@@ -8059,9 +8059,7 @@ vectorizable_live_operation (stmt_vec_info stmt_info,
 	: gimple_get_lhs (stmt);
   lhs_type = TREE_TYPE (lhs);
 
-  bitsize = (VECTOR_BOOLEAN_TYPE_P (vectype)
-	     ? bitsize_int (TYPE_PRECISION (TREE_TYPE (vectype)))
-	     : TYPE_SIZE (TREE_TYPE (vectype)));
+  bitsize = vector_element_bits_tree (vectype);
   vec_bitsize = TYPE_SIZE (vectype);
 
   /* Get the vectorized lhs of STMT and the lane to use (counted in bits).  */
