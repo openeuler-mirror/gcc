@@ -390,7 +390,7 @@ expand_vector_comparison (gimple_stmt_iterator *gsi, tree type, tree op0,
 						(TREE_TYPE (type)))))
 	{
 	  tree inner_type = TREE_TYPE (TREE_TYPE (op0));
-	  tree part_width = TYPE_SIZE (inner_type);
+	  tree part_width = vector_element_bits_tree (TREE_TYPE (op0));
 	  tree index = bitsize_int (0);
 	  int nunits = nunits_for_known_piecewise_op (TREE_TYPE (op0));
 	  int prec = GET_MODE_PRECISION (SCALAR_TYPE_MODE (type));
@@ -946,9 +946,9 @@ expand_vector_condition (gimple_stmt_iterator *gsi)
   vec<constructor_elt, va_gc> *v;
   tree constr;
   tree inner_type = TREE_TYPE (type);
+  tree width = vector_element_bits_tree (type);
   tree cond_type = TREE_TYPE (TREE_TYPE (a));
   tree comp_inner_type = cond_type;
-  tree width = TYPE_SIZE (inner_type);
   tree index = bitsize_int (0);
   tree comp_width = width;
   tree comp_index = index;
@@ -1342,7 +1342,7 @@ vector_element (gimple_stmt_iterator *gsi, tree vect, tree idx, tree *ptmpvec)
         }
       else
         {
-	  tree size = TYPE_SIZE (vect_elt_type);
+	  tree size = vector_element_bits_tree (vect_type);
 	  tree pos = fold_build2 (MULT_EXPR, bitsizetype, bitsize_int (index),
 				  size);
 	  return fold_build3 (BIT_FIELD_REF, vect_elt_type, vect, size, pos);
