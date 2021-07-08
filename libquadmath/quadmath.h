@@ -27,6 +27,9 @@ Boston, MA 02110-1301, USA.  */
 extern "C" {
 #endif
 
+#ifdef AARCH64_QUADMATH
+typedef long double __float128;
+#endif
 /* Define the complex type corresponding to __float128
    ("_Complex __float128" is not allowed) */
 #if (!defined(_ARCH_PPC)) || defined(__LONG_DOUBLE_IEEE128__)
@@ -160,10 +163,9 @@ extern int quadmath_snprintf (char *str, size_t size,
 #define FLT128_MAX_10_EXP 4932
 
 
-#define HUGE_VALQ __builtin_huge_valq()
 /* The following alternative is valid, but brings the warning:
    (floating constant exceeds range of ‘__float128’)  */
-/* #define HUGE_VALQ (__extension__ 0x1.0p32767Q) */
+ #define HUGE_VALQ (__extension__ 0x1.0p32767Q)
 
 #define M_Eq		2.718281828459045235360287471352662498Q  /* e */
 #define M_LOG2Eq	1.442695040888963407359924681001892137Q  /* log_2 e */
