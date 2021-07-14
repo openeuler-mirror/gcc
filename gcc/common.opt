@@ -2968,6 +2968,10 @@ ftree-slp-vectorize
 Common Report Var(flag_tree_slp_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable basic block vectorization (SLP) on trees.
 
+ftree-vect-analyze-slp-group
+Common Report Var(flag_tree_slp_group) Init(0)
+Disable SLP vectorization for reduction chain on tree.
+
 fvect-cost-model=
 Common Joined RejectNegative Enum(vect_cost_model) Var(flag_vect_cost_model) Init(VECT_COST_MODEL_DEFAULT) Optimization
 -fvect-cost-model=[unlimited|dynamic|cheap]	Specifies the cost model for vectorization.
