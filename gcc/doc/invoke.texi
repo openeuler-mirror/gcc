@@ -478,6 +478,7 @@ Objective-C and Objective-C++ Dialects}.
 -finline-functions  -finline-functions-called-once  -finline-limit=@var{n} @gol
 -finline-small-functions  -fipa-cp  -fipa-cp-clone @gol
 -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const @gol
+-fipa-struct-reorg @gol
 -fipa-reference  -fipa-reference-addressable @gol
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm} @gol
 -flive-patching=@var{level} @gol
@@ -10223,6 +10224,19 @@ Enabled by default at @option{-O} and higher.
 Reduce stack alignment on call sites if possible.
 Enabled by default.
 
+@item -fipa-struct-reorg
+@opindex fipa-struct-reorg
+Perform structure reorganization optimization, that change C-like structures
+layout in order to better utilize spatial locality.  This transformation is
+affective for programs containing arrays of structures.  Available in two
+compilation modes: profile-based (enabled with @option{-fprofile-generate})
+or static (which uses built-in heuristics).  It works only in whole program
+mode, so it requires @option{-fwhole-program} to be
+enabled.  Structures considered @samp{cold} by this transformation are not
+affected (see @option{--param struct-reorg-cold-struct-ratio=@var{value}}).
+
+With this flag, the program debug info reflects a new structure layout.
+
 @item -fipa-pta
 @opindex fipa-pta
 Perform interprocedural pointer analysis and interprocedural modification
@@ -11981,6 +11995,15 @@ In each case, the @var{value} is an integer.  The following choices
 of @var{name} are recognized for all targets:
 
 @table @gcctabopt
+@item struct-reorg-cold-struct-ratio
+The threshold ratio (as a percentage) between a structure frequency
+and the frequency of the hottest structure in the program.  This parameter
+is used by struct-reorg optimization enabled by @option{-fipa-struct-reorg}.
+We say that if the ratio of a structure frequency, calculated by profiling,
+to the hottest structure frequency in the program is less than this
+parameter, then structure reorganization is not applied to this structure.
+The default is 10.
+
 @item predictable-branch-outcome
 When branch is predicted to be taken with probability lower than this threshold
 (in percent), then it is considered well predictable.
