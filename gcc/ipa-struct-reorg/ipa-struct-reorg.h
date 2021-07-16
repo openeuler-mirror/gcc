@@ -121,6 +121,7 @@ public:
 
   tree newtype[max_split];
   bool visited;
+  int has_alloc_array;
 
   // Constructors
   srtype(tree type);
@@ -231,5 +232,35 @@ struct srdecl
 
 
 } // namespace struct_reorg
+
+
+namespace struct_relayout {
+
+const int min_relayout_split = 8;
+const int max_relayout_split = 16;
+
+struct csrtype
+{
+  tree type;
+  unsigned HOST_WIDE_INT old_size;
+  unsigned HOST_WIDE_INT new_size;
+  unsigned field_count;
+  tree struct_size;
+
+  // Constructors
+  csrtype ()
+    : type (NULL),
+      old_size (0),
+      new_size (0),
+      field_count (0),
+      struct_size (NULL)
+  {}
+
+  // Methods
+  unsigned calculate_field_num (tree field_offset);
+  void init_type_info (void);
+};
+
+} // namespace struct_relayout
 
 #endif
