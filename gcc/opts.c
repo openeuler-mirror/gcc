@@ -195,6 +195,7 @@ static void set_debug_level (enum debug_info_type type, int extended,
 			     struct gcc_options *opts_set,
 			     location_t loc);
 static void set_fast_math_flags (struct gcc_options *opts, int set);
+static void set_fp_model_flags (struct gcc_options *opts, int set);
 static void decode_d_option (const char *arg, struct gcc_options *opts,
 			     location_t loc, diagnostic_context *dc);
 static void set_unsafe_math_optimizations_flags (struct gcc_options *opts,
@@ -2482,6 +2483,10 @@ common_handle_option (struct gcc_options *opts,
       set_fast_math_flags (opts, value);
       break;
 
+    case OPT_fp_model_:
+      set_fp_model_flags (opts, value);
+      break;
+
     case OPT_funsafe_math_optimizations:
       set_unsafe_math_optimizations_flags (opts, value);
       break;
@@ -2905,6 +2910,69 @@ set_fast_math_flags (struct gcc_options *opts, int set)
 	opts->x_flag_rounding_math = 0;
       if (!opts->frontend_set_flag_cx_limited_range)
 	opts->x_flag_cx_limited_range = 1;
+    }
+}
+
+/* Handle fp-model options.  */
+static void
+set_fp_model_flags (struct gcc_options *opts, int set)
+{
+  enum fp_model model = (enum fp_model) set;
+  switch (model)
+    {
+      case FP_MODEL_FAST:
+	/* Equivalent to open ffast-math.  */
+	set_fast_math_flags (opts, 1);
+	break;
+
+      case FP_MODEL_PRECISE:
+	/* Equivalent to close ffast-math.  */
+	set_fast_math_flags (opts, 0);
+	/* Turn on -frounding-math -fsignaling-nans.  */
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	opts->x_flag_expensive_optimizations = 0;
+	opts->x_flag_code_hoisting = 0;
+	opts->x_flag_predictive_commoning = 0;
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_EXCEPT:
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	/* Also turn on ffpe-trap in fortran.  */
+	break;
+
+      case FP_MODEL_STRICT:
+	/* Turn on both precise and except.  */
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	opts->x_flag_expensive_optimizations = 0;
+	opts->x_flag_code_hoisting = 0;
+	opts->x_flag_predictive_commoning = 0;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_NORMAL:
+	/* Do nothing.  */
+	break;
+
+      default:
+	gcc_unreachable ();
     }
 }
 

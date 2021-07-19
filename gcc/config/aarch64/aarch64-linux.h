@@ -50,7 +50,8 @@
 #define LINK_SPEC LINUX_TARGET_LINK_SPEC AARCH64_ERRATA_LINK_SPEC
 
 #define GNU_USER_TARGET_MATHFILE_SPEC \
-  "%{Ofast|ffast-math|funsafe-math-optimizations:crtfastmath.o%s}"
+  "%{Ofast|ffast-math|funsafe-math-optimizations|fp-model=fast|fftz:\
+  %{!fno-ftz:crtfastmath.o%s}}"
 
 #undef ENDFILE_SPEC
 #define ENDFILE_SPEC   \

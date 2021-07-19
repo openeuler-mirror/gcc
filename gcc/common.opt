@@ -1545,6 +1545,32 @@ ffp-int-builtin-inexact
 Common Report Var(flag_fp_int_builtin_inexact) Init(1) Optimization
 Allow built-in functions ceil, floor, round, trunc to raise \"inexact\" exceptions.
 
+fftz
+Common Report Var(flag_ftz) Optimization
+Control fpcr register for flush to zero.
+
+fp-model=
+Common Joined RejectNegative Enum(fp_model) Var(flag_fp_model) Init(FP_MODEL_NORMAL) Optimization
+-fp-model=[normal|fast|precise|except|strict] Perform floating-point precision control.
+
+Enum
+Name(fp_model) Type(enum fp_model) UnknownError(unknown floating point precision model %qs)
+
+EnumValue
+Enum(fp_model) String(normal) Value(FP_MODEL_NORMAL)
+
+EnumValue
+Enum(fp_model) String(fast) Value(FP_MODEL_FAST)
+
+EnumValue
+Enum(fp_model) String(precise) Value(FP_MODEL_PRECISE)
+
+EnumValue
+Enum(fp_model) String(except) Value(FP_MODEL_EXCEPT)
+
+EnumValue
+Enum(fp_model) String(strict) Value(FP_MODEL_STRICT)
+
 ; Nonzero means don't put addresses of constant functions in registers.
 ; Used for compiling the Unix kernel, where strange substitutions are
 ; done on the assembly output.
