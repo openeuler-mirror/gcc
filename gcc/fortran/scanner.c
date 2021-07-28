@@ -2737,6 +2737,10 @@ gfc_new_file (void)
       && !load_file (flag_pre_include, NULL, false))
     exit (FATAL_EXIT_CODE);
 
+  if (flag_simdmath
+      && !load_file ("simdmath_f.h", NULL, false))
+    exit (FATAL_EXIT_CODE);
+
   if (gfc_cpp_enabled ())
     {
       result = gfc_cpp_preprocess (gfc_source_file);

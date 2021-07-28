@@ -1169,6 +1169,10 @@ fcompare-elim
 Common Report Var(flag_compare_elim_after_reload) Optimization
 Perform comparison elimination after register allocation has finished.
 
+floop-elim
+Common Report Var(flag_loop_elim) Init(0) Optimization
+Perform redundant loop elimination.
+
 fconserve-stack
 Common Var(flag_conserve_stack) Optimization
 Do not perform optimizations increasing noticeably stack usage.
@@ -1544,6 +1548,32 @@ Enum(fp_contract_mode) String(fast) Value(FP_CONTRACT_FAST)
 ffp-int-builtin-inexact
 Common Report Var(flag_fp_int_builtin_inexact) Init(1) Optimization
 Allow built-in functions ceil, floor, round, trunc to raise \"inexact\" exceptions.
+
+fftz
+Common Report Var(flag_ftz) Optimization
+Control fpcr register for flush to zero.
+
+fp-model=
+Common Joined RejectNegative Enum(fp_model) Var(flag_fp_model) Init(FP_MODEL_NORMAL) Optimization
+-fp-model=[normal|fast|precise|except|strict] Perform floating-point precision control.
+
+Enum
+Name(fp_model) Type(enum fp_model) UnknownError(unknown floating point precision model %qs)
+
+EnumValue
+Enum(fp_model) String(normal) Value(FP_MODEL_NORMAL)
+
+EnumValue
+Enum(fp_model) String(fast) Value(FP_MODEL_FAST)
+
+EnumValue
+Enum(fp_model) String(precise) Value(FP_MODEL_PRECISE)
+
+EnumValue
+Enum(fp_model) String(except) Value(FP_MODEL_EXCEPT)
+
+EnumValue
+Enum(fp_model) String(strict) Value(FP_MODEL_STRICT)
 
 ; Nonzero means don't put addresses of constant functions in registers.
 ; Used for compiling the Unix kernel, where strange substitutions are
@@ -1976,6 +2006,10 @@ Report various link-time optimization statistics for WPA only.
 fmath-errno
 Common Report Var(flag_errno_math) Init(1) Optimization SetByCombined
 Set errno after built-in math functions.
+
+fsimdmath
+Common Report Var(flag_simdmath) Init(0) Optimization
+Enable auto-vectorize math functions for mathlib.  This option will turn on -fno-math-errno and -fopenmp-simd.
 
 fmax-errors=
 Common Joined RejectNegative UInteger Var(flag_max_errors)
@@ -2963,6 +2997,10 @@ Enable loop vectorization on trees.
 ftree-slp-vectorize
 Common Report Var(flag_tree_slp_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable basic block vectorization (SLP) on trees.
+
+ftree-vect-analyze-slp-group
+Common Report Var(flag_tree_slp_group) Init(0)
+Disable SLP vectorization for reduction chain on tree.
 
 fvect-cost-model=
 Common Joined RejectNegative Enum(vect_cost_model) Var(flag_vect_cost_model) Init(VECT_COST_MODEL_DEFAULT) Optimization

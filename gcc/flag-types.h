@@ -223,6 +223,15 @@ enum fp_contract_mode {
   FP_CONTRACT_FAST = 2
 };
 
+/* Floating-point precision mode.  */
+enum fp_model {
+  FP_MODEL_NORMAL = 0,
+  FP_MODEL_FAST = 1,
+  FP_MODEL_PRECISE = 2,
+  FP_MODEL_EXCEPT = 3,
+  FP_MODEL_STRICT = 4
+};
+
 /* Scalar storage order kind.  */
 enum scalar_storage_order_kind {
   SSO_NATIVE = 0,

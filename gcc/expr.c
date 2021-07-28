@@ -3814,6 +3814,78 @@ emit_move_insn (rtx x, rtx y)
   gcc_assert (mode != BLKmode
 	      && (GET_MODE (y) == mode || GET_MODE (y) == VOIDmode));
 
+  /* If we have a copy that looks like one of the following patterns:
+       (set (subreg:M1 (reg:M2 ...)) (subreg:M1 (reg:M2 ...)))
+       (set (subreg:M1 (reg:M2 ...)) (mem:M1 ADDR))
+       (set (mem:M1 ADDR) (subreg:M1 (reg:M2 ...)))
+       (set (subreg:M1 (reg:M2 ...)) (constant C))
+     where mode M1 is equal in size to M2, try to detect whether the
+     mode change involves an implicit round trip through memory.
+     If so, see if we can avoid that by removing the subregs and
+     doing the move in mode M2 instead.  */
+
+  rtx x_inner = NULL_RTX;
+  rtx y_inner = NULL_RTX;
+
+#define CANDIDATE_SUBREG_P(subreg) \
+  (REG_P (SUBREG_REG (subreg)) \
+   && known_eq (GET_MODE_SIZE (GET_MODE (SUBREG_REG (subreg))), \
+               GET_MODE_SIZE (GET_MODE (subreg))) \
+   && optab_handler (mov_optab, GET_MODE (SUBREG_REG (subreg))) \
+      != CODE_FOR_nothing)
+
+#define CANDIDATE_MEM_P(innermode, mem) \
+  (!targetm.can_change_mode_class ((innermode), GET_MODE (mem), ALL_REGS) \
+   && !push_operand ((mem), GET_MODE (mem))                              \
+   /* Not a candiate if innermode requires too much alignment.  */       \
+   && (MEM_ALIGN (mem) >= GET_MODE_ALIGNMENT (innermode)                 \
+       || targetm.slow_unaligned_access (GET_MODE (mem),                 \
+                                        MEM_ALIGN (mem))                 \
+       || !targetm.slow_unaligned_access ((innermode),                   \
+                                         MEM_ALIGN (mem))))
+
+  if (SUBREG_P (x) && CANDIDATE_SUBREG_P (x))
+    x_inner = SUBREG_REG (x);
+
+  if (SUBREG_P (y) && CANDIDATE_SUBREG_P (y))
+    y_inner = SUBREG_REG (y);
+
+  if (x_inner != NULL_RTX
+      && y_inner != NULL_RTX
+      && GET_MODE (x_inner) == GET_MODE (y_inner)
+      && !targetm.can_change_mode_class (GET_MODE (x_inner), mode, ALL_REGS))
+    {
+      x = x_inner;
+      y = y_inner;
+      mode = GET_MODE (x_inner);
+    }
+  else if (x_inner != NULL_RTX
+          && MEM_P (y)
+          && CANDIDATE_MEM_P (GET_MODE (x_inner), y))
+    {
+      x = x_inner;
+      y = adjust_address (y, GET_MODE (x_inner), 0);
+      mode = GET_MODE (x_inner);
+    }
+  else if (y_inner != NULL_RTX
+          && MEM_P (x)
+          && CANDIDATE_MEM_P (GET_MODE (y_inner), x))
+    {
+      x = adjust_address (x, GET_MODE (y_inner), 0);
+      y = y_inner;
+      mode = GET_MODE (y_inner);
+    }
+  else if (x_inner != NULL_RTX
+          && CONSTANT_P (y)
+          && !targetm.can_change_mode_class (GET_MODE (x_inner),
+                                             mode, ALL_REGS)
+          && (y_inner = simplify_subreg (GET_MODE (x_inner), y, mode, 0)))
+    {
+      x = x_inner;
+      y = y_inner;
+      mode = GET_MODE (x_inner);
+    }
+
   if (CONSTANT_P (y))
     {
       if (optimize

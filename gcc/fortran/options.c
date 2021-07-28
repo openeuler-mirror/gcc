@@ -250,6 +250,7 @@ form_from_filename (const char *filename)
   return f_form;
 }
 
+static void gfc_handle_fpe_option (const char *arg, bool trap);
 
 /* Finalize commandline options.  */
 
@@ -276,6 +277,13 @@ gfc_post_options (const char **pfilename)
 
   if (flag_protect_parens == -1)
     flag_protect_parens = !optimize_fast;
+
+  /* If fp-model=precise/strict, turn on all ffpe-trap and ffpe-summary.  */
+  if (flag_fp_model == FP_MODEL_EXCEPT || flag_fp_model == FP_MODEL_STRICT)
+    {
+      gfc_handle_fpe_option ("all", false);
+      gfc_handle_fpe_option ("invalid,zero,overflow,underflow", true);
+    }
 
   /* -Ofast sets implies -fstack-arrays unless an explicit size is set for
      stack arrays.  */
