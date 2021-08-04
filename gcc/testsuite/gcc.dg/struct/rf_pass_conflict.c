@@ -1,6 +1,6 @@
-// 针对 
+// For testing:
 /*
-Compile options: /home/hxq/hcc_gcc9.3.0_org_debug/bin/gcc -O3 -g 
+Compile options: gcc -O3 -g 
 -flto -flto-partition=one -fipa-reorder-fields -fipa-struct-reorg 
 -v -save-temps -fdump-ipa-all-details test.c -o  test
 
@@ -94,11 +94,10 @@ switch_arcs(arc_t** deleted_arcs, arc_t* arcnew)
       copy = *test_arc;
       count++;
       *test_arc = arcnew[0];
-      replace_weaker_arc(arcnew, copy.tail, copy.head);
+      replace_weaker_arc(arcnew, NULL, NULL);
     }
   return count;
 }
-
 
 int
 main ()

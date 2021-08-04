@@ -173,31 +173,30 @@ lang_c_p (void)
       return false;
     }
 
-  if (strcmp (language_string, "GNU GIMPLE") == 0)
+  if (lang_GNU_C ())
+    {
+      return true;
+    }
+  else if (strcmp (language_string, "GNU GIMPLE") == 0) // for LTO check
     {
       unsigned i = 0;
-      tree t = NULL;
-      const char *unit_string = NULL;
+      tree t = NULL_TREE;
 
       FOR_EACH_VEC_SAFE_ELT (all_translation_units, i, t)
 	{
-	  unit_string = TRANSLATION_UNIT_LANGUAGE (t);
-	  if (!unit_string
-	      || (strncmp (unit_string, "GNU C", 5) != 0)
-	      || (!ISDIGIT (unit_string[5])))
+	  language_string = TRANSLATION_UNIT_LANGUAGE (t);
+	  if (language_string == NULL
+	      || strncmp (language_string, "GNU C", 5)
+	      || (language_string[5] != '\0'
+		  && !(ISDIGIT (language_string[5]))))
 	    {
 	      return false;
 	    }
 	}
       return true;
     }
-  else if (strncmp (language_string, "GNU C", 5) == 0
-	   && ISDIGIT (language_string[5]))
-    {
-      return true;
-    }
-
   return false;
+}
 
 /* Get the number of pointer layers.  */
 
@@ -1262,7 +1261,7 @@ public:
   void check_uses (srdecl *decl, vec<srdecl*>&);
   void check_use (srdecl *decl, gimple *stmt, vec<srdecl*>&);
   void check_type_and_push (tree newdecl, srdecl *decl,
-  			    vec<srdecl*> &worklist, gimple *stmt);
+			    vec<srdecl*> &worklist, gimple *stmt);
   void check_other_side (srdecl *decl, tree other, gimple *stmt, vec<srdecl*> &worklist);
   void check_ptr_layers (tree a_expr, tree b_expr, gimple* stmt);
 
@@ -3010,11 +3009,9 @@ ipa_struct_reorg::find_var (tree expr, gimple *stmt)
     {
       tree r = TREE_OPERAND (expr, 0);
       tree orig_type = TREE_TYPE (expr);
-      if (handled_component_p (r)
-          || TREE_CODE (r) == MEM_REF)
+      if (handled_component_p (r) || TREE_CODE (r) == MEM_REF)
         {
-          while (handled_component_p (r)
-		 || TREE_CODE (r) == MEM_REF)
+	  while (handled_component_p (r) || TREE_CODE (r) == MEM_REF)
 	    {
 	      if (TREE_CODE (r) == VIEW_CONVERT_EXPR)
 		{
@@ -3092,10 +3089,12 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	      srdecl *d = find_decl (lhs);
 	      if (!d && t)
 		{
-		  current_function->record_decl (t, lhs, -1);
+		  current_function->record_decl (t, lhs, -1,
+			isptrptr (TREE_TYPE (rhs)) ? TREE_TYPE (rhs) : NULL);
 		  tree var = SSA_NAME_VAR (lhs);
 		  if (var && VOID_POINTER_P (TREE_TYPE (var)))
-		    current_function->record_decl (t, var, -1);
+		    current_function->record_decl (t, var, -1,
+			isptrptr (TREE_TYPE (rhs)) ? TREE_TYPE (rhs) : NULL);
 		}
 	    }
 	  /* void * _1; struct arc * _2;
@@ -3108,10 +3107,12 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	      srdecl *d = find_decl (rhs);
 	      if (!d && t)
 		{
-		  current_function->record_decl (t, rhs, -1);
+		  current_function->record_decl (t, rhs, -1,
+			isptrptr (TREE_TYPE (lhs)) ? TREE_TYPE (lhs) : NULL);
 		  tree var = SSA_NAME_VAR (rhs);
 		  if (var && VOID_POINTER_P (TREE_TYPE (var)))
-		    current_function->record_decl (t, var, -1);
+		    current_function->record_decl (t, var, -1,
+			isptrptr (TREE_TYPE (lhs)) ? TREE_TYPE (lhs) : NULL);
 		}
 	    }
 	}
@@ -3529,7 +3530,7 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other, gimple
 	{
 	  /* The type is other, the declaration is side.  */
 	  current_function->record_decl (type, side, -1,
-		find_decl (other) ? find_decl (other)->orig_type : NULL);
+		isptrptr (TREE_TYPE (other)) ? TREE_TYPE (other) : NULL);
 	}
       else
 	{
@@ -5111,31 +5112,23 @@ ipa_struct_reorg::propagate_escape_via_original (void)
 {
   for (unsigned i = 0; i < types.length (); i++)
     {
-      for (unsigned j = 0; j < types[i]->fields.length (); j++)
-	{
-	  srfield *field = types[i]->fields[j];
-	  if (handled_type (field->fieldtype) && field->type)
-	    {
-	      for (unsigned k = 0; k < types.length (); k++)
-		{
-		  const char *type1 = get_type_name (field->type->type);
-		  const char *type2 = get_type_name (types[k]->type);
-		  if (type1 == NULL || type2 == NULL)
-		    {
-		      continue;
-		    }
-		  if (type1 == type2 && types[k]->has_escaped ())
-		    {
-		      if (!field->type->has_escaped ())
-			{
-			  field->type->mark_escape (
-				       escape_via_orig_escape, NULL);
-			}
-		      break;
-		    }
-		}
-	    }
-	}
+      for (unsigned j = 0; j < types.length (); j++)
+      {
+	const char *type1 = get_type_name (types[i]->type);
+	const char *type2 = get_type_name (types[j]->type);
+	if (type1 == NULL || type2 == NULL)
+	  {
+	    continue;
+	  }
+	if (type1 == type2 && types[j]->has_escaped ())
+	  {
+	    if (!types[i]->has_escaped ())
+	      {
+		types[i]->mark_escape (escape_via_orig_escape, NULL);
+	      }
+	    break;
+	  }
+      }
     }
 }
 
@@ -6683,7 +6676,10 @@ pass_ipa_reorder_fields::gate (function *)
 	  && flag_ipa_reorder_fields
 	  /* Don't bother doing anything if the program has errors.  */
 	  && !seen_error ()
-	  && flag_lto_partition == LTO_PARTITION_ONE);
+	  && flag_lto_partition == LTO_PARTITION_ONE
+	  /* Only enable struct optimizations in C since other
+	     languages' grammar forbid.  */
+	  && lang_c_p ());
 }
 
 } // anon namespace

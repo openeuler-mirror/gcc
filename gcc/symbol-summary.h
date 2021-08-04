@@ -61,10 +61,9 @@ protected:
   {
     /* In structure optimizatons, we call new to ensure that
        the allocated memory is initialized to 0.  */
-    if (flag_ipa_struct_reorg)
+    if (flag_ipa_reorder_fields || flag_ipa_struct_reorg)
       return is_ggc () ? new (ggc_internal_alloc (sizeof (T))) T ()
 		       : new T ();
-
     /* Call gcc_internal_because we do not want to call finalizer for
        a type T.  We call dtor explicitly.  */
     return is_ggc () ? new (ggc_internal_alloc (sizeof (T))) T ()
@@ -78,7 +77,7 @@ protected:
       ggc_delete (item);
     else
       {
-	if (flag_ipa_struct_reorg)
+	if (flag_ipa_reorder_fields || flag_ipa_struct_reorg)
 	  delete item;
 	else
 	  m_allocator.remove (item);
