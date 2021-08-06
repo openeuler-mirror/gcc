@@ -6983,6 +6983,11 @@ things like cost calculations or profiling frequencies.  The default
 implementation returns the lowest possible value of @var{val}.
 @end deftypefn
 
+@deftypefn {Target Hook} bool TARGET_MEDIUM_SYMBOL_P (rtx @var{x})
+Return true if the input rtx is a symbol loaded by kunpeng medium code
+model.
+@end deftypefn
+
 @node Scheduling
 @section Adjusting the Instruction Scheduler
 

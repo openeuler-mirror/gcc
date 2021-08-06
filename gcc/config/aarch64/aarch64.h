@@ -33,6 +33,10 @@
 
 #define REGISTER_TARGET_PRAGMAS() aarch64_register_pragmas ()
 
+/* Default threshold 64-bit relocation data
+    with aarch64 medium memory model.  */
+#define AARCH64_DEFAULT_LARGE_DATA_THRESHOLD 65536
+
 /* Target machine storage layout.  */
 
 #define PROMOTE_MODE(MODE, UNSIGNEDP, TYPE)	\

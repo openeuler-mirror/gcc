@@ -3869,6 +3869,13 @@ implementation returns the lowest possible value of @var{val}.",
  HOST_WIDE_INT, (poly_int64 val),
  default_estimated_poly_value)
 
+DEFHOOK
+(medium_symbol_p,
+ "Return true if the input rtx is a symbol loaded by kunpeng medium code\n\
+model.",
+ bool, (rtx x),
+ default_medium_symbol_p)
+
 /* Permit speculative instructions in delay slots during delayed-branch 
    scheduling.  */
 DEFHOOK

@@ -1923,6 +1923,12 @@ can_combine_p (rtx_insn *insn, rtx_insn *i3, rtx_insn *pred ATTRIBUTE_UNUSED,
 	      break;
 
 	    case SET:
+	      /* If the set is a symbol loaded by medium code model unspec
+		 escape this combine.  */
+	      if (GET_CODE (SET_SRC (elt)) == UNSPEC
+		  && XVECLEN (SET_SRC (elt), 0) != 0
+		  && targetm.medium_symbol_p (SET_SRC (elt)))
+		return 0;
 	      /* Ignore SETs whose result isn't used but not those that
 		 have side-effects.  */
 	      if (find_reg_note (insn, REG_UNUSED, SET_DEST (elt))

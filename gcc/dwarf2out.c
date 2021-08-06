@@ -14501,14 +14501,17 @@ const_ok_for_output_1 (rtx rtl)
       /* If delegitimize_address couldn't do anything with the UNSPEC, and
 	 the target hook doesn't explicitly allow it in debug info, assume
 	 we can't express it in the debug info.  */
-      /* Don't complain about TLS UNSPECs, those are just too hard to
-	 delegitimize.  Note this could be a non-decl SYMBOL_REF such as
-	 one in a constant pool entry, so testing SYMBOL_REF_TLS_MODEL
-	 rather than DECL_THREAD_LOCAL_P is not just an optimization.  */
+      /* Don't complain about TLS UNSPECs and aarch64 medium code model
+	 related UNSPECs, those are just too hard to delegitimize.  Note
+	 this could be a non-decl SYMBOL_REF such as one in a constant
+	 pool entry, so testing SYMBOL_REF_TLS_MODEL rather than
+	 DECL_THREAD_LOCAL_P is not just an optimization.  */
       if (flag_checking
 	  && (XVECLEN (rtl, 0) == 0
 	      || GET_CODE (XVECEXP (rtl, 0, 0)) != SYMBOL_REF
-	      || SYMBOL_REF_TLS_MODEL (XVECEXP (rtl, 0, 0)) == TLS_MODEL_NONE))
+	      || (!targetm.medium_symbol_p (rtl)
+		  && SYMBOL_REF_TLS_MODEL (XVECEXP (rtl, 0, 0))
+		     == TLS_MODEL_NONE)))
 	inform (current_function_decl
 		? DECL_SOURCE_LOCATION (current_function_decl)
 		: UNKNOWN_LOCATION,

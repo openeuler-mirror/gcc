@@ -1708,6 +1708,13 @@ default_estimated_poly_value (poly_int64 x)
   return x.coeffs[0];
 }
 
+/* The default implementation of TARGET_MEDIUM_SYMBOL_P.  */
+bool
+default_medium_symbol_p (rtx x ATTRIBUTE_UNUSED)
+{
+  return false;
+}
+
 /* For hooks which use the MOVE_RATIO macro, this gives the legacy default
    behavior.  SPEED_P is true if we are compiling for speed.  */
 

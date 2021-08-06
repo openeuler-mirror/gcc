@@ -27,6 +27,10 @@ enum aarch64_processor explicit_tune_core = aarch64_none
 TargetVariable
 enum aarch64_arch explicit_arch = aarch64_no_arch
 
+;; -mlarge-data-threshold=
+TargetSave
+int x_aarch64_data_threshold
+
 TargetSave
 const char *x_aarch64_override_tune_string
 
@@ -61,7 +65,14 @@ EnumValue
 Enum(cmodel) String(small) Value(AARCH64_CMODEL_SMALL)
 
 EnumValue
+Enum(cmodel) String(medium) Value(AARCH64_CMODEL_MEDIUM)
+
+EnumValue
 Enum(cmodel) String(large) Value(AARCH64_CMODEL_LARGE)
+
+mlarge-data-threshold=
+Target RejectNegative Joined UInteger Var(aarch64_data_threshold) Init(AARCH64_DEFAULT_LARGE_DATA_THRESHOLD)
+-mlarge-data-threshold=<number> Data greater than given threshold will be assume that it should be relocated using 64-bit relocation.
 
 mbig-endian
 Target Report RejectNegative Mask(BIG_END)
