@@ -224,6 +224,9 @@
     UNSPEC_RSQRTS
     UNSPEC_NZCV
     UNSPEC_XPACLRI
+    UNSPEC_GOTMEDIUMPIC4G
+    UNSPEC_GET_GOTOFF
+    UNSPEC_LOAD_SYMBOL_MEDIUM
     UNSPEC_LD1_SVE
     UNSPEC_ST1_SVE
     UNSPEC_LDNT1_SVE
@@ -6792,6 +6795,39 @@
   [(set_attr "type" "load_4")]
 )
 
+(define_insn "get_gotoff_<mode>"
+  [(set (match_operand:GPI 0 "register_operand" "=r")
+	(unspec:GPI [(match_operand 1 "aarch64_valid_symref" "S")]
+		  UNSPEC_GET_GOTOFF))]
+  ""
+  "movz\\t%x0, :gotoff_g1:%A1\;movk\\t%x0, :gotoff_g0_nc:%A1"
+  [(set_attr "type" "multiple")
+   (set_attr "length" "8")]
+)
+
+(define_insn "ldr_got_medium_<mode>"
+  [(set (match_operand:PTR 0 "register_operand" "=r")
+	(unspec:PTR [(mem:PTR (lo_sum:PTR
+			      (match_operand:PTR 1 "register_operand" "r")
+			      (match_operand:PTR 2 "register_operand" "r")))]
+		    UNSPEC_GOTMEDIUMPIC4G))]
+  ""
+  "ldr\\t%0, [%1, %2]"
+  [(set_attr "type" "load_4")]
+)
+
+(define_insn "ldr_got_medium_sidi"
+  [(set (match_operand:DI 0 "register_operand" "=r")
+	(zero_extend:DI
+	 (unspec:SI [(mem:SI (lo_sum:DI
+			     (match_operand:DI 1 "register_operand" "r")
+			     (match_operand:DI 2 "register_operand" "r")))]
+		    UNSPEC_GOTMEDIUMPIC4G)))]
+  "TARGET_ILP32"
+  "ldr\\t%0, [%1, %2]"
+  [(set_attr "type" "load_4")]
+)
+
 (define_insn "ldr_got_small_28k_<mode>"
   [(set (match_operand:PTR 0 "register_operand" "=r")
 	(unspec:PTR [(mem:PTR (lo_sum:PTR
@@ -6953,6 +6989,23 @@
   "movz\\t%<w>0, #:tprel_g2:%1\;movk\\t%<w>0, #:tprel_g1_nc:%1\;movk\\t%<w>0, #:tprel_g0_nc:%1"
   [(set_attr "type" "multiple")
    (set_attr "length" "12")]
+)
+
+(define_insn "load_symbol_medium_<mode>"
+   [(set (match_operand:GPI 0 "register_operand" "=r")
+		(unspec:GPI [(match_operand 2 "aarch64_valid_symref" "S")]
+		  UNSPEC_LOAD_SYMBOL_MEDIUM))
+	(clobber (match_operand:GPI 1 "register_operand" "=r"))]
+  ""
+  "movz\\t%x0, :prel_g3:%A2\;\\
+movk\\t%x0, :prel_g2_nc:%A2\;\\
+movk\\t%x0, :prel_g1_nc:%A2\;\\
+movk\\t%x0, :prel_g0_nc:%A2\;\\
+adr\\t%x1, .\;\\
+sub\\t%x1, %x1, 0x4\;\\
+add\\t%x0, %x0, %x1"
+  [(set_attr "type" "multiple")
+   (set_attr "length" "28")]
 )
 
 (define_expand "tlsdesc_small_<mode>"

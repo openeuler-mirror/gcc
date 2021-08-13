@@ -3127,6 +3127,29 @@ aarch64_load_symref_appropriately (rtx dest, rtx imm,
 	emit_insn (gen_add_losym (dest, tmp_reg, imm));
 	return;
       }
+    case SYMBOL_MEDIUM_ABSOLUTE:
+      {
+	rtx tmp_reg = dest;
+	machine_mode mode = GET_MODE (dest);
+
+	gcc_assert (mode == Pmode || mode == ptr_mode);
+	if (can_create_pseudo_p ())
+	  tmp_reg = gen_reg_rtx (mode);
+
+	if (mode == DImode)
+	  {
+	    emit_insn (gen_load_symbol_medium_di (dest, tmp_reg, imm));
+	  }
+	else
+	  {
+	    emit_insn (gen_load_symbol_medium_si (dest, tmp_reg, imm));
+	  }
+	if (REG_P (dest))
+	  {
+	    set_unique_reg_note (get_last_insn (), REG_EQUAL, copy_rtx (imm));
+	  }
+	return;
+      }
 
     case SYMBOL_TINY_ABSOLUTE:
       emit_insn (gen_rtx_SET (dest, imm));
@@ -3239,6 +3262,60 @@ aarch64_load_symref_appropriately (rtx dest, rtx imm,
 	    gcc_assert (mode == Pmode);
 
 	    insn = gen_ldr_got_small_sidi (dest, tmp_reg, imm);
+	    mem = XVECEXP (XEXP (SET_SRC (insn), 0), 0, 0);
+	  }
+
+	gcc_assert (GET_CODE (mem) == MEM);
+	MEM_READONLY_P (mem) = 1;
+	MEM_NOTRAP_P (mem) = 1;
+	emit_insn (insn);
+	return;
+      }
+
+    case SYMBOL_MEDIUM_GOT_4G:
+      {
+	rtx tmp_reg = dest;
+	machine_mode mode = GET_MODE (dest);
+	if (can_create_pseudo_p ())
+	  {
+	    tmp_reg = gen_reg_rtx (mode);
+	  }
+	rtx insn;
+	rtx mem;
+	rtx s = gen_rtx_SYMBOL_REF (Pmode, "_GLOBAL_OFFSET_TABLE_");
+
+	if (mode == DImode)
+	  {
+	    emit_insn (gen_load_symbol_medium_di (tmp_reg, dest, s));
+	  }
+	else
+	  {
+	    emit_insn (gen_load_symbol_medium_si (tmp_reg, dest, s));
+	  }
+	if (REG_P (dest))
+	  {
+	    set_unique_reg_note (get_last_insn (), REG_EQUAL, copy_rtx (s));
+	  }
+
+	if (mode == ptr_mode)
+	  {
+	    if (mode == DImode)
+	      {
+		emit_insn (gen_get_gotoff_di (dest, imm));
+		insn = gen_ldr_got_medium_di (dest, tmp_reg, dest);
+	      }
+	    else
+	      {
+		emit_insn (gen_get_gotoff_si (dest, imm));
+		insn = gen_ldr_got_medium_si (dest, tmp_reg, dest);
+	      }
+	    mem = XVECEXP (SET_SRC (insn), 0, 0);
+	  }
+	else
+	  {
+	    gcc_assert (mode == Pmode);
+	    emit_insn (gen_get_gotoff_di (dest, imm));
+	    insn = gen_ldr_got_medium_sidi (dest, tmp_reg, dest);
 	    mem = XVECEXP (XEXP (SET_SRC (insn), 0), 0, 0);
 	  }
 
@@ -5256,11 +5333,12 @@ aarch64_expand_mov_immediate (rtx dest, rtx imm)
 
 	  return;
 
-        case SYMBOL_SMALL_TLSGD:
-        case SYMBOL_SMALL_TLSDESC:
+	case SYMBOL_SMALL_TLSGD:
+	case SYMBOL_SMALL_TLSDESC:
 	case SYMBOL_SMALL_TLSIE:
 	case SYMBOL_SMALL_GOT_28K:
 	case SYMBOL_SMALL_GOT_4G:
+	case SYMBOL_MEDIUM_GOT_4G:
 	case SYMBOL_TINY_GOT:
 	case SYMBOL_TINY_TLSIE:
 	  if (const_offset != 0)
@@ -5279,6 +5357,7 @@ aarch64_expand_mov_immediate (rtx dest, rtx imm)
 	case SYMBOL_TLSLE24:
 	case SYMBOL_TLSLE32:
 	case SYMBOL_TLSLE48:
+	case SYMBOL_MEDIUM_ABSOLUTE:
 	  aarch64_load_symref_appropriately (dest, imm, sty);
 	  return;
 
@@ -9389,7 +9468,14 @@ aarch64_classify_address (struct aarch64_address_info *info,
 	  if (GET_CODE (sym) == SYMBOL_REF
 	      && offset.is_constant (&const_offset)
 	      && (aarch64_classify_symbol (sym, const_offset)
-		  == SYMBOL_SMALL_ABSOLUTE))
+		  == SYMBOL_SMALL_ABSOLUTE
+		  /* Fix fail on dbl_mov_immediate_1.c.  If end up here with
+		     MEDIUM_ABSOLUTE, the symbol is a constant number that is
+		     forced to memory in reload pass, which is ok to go on with
+		     the original design that subtitude the mov to
+		     'adrp and ldr :losum'.  */
+		  || aarch64_classify_symbol (sym, const_offset)
+		     == SYMBOL_MEDIUM_ABSOLUTE))
 	    {
 	      /* The symbol and offset must be aligned to the access size.  */
 	      unsigned int align;
@@ -11346,7 +11432,13 @@ static inline bool
 aarch64_can_use_per_function_literal_pools_p (void)
 {
   return (aarch64_pcrelative_literal_loads
-	  || aarch64_cmodel == AARCH64_CMODEL_LARGE);
+	  || aarch64_cmodel == AARCH64_CMODEL_LARGE
+	  /* Fix const9.C so that constants goes to function_literal_pools.
+	     According to the orignal design of aarch64 mcmodel=medium, we
+	     don't care where this symbol is put.  For the benefit of code size
+	     and behaviour consistent with other mcmodel, put it into
+	     function_literal_pools.  */
+	  || aarch64_cmodel == AARCH64_CMODEL_MEDIUM);
 }
 
 static bool
@@ -13003,6 +13095,13 @@ cost_plus:
 	  if (speed)
 	    *cost += extra_cost->alu.arith;
 	}
+      else if (aarch64_cmodel == AARCH64_CMODEL_MEDIUM
+	       || aarch64_cmodel == AARCH64_CMODEL_MEDIUM_PIC)
+	{
+	  /* 4 movs  adr  sub  add  2movs  ldr.  */
+	  if (speed)
+	    *cost += 7*extra_cost->alu.arith;
+	}
 
       if (flag_pic)
 	{
@@ -13010,6 +13109,8 @@ cost_plus:
 	  *cost += COSTS_N_INSNS (1);
 	  if (speed)
 	    *cost += extra_cost->ldst.load;
+	  if (aarch64_cmodel == AARCH64_CMODEL_MEDIUM_PIC)
+	    *cost += 2*extra_cost->alu.arith;
 	}
       return true;
 
@@ -14373,6 +14474,7 @@ initialize_aarch64_tls_size (struct gcc_options *opts)
       if (aarch64_tls_size > 32)
 	aarch64_tls_size = 32;
       break;
+    case AARCH64_CMODEL_MEDIUM:
     case AARCH64_CMODEL_LARGE:
       /* The maximum TLS size allowed under large is 16E.
 	 FIXME: 16E should be 64bit, we only support 48bit offset now.  */
@@ -15266,6 +15368,12 @@ initialize_aarch64_code_model (struct gcc_options *opts)
 #endif
 	}
       break;
+    case AARCH64_CMODEL_MEDIUM:
+      if (opts->x_flag_pic)
+      {
+	aarch64_cmodel = AARCH64_CMODEL_MEDIUM_PIC;
+      }
+      break;
     case AARCH64_CMODEL_LARGE:
       if (opts->x_flag_pic)
 	sorry ("code model %qs with %<-f%s%>", "large",
@@ -15276,6 +15384,7 @@ initialize_aarch64_code_model (struct gcc_options *opts)
     case AARCH64_CMODEL_TINY_PIC:
     case AARCH64_CMODEL_SMALL_PIC:
     case AARCH64_CMODEL_SMALL_SPIC:
+    case AARCH64_CMODEL_MEDIUM_PIC:
       gcc_unreachable ();
     }
 }
@@ -15286,6 +15395,7 @@ static void
 aarch64_option_save (struct cl_target_option *ptr, struct gcc_options *opts)
 {
   ptr->x_aarch64_override_tune_string = opts->x_aarch64_override_tune_string;
+  ptr->x_aarch64_data_threshold = opts->x_aarch64_data_threshold;
   ptr->x_aarch64_branch_protection_string
     = opts->x_aarch64_branch_protection_string;
 }
@@ -15301,6 +15411,7 @@ aarch64_option_restore (struct gcc_options *opts, struct cl_target_option *ptr)
   opts->x_explicit_arch = ptr->x_explicit_arch;
   selected_arch = aarch64_get_arch (ptr->x_explicit_arch);
   opts->x_aarch64_override_tune_string = ptr->x_aarch64_override_tune_string;
+  opts->x_aarch64_data_threshold = ptr->x_aarch64_data_threshold;
   opts->x_aarch64_branch_protection_string
     = ptr->x_aarch64_branch_protection_string;
   if (opts->x_aarch64_branch_protection_string)
@@ -16169,6 +16280,8 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
 
 	case AARCH64_CMODEL_SMALL_SPIC:
 	case AARCH64_CMODEL_SMALL_PIC:
+	case AARCH64_CMODEL_MEDIUM_PIC:
+	case AARCH64_CMODEL_MEDIUM:
 	case AARCH64_CMODEL_SMALL:
 	  return SYMBOL_SMALL_ABSOLUTE;
 
@@ -16205,6 +16318,7 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
 	  return SYMBOL_TINY_ABSOLUTE;
 
 	case AARCH64_CMODEL_SMALL:
+	AARCH64_SMALL_ROUTINE:
 	  /* Same reasoning as the tiny code model, but the offset cap here is
 	     1MB, allowing +/-3.9GB for the offset to the symbol.  */
 
@@ -16228,7 +16342,50 @@ aarch64_classify_symbol (rtx x, HOST_WIDE_INT offset)
 		    ?  SYMBOL_SMALL_GOT_28K : SYMBOL_SMALL_GOT_4G);
 	  return SYMBOL_SMALL_ABSOLUTE;
 
+	case AARCH64_CMODEL_MEDIUM:
+	  {
+	    tree decl_local = SYMBOL_REF_DECL (x);
+	    if (decl_local != NULL
+		&& tree_fits_uhwi_p (DECL_SIZE_UNIT (decl_local)))
+	      {
+		HOST_WIDE_INT size = tree_to_uhwi (DECL_SIZE_UNIT (decl_local));
+		/* If the data is smaller than the threshold, goto
+		   the small code model.  Else goto the large code
+		   model.  */
+		if (size >= HOST_WIDE_INT (aarch64_data_threshold))
+		  goto AARCH64_LARGE_ROUTINE;
+	      }
+	    goto AARCH64_SMALL_ROUTINE;
+	  }
+
+	case AARCH64_CMODEL_MEDIUM_PIC:
+	  {
+	    tree decl_local = SYMBOL_REF_DECL (x);
+	    if (decl_local != NULL
+		&& tree_fits_uhwi_p (DECL_SIZE_UNIT (decl_local)))
+	      {
+		HOST_WIDE_INT size = tree_to_uhwi (DECL_SIZE_UNIT (decl_local));
+		if (size < HOST_WIDE_INT (aarch64_data_threshold))
+		  {
+		    if (!aarch64_symbol_binds_local_p (x))
+		      {
+			/* flag_pic is 2 only when -fPIC is on, when we should
+			   use 4G GOT.  */
+			return flag_pic == 2 ? SYMBOL_SMALL_GOT_4G
+					     : SYMBOL_SMALL_GOT_28K ;
+		      }
+		    return SYMBOL_SMALL_ABSOLUTE;
+		  }
+	      }
+	    if (!aarch64_symbol_binds_local_p (x))
+	      {
+		return SYMBOL_MEDIUM_GOT_4G;
+	      }
+	    return SYMBOL_MEDIUM_ABSOLUTE;
+	  }
+
 	case AARCH64_CMODEL_LARGE:
+	AARCH64_LARGE_ROUTINE:
 	  /* This is alright even in PIC code as the constant
 	     pool reference is always PC relative and within
 	     the same translation unit.  */
@@ -19352,6 +19509,8 @@ aarch64_asm_preferred_eh_data_format (int code ATTRIBUTE_UNUSED, int global)
      case AARCH64_CMODEL_SMALL:
      case AARCH64_CMODEL_SMALL_PIC:
      case AARCH64_CMODEL_SMALL_SPIC:
+     case AARCH64_CMODEL_MEDIUM:
+     case AARCH64_CMODEL_MEDIUM_PIC:
        /* text+got+data < 4Gb.  4-byte signed relocs are sufficient
 	  for everything.  */
        type = DW_EH_PE_sdata4;
@@ -22605,7 +22764,14 @@ aarch64_empty_mask_is_expensive (unsigned)
 bool
 aarch64_use_pseudo_pic_reg (void)
 {
-  return aarch64_cmodel == AARCH64_CMODEL_SMALL_SPIC;
+  /* flag_pic is 2 when -fPIC is on, where we do not need the pseudo
+     pic reg.  In medium code mode, when combine with -fpie/-fpic, there are
+     possibility that some symbol size smaller than the -mlarge-data-threshold
+     will still use SMALL_SPIC relocation, which need the pseudo pic reg.
+     Fix spill_1.c fail.  */
+  return aarch64_cmodel == AARCH64_CMODEL_SMALL_SPIC
+	 || (aarch64_cmodel == AARCH64_CMODEL_MEDIUM_PIC
+	     && flag_pic != 2);
 }
 
 /* Implement TARGET_UNSPEC_MAY_TRAP_P.  */
@@ -22615,6 +22781,7 @@ aarch64_unspec_may_trap_p (const_rtx x, unsigned flags)
 {
   switch (XINT (x, 1))
     {
+    case UNSPEC_GOTMEDIUMPIC4G:
     case UNSPEC_GOTSMALLPIC:
     case UNSPEC_GOTSMALLPIC28K:
     case UNSPEC_GOTTINYPIC:
@@ -22974,6 +23141,18 @@ aarch64_estimated_poly_value (poly_int64 val)
 
   HOST_WIDE_INT over_128 = width_source - 128;
   return val.coeffs[0] + val.coeffs[1] * over_128 / 128;
+}
+
+/* Implement TARGET_MEDIUM_SYMBOL_P.
+   Return true if x is a symbol loaded by UNSPEC_LOAD_SYMBOL_MEDIUM.  */
+bool
+aarch64_medium_symbol_p (rtx x)
+{
+  if (GET_CODE (x) != UNSPEC)
+    {
+      return false;
+    }
+  return XINT (x, 1) == UNSPEC_LOAD_SYMBOL_MEDIUM;
 }
 
 
@@ -24014,6 +24193,9 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_ESTIMATED_POLY_VALUE
 #define TARGET_ESTIMATED_POLY_VALUE aarch64_estimated_poly_value
+
+#undef TARGET_MEDIUM_SYMBOL_P
+#define TARGET_MEDIUM_SYMBOL_P aarch64_medium_symbol_p
 
 #undef TARGET_ATTRIBUTE_TABLE
 #define TARGET_ATTRIBUTE_TABLE aarch64_attribute_table
