@@ -2235,9 +2235,9 @@ check_record_ptr_usage (gimple *use_stmt, tree &current_node,
     }
 
   bool res = true;
-  /* MEM[(long int *)a_1] = _57; (record).
+  /* MEM[(long int *)a_1] = _1; (record).
      If lhs is ssa_name, lhs cannot be the current node.
-     _283 = _282->flow; (No record).  */
+     _2 = _1->flow; (No record).  */
   if (TREE_CODE (rhs1) == SSA_NAME)
     {
       tree tmp = (rhs1 != current_node) ? rhs1 : lhs;
@@ -2285,13 +2285,13 @@ check_record_single_node (gimple *use_stmt, tree &current_node,
   bool res = true;
   if (TREE_CODE (lhs) == SSA_NAME && TREE_CODE (rhs1) == MEM_REF)
     {
-      /* _257 = MEM[(struct arc_t * *)_17].  */
+      /* add such as: _2 = MEM[(struct arc_t * *)_1].  */
       res = add_node (lhs, *ptr_layers.get (current_node) - 1,
 		      ptr_layers, ssa_name_stack);
     }
   else if (TREE_CODE (lhs) == MEM_REF && TREE_CODE (rhs1) == SSA_NAME)
     {
-      /* MEM[(long int *)a_1] = _57.  */
+      /* add such as: MEM[(long int *)a_1] = _1.  */
       if (rhs1 == current_node)
 	{
 	  res = add_node (TREE_OPERAND (lhs, 0),
@@ -3097,7 +3097,8 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 			isptrptr (TREE_TYPE (rhs)) ? TREE_TYPE (rhs) : NULL);
 		}
 	    }
-	  /* void * _1; struct arc * _2;
+	  /* find void ssa_name such as:
+	     void * _1; struct arc * _2;
 	     _2 = _1 + _3; _1 = calloc (100, 40).  */
 	  if (TREE_CODE (rhs) == SSA_NAME
 	      && VOID_POINTER_P (TREE_TYPE (rhs))
@@ -3126,7 +3127,7 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	  find_var (gimple_assign_rhs1 (stmt), stmt);
 	  find_var (gimple_assign_rhs2 (stmt), stmt);
 	}
-      /* _23 = _21 - old_arcs_12.  */
+      /* find void ssa_name from stmt such as: _2 = _1 - old_arcs_1.  */
       else if ((current_mode == STRUCT_REORDER_FIELDS)
 	       && gimple_assign_rhs_code (stmt) == POINTER_DIFF_EXPR
 	       && types_compatible_p (
@@ -3310,7 +3311,7 @@ trace_calculate_negate (gimple *size_def_stmt, tree *num, tree struct_size)
 {
   gcc_assert (gimple_assign_rhs_code (size_def_stmt) == NEGATE_EXPR);
 
-  /* _480 = -_479; _479 = _478 * 72.  */
+  /* support NEGATE_EXPR trace: _3 = -_2; _2 = _1 * 72.  */
   tree num1 = NULL_TREE;
   tree arg0 = gimple_assign_rhs1 (size_def_stmt);
   if (!is_result_of_mult (arg0, &num1, struct_size) || num1 == NULL_TREE)
@@ -3329,7 +3330,8 @@ trace_calculate_diff (gimple *size_def_stmt, tree *num)
 {
   gcc_assert (gimple_assign_rhs_code (size_def_stmt) == NOP_EXPR);
 
-  /* _25 = (long unsigned int) _23; _23 = _21 - old_arcs_12.  */
+  /* support POINTER_DIFF_EXPR trace:
+  _3 = (long unsigned int) _2; _2 = _1 - old_arcs_1.  */
   tree arg = gimple_assign_rhs1 (size_def_stmt);
   size_def_stmt = SSA_NAME_DEF_STMT (arg);
   if (size_def_stmt && is_gimple_assign (size_def_stmt)
@@ -3811,8 +3813,8 @@ ipa_struct_reorg::get_type_field (tree expr, tree &base, bool &indirect,
 	 release INTEGER_TYPE cast to struct pointer.
 	 (If t has escpaed above, then directly returns
 	 and doesn't mark escape follow.). */
-      /* _607 = MEM[(struct arc_t * *)pl_100].
-	 then base pl_100：ssa_name  - pointer_type - integer_type.  */
+      /* _1 = MEM[(struct arc_t * *)a_1].
+	 then base a_1: ssa_name  - pointer_type - integer_type.  */
       if (current_mode == STRUCT_REORDER_FIELDS)
 	{
 	  bool is_int_ptr = POINTER_TYPE_P (TREE_TYPE (base))
@@ -4520,8 +4522,15 @@ ipa_struct_reorg::check_ptr_layers (tree a_expr, tree b_expr, gimple* stmt)
     {
       return;
     }
-  a->type->mark_escape (escape_cast_another_ptr, stmt);
-  b->type->mark_escape (escape_cast_another_ptr, stmt);
+
+  if (a)
+    {
+      a->type->mark_escape (escape_cast_another_ptr, stmt);
+    }
+  if (b)
+    {
+      b->type->mark_escape (escape_cast_another_ptr, stmt);
+    }
 }
 
 void
@@ -5649,9 +5658,9 @@ ipa_struct_reorg::rewrite_expr (tree expr, tree newexpr[max_split], bool ignore_
 	  if (current_mode == STRUCT_REORDER_FIELDS)
 	    {
 	      /* Supports the MEM_REF offset.
-		 _1 = MEM[(struct arc *)ap_4 + 72B].flow;
-		 Old rewrite：_1 = ap.reorder.0_8->flow;
-		 New rewrite：_1
+		 _1 = MEM[(struct arc *)ap_1 + 72B].flow;
+		 Old rewrite: _1 = ap.reorder.0_8->flow;
+		 New rewrite: _1
 		  = MEM[(struct arc.reorder.0 *)ap.reorder.0_8 + 64B].flow;
 	      */
 	      HOST_WIDE_INT offset_tmp = 0;
@@ -6150,10 +6159,10 @@ ipa_struct_reorg::rewrite_cond (gcond *stmt, gimple_stmt_iterator *gsi)
       return false;
     }
 
-  /*  Old rewrite：if (x_1 != 0B)
+  /*  Old rewrite: if (x_1 != 0B)
 		-> _1 = x.reorder.0_1 != 0B; if (_1 != 1)
 		   The logic is incorrect.
-      New rewrite：if (x_1 != 0B)
+      New rewrite: if (x_1 != 0B)
 		-> if (x.reorder.0_1 != 0B)；*/
   for (unsigned i = 0; i < max_split && (newlhs[i] || newrhs[i]); i++)
     {
