@@ -3876,6 +3876,17 @@ ipa_struct_reorg::get_type_field (tree expr, tree &base, bool &indirect,
       return false;
     }
 
+  /* Escape the operation of fetching field with pointer offset such as:
+     *(&(t->right)) = malloc (0); -> MEM[(struct node * *)_1 + 8B] = malloc (0);
+  */
+  if (current_mode != NORMAL
+      && (TREE_CODE (expr) == MEM_REF) && (offset != 0))
+    {
+      gcc_assert (can_escape);
+      t->mark_escape (escape_non_multiply_size, NULL);
+      return false;
+    }
+
   if (wholeaccess (expr, base, accesstype, t))
     {
       field = NULL;
