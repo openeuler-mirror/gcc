@@ -3876,6 +3876,17 @@ ipa_struct_reorg::get_type_field (tree expr, tree &base, bool &indirect,
       return false;
     }
 
+  /* Escape the operation of fetching field with pointer offset such as:
+     *(&(t->right)) = malloc (0); -> MEM[(struct node * *)_1 + 8B] = malloc (0);
+  */
+  if (current_mode != NORMAL
+      && (TREE_CODE (expr) == MEM_REF) && (offset != 0))
+    {
+      gcc_assert (can_escape);
+      t->mark_escape (escape_non_multiply_size, NULL);
+      return false;
+    }
+
   if (wholeaccess (expr, base, accesstype, t))
     {
       field = NULL;
@@ -6644,7 +6655,9 @@ pass_ipa_struct_reorg::gate (function *)
 	  && flag_lto_partition == LTO_PARTITION_ONE
 	  /* Only enable struct optimizations in C since other
 	     languages' grammar forbid.  */
-	  && lang_c_p ());
+	  && lang_c_p ()
+	  /* Only enable struct optimizations in lto or whole_program.  */
+	  && (in_lto_p || flag_whole_program));
 }
 
 const pass_data pass_data_ipa_reorder_fields =
@@ -6688,7 +6701,9 @@ pass_ipa_reorder_fields::gate (function *)
 	  && flag_lto_partition == LTO_PARTITION_ONE
 	  /* Only enable struct optimizations in C since other
 	     languages' grammar forbid.  */
-	  && lang_c_p ());
+	  && lang_c_p ()
+	  /* Only enable struct optimizations in lto or whole_program.  */
+	  && (in_lto_p || flag_whole_program));
 }
 
 } // anon namespace
