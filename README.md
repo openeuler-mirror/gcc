@@ -1,37 +1,29 @@
-# gcc
+# GCC for openEuler
 
-#### 介绍
-gcc is a generic and open source compiler
+## GCC for openEuler 10.3.1
 
-#### 软件架构
-软件架构说明
+GCC for openEuler 编译器是基于开源 GCC 的高性能编译器，GCC for openEuler 与鲲鹏芯片协同，通过编译器技术充分发挥芯片的性能，提升鲲鹏硬件平台上业务的性能体验。除支持开源 GCC 通用功能之外，GCC for openEuler 主要对以下三个方面进行了增强。
 
+- 更丰富的编译算法：提供丰富的优化算法，如内存布局优化、结构体拆分优化、自动矢量化等，大幅提升指令和数据的吞吐量。
+- 更灵活的指令流水：适配鲲鹏平台的指令流水优化，发挥鲲鹏架构极致算力。
+- 更高效的运算库：深度优化数学库算法，提供丰富的矢量数学函数接口，大幅提升数学计算的效率。
 
-#### 安装教程
+二进制可以从[这里](https://www.hikunpeng.com/developer/devkit/compiler/gcc)下载。
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+用户指南和新特性，详见[Wiki](https://support.huaweicloud.com/ug-hgcc-kunpengdevps/kunpenghgcc_06_0001.html)。
 
-#### 使用说明
+## 版本节奏
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+GCC for openEuler 每两年发布一个新版本，选择x.2.y以后的版本。
 
-#### 参与贡献
+## 平台支持
 
-1.  Fork 本仓库
-2.  新建 Feat_xxx 分支
-3.  提交代码
-4.  新建 Pull Request
+GCC for openEuler 当前支持`Linux/AArch64`和`Linux/x86`平台。
 
+## License
 
-#### 特技
+GCC for openEuler 使用 GPLv3 协议，请见[License](https://gitee.com/openeuler/gcc/blob/master/COPYING3)。
 
-1.  使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2.  Gitee 官方博客 [blog.gitee.com](https://blog.gitee.com)
-3.  你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解 Gitee 上的优秀开源项目
-4.  [GVP](https://gitee.com/gvp) 全称是 Gitee 最有价值开源项目，是综合评定出的优秀开源项目
-5.  Gitee 官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6.  Gitee 封面人物是一档用来展示 Gitee 会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+## 如何提交贡献
+
+我们非常欢迎开发者提交贡献，如果您发现了一个bug或者有一些想法想要交流，欢迎[发邮件到dev列表](https://www.openeuler.org/zh/community/mailing-list/)或者[提交一个issue](https://gitee.com/openeuler/gcc/issues)。

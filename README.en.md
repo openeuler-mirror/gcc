@@ -1,36 +1,29 @@
-# gcc
+# GCC for openEuler
 
-#### Description
-gcc is a generic and open source compiler
+## GCC for openEuler 10.3.1
 
-#### Software Architecture
-Software architecture description
+The GCC for openEuler compiler is a high-performance compiler based on the open source GCC. GCC for openEuler works with Kunpeng chip to fully utilize the performance of the chip through compiler technology and improve the performance experience of the workload on the Kunpeng hardware platform. In addition to supporting open source GCC general functions, GCC for openEuler mainly enhances the following three aspects.
 
-#### Installation
+- Richer compilation algorithms: Provide a wealth of optimization algorithms, such as memory layout optimization, structure split optimization, automatic vectorization, etc., which greatly improve the throughput of instructions and data.
+- More flexible instruction pipeline: Adapt to the instruction pipeline of the Kunpeng platform, and give full play to the powerful performance of Kunpeng architecture.
+- More efficient operation library: Deeply optimize the mathematical library algorithm, provide a rich vector mathematical function interface, greatly improve the efficiency of mathematical calculations.
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+The binary can be downloaded from [here](https://www.hikunpeng.com/developer/devkit/compiler/gcc).
 
-#### Instructions
+For the user guide and new features, see [Wiki](https://support.huaweicloud.com/ug-hgcc-kunpengdevps/kunpenghgcc_06_0001.html) for details.
 
-1.  xxxx
-2.  xxxx
-3.  xxxx
+## Version planning
 
-#### Contribution
+GCC for openEuler releases a new version every two years, and chooses the version after x.2.y.
 
-1.  Fork the repository
-2.  Create Feat_xxx branch
-3.  Commit your code
-4.  Create Pull Request
+## Platform support
 
+GCC for openEuler currently supports `Linux/AArch64` and `Linux/x86` platforms.
 
-#### Gitee Feature
+## License
 
-1.  You can use Readme\_XXX.md to support different languages, such as Readme\_en.md, Readme\_zh.md
-2.  Gitee blog [blog.gitee.com](https://blog.gitee.com)
-3.  Explore open source project [https://gitee.com/explore](https://gitee.com/explore)
-4.  The most valuable open source project [GVP](https://gitee.com/gvp)
-5.  The manual of Gitee [https://gitee.com/help](https://gitee.com/help)
-6.  The most popular members  [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+GCC for openEuler uses the GPLv3 License, please see [License](https://gitee.com/openeuler/gcc/blob/master/COPYING3).
+
+## How to submit a contribution
+
+We welcome developers to submit contributions. If you find a bug or have some ideas to exchange, welcome [send an email to the dev list](https://www.openeuler.org/zh/community/mailing-list/) Or [submit an issue](https://gitee.com/openeuler/gcc/issues).
