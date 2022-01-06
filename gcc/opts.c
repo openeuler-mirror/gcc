@@ -1742,6 +1742,13 @@ enable_fdo_optimizations (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, flag_tree_loop_distribution, value);
 }
 
+static void
+set_cache_misses_profile_params (struct gcc_options *opts,
+			       struct gcc_options *opts_set)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_prefetch_loop_arrays, 1);
+}
+
 /* -f{,no-}sanitize{,-recover}= suboptions.  */
 const struct sanitizer_opts_s sanitizer_opts[] =
 {
@@ -2602,6 +2609,25 @@ common_handle_option (struct gcc_options *opts,
       SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_correction, value);
       SET_OPTION_IF_UNSET (opts, opts_set,
 			   param_early_inliner_max_iterations, 10);
+      break;
+
+    case OPT_fipa_extend_auto_profile:
+      opts->x_flag_ipa_extend_auto_profile = opts->x_flag_cache_misses_profile
+					     ? true : value;
+      break;
+
+    case OPT_fcache_misses_profile_:
+      opts->x_cache_misses_profile_file = xstrdup (arg);
+      opts->x_flag_cache_misses_profile = true;
+      value = true;
+      /* No break here - do -fcache-misses-profile processing. */
+      /* FALLTHRU */
+    case OPT_fcache_misses_profile:
+      opts->x_flag_ipa_extend_auto_profile = value;
+      if (value)
+	{
+	  set_cache_misses_profile_params (opts, opts_set);
+	}
       break;
 
     case OPT_fprofile_generate_:
