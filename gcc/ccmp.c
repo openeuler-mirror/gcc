@@ -37,6 +37,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "cfgexpand.h"
 #include "ccmp.h"
 #include "predict.h"
+#include "gimple-iterator.h"
 
 /* Check whether T is a simple boolean variable or a SSA name
    set by a comparison operator in the same basic block.  */
@@ -126,6 +127,38 @@ ccmp_candidate_p (gimple *g)
   /* We skip ccmp_candidate_p (gs1) && ccmp_candidate_p (gs0) since
      there is no way to set and maintain the CC flag on both sides of
      the logical operator at the same time.  */
+  return false;
+}
+
+/* Check whether bb is a potential conditional compare candidate.  */
+bool
+check_ccmp_candidate (basic_block bb)
+{
+  gimple_stmt_iterator gsi;
+  gimple *bb_last_stmt, *stmt;
+  tree op0, op1;
+
+  gsi = gsi_last_bb (bb);
+  bb_last_stmt = gsi_stmt (gsi);
+
+  if (bb_last_stmt && gimple_code (bb_last_stmt) == GIMPLE_COND)
+    {
+      op0 = gimple_cond_lhs (bb_last_stmt);
+      op1 = gimple_cond_rhs (bb_last_stmt);
+
+      if (TREE_CODE (op0) == SSA_NAME
+	  && TREE_CODE (TREE_TYPE (op0)) == BOOLEAN_TYPE
+	  && TREE_CODE (op1) == INTEGER_CST
+	  && ((gimple_cond_code (bb_last_stmt) == NE_EXPR)
+	      || (gimple_cond_code (bb_last_stmt) == EQ_EXPR)))
+	{
+	  stmt = SSA_NAME_DEF_STMT (op0);
+	  if (stmt && gimple_code (stmt) == GIMPLE_ASSIGN)
+	    {
+	      return ccmp_candidate_p (stmt);
+	    }
+	}
+    }
   return false;
 }
 

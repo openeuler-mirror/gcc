@@ -38,6 +38,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "explow.h"
 #include "tree-dfa.h"
 #include "stor-layout.h"
+#include "ccmp.h"
+#include "target.h"
+#include "tree-outof-ssa.h"
 
 /* This set of routines implements a coalesce_list.  This is an object which
    is used to track pairs of ssa_names which are desirable to coalesce
@@ -854,6 +857,198 @@ live_track_clear_base_vars (live_track *ptr)
   bitmap_clear (&ptr->live_base_var);
 }
 
+/* Return true if gimple is a copy assignment.  */
+
+static inline bool
+gimple_is_assign_copy_p (gimple *gs)
+{
+  return (is_gimple_assign (gs) && gimple_assign_copy_p (gs)
+	  && TREE_CODE (gimple_assign_lhs (gs)) == SSA_NAME
+	  && TREE_CODE (gimple_assign_rhs1 (gs)) == SSA_NAME);
+}
+
+#define MAX_CCMP_CONFLICT_NUM 5
+
+/* Clear high-cost conflict graphs.  */
+
+static void
+remove_high_cost_graph_for_ccmp (ssa_conflicts *conflict_graph)
+{
+  unsigned x = 0;
+  int add_conflict_num = 0;
+  bitmap b;
+  FOR_EACH_VEC_ELT (conflict_graph->conflicts, x, b)
+    {
+      if (b)
+	{
+	  add_conflict_num++;
+	}
+    }
+  if (add_conflict_num >= MAX_CCMP_CONFLICT_NUM)
+    {
+      conflict_graph->conflicts.release ();
+    }
+}
+
+/* Adding a new conflict graph to the original graph.  */
+
+static void
+process_add_graph (live_track *live, basic_block bb,
+		   ssa_conflicts *conflict_graph)
+{
+  tree use, def;
+  ssa_op_iter iter;
+  gimple *first_visit_stmt = NULL;
+  for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
+       gsi_next (&gsi))
+    {
+      if (gimple_visited_p (gsi_stmt (gsi)))
+	{
+	  first_visit_stmt = gsi_stmt (gsi);
+	  break;
+	}
+    }
+  if (!first_visit_stmt)
+    return;
+
+  for (gimple_stmt_iterator gsi = gsi_last_bb (bb);
+       gsi_stmt (gsi) != first_visit_stmt; gsi_prev (&gsi))
+    {
+      gimple *stmt = gsi_stmt (gsi);
+      if (gimple_visited_p (gsi_stmt (gsi)) && is_gimple_debug (stmt))
+	{
+	  continue;
+	}
+      if (gimple_is_assign_copy_p (stmt))
+	{
+	  live_track_clear_var (live, gimple_assign_rhs1 (stmt));
+	}
+      FOR_EACH_SSA_TREE_OPERAND (def, stmt, iter, SSA_OP_DEF)
+	{
+	  live_track_process_def (live, def, conflict_graph);
+	}
+      FOR_EACH_SSA_TREE_OPERAND (use, stmt, iter, SSA_OP_USE)
+	{
+	  live_track_process_use (live, use);
+	}
+    }
+}
+
+/* Build a conflict graph based on ccmp candidate.  */
+
+static void
+add_ccmp_conflict_graph (ssa_conflicts *conflict_graph,
+			 tree_live_info_p liveinfo, var_map map, basic_block bb)
+{
+  live_track *live;
+  tree use, def;
+  ssa_op_iter iter;
+  live = new_live_track (map);
+  live_track_init (live, live_on_exit (liveinfo, bb));
+
+  gimple *last_stmt = gsi_stmt (gsi_last_bb (bb));
+  gcc_assert (gimple_cond_lhs (last_stmt));
+
+  auto_vec<tree> stack;
+  stack.safe_push (gimple_cond_lhs (last_stmt));
+  while (!stack.is_empty ())
+    {
+      tree op = stack.pop ();
+      gimple *op_stmt = SSA_NAME_DEF_STMT (op);
+      if (!op_stmt || gimple_bb (op_stmt) != bb
+	  || !is_gimple_assign (op_stmt)
+	  || !ssa_is_replaceable_p (op_stmt))
+	{
+	  continue;
+	}
+      if (gimple_is_assign_copy_p (op_stmt))
+	{
+	  live_track_clear_var (live, gimple_assign_rhs1 (op_stmt));
+	}
+      gimple_set_visited (op_stmt, true);
+      FOR_EACH_SSA_TREE_OPERAND (def, op_stmt, iter, SSA_OP_DEF)
+	{
+	  live_track_process_def (live, def, conflict_graph);
+	}
+      FOR_EACH_SSA_TREE_OPERAND (use, op_stmt, iter, SSA_OP_USE)
+	{
+	  stack.safe_push (use);
+	  live_track_process_use (live, use);
+	}
+    }
+
+  process_add_graph (live, bb, conflict_graph);
+  delete_live_track (live);
+  remove_high_cost_graph_for_ccmp (conflict_graph);
+}
+
+/* Determine whether the ccmp conflict graph can be added.
+   i.e,
+
+   ;;   basic block 3, loop depth 1
+   ;;    pred:		2
+   ;;		     	3
+   # ivtmp.5_10 = PHI <ivtmp.5_12 (2), ivtmp.5_11 (3)>
+   _7 = b_4 (D) >= c_5 (D);
+   _8 = ivtmp.5_10 == 0;
+   _9 = _7 | _8;
+   ivtmp.5_11 = ivtmp.5_10 - 1;
+   if (_9 != 0)
+     goto <bb 4>; [10.70%]
+   else
+     goto <bb 3>; [89.30%]
+
+   In the above loop, the expression will be replaced:
+
+   _7 replaced by b_4 (D) >= c_5 (D)
+   _8 replaced by ivtmp.5_10 == 0
+
+   If the current case want use the ccmp instruction, then
+
+   _9 can replaced by _7 | _8
+
+   So this requires that ivtmp.5_11 and ivtmp.5_10 be divided into different
+   partitions.
+
+   Now this function can achieve this ability.  */
+
+static void
+determine_add_ccmp_conflict_graph (basic_block bb, tree_live_info_p liveinfo,
+				   var_map map, ssa_conflicts *graph)
+{
+  if (!flag_ccmp2 || !targetm.gen_ccmp_first || !check_ccmp_candidate (bb))
+    return;
+  for (gimple_stmt_iterator bsi = gsi_start_bb (bb); !gsi_end_p (bsi);
+       gsi_next (&bsi))
+    {
+      gimple_set_visited (gsi_stmt (bsi), false);
+    }
+  ssa_conflicts *ccmp_conflict_graph;
+  ccmp_conflict_graph = ssa_conflicts_new (num_var_partitions (map));
+  add_ccmp_conflict_graph (ccmp_conflict_graph, liveinfo, map, bb);
+  unsigned x;
+  bitmap b;
+  if (ccmp_conflict_graph)
+    {
+      FOR_EACH_VEC_ELT (ccmp_conflict_graph->conflicts, x, b)
+	{
+	  if (!b)
+	    continue;
+	  unsigned y = bitmap_first_set_bit (b);
+	  if (!graph->conflicts[x] || !bitmap_bit_p (graph->conflicts[x], y))
+	    {
+	      ssa_conflicts_add (graph, x, y);
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "potential ccmp: add additional "
+				      "conflict-ssa : bb[%d]  %d:%d\n",
+			   bb->index, x, y);
+		}
+	    }
+	}
+    }
+  ssa_conflicts_delete (ccmp_conflict_graph);
+}
 
 /* Build a conflict graph based on LIVEINFO.  Any partitions which are in the
    partition view of the var_map liveinfo is based on get entries in the
@@ -937,6 +1132,8 @@ build_ssa_conflict_graph (tree_live_info_p liveinfo)
 	  FOR_EACH_SSA_TREE_OPERAND (var, stmt, iter, SSA_OP_USE)
 	    live_track_process_use (live, var);
 	}
+
+	determine_add_ccmp_conflict_graph (bb, liveinfo, map, graph);
 
       /* If result of a PHI is unused, looping over the statements will not
 	 record any conflicts since the def was never live.  Since the PHI node
