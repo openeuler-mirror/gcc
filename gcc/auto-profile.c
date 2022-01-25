@@ -678,6 +678,17 @@ string_table::get_index (const char *name) const
   if (name == NULL)
     return -1;
   string_index_map::const_iterator iter = map_.find (name);
+  /* Function name may be duplicate. Try to distinguish by the
+     #file_name#function_name defined by the autofdo tool chain.  */
+  if (iter == map_.end ())
+    {
+      char* file_name = get_original_name (lbasename (dump_base_name));
+      char* file_func_name
+	= concat ("#", file_name, "#", name, NULL);
+      iter = map_.find (file_func_name);
+      free (file_name);
+      free (file_func_name);
+    }
   if (iter == map_.end ())
     return -1;
 
@@ -866,7 +877,7 @@ function_instance::read_function_instance (function_instance_stack *stack,
 
   for (unsigned i = 0; i < num_pos_counts; i++)
     {
-      unsigned offset = gcov_read_unsigned () & 0xffff0000;
+      unsigned offset = gcov_read_unsigned ();
       unsigned num_targets = gcov_read_unsigned ();
       gcov_type count = gcov_read_counter ();
       s->pos_counts[offset].count = count;
@@ -945,6 +956,10 @@ autofdo_source_profile::get_count_info (gimple *stmt, count_info *info) const
   function_instance *s = get_function_instance_by_inline_stack (stack);
   if (s == NULL)
     return false;
+  if (s->get_count_info (stack[0].second + stmt->bb->discriminator, info))
+    {
+      return true;
+    }
   return s->get_count_info (stack[0].second, info);
 }
 
@@ -1583,6 +1598,68 @@ afdo_propagate (bb_set *annotated_bb)
     }
 }
 
+/* Process the following scene when the branch probability
+   inversion when do function afdo_propagate (). E.g.
+   BB_NUM (sample count)
+      BB1 (1000)
+      /     \
+    BB2 (10) BB3 (0)
+      \     /
+	BB4
+  In afdo_propagate(), count of BB3 is calculated by
+  COUNT (BB3) = 990 (990 = COUNT (BB1) - COUNT (BB2) = 1000 - 10)
+
+  In fact, BB3 may be colder than BB2 by sample count.
+
+  This function allocate source BB count to each succ BB by sample
+  rate, E.g.
+  BB2_COUNT = BB1_COUNT * (BB2_COUNT / (BB2_COUNT + BB3_COUNT))  */
+
+static void
+afdo_preprocess_bb_count ()
+{
+  basic_block bb;
+  FOR_ALL_BB_FN (bb, cfun)
+    {
+      if (bb->count.ipa_p () && EDGE_COUNT (bb->succs) > 1
+	&& bb->count > profile_count::zero ().afdo ())
+	{
+	  basic_block bb1 = EDGE_SUCC (bb, 0)->dest;
+	  basic_block bb2 = EDGE_SUCC (bb, 1)->dest;
+	  if (single_succ_p (bb1) && single_succ_p (bb2)
+	    && EDGE_SUCC (bb1, 0)->dest == EDGE_SUCC (bb2, 0)->dest)
+	    {
+	      gcov_type max_count = 0;
+	      gcov_type total_count = 0;
+	      edge e;
+	      edge_iterator ei;
+	      FOR_EACH_EDGE (e, ei, bb->succs)
+		{
+		  if (!e->dest->count.ipa_p ())
+		    {
+		      continue;
+		    }
+		  max_count = MAX(max_count, e->dest->count.to_gcov_type ());
+		  total_count += e->dest->count.to_gcov_type ();
+		}
+	      /* Only bb_count > max_count * 2, branch probability will
+		 inversion.  */
+	      if (max_count > 0
+		&& bb->count.to_gcov_type () > max_count * 2)
+		{
+		  FOR_EACH_EDGE (e, ei, bb->succs)
+		    {
+		      gcov_type target_count = bb->count.to_gcov_type ()
+			* e->dest->count.to_gcov_type () / total_count;
+		      e->dest->count
+			= profile_count::from_gcov_type (target_count).afdo ();
+		    }
+		}
+	    }
+	}
+    }
+}
+
 /* Propagate counts on control flow graph and calculate branch
    probabilities.  */
 
@@ -1608,6 +1685,7 @@ afdo_calculate_branch_prob (bb_set *annotated_bb)
     }
 
   afdo_find_equiv_class (annotated_bb);
+  afdo_preprocess_bb_count ();
   afdo_propagate (annotated_bb);
 
   FOR_EACH_BB_FN (bb, cfun)
@@ -1711,6 +1789,82 @@ afdo_vpt_for_early_inline (stmt_set *promoted_stmts)
   return false;
 }
 
+/* Preparation before executing MCF algorithm.  */
+
+static void
+afdo_init_mcf ()
+{
+  basic_block bb;
+  edge e;
+  edge_iterator ei;
+
+  if (dump_file)
+    {
+      fprintf (dump_file, "\n init calling mcf_smooth_cfg (). \n");
+    }
+
+  /* Step1: when use mcf, BB id must be continous,
+     so we need compact_blocks ().  */
+  compact_blocks ();
+
+  /* Step2: allocate memory for MCF input data.  */
+  bb_gcov_counts.safe_grow_cleared (cfun->cfg->x_last_basic_block);
+  edge_gcov_counts = new hash_map<edge, gcov_type>;
+
+  /* Step3: init MCF input data from cfg.  */
+  FOR_ALL_BB_FN (bb, cfun)
+    {
+      /* Init BB count for MCF.  */
+      bb_gcov_count (bb) = bb->count.to_gcov_type ();
+
+      gcov_type total_count = 0;
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	{
+	  total_count += e->dest->count.to_gcov_type ();
+	}
+
+      /* If there is no sample in each successor blocks, source
+       BB samples are allocated to each edge by branch static prob.  */
+
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	{
+	  if (total_count == 0)
+	    {
+	      edge_gcov_count (e) = e->src->count.to_gcov_type ()
+		* e->probability.to_reg_br_prob_base () / REG_BR_PROB_BASE;
+	    }
+	  else
+	    {
+	       edge_gcov_count (e) = e->src->count.to_gcov_type ()
+		* e->dest->count.to_gcov_type () / total_count;
+	    }
+	}
+    }
+}
+
+/* Free the resources used by MCF and reset BB count from MCF result,
+   branch probability has been updated in mcf_smooth_cfg ().  */
+
+static void
+afdo_process_after_mcf ()
+{
+  basic_block bb;
+  /* Reset BB count from MCF result.  */
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      if (bb_gcov_count (bb))
+	{
+	  bb->count
+	    = profile_count::from_gcov_type (bb_gcov_count (bb)).afdo ();
+	}
+    }
+
+  /* Clean up MCF resource.  */
+  bb_gcov_counts.release ();
+  delete edge_gcov_counts;
+  edge_gcov_counts = NULL;
+}
+
 /* Annotate auto profile to the control flow graph. Do not annotate value
    profile for stmts in PROMOTED_STMTS.  */
 
@@ -1762,8 +1916,20 @@ afdo_annotate_cfg (const stmt_set &promoted_stmts)
   afdo_source_profile->mark_annotated (cfun->function_end_locus);
   if (max_count > profile_count::zero ())
     {
-      /* Calculate, propagate count and probability information on CFG.  */
-      afdo_calculate_branch_prob (&annotated_bb);
+      /* 1 means -fprofile-correction is enabled manually, and MCF
+	 algorithm will be used to calculate count and probability.
+	 Otherwise, use the default calculate algorithm.  */
+      if (flag_profile_correction == 1)
+	{
+	  afdo_init_mcf ();
+	  mcf_smooth_cfg ();
+	  afdo_process_after_mcf ();
+	}
+      else
+	{
+	  /* Calculate, propagate count and probability information on CFG.  */
+	  afdo_calculate_branch_prob (&annotated_bb);
+	}
     }
   update_max_bb_count ();
   profile_status_for_fn (cfun) = PROFILE_READ;
