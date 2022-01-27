@@ -1747,6 +1747,8 @@ set_cache_misses_profile_params (struct gcc_options *opts,
 			       struct gcc_options *opts_set)
 {
   SET_OPTION_IF_UNSET (opts, opts_set, flag_prefetch_loop_arrays, 1);
+  SET_OPTION_IF_UNSET (opts, opts_set, prefetch_level, 2);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_simultaneous_prefetches, 100);
 }
 
 /* -f{,no-}sanitize{,-recover}= suboptions.  */
@@ -2643,6 +2645,11 @@ common_handle_option (struct gcc_options *opts,
       SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_values, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_inline_functions, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_bit_cp, value);
+      break;
+
+    case OPT_fprefetch_loop_arrays_:
+      opts->x_prefetch_level = value;
+      opts->x_flag_prefetch_loop_arrays = true;
       break;
 
     case OPT_fpatchable_function_entry_:

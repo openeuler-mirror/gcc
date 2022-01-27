@@ -968,4 +968,20 @@ Bound on number of runtime checks inserted by the vectorizer's loop versioning f
 Common Joined UInteger Var(param_vect_max_version_for_alignment_checks) Init(6) Param Optimization
 Bound on number of runtime checks inserted by the vectorizer's loop versioning for alignment check.
 
+-param=param-prefetch-func-topn=
+Common Joined UInteger Var(param_prefetch_func_topn) Init(3) Param Optimization
+TopN functions of cache miss counts to be analyzed in prefetching.
+
+-param=param-prefetch-ref-topn=
+Common Joined UInteger Var(param_prefetch_ref_topn) Init(5) Param Optimization
+TopN ref of cache miss counts to be analyzed in prefetching.
+
+-param=param-high-loop-execution-rate=
+Common Joined UInteger Var(param_high_loop_execution_rate) Init(95) IntegerRange(0, 100) Param Optimization
+High execution rate loops to be analyzed in prefetch (in%).
+
+-param=param-prefetch-func-counts-threshold=
+Common Joined UInteger Var(param_prefetch_func_counts_threshold) Init(100) Param Optimization
+Threshold functions of cache miss counts to be analyzed in prefetching.
+
 ; This comment is to ensure we retain the blank line above.

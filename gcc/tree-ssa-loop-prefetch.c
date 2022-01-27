@@ -18,6 +18,9 @@ along with GCC; see the file COPYING3.  If not see
 <http://www.gnu.org/licenses/>.  */
 
 #include "config.h"
+#define INCLUDE_ALGORITHM
+#define INCLUDE_MAP
+#define INCLUDE_VECTOR
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -48,6 +51,11 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-data-ref.h"
 #include "diagnostic-core.h"
 #include "dbgcnt.h"
+#include "gimple-pretty-print.h"
+#include "tree-cfg.h"
+#include "auto-profile.h"
+#include "cgraph.h"
+#include "print-tree.h"
 
 /* This pass inserts prefetch instructions to optimize cache usage during
    accesses to arrays in loops.  It processes loops sequentially and:
@@ -253,6 +261,22 @@ struct mem_ref_group
 #define PREFETCH_MAX_MEM_REFS_PER_LOOP 200
 #endif
 
+#ifndef PREFETCH_FUNC_TOPN
+#define PREFETCH_FUNC_TOPN param_prefetch_func_topn
+#endif
+
+#ifndef PREFETCH_FUNC_COUNTS_THRESHOLD
+#define PREFETCH_FUNC_COUNTS_THRESHOLD param_prefetch_func_counts_threshold
+#endif
+
+#ifndef PREFETCH_REF_TOPN
+#define PREFETCH_REF_TOPN param_prefetch_ref_topn
+#endif
+
+#ifndef LOOP_EXECUTION_RATE
+#define LOOP_EXECUTION_RATE param_high_loop_execution_rate
+#endif
+
 /* The memory reference.  */
 
 struct mem_ref
@@ -278,6 +302,131 @@ struct mem_ref
   unsigned storent_p : 1;	/* True if we changed the store to a
 				   nontemporal one.  */
 };
+
+/* Probability information of basic blocks and branches.  */
+struct bb_bp
+{
+  basic_block bb;
+  basic_block true_edge_bb;
+  basic_block false_edge_bb;
+  float true_edge_prob;
+  float false_edge_prob;
+  float bb_prob;
+};
+
+typedef struct bb_bp bb_bp;
+
+enum PREFETCH_MODE
+{
+  ORIGINAL_MODE=0,		/* Original prefetch method.  */
+  REFINE_BB_AHEAD,
+				/* Prefetch distance algorithm for removing
+				   irrelevant bb.  */
+  BRANCH_WEIGHTED_AHEAD,
+				/* Branch weighted prefetch
+				   distance algorithm.  */
+  INDIRECT_MODE			/* Indirect array prefetch mode.  */
+};
+
+typedef std::map <unsigned int, unsigned int> uid_rank_map;
+typedef std::map <location_t, unsigned int> loc_rank_map;
+typedef std::vector <std::pair<location_t, gcov_type> > loc_gcov_type_vec;
+typedef std::map <location_t, std::vector<gimple *> > loc_gimple_vec_map;
+
+static loc_rank_map ref_rank;
+
+/* Callback function for event_count comparison.  */
+
+static bool
+event_count_cmp (std::pair<unsigned int, gcov_type> &a,
+		 std::pair<unsigned int, gcov_type> &b)
+{
+  return a.second > b.second;
+}
+
+/* Prepared mappings from location to counts and from location
+   to stmt list.  */
+
+static void
+prepare_loc_count_info (function *fun, loc_gcov_type_vec &ref_sorted,
+			loc_gimple_vec_map &loc_stmt, event_type event)
+{
+  basic_block bb = NULL;
+  gimple_stmt_iterator bsi;
+  gimple *stmt;
+  tree lhs = NULL_TREE;
+  tree rhs = NULL_TREE;
+
+  FOR_EACH_BB_FN (bb, fun)
+    {
+      for (bsi = gsi_start_bb (bb); !gsi_end_p (bsi); gsi_next (&bsi))
+	{
+	  stmt = gsi_stmt (bsi);
+	  if (gimple_code (stmt) != GIMPLE_ASSIGN)
+	    {
+	      continue;
+	    }
+	  if (!gimple_vuse (stmt))
+	   {
+	      continue;
+	   }
+	  lhs = gimple_assign_lhs (stmt);
+	  rhs = gimple_assign_rhs1 (stmt);
+	  if (REFERENCE_CLASS_P (rhs) || REFERENCE_CLASS_P (lhs))
+	    {
+	      gcov_type loc_count =
+	        event_get_loc_count (gimple_location (stmt), event);
+	      if (loc_count > 0)
+		{
+		  /* There may be multiple gimple correspond to the same
+		     location.  */
+		  if (loc_stmt.count (gimple_location (stmt)) == 0)
+		    {
+		      ref_sorted.push_back (std::make_pair (gimple_location (stmt),
+					loc_count));
+		    }
+		  loc_stmt[gimple_location (stmt)].push_back (stmt);
+		}
+	    }
+	}
+    }
+}
+
+/* Sort references by event_count and dump loc count information after 
+   sorting.  */
+
+static void
+sort_ref_by_event_count (function *fun, event_type event)
+{
+  loc_gcov_type_vec ref_sorted;
+  loc_gimple_vec_map loc_stmt;
+
+  prepare_loc_count_info (fun, ref_sorted, loc_stmt, event);
+  sort (ref_sorted.begin (), ref_sorted.end (), event_count_cmp);
+
+  for (unsigned i = 0; i < ref_sorted.size (); ++i)
+    {
+      ref_rank[ref_sorted[i].first] = i + 1;
+      /* Print the stmt and count of the topn ref.  */
+      if (i < PREFETCH_REF_TOPN && dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "stmt: \n");
+	  for (unsigned j = 0; j < loc_stmt[ref_sorted[i].first].size ();
+		++j)
+	    {
+	      print_gimple_stmt (dump_file,
+				 loc_stmt[ref_sorted[i].first][j], 0);
+	    }
+	  gcov_type loc_count =
+	    event_get_loc_count (ref_sorted[i].first, event);
+	  fprintf (dump_file, "stmt loc %u counts is %lu: "
+			      "rank %d in top %d, (candidate analysis)\n\n",
+		   ref_sorted[i].first, loc_count,
+		   ref_rank[ref_sorted[i].first], PREFETCH_REF_TOPN);
+	}
+    }
+  return;
+}
 
 /* Dumps information about memory reference */
 static void
@@ -479,6 +628,30 @@ idx_analyze_ref (tree base, tree *index, void *data)
   return true;
 }
 
+/* Dumps information about ar_data structure.  */
+
+static void
+dump_ar_data_details (FILE *file, tree ref, struct ar_data &ar_data)
+{
+  print_generic_expr (file, ref, TDF_SLIM);
+  fprintf (file, "\n");
+  if (*(ar_data.step))
+    {
+      fprintf (file, " step ");
+      if (cst_and_fits_in_hwi (*(ar_data.step)))
+	fprintf (file, HOST_WIDE_INT_PRINT_DEC,
+		 int_cst_value (*(ar_data.step)));
+      else
+	print_generic_expr (file, *(ar_data.step), TDF_SLIM);
+    }
+  fprintf (file, "\n");
+  if (*(ar_data.delta))
+    {
+      fprintf (file, " delta " HOST_WIDE_INT_PRINT_DEC "\n",
+	       *(ar_data.delta));
+    }
+}
+
 /* Tries to express REF_P in shape &BASE + STEP * iter + DELTA, where DELTA and
    STEP are integer constants and iter is number of iterations of LOOP.  The
    reference occurs in statement STMT.  Strips nonaddressable component
@@ -526,7 +699,17 @@ analyze_ref (class loop *loop, tree *ref_p, tree *base,
   ar_data.stmt = stmt;
   ar_data.step = step;
   ar_data.delta = delta;
-  return for_each_index (base, idx_analyze_ref, &ar_data);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      dump_ar_data_details (dump_file, ref, ar_data);
+    }
+  bool idx_flag = for_each_index (base, idx_analyze_ref, &ar_data);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "idx_flag = %d \n\n", idx_flag);
+    }
+  return idx_flag;
 }
 
 /* Record a memory reference REF to the list REFS.  The reference occurs in
@@ -601,6 +784,55 @@ gather_memory_references_ref (class loop *loop, struct mem_ref_group **refs,
   return true;
 }
 
+/* Determine whether to collect the memory references based on the
+   ranking of ref cache miss counts.  */
+
+static bool
+should_gather_memory_references (gimple *stmt)
+{
+  if (!(profile_exist (CACHE_MISSES)))
+    {
+      return true;
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "stmt:");
+      print_gimple_stmt (dump_file, stmt, 0);
+      fprintf (dump_file, "\n");
+    }
+  if (ref_rank.count (gimple_location (stmt)) == 0)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "stmt location no found, skip prefetch "
+			      "analysis\n");
+	}
+      return false;
+    }
+  gcov_type loc_count = event_get_loc_count (gimple_location (stmt), CACHE_MISSES);
+  if (ref_rank[gimple_location (stmt)] > PREFETCH_REF_TOPN)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "stmt loc %u counts is %lu:"
+			      "rank %d exceed topn %d, skip prefetch "
+			      "analysis\n",
+		   gimple_location (stmt), loc_count,
+		   ref_rank[gimple_location (stmt)], PREFETCH_REF_TOPN);
+	}
+      return false;
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "stmt loc %u counts is %lu: rank %d in top %d,"
+			  "continue prefetch analysis\n",
+	       gimple_location (stmt), loc_count,
+	       ref_rank[gimple_location (stmt)], PREFETCH_REF_TOPN);
+    }
+  return true;
+}
+
 /* Record the suitable memory references in LOOP.  NO_OTHER_REFS is set to
    true if there are no other memory references inside the loop.  */
 
@@ -626,6 +858,13 @@ gather_memory_references (class loop *loop, bool *no_other_refs, unsigned *ref_c
       if (bb->loop_father != loop)
 	continue;
 
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "==== the %dth loop bb body ====\n", i);
+	  gimple_dump_bb (dump_file, bb, 0, dump_flags);
+	  fprintf (dump_file, "\n");
+	}
+
       for (bsi = gsi_start_bb (bb); !gsi_end_p (bsi); gsi_next (&bsi))
 	{
 	  stmt = gsi_stmt (bsi);
@@ -642,20 +881,31 @@ gather_memory_references (class loop *loop, bool *no_other_refs, unsigned *ref_c
 	  if (! gimple_vuse (stmt))
 	    continue;
 
+	  if (!should_gather_memory_references (stmt))
+	    continue;
+
 	  lhs = gimple_assign_lhs (stmt);
 	  rhs = gimple_assign_rhs1 (stmt);
 
 	  if (REFERENCE_CLASS_P (rhs))
 	    {
-	    *no_other_refs &= gather_memory_references_ref (loop, &refs,
-							    rhs, false, stmt);
-	    *ref_count += 1;
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "====> the %dth ref \n", *ref_count);
+		}
+	      *no_other_refs &= gather_memory_references_ref (loop, &refs, rhs,
+							      false, stmt);
+	      *ref_count += 1;
 	    }
 	  if (REFERENCE_CLASS_P (lhs))
 	    {
-	    *no_other_refs &= gather_memory_references_ref (loop, &refs,
-							    lhs, true, stmt);
-	    *ref_count += 1;
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "====> the %dth ref \n", *ref_count);
+		}
+	      *no_other_refs &= gather_memory_references_ref (loop, &refs, lhs,
+							      true, stmt);
+	      *ref_count += 1;
 	    }
 	}
     }
@@ -1168,9 +1418,9 @@ issue_prefetch_ref (struct mem_ref *ref, unsigned unroll_factor, unsigned ahead)
   bool nontemporal = ref->reuse_distance >= L2_CACHE_SIZE_BYTES;
 
   if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Issued%s prefetch for reference %u:%u.\n",
-	     nontemporal ? " nontemporal" : "",
-	     ref->group->uid, ref->uid);
+      fprintf (dump_file, "Issued%s prefetch for reference %u:%u.\n",
+	       nontemporal ? " nontemporal" : "",
+	       ref->group->uid, ref->uid);
 
   bsi = gsi_for_stmt (ref->stmt);
 
@@ -1875,6 +2125,306 @@ insn_to_prefetch_ratio_too_small_p (unsigned ninsns, unsigned prefetch_count,
   return false;
 }
 
+/* Obtain the edge probability information of each basic block in the loop.  */
+
+static float
+get_edge_prob (edge e)
+{
+  /* Limit the minimum probability value.  */
+  const float MINNUM_PROB = 0.00001f;
+  float fvalue = 1;
+
+  profile_probability probability = e->probability;
+  if (probability.initialized_p ())
+    {
+      fvalue = probability.to_reg_br_prob_base () / float (REG_BR_PROB_BASE);
+      if (fvalue < MINNUM_PROB && probability.to_reg_br_prob_base ())
+	{
+	  fvalue = MINNUM_PROB;
+	}
+    }
+  return fvalue;
+}
+
+
+/* Dump the bb information in a loop.  */
+
+static void
+dump_loop_bb (struct loop *loop)
+{
+  basic_block *body = get_loop_body_in_dom_order (loop);
+  basic_block bb = NULL;
+
+  for (unsigned i = 0; i < loop->num_nodes; i++)
+    {
+      bb = body[i];
+      if (bb->loop_father != loop)
+	{
+	  continue;
+	}
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "===== the %dth loop bb body ======= \n", i);
+	  gimple_dump_bb (dump_file, bb, 0, dump_flags);
+	  fprintf (dump_file, "\n");
+	}
+    }
+  free (body);
+}
+
+
+/* Obtain the branch probability information of each basic block
+   in the loop.  */
+
+static void
+get_bb_branch_prob (hash_map <basic_block, bb_bp> &bb_branch_prob,
+		 struct loop *loop)
+{
+  basic_block *body = get_loop_body (loop);
+  basic_block bb = NULL;
+  for (unsigned i = 0; i < loop->num_nodes; i++)
+    {
+      bb = body[i];
+      if (bb->loop_father != loop)
+	{
+	  continue;
+	}
+      bb_bp &branch_prob = bb_branch_prob.get_or_insert (bb);
+      branch_prob.bb = bb;
+      branch_prob.true_edge_bb = NULL;
+      branch_prob.false_edge_bb = NULL;
+      branch_prob.true_edge_prob = 0;
+      branch_prob.false_edge_prob = 0;
+      branch_prob.bb_prob = 0;
+
+      gimple *stmt = last_stmt (bb);
+      if (stmt && gimple_code (stmt) == GIMPLE_COND)
+	{
+	  if (EDGE_COUNT (bb->succs) != 2)
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		fprintf (dump_file, "The number of successful edges of bb"
+				    "is abnormal\n");
+	      continue;
+	    }
+	  edge true_edge = NULL;
+	  edge false_edge = NULL;
+	  extract_true_false_edges_from_block (bb, &true_edge, &false_edge);
+
+	  /* If it is exiting bb, and the destination bb of the edge does not
+	     belong to the current loop, the information of the edge is not
+	     recorded.  */
+	  if (true_edge->dest->loop_father == loop)
+	    {
+	      branch_prob.true_edge_bb = true_edge->dest;
+	      branch_prob.true_edge_prob = get_edge_prob (true_edge);
+	    }
+	  if (false_edge->dest->loop_father == loop)
+	    {
+	      branch_prob.false_edge_bb = false_edge->dest;
+	      branch_prob.false_edge_prob = get_edge_prob (false_edge);
+	    }
+	}
+
+      edge e = find_fallthru_edge (bb->succs);
+      if (e)
+	{
+	  branch_prob.true_edge_bb = e->dest;
+	  branch_prob.true_edge_prob = get_edge_prob (e);
+	}
+    }
+}
+
+/* Traverse each bb in the loop and prune fake loops.  */
+
+static bool
+traverse_prune_bb_branch (hash_map <basic_block, bb_bp> &bb_branch_prob,
+			  int& max_path, hash_set <basic_block> &path_node,
+			  basic_block current_bb, basic_block latch_bb)
+{
+  /* Limit the maximum number of analysis paths.  */
+  if (max_path <= 0 || current_bb == NULL)
+    return false;
+
+  /* Do not join edges that do not form a complete loop.  */
+  bb_bp *bb_bp_node = bb_branch_prob.get (current_bb);
+  if (bb_bp_node == NULL || (bb_bp_node->true_edge_bb == NULL
+			     && bb_bp_node->false_edge_bb == NULL))
+    return false;
+
+  if (current_bb == latch_bb)
+    {
+      max_path--;
+      return true;
+    }
+
+  /* Do not join edges that return to non-dominate nodes.  */
+  if (path_node.contains (bb_bp_node->true_edge_bb)
+      || path_node.contains (bb_bp_node->false_edge_bb))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "fake loop: in bb%d\n", current_bb->index);
+      return false;
+    }
+
+  path_node.add (current_bb);
+  if (bb_bp_node->true_edge_bb)
+    {
+      if (traverse_prune_bb_branch (bb_branch_prob, max_path,
+		path_node, bb_bp_node->true_edge_bb, latch_bb) == false)
+	return false;
+    }
+  if (bb_bp_node->false_edge_bb)
+    {
+      if (traverse_prune_bb_branch (bb_branch_prob, max_path,
+		path_node, bb_bp_node->false_edge_bb, latch_bb) == false)
+	return false;
+    }
+  path_node.remove (current_bb);
+
+  max_path--;
+  return true;
+}
+
+/* Traverse and calculate the probability of basic block.  */
+
+static void
+traverse_calculate_bb_prob (hash_map <basic_block, bb_bp> &bb_branch_prob,
+			    basic_block current_bb, basic_block latch_bb,
+			    float prob)
+{
+  /* Limit bb block access probability, the probability is
+     less than 100% and include delta.  */
+  const float MAX_BB_PROBABILITY = 1.001f;
+
+  if (current_bb == NULL)
+    {
+      return;
+    }
+  bb_bp *bb_bp_node = bb_branch_prob.get (current_bb);
+  bb_bp_node->bb_prob += prob;
+
+  gcc_assert (bb_bp_node->bb_prob <= MAX_BB_PROBABILITY);
+
+  if (bb_bp_node == NULL || (bb_bp_node->true_edge_bb == NULL
+			     && bb_bp_node->false_edge_bb == NULL))
+    {
+      return;
+    }
+  if (current_bb == latch_bb)
+    {
+      return;
+    }
+
+  bool assign = (bb_bp_node->true_edge_bb && bb_bp_node->false_edge_bb);
+  if (bb_bp_node->true_edge_bb)
+    {
+      float assign_prob = assign ? bb_bp_node->true_edge_prob * prob : prob;
+      traverse_calculate_bb_prob (bb_branch_prob,
+			    bb_bp_node->true_edge_bb, latch_bb, assign_prob);
+    }
+  if (bb_bp_node->false_edge_bb)
+    {
+      float assign_prob = assign ? bb_bp_node->false_edge_prob * prob : prob;
+      traverse_calculate_bb_prob (bb_branch_prob,
+			    bb_bp_node->false_edge_bb, latch_bb, assign_prob);
+    }
+  return;
+}
+
+/* Obtain the probability of basic block.  */
+
+static bool
+get_bb_prob (hash_map <basic_block, bb_bp> &bb_branch_prob, struct loop *loop)
+{
+  /* The upper limit of the branch path in the loop is 10000.  */
+  const int MAX_BB_BRANCH_PATH = 10000;
+
+  if (loop->header == NULL || loop->latch == NULL
+      || loop->header == loop->latch)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "get_bb_prob failed: without the header bb or "
+			    "latch bb\n");
+      return false;
+    }
+
+  bb_bp *latch_branch_prob = bb_branch_prob.get (loop->latch);
+  bb_bp *header_branch_prob = bb_branch_prob.get (loop->header);
+  if (header_branch_prob == NULL || latch_branch_prob == NULL
+      || (latch_branch_prob->true_edge_bb != header_branch_prob->bb
+	  && latch_branch_prob->false_edge_bb != header_branch_prob->bb))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "get_bb_prob failed: loop data exception\n");
+      return false;
+    }
+
+  hash_set <basic_block> path_node;
+  int max_path = MAX_BB_BRANCH_PATH;
+  if (traverse_prune_bb_branch (bb_branch_prob, max_path, path_node,
+			    header_branch_prob->bb, loop->latch) == false)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "traverse_prune_bb_branch false.\n");
+      return false;
+    }
+  traverse_calculate_bb_prob (bb_branch_prob,
+			      header_branch_prob->bb, loop->latch, 1);
+
+  return true;
+}
+
+/* Computes an estimated number of insns in LOOP, weighted by WEIGHTS.  */
+
+static unsigned
+estimate_num_loop_insns (struct loop *loop, eni_weights *weights)
+{
+  basic_block *body = get_loop_body_in_dom_order (loop);
+  gimple_stmt_iterator gsi;
+  float size = 0;
+  basic_block bb = NULL;
+  hash_map <basic_block, bb_bp> bb_branch_prob;
+
+  if (prefetch_level >= BRANCH_WEIGHTED_AHEAD)
+    {
+      get_bb_branch_prob (bb_branch_prob, loop);
+      if (get_bb_prob (bb_branch_prob, loop) == false)
+	{
+	  dump_loop_bb (loop);
+	  return 0;
+	}
+    }
+
+  for (unsigned i = 0; i < loop->num_nodes; i++)
+    {
+      bb = body[i];
+      /* For nested loops, the bb of the inner loop is not calculated.  */
+      if (bb->loop_father != loop)
+	{
+	  continue;
+	}
+
+      float size_tmp = 0;
+      for (gsi = gsi_start_bb (body[i]); !gsi_end_p (gsi); gsi_next (&gsi))
+	{
+	  size_tmp += estimate_num_insns (gsi_stmt (gsi), weights);
+	}
+
+      if (prefetch_level >= BRANCH_WEIGHTED_AHEAD)
+	{
+	  float bb_prob = bb_branch_prob.get (bb)->bb_prob;
+	  size += size_tmp * bb_prob;
+	}
+      else
+	{
+	  size += size_tmp;
+	}
+    }
+  free (body);
+
+  return unsigned (size);
+}
 
 /* Issue prefetch instructions for array references in LOOP.  Returns
    true if the LOOP was unrolled.  */
@@ -1899,7 +2449,15 @@ loop_prefetch_arrays (class loop *loop)
 
   /* FIXME: the time should be weighted by the probabilities of the blocks in
      the loop body.  */
-  time = tree_num_loop_insns (loop, &eni_time_weights);
+
+  if (prefetch_level >= REFINE_BB_AHEAD)
+    {
+      time = estimate_num_loop_insns (loop, &eni_time_weights);
+    }
+  else
+    {
+      time = tree_num_loop_insns (loop, &eni_time_weights);
+    }
   if (time == 0)
     return false;
 
@@ -1913,7 +2471,14 @@ loop_prefetch_arrays (class loop *loop)
   if (trip_count_to_ahead_ratio_too_small_p (ahead, est_niter))
     return false;
 
-  ninsns = tree_num_loop_insns (loop, &eni_size_weights);
+  if (prefetch_level >= REFINE_BB_AHEAD)
+    {
+      ninsns = estimate_num_loop_insns (loop, &eni_size_weights);
+    }
+  else
+    {
+      ninsns = tree_num_loop_insns (loop, &eni_size_weights);
+    }
 
   /* Step 1: gather the memory references.  */
   refs = gather_memory_references (loop, &no_other_refs, &mem_ref_count);
@@ -1978,10 +2543,49 @@ fail:
   return unrolled;
 }
 
+/* Determine if it is a high execution rate loop.  */
+
+static bool
+is_high_exec_rate_loop (struct loop *loop)
+{
+  vec<edge> exit_edges = get_loop_exit_edges (loop);
+  if (exit_edges == vNULL)
+    {
+      return false;
+    }
+
+  unsigned i = 0;
+  gcov_type exit_count = 0;
+  edge e = NULL;
+  float loop_exec_rate = 0;
+  gcov_type header_bb_count = loop->header->count.to_gcov_type ();
+  FOR_EACH_VEC_ELT (exit_edges, i, e)
+    {
+      gcov_type exiting_bb_count = e->src->count.to_gcov_type ();
+      float exit_edge_prob = get_edge_prob (e);
+      exit_count += exit_edge_prob * exiting_bb_count;
+
+      loop_exec_rate = 1.0 - ((double) exit_count / header_bb_count);
+
+      if (loop_exec_rate < (float) LOOP_EXECUTION_RATE / 100.0)
+	{
+	  return false;
+	}
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "loop with high execution rate: %f >= %f\n\n",
+	       loop_exec_rate, (float) LOOP_EXECUTION_RATE / 100.0);
+      dump_loop_bb (loop);
+    }
+  return true;
+}
+
 /* Issue prefetch instructions for array references in loops.  */
 
 unsigned int
-tree_ssa_prefetch_arrays (void)
+tree_ssa_prefetch_arrays (function *fun)
 {
   class loop *loop;
   bool unrolled = false;
@@ -2012,6 +2616,12 @@ tree_ssa_prefetch_arrays (void)
 	       param_min_insn_to_prefetch_ratio);
       fprintf (dump_file, "    min insn-to-mem ratio: %d \n",
 	       param_prefetch_min_insn_to_mem_ratio);
+      fprintf (dump_file, "    prefetch_func_topn: %d \n",
+	       param_prefetch_func_topn);
+      fprintf (dump_file, "    prefetch_ref_topn: %d \n",
+	       param_prefetch_ref_topn);
+      fprintf (dump_file, "    high_loop_execution_rate: %d \n",
+	       LOOP_EXECUTION_RATE);
       fprintf (dump_file, "\n");
     }
 
@@ -2028,13 +2638,42 @@ tree_ssa_prefetch_arrays (void)
       set_builtin_decl (BUILT_IN_PREFETCH, decl, false);
     }
 
-  FOR_EACH_LOOP (loop, LI_FROM_INNERMOST)
+  enum li_flags LI = LI_FROM_INNERMOST;
+
+  if (profile_exist (CACHE_MISSES))
+    {
+      LI = LI_ONLY_INNERMOST;
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Processing model %d:\n", LI);
+    }
+
+  if (profile_exist (CACHE_MISSES))
+    {
+      sort_ref_by_event_count (fun, CACHE_MISSES);
+    }
+
+  FOR_EACH_LOOP (loop, LI)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "Processing loop %d:\n", loop->num);
+	{
+	  fprintf (dump_file, "======================================\n");
+	  fprintf (dump_file, "Processing loop %d:\n", loop->num);
+	  fprintf (dump_file, "======================================\n");
+	  flow_loop_dump (loop, dump_file, NULL, 1);
+	  fprintf (dump_file, "\n\n");
+	}
+
+      if (profile_exist (CACHE_MISSES))
+	{
+	  if (!is_high_exec_rate_loop (loop))
+	    {
+	      continue;
+	    }
+	}
 
       unrolled |= loop_prefetch_arrays (loop);
-
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "\n\n");
     }
@@ -2047,6 +2686,56 @@ tree_ssa_prefetch_arrays (void)
 
   free_original_copy_tables ();
   return todo_flags;
+}
+
+/* Determine whether to analyze the function according to
+   the sorting of the function containing cache-miss counts.  */
+
+static bool
+should_analyze_func_p (void)
+{
+  gcov_type decl_uid = DECL_UID (current_function_decl);
+  struct rank_info func_rank_info =
+    event_get_func_rank (decl_uid, CACHE_MISSES);
+  if (func_rank_info.total == 0)
+    {
+      return false;
+    }
+  gcov_type func_count = event_get_func_count (decl_uid, CACHE_MISSES);
+  if (func_count == 0)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "function uid %d cannot find profile data "
+			      "and skip prefetch analysis\n",
+		   decl_uid);
+	}
+      return false;
+    }
+  if (func_rank_info.rank > PREFETCH_FUNC_TOPN
+      || func_count < PREFETCH_FUNC_COUNTS_THRESHOLD)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "function uid %d total counts is %lu: "
+			      "rank %d > topn %d, counts %lu < threshold %lu "
+			      "skip prefetch analysis\n",
+		   decl_uid, func_count,
+		   func_rank_info.rank, PREFETCH_FUNC_TOPN,
+		   func_count, PREFETCH_FUNC_COUNTS_THRESHOLD);
+	}
+      return false;
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "function uid %d total counts is %lu: "
+			  "rank %d in topn %d, counts %lu > threshold %lu "
+			  "continue prefetch analysis\n",
+	       decl_uid, func_count,
+	       func_rank_info.rank, PREFETCH_FUNC_TOPN,
+	       func_count, PREFETCH_FUNC_COUNTS_THRESHOLD);
+    }
+  return true;
 }
 
 /* Prefetching.  */
@@ -2085,6 +2774,18 @@ pass_loop_prefetch::execute (function *fun)
   if (number_of_loops (fun) <= 1)
     return 0;
 
+  /* Filter only when combined with cache-miss. When the should_analyze_func_p
+     analysis fails (for example, the function without cache-miss count),
+     in order to ensure the accuracy of the prefetch analysis, the function
+     does not perform native prefetch processing.  */
+  if (profile_exist (CACHE_MISSES))
+    {
+      if (!should_analyze_func_p ())
+	{
+	  return 0;
+	}
+    }
+
   if ((PREFETCH_BLOCK & (PREFETCH_BLOCK - 1)) != 0)
     {
       static bool warned = false;
@@ -2099,7 +2800,7 @@ pass_loop_prefetch::execute (function *fun)
       return 0;
     }
 
-  return tree_ssa_prefetch_arrays ();
+  return tree_ssa_prefetch_arrays (fun);
 }
 
 } // anon namespace
