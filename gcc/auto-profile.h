@@ -21,11 +21,39 @@ along with GCC; see the file COPYING3.  If not see
 #ifndef AUTO_PROFILE_H
 #define AUTO_PROFILE_H
 
+enum event_type
+{
+  INST_EXEC = 0,
+  CACHE_MISSES,
+  EVENT_NUMBER
+};
+
 /* Read, process, finalize AutoFDO data structures.  */
 extern void read_autofdo_file (void);
 extern void end_auto_profile (void);
 
 /* Returns TRUE if EDGE is hot enough to be inlined early.  */
 extern bool afdo_callsite_hot_enough_for_early_inline (struct cgraph_edge *);
+
+/* Chcek if profile exists before using this profile.  */
+extern bool profile_exist (enum event_type);
+
+/* Given func decl_uid or gimple location and event_type, return count.
+   Count is 0 if function or gimple is not sampled.  */
+extern gcov_type event_get_func_count (unsigned, enum event_type);
+extern gcov_type event_get_loc_count (location_t, enum event_type);
+
+struct rank_info
+{
+  unsigned total;
+  unsigned rank;
+};
+
+/* Given function decl_uid and event type, return rank_info.  Rank_info
+   is {0, 0} if function was not sampled.  */
+extern struct rank_info event_get_func_rank (unsigned, enum event_type);
+
+/* Free memory allocated by autofdo::extern_profile.  */
+extern void free_extend_profile_info ();
 
 #endif /* AUTO_PROFILE_H */

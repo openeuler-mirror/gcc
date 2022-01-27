@@ -577,6 +577,12 @@ compile_file (void)
       targetm.asm_out.output_ident (ident_str);
     }
 
+  /* Extend auto profile finalization.  */
+  if (flag_ipa_extend_auto_profile)
+    {
+      free_extend_profile_info ();
+    }
+
   /* Auto profile finalization. */
   if (flag_auto_profile)
     end_auto_profile ();

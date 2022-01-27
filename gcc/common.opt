@@ -1074,6 +1074,16 @@ Common Joined RejectNegative Var(auto_profile_file)
 Use sample profile information for call graph node weights. The profile
 file is specified in the argument.
 
+fcache-misses-profile
+Common Report Var(flag_cache_misses_profile)
+Use sample profile information for source code cache miss count.  The default
+profile file is cmsdata.gcov in `pwd`.
+
+fcache-misses-profile=
+Common Joined RejectNegative Var(cache_misses_profile_file)
+Use sample profile information for source code cache miss count.  The profile
+file is specified in the argument.
+
 ; -fcheck-bounds causes gcc to generate array bounds checks.
 ; For C, C++ and ObjC: defaults off.
 ; For Java: defaults to on.
@@ -1872,6 +1882,10 @@ Perform structure fields reorder optimizations.
 fipa-struct-reorg
 Common Report Var(flag_ipa_struct_reorg) Init(0) Optimization
 Perform structure layout optimizations.
+
+fipa-extend-auto-profile
+Common Report Var(flag_ipa_extend_auto_profile)
+Use sample profile information for source code.
 
 fipa-vrp
 Common Report Var(flag_ipa_vrp) Optimization
