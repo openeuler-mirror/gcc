@@ -4365,6 +4365,27 @@ update_profiling_info (struct cgraph_node *orig_node,
 	  orig_node_count.dump (dump_file);
 	  fprintf (dump_file, "\n");
 	}
+
+      /* When autofdo uses PMU as the sampling unit, the count of
+	 cgraph_node->count cannot be obtained directly and will
+	 be zero. It using for apply_scale will cause the node
+	 count incorrectly overestimated. So set orig_new_node_count
+	 equal to orig_node_count, which is same as known error
+	 handling.  */
+      if (orig_node->count == profile_count::zero ().afdo ()
+	  && new_node->count == profile_count::zero ().global0adjusted ())
+	{
+	  orig_new_node_count = (orig_sum + new_sum).apply_scale (12, 10);
+
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, "      node %s with zero count from afdo ",
+		       new_node->dump_name ());
+	      fprintf (dump_file, "      proceeding by pretending it was ");
+	      orig_new_node_count.dump (dump_file);
+	      fprintf (dump_file, "\n");
+	    }
+	}
     }
 
   remainder = orig_node_count.combine_with_ipa_count (orig_node_count.ipa ()

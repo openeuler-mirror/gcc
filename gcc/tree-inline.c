@@ -2015,6 +2015,10 @@ copy_bb (copy_body_data *id, basic_block bb,
      basic_block_info automatically.  */
   copy_basic_block = create_basic_block (NULL, (basic_block) prev->aux);
   copy_basic_block->count = bb->count.apply_scale (num, den);
+  /* Copy discriminator from original bb for distinguishes among
+     several basic blocks that share a common locus, allowing for
+     more accurate autofdo.  */
+  copy_basic_block->discriminator = bb->discriminator;
 
   copy_gsi = gsi_start_bb (copy_basic_block);
 
@@ -3027,6 +3031,16 @@ copy_cfg_body (copy_body_data * id,
 	if (!e->src->aux)
 	  den += e->count ();
       ENTRY_BLOCK_PTR_FOR_FN (cfun)->count = den;
+    }
+  /* When autofdo uses PMU as the sampling unit, the number of
+     ENTRY_BLOCK_PTR_FOR_FN cannot be obtained directly and will
+     be zero. It using for adjust_for_ipa_scaling will cause the
+     inlined BB count incorrectly overestimated. So set den equal
+     to num, which is the source inline BB count to avoid
+     overestimated.  */
+  if (den == profile_count::zero ().afdo ())
+    {
+      den = num;
     }
 
   profile_count::adjust_for_ipa_scaling (&num, &den);
