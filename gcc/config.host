@@ -59,7 +59,11 @@
 #  host_lto_plugin_soname Set this to the name to which the LTO linker
 #			plugin gets compiled on this host, if it is
 #			different from the default "liblto_plugin.so".
-
+#
+#  host_bolt_plugin_soname Set this to the name to which the BOLT
+#			plugin gets compiled on this host, if it is
+#			different from the default "libbolt_plugin.so".
+#
 # When setting any of these variables, check to see if a corresponding
 # variable is present in config.build; if so, you will likely want to 
 # set it in both places.
@@ -75,6 +79,7 @@ out_host_hook_obj=host-default.o
 host_can_use_collect2=yes
 use_long_long_for_widest_fast_int=no
 host_lto_plugin_soname=liblto_plugin.so
+host_bolt_plugin_soname=libbolt_plugin.so
 
 # Unsupported hosts list.  Generally, only include hosts known to fail here,
 # since we allow hosts not listed to be supported generically.
