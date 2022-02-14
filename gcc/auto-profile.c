@@ -21,6 +21,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "config.h"
 #define INCLUDE_MAP
 #define INCLUDE_SET
+#define INCLUDE_ALGORITHM
+#define INCLUDE_VECTOR
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -49,9 +51,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "auto-profile.h"
 #include "tree-pretty-print.h"
 #include "gimple-pretty-print.h"
-#include <map>
-#include <vector>
-#include <algorithm>
 
 /* The following routines implements AutoFDO optimization.
 

@@ -2201,6 +2201,11 @@ fprefetch-loop-arrays
 Common Report Var(flag_prefetch_loop_arrays) Init(-1) Optimization
 Generate prefetch instructions, if available, for arrays in loops.
 
+fprefetch-loop-arrays=
+Common Joined RejectNegative UInteger Var(prefetch_level) Init(0) IntegerRange(0, 3)
+Generate prefetch instructions, if available, for arrays in loops. The prefetch
+level can control the optimize level to array prefetch.
+
 fprofile
 Common Report Var(profile_flag)
 Enable basic program profiling code.
