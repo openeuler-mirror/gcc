@@ -81,6 +81,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "rtl-iter.h"
 #include "print-rtl.h"
 #include "function-abi.h"
+#include "insn-codes.h"
 
 #ifdef XCOFF_DEBUGGING_INFO
 #include "xcoffout.h"		/* Needed for external data declarations.  */
@@ -4640,6 +4641,399 @@ leaf_renumber_regs_insn (rtx in_rtx)
 }
 #endif
 
+
+#define ASM_FDO_SECTION_PREFIX ".text.fdo."
+
+#define ASM_FDO_CALLER_FLAG ".fdo.caller "
+#define ASM_FDO_CALLER_SIZE_FLAG ".fdo.caller.size "
+#define ASM_FDO_CALLER_BIND_FLAG ".fdo.caller.bind "
+
+#define ASM_FDO_CALLEE_FLAG ".fdo.callee "
+
+/* Return the relative offset address of the start instruction of BB,
+   return -1 if it is empty instruction.  */
+
+static int
+get_bb_start_addr (basic_block bb)
+{
+  rtx_insn *insn;
+  FOR_BB_INSNS (bb, insn)
+    {
+      if (!INSN_P (insn))
+	{
+	  continue;
+	}
+
+      int insn_code = recog_memoized (insn);
+
+      /* The instruction NOP in llvm-bolt belongs to the previous
+	 BB, so it needs to be skipped.  */
+      if (insn_code != CODE_FOR_nop)
+	{
+	  return INSN_ADDRESSES (INSN_UID (insn));
+	}
+    }
+  return -1;
+}
+
+/* Return the relative offset address of the end instruction of BB,
+   return -1 if it is empty or call instruction.  */
+
+static int
+get_bb_end_addr (basic_block bb)
+{
+  rtx_insn *insn;
+  int num_succs = EDGE_COUNT (bb->succs);
+  FOR_BB_INSNS_REVERSE (bb, insn)
+    {
+      if (!INSN_P (insn))
+	{
+	  continue;
+	}
+      /* The jump target of call is not in this function, so
+	 it should be excluded.  */
+      if (CALL_P (insn))
+	{
+	  return -1;
+	}
+      if ((num_succs == 1)
+	  || ((num_succs == 2) && any_condjump_p (insn)))
+	{
+	  return INSN_ADDRESSES (INSN_UID (insn));
+	}
+      else
+	{
+	  return -1;
+	}
+    }
+  return -1;
+}
+
+/* Return the end address of cfun.  */
+
+static int
+get_function_end_addr ()
+{
+  rtx_insn *insn = get_last_insn ();
+  for (; insn != get_insns (); insn = PREV_INSN (insn))
+    {
+      if (!INSN_P (insn))
+	{
+	  continue;
+	}
+      return INSN_ADDRESSES (INSN_UID (insn));
+    }
+
+  return -1;
+}
+
+/* Return the function profile status string.  */
+
+static const char *
+get_function_profile_status ()
+{
+  const char *profile_status[] = {
+    "PROFILE_ABSENT",
+    "PROFILE_GUESSED",
+    "PROFILE_READ",
+    "PROFILE_LAST"	/* Last value, used by profile streaming.  */
+  };
+
+  return profile_status[profile_status_for_fn (cfun)];
+}
+
+/* Return the count from the feedback data, such as PGO or AFDO.  */
+
+inline static gcov_type
+get_fdo_count (profile_count count)
+{
+  return count.quality () >= GUESSED
+	 ? count.to_gcov_type () : 0;
+}
+
+/* Return the profile quality string.  */
+
+static const char *
+get_fdo_count_quality (profile_count count)
+{
+  const char *profile_quality[] = {
+    "UNINITIALIZED_PROFILE",
+    "GUESSED_LOCAL",
+    "GUESSED_GLOBAL0",
+    "GUESSED_GLOBAL0_ADJUSTED",
+    "GUESSED",
+    "AFDO",
+    "ADJUSTED",
+    "PRECISE"
+  };
+
+  return profile_quality[count.quality ()];
+}
+
+static const char *
+alias_local_functions (const char *fnname)
+{
+  if (TREE_PUBLIC (cfun->decl))
+    {
+      return fnname;
+    }
+
+  return concat (fnname, "/", lbasename (dump_base_name), NULL);
+}
+
+/* Return function bind type string.  */
+
+static const char *
+simple_get_function_bind ()
+{
+  const char *function_bind[] = {
+    "GLOBAL",
+    "WEAK",
+    "LOCAL",
+    "UNKNOWN"
+  };
+
+  if (TREE_PUBLIC (cfun->decl))
+    {
+      if (!(DECL_WEAK (cfun->decl)))
+	{
+	  return function_bind[0];
+	}
+      else
+	{
+	  return function_bind[1];
+	}
+    }
+  else
+    {
+      return function_bind[2];
+    }
+
+  return function_bind[3];
+}
+
+/* Dump the callee functions insn in bb by CALL_P (insn).  */
+
+static void
+dump_direct_callee_info_to_asm (basic_block bb, gcov_type call_count)
+{
+  rtx_insn *insn;
+  FOR_BB_INSNS (bb, insn)
+    {
+      if (insn && CALL_P (insn))
+	{
+	  tree callee = get_call_fndecl (insn);
+
+	  if (callee)
+	    {
+	      fprintf (asm_out_file, "\t.string \"%x\"\n",
+		       INSN_ADDRESSES (INSN_UID (insn)));
+
+	      fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+		       ASM_FDO_CALLEE_FLAG,
+		       alias_local_functions (get_fnname_from_decl (callee)));
+
+	      fprintf (asm_out_file,
+		       "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+		       call_count);
+
+	      if (dump_file)
+		{
+		  fprintf (dump_file, "call: %x --> %s\n",
+			   INSN_ADDRESSES (INSN_UID (insn)),
+			   alias_local_functions
+			     (get_fnname_from_decl (callee)));
+		}
+	    }
+	}
+    }
+}
+
+/* Dump the edge info into asm.  */
+
+static void
+dump_edge_jump_info_to_asm (basic_block bb, gcov_type bb_count)
+{
+  edge e;
+  edge_iterator ei;
+  gcov_type edge_total_count = 0;
+
+  FOR_EACH_EDGE (e, ei, bb->succs)
+    {
+      gcov_type edge_count = get_fdo_count (e->count ());
+      edge_total_count += edge_count;
+
+      int edge_start_addr = get_bb_end_addr (e->src);
+      int edge_end_addr = get_bb_start_addr (e->dest);
+
+      if (edge_start_addr == -1 || edge_end_addr == -1)
+	{
+	  continue;
+	}
+
+      /* This is a reserved assert for the original design.  If this
+	 assert is found, use the address of the previous instruction
+	 as edge_start_addr.  */
+      gcc_assert (edge_start_addr != edge_end_addr);
+
+      if (dump_file)
+	{
+	  fprintf (dump_file, "edge: %x --> %x = (%ld)\n",
+		   edge_start_addr, edge_end_addr, edge_count);
+	}
+
+      if (edge_count > 0)
+	{
+	  fprintf (asm_out_file, "\t.string \"%x\"\n", edge_start_addr);
+	  fprintf (asm_out_file, "\t.string \"%x\"\n", edge_end_addr);
+	  fprintf (asm_out_file, "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+		   edge_count);
+	}
+    }
+
+    gcov_type call_count = MAX (edge_total_count, bb_count);
+    if (call_count > 0)
+      {
+	dump_direct_callee_info_to_asm (bb, call_count);
+      }
+}
+
+/* Dump the bb info into asm.  */
+
+static void
+dump_bb_info_to_asm (basic_block bb, gcov_type bb_count)
+{
+  int bb_start_addr = get_bb_start_addr (bb);
+  if (bb_start_addr != -1)
+    {
+      fprintf (asm_out_file, "\t.string \"%x\"\n", bb_start_addr);
+      fprintf (asm_out_file, "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+	       bb_count);
+    }
+}
+
+/* Dump the function info into asm.  */
+
+static void
+dump_function_info_to_asm (const char *fnname)
+{
+  fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+	   ASM_FDO_CALLER_FLAG, alias_local_functions (fnname));
+  fprintf (asm_out_file, "\t.string \"%s%d\"\n",
+	   ASM_FDO_CALLER_SIZE_FLAG, get_function_end_addr ());
+  fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+	   ASM_FDO_CALLER_BIND_FLAG, simple_get_function_bind ());
+
+  if (dump_file)
+    {
+      fprintf (dump_file, "\n FUNC_NAME: %s\n",
+	       alias_local_functions (fnname));
+      fprintf (dump_file, " file: %s\n",
+	       dump_base_name);
+      fprintf (dump_file, " profile_status: %s\n",
+	       get_function_profile_status ());
+      fprintf (dump_file, " size: %x\n",
+	       get_function_end_addr ());
+      fprintf (dump_file, " function_bind: %s\n",
+	       simple_get_function_bind ());
+    }
+}
+
+/* Dump function profile info form AutoFDO or PGO to asm.  */
+
+static void
+dump_fdo_info_to_asm (const char *fnname)
+{
+  basic_block bb;
+
+  dump_function_info_to_asm (fnname);
+
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      gcov_type bb_count = get_fdo_count (bb->count);
+      if (bb_count == 0)
+	{
+	  continue;
+	}
+
+      if (dump_file)
+	{
+	  fprintf (dump_file, "BB: %x --> %x = (%ld) [%s]\n",
+		   get_bb_start_addr (bb), get_bb_end_addr (bb),
+		   bb_count, get_fdo_count_quality (bb->count));
+	}
+
+      if (flag_profile_use)
+	{
+	  dump_edge_jump_info_to_asm (bb, bb_count);
+	}
+      else if (flag_auto_profile)
+	{
+	  dump_bb_info_to_asm (bb, bb_count);
+	}
+    }
+}
+
+/* When -fauto-bolt option is turned on, the .text.fdo. section
+   will be generated in the *.s file if there is feedback information
+   from PGO or AutoFDO.  This section will parserd in BOLT-plugin.  */
+
+static void
+dump_profile_to_elf_sections ()
+{
+  if (!flag_function_sections)
+    {
+      error ("-fauto-bolt should work with -ffunction-sections");
+      return;
+    }
+  if (!flag_ipa_ra)
+    {
+      error ("-fauto-bolt should work with -fipa-ra");
+      return;
+    }
+  if (flag_align_jumps)
+    {
+      error ("-fauto-bolt is not supported with -falign-jumps");
+      return;
+    }
+  if (flag_align_labels)
+    {
+      error ("-fauto-bolt is not supported with -falign-labels");
+      return;
+    }
+  if (flag_align_loops)
+    {
+      error ("-fauto-bolt is not supported with -falign-loops");
+      return;
+    }
+
+  /* Return if no feedback data.  */
+  if (!flag_profile_use && !flag_auto_profile)
+    {
+      error ("-fauto-bolt should use with -fprofile-use or -fauto-profile");
+      return;
+    }
+
+  /* Avoid empty functions.  */
+  if (TREE_CODE (cfun->decl) != FUNCTION_DECL)
+    {
+      return;
+    }
+  int flags = SECTION_DEBUG | SECTION_EXCLUDE;
+  const char *fnname = get_fnname_from_decl (current_function_decl);
+  char *profile_fnname = NULL;
+
+  asprintf (&profile_fnname,"%s%s", ASM_FDO_SECTION_PREFIX, fnname);
+  switch_to_section (get_section (profile_fnname, flags , NULL));
+  dump_fdo_info_to_asm (fnname);
+
+  if (profile_fnname)
+    {
+      free (profile_fnname);
+      profile_fnname = NULL;
+    }
+}
+
 /* Turn the RTL into assembly.  */
 static unsigned int
 rest_of_handle_final (void)
@@ -4707,6 +5101,12 @@ rest_of_handle_final (void)
     targetm.asm_out.destructor (XEXP (DECL_RTL (current_function_decl), 0),
 				decl_fini_priority_lookup
 				  (current_function_decl));
+
+  if (flag_auto_bolt)
+    {
+      dump_profile_to_elf_sections ();
+    }
+
   return 0;
 }
 
