@@ -2411,6 +2411,22 @@ fauto-bolt=
 Common Joined RejectNegative
 Specify the feedback data directory required by BOLT-plugin.  The default is the current directory.
 
+fbolt-use
+Common Report Var(flag_bolt_use)
+Do BOLT optimization after linkage with BOLT profile read from this option.  The default is data.fdata.
+
+fbolt-use=
+Common Joined RejectNegative Var
+Do BOLT optimization after linkage with BOLT profile read from this option.
+
+fbolt-target=
+Common Joined RejectNegative Var
+Specify the BOLT optimization target binary.
+
+fbolt-option=
+Common Joined RejectNegative Var
+Specify BOLT optimization options separated by commas.
+
 frerun-cse-after-loop
 Common Report Var(flag_rerun_cse_after_loop) Optimization
 Add a common subexpression elimination pass after loop optimizations.
