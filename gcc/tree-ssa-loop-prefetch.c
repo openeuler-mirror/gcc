@@ -2132,7 +2132,7 @@ get_edge_prob (edge e)
 {
   /* Limit the minimum probability value.  */
   const float MINNUM_PROB = 0.00001f;
-  float fvalue = 1;
+  float fvalue = 0;
 
   profile_probability probability = e->probability;
   if (probability.initialized_p ())
@@ -2142,6 +2142,21 @@ get_edge_prob (edge e)
 	{
 	  fvalue = MINNUM_PROB;
 	}
+    }
+  else
+    {
+      /* When the node branch probability value is not initialized, the branch
+	 probability must be set to 0 to ensure that the calculation of the
+	 basic block execution probability must be less than or equal to 100%.
+	 i.e,
+	 ...
+	 <bb 3> [local count: 20000]
+	 if (f_2 != 0)
+	   goto <bb 6>; [INV]
+	 else
+	   goto <bb 7>; [100.00%]
+	 ...  */
+      fvalue = 0;
     }
   return fvalue;
 }
