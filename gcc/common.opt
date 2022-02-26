@@ -2403,6 +2403,14 @@ freorder-functions
 Common Report Var(flag_reorder_functions) Optimization
 Reorder functions to improve code placement.
 
+fauto-bolt
+Common Report Var(flag_auto_bolt)
+Generate profile from AutoFDO or PGO and do BOLT optimization after linkage.
+
+fauto-bolt=
+Common Joined RejectNegative
+Specify the feedback data directory required by BOLT-plugin.  The default is the current directory.
+
 frerun-cse-after-loop
 Common Report Var(flag_rerun_cse_after_loop) Optimization
 Add a common subexpression elimination pass after loop optimizations.
