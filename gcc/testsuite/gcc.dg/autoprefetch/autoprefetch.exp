@@ -20,7 +20,7 @@ load_lib target-supports.exp
 # Initialize `dg'.
 dg-init
 
-gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.c]] \
+dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.c]] \
 	"" "-fprefetch-loop-arrays"
 
 # All done.
