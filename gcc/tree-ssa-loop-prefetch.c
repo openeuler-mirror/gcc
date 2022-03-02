@@ -2267,6 +2267,15 @@ traverse_prune_bb_branch (hash_map <basic_block, bb_bp> &bb_branch_prob,
 			     && bb_bp_node->false_edge_bb == NULL))
     return false;
 
+  /* Do not process the loop with a bb branch probability of an abnormal
+     value.  */
+  if (bb_bp_node->true_edge_prob + bb_bp_node->false_edge_prob > 1)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "bb branch probability is abnormal\n");
+      return false;
+    }
+
   if (current_bb == latch_bb)
     {
       max_path--;
@@ -2409,6 +2418,9 @@ estimate_num_loop_insns (struct loop *loop, eni_weights *weights)
 	  dump_loop_bb (loop);
 	  return 0;
 	}
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Calculating prefetch distance using bb branch "
+			    "weighting method\n");
     }
 
   for (unsigned i = 0; i < loop->num_nodes; i++)
