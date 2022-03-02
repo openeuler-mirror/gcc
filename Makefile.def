@@ -129,6 +129,9 @@ host_modules= { module= gnattools; };
 host_modules= { module= lto-plugin; bootstrap=true;
 		extra_configure_flags='--enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@';
 		extra_make_flags='@extra_linker_plugin_flags@'; };
+host_modules= { module= bolt-plugin; bootstrap=true;
+		extra_configure_flags='--enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@';
+		extra_make_flags='@extra_linker_plugin_flags@'; };
 host_modules= { module= libcc1; extra_configure_flags=--enable-shared; };
 host_modules= { module= gotools; };
 host_modules= { module= libctf; no_install=true; no_check=true;
@@ -327,6 +330,7 @@ dependencies = { module=configure-gcc; on=all-mpfr; };
 dependencies = { module=configure-gcc; on=all-mpc; };
 dependencies = { module=configure-gcc; on=all-isl; };
 dependencies = { module=configure-gcc; on=all-lto-plugin; };
+dependencies = { module=configure-gcc; on=all-bolt-plugin; };
 dependencies = { module=configure-gcc; on=all-binutils; };
 dependencies = { module=configure-gcc; on=all-gas; };
 dependencies = { module=configure-gcc; on=all-ld; };
@@ -351,6 +355,7 @@ dependencies = { module=all-gcc; on=all-libdecnumber; hard=true; };
 dependencies = { module=all-gcc; on=all-libiberty; };
 dependencies = { module=all-gcc; on=all-fixincludes; };
 dependencies = { module=all-gcc; on=all-lto-plugin; };
+dependencies = { module=all-gcc; on=all-bolt-plugin; };
 dependencies = { module=all-gcc; on=all-libiconv; };
 dependencies = { module=info-gcc; on=all-build-libiberty; };
 dependencies = { module=dvi-gcc; on=all-build-libiberty; };
@@ -358,8 +363,10 @@ dependencies = { module=pdf-gcc; on=all-build-libiberty; };
 dependencies = { module=html-gcc; on=all-build-libiberty; };
 dependencies = { module=install-gcc ; on=install-fixincludes; };
 dependencies = { module=install-gcc ; on=install-lto-plugin; };
+dependencies = { module=install-gcc ; on=install-bolt-plugin; };
 dependencies = { module=install-strip-gcc ; on=install-strip-fixincludes; };
 dependencies = { module=install-strip-gcc ; on=install-strip-lto-plugin; };
+dependencies = { module=install-strip-gcc ; on=install-strip-bolt-plugin; };
 
 dependencies = { module=configure-libcpp; on=configure-libiberty; hard=true; };
 dependencies = { module=configure-libcpp; on=configure-intl; };
@@ -377,6 +384,9 @@ dependencies = { module=all-gnattools; on=all-target-libstdc++-v3; };
 // generic libiberty build or the specific build for linker plugins.
 dependencies = { module=all-lto-plugin; on=all-libiberty; };
 dependencies = { module=all-lto-plugin; on=all-libiberty-linker-plugin; };
+
+dependencies = { module=all-bolt-plugin; on=all-libiberty; };
+dependencies = { module=all-bolt-plugin; on=all-libiberty-linker-plugin; };
 
 dependencies = { module=configure-libcc1; on=configure-gcc; };
 dependencies = { module=all-libcc1; on=all-gcc; };
