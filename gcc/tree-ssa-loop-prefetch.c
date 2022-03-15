@@ -2248,6 +2248,7 @@ get_bb_branch_prob (hash_map <basic_block, bb_bp> &bb_branch_prob,
 	  branch_prob.true_edge_prob = get_edge_prob (e);
 	}
     }
+  free (body);
 }
 
 /* Traverse each bb in the loop and prune fake loops.  */
@@ -2416,6 +2417,7 @@ estimate_num_loop_insns (struct loop *loop, eni_weights *weights)
       if (get_bb_prob (bb_branch_prob, loop) == false)
 	{
 	  dump_loop_bb (loop);
+	  free (body);
 	  return 0;
 	}
       if (dump_file && (dump_flags & TDF_DETAILS))
@@ -2596,6 +2598,7 @@ is_high_exec_rate_loop (struct loop *loop)
 
       if (loop_exec_rate < (float) LOOP_EXECUTION_RATE / 100.0)
 	{
+	  exit_edges.release ();
 	  return false;
 	}
     }
@@ -2606,6 +2609,7 @@ is_high_exec_rate_loop (struct loop *loop)
 	       loop_exec_rate, (float) LOOP_EXECUTION_RATE / 100.0);
       dump_loop_bb (loop);
     }
+  exit_edges.release ();
   return true;
 }
 
