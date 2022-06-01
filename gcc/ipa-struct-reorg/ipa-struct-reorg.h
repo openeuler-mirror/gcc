@@ -187,7 +187,7 @@ struct srfield
 			  tree newlast[max_split]);
   void reorder_fields (tree newfields[max_split], tree newlast[max_split],
 		       tree &field);
-  void create_new_reorder_fields (tree newtype[max_split],
+  void create_new_optimized_fields (tree newtype[max_split],
 				  tree newfields[max_split],
 				  tree newlast[max_split]);
 };

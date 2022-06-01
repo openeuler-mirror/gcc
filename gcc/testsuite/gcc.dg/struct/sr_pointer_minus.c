@@ -30,4 +30,4 @@ main ()
   return 0;
 }
 
-/* { dg-final { scan-ipa-dump "struct node has escaped: \"Type escapes via a unhandled rewrite stmt\"" "struct_reorg" } } */
+/* { dg-final { scan-ipa-dump "has escaped: \"Type escapes via a unhandled rewrite stmt\"" "struct_reorg" } } */
