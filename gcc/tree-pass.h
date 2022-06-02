@@ -436,6 +436,7 @@ extern gimple_opt_pass *make_pass_cselim (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_phiopt (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_forwprop (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_phiprop (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_array_widen_compare (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_ifcombine (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_dse (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_nrv (gcc::context *ctxt);
