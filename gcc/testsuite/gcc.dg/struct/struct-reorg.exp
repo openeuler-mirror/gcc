@@ -64,8 +64,27 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/complete_struct_relayout
 	"" "-fipa-struct-reorg=1 -fdump-ipa-all -flto-partition=one -fwhole-program"
 
 # -fipa-struct-reorg=2
-gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.c]] \
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/rf*.c]] \
  	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/wo_prof_*.c]] \
+ 	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/w_ratio_*.c]] \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/w_prof_*.c]] \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/struct_reorg*.c]] \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sr_*.c]] \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/csr_*.c]] \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/complete_struct_relayout.c]] \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-struct-reorg=3
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/dfe*.c]] \
+	"" "-fipa-struct-reorg=3 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
 # All done.
 torture-finish
 dg-finish
