@@ -142,6 +142,7 @@ public:
 
   bool create_new_type (void);
   void analyze (void);
+  bool has_dead_field (void);
   void mark_escape (escape_type, gimple *stmt);
   bool has_escaped (void)
   {
@@ -163,6 +164,12 @@ public:
   }
 };
 
+/* Bitflags used for determining if a field
+     is never accessed, read or written.  */
+const unsigned EMPTY_FIELD = 0x0u;
+const unsigned READ_FIELD = 0x01u;
+const unsigned WRITE_FIELD = 0x02u;
+
 struct srfield
 {
   unsigned HOST_WIDE_INT offset;
@@ -174,7 +181,7 @@ struct srfield
   unsigned clusternum;
 
   tree newfield[max_split];
-
+  unsigned field_access; /* FIELD_DECL -> bitflag (use for dfe).  */
   // Constructors
   srfield (tree field, srtype *base);
 

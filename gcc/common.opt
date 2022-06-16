@@ -1884,8 +1884,8 @@ Common Report Var(flag_ipa_struct_reorg) Init(0) Optimization
 Perform structure layout optimizations.
 
 fipa-struct-reorg=
-Common RejectNegative Joined UInteger Var(struct_layout_optimize_level) Init(0) IntegerRange(0, 2)
--fipa-struct-reorg=[0,1,2] adding none, struct-reorg, reorder-fields optimizations.
+Common RejectNegative Joined UInteger Var(struct_layout_optimize_level) Init(0) IntegerRange(0, 3)
+-fipa-struct-reorg=[0,1,2,3] adding none, struct-reorg, reorder-fields, dfe optimizations.
 
 fipa-extend-auto-profile
 Common Report Var(flag_ipa_extend_auto_profile)
