@@ -2647,6 +2647,9 @@ vect_analyze_group_access_1 (dr_vec_info *dr_info)
       DR_GROUP_GAP (stmt_info) = groupsize - last_accessed_element;
 
       DR_GROUP_SIZE (stmt_info) = groupsize;
+
+      DR_GROUP_SLP_TRANSPOSE (stmt_info) = false;
+
       if (dump_enabled_p ())
 	{
 	  dump_printf_loc (MSG_NOTE, vect_location,
@@ -2674,6 +2677,20 @@ vect_analyze_group_access_1 (dr_vec_info *dr_info)
 	    dump_printf_loc (MSG_NOTE, vect_location,
 			     "\t<gap of %d elements>\n",
 			     DR_GROUP_GAP (stmt_info));
+	}
+
+      /* SLP: create an SLP data structure for every interleaving group of
+	 loads for further analysis in vect_analyse_slp.  */
+      if (DR_IS_READ (dr) && !slp_impossible)
+	{
+	  if (loop_vinfo)
+	    {
+	      LOOP_VINFO_GROUPED_LOADS (loop_vinfo).safe_push (stmt_info);
+	    }
+	  if (bb_vinfo)
+	    {
+	      BB_VINFO_GROUPED_LOADS (bb_vinfo).safe_push (stmt_info);
+	    }
 	}
 
       /* SLP: create an SLP data structure for every interleaving group of
@@ -5410,6 +5427,225 @@ vect_permute_store_chain (vec<tree> dr_chain,
 	    memcpy (dr_chain.address (), result_chain->address (),
 		    length * sizeof (tree));
 	  }
+    }
+}
+
+/* Encoding the PERM_MASK_FIRST.  */
+
+static void
+vect_indices_encoding_first (tree vectype, unsigned int array_num,
+			     tree &perm_mask_high_first,
+			     tree &perm_mask_low_first)
+{
+  unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
+  vec_perm_builder sel (nelt, nelt, 1);
+  sel.quick_grow (nelt);
+  unsigned int group_num = nelt / array_num;
+  unsigned int index = 0;
+  unsigned int array = 0;
+  unsigned int group = 0;
+
+  /* The encoding has 1 pattern in the fisrt stage.  */
+  for (array = 0; array < array_num / 2; array++)
+    {
+      for (group = 0; group < group_num * 2; group++)
+	{
+	  sel[index++] = array + array_num * group;
+	}
+    }
+  vec_perm_indices indices (sel, 2, nelt);
+  perm_mask_high_first = vect_gen_perm_mask_checked (vectype, indices);
+
+  index = 0;
+  for (array = array_num / 2; array < array_num; array++)
+    {
+      for (group = 0; group < group_num * 2; group++)
+	{
+	  sel[index++] = array + array_num * group;
+	}
+    }
+  indices.new_vector (sel, 2, nelt);
+  perm_mask_low_first = vect_gen_perm_mask_checked (vectype, indices);
+}
+
+/* Encoding the PERM_MASK.  */
+
+static void
+vect_indices_encoding (tree vectype, unsigned int array_num,
+		       tree &perm_mask_high, tree &perm_mask_low)
+{
+  unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
+  vec_perm_builder sel (nelt, nelt, 1);
+  sel.quick_grow (nelt);
+  unsigned int group_num = nelt / array_num;
+  unsigned int index = 0;
+  unsigned int array = 0;
+  unsigned int group = 0;
+
+  /* The encoding has 2 patterns in the folllowing stages.  */
+  for (array = 0; array < array_num / 2; array++)
+    {
+      for (group = 0; group < group_num; group++)
+	{
+	  sel[index++] = group + group_num * array;
+	}
+      for (group = 0; group < group_num; group++)
+	{
+	  sel[index++] = nelt + group + group_num * array;
+	}
+    }
+  vec_perm_indices indices (sel, 2, nelt);
+  perm_mask_high = vect_gen_perm_mask_checked (vectype, indices);
+
+  index = 0;
+  for (array = array_num / 2; array < array_num; array++)
+    {
+      for (group = 0; group < group_num; group++)
+	{
+	  sel[index++] = group + group_num * array;
+	}
+      for (group = 0; group < group_num; group++)
+	{
+	  sel[index++] = nelt + group + group_num * array;
+	}
+    }
+  indices.new_vector (sel, 2, nelt);
+  perm_mask_low = vect_gen_perm_mask_checked (vectype, indices);
+}
+
+/* Function vect_transpose_store_chain.
+
+   Given a chain of interleaved stores in DR_CHAIN of LENGTH and ARRAY_NUM that
+   must be a power of 2.  Generate interleave_high/low stmts to reorder
+   the data correctly for the stores.  Return the final references for stores
+   in RESULT_CHAIN.  This function is similar to vect_permute_store_chain (),
+   we interleave the contents of the vectors in their order.
+
+   E.g., LENGTH is 4, the scalar type is short (i.e., VF is 8) and ARRAY_NUM
+   is 4.  That is, the input is 4 vectors each containing 8 elements.
+   And 2 (VF / ARRAY_NUM) of 8 elements come from the same array.  we interleave
+   the contents of the four vectors in their order.  We assign a number to each
+   element, the input sequence is:
+
+   1st vec:   0  1  2  3  4  5  6  7
+   2nd vec:   8  9 10 11 12 13 14 15
+   3rd vec:  16 17 18 19 20 21 22 23
+   4th vec:  24 25 26 27 28 29 30 31
+
+   The output sequence should be:
+
+   1st vec:   0  4  8 12 16 20 24 28
+   2nd vec:   1  5  9 13 17 21 25 29
+   3rd vec:   2  6 10 14 18 22 26 30
+   4th vec:   3  7 11 15 19 23 27 31
+
+   In our example,
+   We get 2 (VF / ARRAY_NUM) elements together in every vector.
+
+   I1:   0  4  1  5  2  6  3  7
+   I2:   8 12  9 13 10 14 11 15
+   I3:  16 20 17 21 18 22 19 23
+   I4:  24 28 25 29 26 30 27 31
+
+   Then, we use interleave_high/low instructions to create such output.
+   Every 2 (VF / ARRAY_NUM) elements are regarded as a whole.  The permutation
+   is done in log LENGTH stages.
+
+   I1: interleave_high (1st vec, 3rd vec)
+   I2: interleave_low (1st vec, 3rd vec)
+   I3: interleave_high (2nd vec, 4th vec)
+   I4: interleave_low (2nd vec, 4th vec)
+
+   The first stage of the sequence should be:
+
+   I1:   0  4 16 20  1  5 17 21
+   I2:   2  6 18 22  3  7 19 23
+   I3:   8 12 24 28  9 13 25 29
+   I4:  10 14 26 30 11 15 27 31
+
+   The following stage sequence should be, i.e. the final result is:
+
+   I1:   0  4  8 12 16 20 24 28
+   I2:   1  5  9 13 17 21 25 29
+   I3:   2  6 10 14 18 22 26 30
+   I4:   3  7 11 15 19 23 27 31.  */
+
+void
+vect_transpose_store_chain (vec<tree> dr_chain, unsigned int length,
+			    unsigned int array_num, stmt_vec_info stmt_info,
+			    gimple_stmt_iterator *gsi, vec<tree> *result_chain)
+{
+  gimple *perm_stmt = NULL;
+  tree vectype = STMT_VINFO_VECTYPE (stmt_info);
+  tree perm_mask_low_first = NULL;
+  tree perm_mask_high_first = NULL;
+  tree perm_mask_low = NULL;
+  tree perm_mask_high = NULL;
+  unsigned int log_length = exact_log2 (length);
+
+  /* Only power of 2 is supported.  */
+  gcc_assert (pow2p_hwi (length));
+
+  /* The encoding has 2 types, one for the grouped pattern in the fisrt stage,
+     another for the interleaved patterns in the following stages.  */
+  gcc_assert (array_num != 0);
+
+  /* Create grouped stmt (in the first stage):
+	group = nelt / array_num;
+	high_first = VEC_PERM_EXPR <vect1, vect2,
+		{0, array_num, 2*array_num, ..., (2*group-1)*array_num,
+		1, 1+array_num, 1+2*array_num, ..., 1+(2*group-1)*array_num,
+		...,
+		array_num/2-1, (array_num/2-1)+array_num, ...,
+		(array_num/2-1)+(2*group-1)*array_num}>
+	low_first = VEC_PERM_EXPR <vect1, vect2,
+		{array_num/2, array_num/2+array_num, array_num/2+2*array_num,
+		..., array_num/2+(2*group-1)*array_num,
+		array_num/2+1, array_num/2+1+array_num,
+		..., array_num/2+1+(2*group-1)*array_num,
+		...,
+		array_num-1, array_num-1+array_num,
+		..., array_num-1+(2*group-1)*array_num}>  */
+  vect_indices_encoding_first (vectype, array_num, perm_mask_high_first,
+			       perm_mask_low_first);
+
+  /* Create interleaving stmt (in the following stages):
+	high = VEC_PERM_EXPR <vect1, vect2, {0, 1, ..., group-1,
+		nelt, nelt+1, ..., nelt+group-1,
+		group, group+1, ..., 2*group-1,
+		nelt+group, nelt+group+1, ..., nelt+2*group-1,
+		...}>
+	low = VEC_PERM_EXPR <vect1, vect2,
+		{nelt/2, nelt/2+1, ..., nelt/2+group-1,
+		nelt*3/2, nelt*3/2+1, ..., nelt*3/2+group-1,
+		nelt/2+group, nelt/2+group+1, ..., nelt/2+2*group-1,
+		nelt*3/2+group, nelt*3/2+group+1, ..., nelt*3/2+2*group-1,
+		...}>  */
+  vect_indices_encoding (vectype, array_num, perm_mask_high, perm_mask_low);
+
+  for (unsigned int perm_time = 0; perm_time < log_length; perm_time++)
+    {
+      for (unsigned int index = 0; index < length / 2; index++)
+	{
+	  tree vect1 = dr_chain[index];
+	  tree vect2 = dr_chain[index + length / 2];
+
+	  tree high = make_temp_ssa_name (vectype, NULL, "vect_inter_high");
+	  perm_stmt = gimple_build_assign (high, VEC_PERM_EXPR, vect1, vect2,
+					   perm_time == 0 ? perm_mask_high_first
+							  : perm_mask_high);
+	  vect_finish_stmt_generation (stmt_info, perm_stmt, gsi);
+	  (*result_chain)[2 * index] = high;
+
+	  tree low = make_temp_ssa_name (vectype, NULL, "vect_inter_low");
+	  perm_stmt = gimple_build_assign (low, VEC_PERM_EXPR, vect1, vect2,
+					   perm_time == 0 ? perm_mask_low_first
+							  : perm_mask_low);
+	  vect_finish_stmt_generation (stmt_info, perm_stmt, gsi);
+	  (*result_chain)[2 * index+1] = low;
+	}
+      memcpy (dr_chain.address (), result_chain->address (),
+	      length * sizeof (tree));
     }
 }
 

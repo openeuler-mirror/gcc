@@ -297,6 +297,21 @@ public:
   vec<ddr_p> ddrs;
 };
 
+/* Information about offset in vectorizable_load.  */
+struct offset_info {
+  tree offset;
+  tree byte_offset;
+  tree dataref_offset;
+};
+
+/* Information about vectype in vectorizable_load.  */
+struct vectype_info {
+  tree vectype;
+  tree ltype;
+  tree lvectype;
+  tree ref_type;
+};
+
 /* Vectorizer state common between loop and basic-block vectorization.  */
 class vec_info {
 public:
@@ -334,6 +349,14 @@ public:
   /* All interleaving chains of stores, represented by the first
      stmt in the chain.  */
   auto_vec<stmt_vec_info> grouped_stores;
+
+  /* All interleaving chains of loads, represented by the first
+     stmt in the chain.  */
+  auto_vec<stmt_vec_info> grouped_loads;
+
+  /* All interleaving chains of stores (before transposed), represented by all
+     stmt in the chain.  */
+  auto_vec<vec<stmt_vec_info> > scalar_stores;
 
   /* Cost data used by the target cost model.  */
   void *target_cost_data;
@@ -702,6 +725,8 @@ public:
 #define LOOP_VINFO_CHECK_NONZERO(L)        (L)->check_nonzero
 #define LOOP_VINFO_LOWER_BOUNDS(L)         (L)->lower_bounds
 #define LOOP_VINFO_GROUPED_STORES(L)       (L)->grouped_stores
+#define LOOP_VINFO_GROUPED_LOADS(L)	    (L)->grouped_loads
+#define LOOP_VINFO_SCALAR_STORES(L)	    (L)->scalar_stores
 #define LOOP_VINFO_SLP_INSTANCES(L)        (L)->slp_instances
 #define LOOP_VINFO_SLP_UNROLLING_FACTOR(L) (L)->slp_unrolling_factor
 #define LOOP_VINFO_REDUCTIONS(L)           (L)->reductions
@@ -764,6 +789,25 @@ public:
   basic_block bb;
   gimple_stmt_iterator region_begin;
   gimple_stmt_iterator region_end;
+
+  /* True, if bb_vinfo can goto vect_analyze_slp.  */
+  bool before_slp;
+
+  /* True, if bb_vinfo is a transposed version.  */
+  bool transposed;
+
+  /* The number of transposed groups.  */
+  int transposed_group;
+
+  /* The cost of the scalar iterations.  */
+  int scalar_cost;
+
+  /* The cost of the vector prologue and epilogue, including peeled
+     iterations and set-up code.  */
+  int vec_outside_cost;
+
+  /* The cost of the vector loop body.  */
+  int vec_inside_cost;
 } *bb_vec_info;
 
 #define BB_VINFO_BB(B)               (B)->bb
@@ -772,6 +816,14 @@ public:
 #define BB_VINFO_DATAREFS(B)         (B)->shared->datarefs
 #define BB_VINFO_DDRS(B)             (B)->shared->ddrs
 #define BB_VINFO_TARGET_COST_DATA(B) (B)->target_cost_data
+#define BB_VINFO_GROUPED_LOADS(B)    (B)->grouped_loads
+#define BB_VINFO_SCALAR_STORES(B)    (B)->scalar_stores
+#define BB_VINFO_VEC_OUTSIDE_COST(B) (B)->vec_outside_cost
+#define BB_VINFO_VEC_INSIDE_COST(B)  (B)->vec_inside_cost
+#define BB_VINFO_SCALAR_COST(B)      (B)->scalar_cost
+#define BB_VINFO_SLP_TRANSPOSED(B)   (B)->transposed
+#define BB_VINFO_BEFORE_SLP(B)       (B)->before_slp
+#define BB_VINFO_TRANS_GROUPS(B)     (B)->transposed_group
 
 static inline bb_vec_info
 vec_info_for_bb (basic_block bb)
@@ -1012,12 +1064,26 @@ public:
   stmt_vec_info next_element;
   /* The size of the group.  */
   unsigned int size;
+
+  /* The size of the group before transposed.  */
+  unsigned int size_before_transpose;
+
+  /* If true, the stmt_info is slp transposed.  */
+  bool slp_transpose;
+
+  /* Mark the group store number for rebuild interleaving chain
+     during transpose phase.  Value -1 represents unable to transpose.  */
+  int group_number;
+
   /* For stores, number of stores from this group seen. We vectorize the last
      one.  */
   unsigned int store_count;
   /* For loads only, the gap from the previous load. For consecutive loads, GAP
      is 1.  */
   unsigned int gap;
+
+  /* The gap before transposed.  */
+  unsigned int gap_before_transpose;
 
   /* The minimum negative dependence distance this stmt participates in
      or zero if none.  */
@@ -1217,6 +1283,12 @@ STMT_VINFO_BB_VINFO (stmt_vec_info stmt_vinfo)
 #define STMT_VINFO_REDUC_VECTYPE_IN(S)  (S)->reduc_vectype_in
 #define STMT_VINFO_SLP_VECT_ONLY(S)     (S)->slp_vect_only_p
 
+#define DR_GROUP_SLP_TRANSPOSE(S) \
+  (gcc_checking_assert ((S)->dr_aux.dr), (S)->slp_transpose)
+#define DR_GROUP_SIZE_TRANS(S) \
+  (gcc_checking_assert ((S)->dr_aux.dr), (S)->size_before_transpose)
+#define DR_GROUP_NUMBER(S) \
+  (gcc_checking_assert ((S)->dr_aux.dr), (S)->group_number)
 #define DR_GROUP_FIRST_ELEMENT(S) \
   (gcc_checking_assert ((S)->dr_aux.dr), (S)->first_element)
 #define DR_GROUP_NEXT_ELEMENT(S) \
@@ -1227,6 +1299,8 @@ STMT_VINFO_BB_VINFO (stmt_vec_info stmt_vinfo)
   (gcc_checking_assert ((S)->dr_aux.dr), (S)->store_count)
 #define DR_GROUP_GAP(S) \
   (gcc_checking_assert ((S)->dr_aux.dr), (S)->gap)
+#define DR_GROUP_GAP_TRANS(S) \
+  (gcc_checking_assert ((S)->dr_aux.dr), (S)->gap_before_transpose)
 
 #define REDUC_GROUP_FIRST_ELEMENT(S) \
   (gcc_checking_assert (!(S)->dr_aux.dr), (S)->first_element)
@@ -1624,6 +1698,17 @@ vect_get_scalar_dr_size (dr_vec_info *dr_info)
   return tree_to_uhwi (TYPE_SIZE_UNIT (TREE_TYPE (DR_REF (dr_info->dr))));
 }
 
+/* Compare two unsigned int A and B.
+   Sorting them in ascending order.  */
+
+static inline int
+cmp_for_group_num (const void *a_, const void *b_)
+{
+  unsigned int a = *(unsigned int *)const_cast<void *>(a_);
+  unsigned int b = *(unsigned int *)const_cast<void *>(b_);
+  return a < b ? -1 : 1;
+}
+
 /* Return true if LOOP_VINFO requires a runtime check for whether the
    vector loop is profitable.  */
 
@@ -1787,6 +1872,9 @@ extern bool vect_grouped_load_supported (tree, bool, unsigned HOST_WIDE_INT);
 extern bool vect_load_lanes_supported (tree, unsigned HOST_WIDE_INT, bool);
 extern void vect_permute_store_chain (vec<tree> ,unsigned int, stmt_vec_info,
                                     gimple_stmt_iterator *, vec<tree> *);
+extern void vect_transpose_store_chain (vec<tree>, unsigned int, unsigned int,
+					stmt_vec_info, gimple_stmt_iterator *,
+					vec<tree> *);
 extern tree vect_setup_realignment (stmt_vec_info, gimple_stmt_iterator *,
 				    tree *, enum dr_alignment_support, tree,
 	                            class loop **);
@@ -1849,6 +1937,7 @@ extern void vect_free_slp_instance (slp_instance, bool);
 extern bool vect_transform_slp_perm_load (slp_tree, vec<tree> ,
 					  gimple_stmt_iterator *, poly_uint64,
 					  slp_instance, bool, unsigned *);
+extern void vect_transform_back_slp_grouped_stores (bb_vec_info, stmt_vec_info);
 extern bool vect_slp_analyze_operations (vec_info *);
 extern void vect_schedule_slp (vec_info *);
 extern opt_result vect_analyze_slp (vec_info *, unsigned);

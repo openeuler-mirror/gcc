@@ -2414,11 +2414,13 @@ vect_analyze_slp_instance (vec_info *vinfo,
 
   /* For basic block SLP, try to break the group up into multiples of the
      vector size.  */
+  bb_vec_info bb_vinfo = dyn_cast <bb_vec_info> (vinfo);
   unsigned HOST_WIDE_INT const_nunits;
   if (is_a <bb_vec_info> (vinfo)
       && STMT_VINFO_GROUPED_ACCESS (stmt_info)
       && DR_GROUP_FIRST_ELEMENT (stmt_info)
-      && nunits.is_constant (&const_nunits))
+      && nunits.is_constant (&const_nunits)
+      && !bb_vinfo->transposed)
     {
       /* We consider breaking the group only on VF boundaries from the existing
 	 start.  */
@@ -2455,6 +2457,898 @@ vect_analyze_slp_instance (vec_info *vinfo,
   return false;
 }
 
+static inline bool
+is_const_assign (stmt_vec_info store_elem)
+{
+  if (store_elem == NULL)
+    {
+      gcc_unreachable ();
+    }
+  gimple *stmt = store_elem->stmt;
+  gimple_rhs_class rhs_class = gimple_assign_rhs_class (stmt);
+  return rhs_class == GIMPLE_SINGLE_RHS
+	 && TREE_CONSTANT (gimple_assign_rhs1 (store_elem->stmt));
+}
+
+/* Push inits to INNERMOST_INITS and check const assign.  */
+
+static bool
+record_innermost (vec<tree> &innermost_inits,
+		  vec<tree> &innermost_offsets,
+		  stmt_vec_info stmt_vinfo)
+{
+  if (!stmt_vinfo)
+    {
+      return false;
+    }
+  stmt_vec_info next_info = stmt_vinfo;
+  while (next_info)
+    {
+      /* No need to vectorize constant assign in a transposed version.  */
+      if (is_const_assign (next_info))
+	{
+	  if (dump_enabled_p ())
+	    {
+	      dump_printf_loc (MSG_NOTE, vect_location,
+			      "no need to vectorize, store is const assign: %G",
+			      next_info->stmt);
+	    }
+	  return false;
+	}
+      innermost_inits.safe_push (STMT_VINFO_DR_INIT (next_info));
+      innermost_offsets.safe_push (STMT_VINFO_DR_OFFSET (next_info));
+      next_info = DR_GROUP_NEXT_ELEMENT (next_info);
+    }
+  return true;
+}
+
+/* Compare inits to INNERMOST_INITS, return FALSE if inits do not match
+   the first grouped_store.  And check const assign meanwhile.  */
+
+static bool
+compare_innermost (const vec<tree> &innermost_inits,
+		   const vec<tree> &innermost_offsets,
+		   stmt_vec_info stmt_vinfo)
+{
+  if (!stmt_vinfo || innermost_inits.length () != stmt_vinfo->size)
+    {
+      return false;
+    }
+  stmt_vec_info next_info = stmt_vinfo;
+  unsigned int i = 0;
+  while (next_info)
+    {
+      if (is_const_assign (next_info))
+	{
+	  if (dump_enabled_p ())
+	    {
+	      dump_printf_loc (MSG_NOTE, vect_location,
+			       "no need to vectorize, store is const "
+			       "assign: %G", next_info->stmt);
+	    }
+	  return false;
+	}
+      if (innermost_inits[i] != STMT_VINFO_DR_INIT (next_info)
+	  || innermost_offsets[i] != STMT_VINFO_DR_OFFSET (next_info))
+	{
+	  return false;
+	}
+      next_info = DR_GROUP_NEXT_ELEMENT (next_info);
+      i++;
+    }
+  return true;
+}
+
+/* Check if grouped stores are of same type.
+   input: t1/t2 = TREE_TYPE (gimple_assign_lhs (first_element->stmt))
+   output: 0 if same, 1 or -1 else.  */
+
+static int
+tree_type_cmp (const tree t1, const tree t2)
+{
+  gcc_checking_assert (t1 != NULL && t2 != NULL);
+  if (t1 != t2)
+    {
+      if (TREE_CODE (t1) != TREE_CODE (t2))
+	{
+	  return TREE_CODE (t1) > TREE_CODE (t2) ? 1 : -1;
+	}
+      if (TYPE_UNSIGNED (t1) != TYPE_UNSIGNED (t2))
+	{
+	  return TYPE_UNSIGNED (t1) > TYPE_UNSIGNED (t2) ? 1 : -1;
+	}
+      if (TYPE_PRECISION (t1) != TYPE_PRECISION (t2))
+	{
+	  return TYPE_PRECISION (t1) > TYPE_PRECISION (t2) ? 1 : -1;
+	}
+    }
+  return 0;
+}
+
+/* Check it if 2 grouped stores are of same type that
+   we can analyze them in a transpose group.  */
+static int
+check_same_store_type (stmt_vec_info grp1, stmt_vec_info grp2)
+{
+  if (grp1 == grp2)
+    {
+      return 0;
+    }
+  if (grp1->size != grp2->size)
+    {
+      return grp1->size > grp2->size ? 1 : -1;
+    }
+  tree lhs1 = gimple_assign_lhs (grp1->stmt);
+  tree lhs2 = gimple_assign_lhs (grp2->stmt);
+  if (TREE_CODE (lhs1) != TREE_CODE (lhs2))
+    {
+      return TREE_CODE (lhs1) > TREE_CODE (lhs2) ? 1 : -1;
+    }
+  tree grp_type1 = TREE_TYPE (gimple_assign_lhs (grp1->stmt));
+  tree grp_type2 = TREE_TYPE (gimple_assign_lhs (grp2->stmt));
+  int cmp = tree_type_cmp (grp_type1, grp_type2);
+  return cmp;
+}
+
+/* Sort grouped stores according to group_size and store_type.
+   output: 0 if same, 1 if grp1 > grp2, -1 otherwise.  */
+
+static int
+grouped_store_cmp (const void *grp1_, const void *grp2_)
+{
+  stmt_vec_info grp1 = *(stmt_vec_info *)const_cast<void *>(grp1_);
+  stmt_vec_info grp2 = *(stmt_vec_info *)const_cast<void *>(grp2_);
+  return check_same_store_type (grp1, grp2);
+}
+
+/* Transposing is based on permutation in registers.  Permutation requires
+   vector length being power of 2 and satisfying the vector mode.  */
+
+static inline bool
+check_filling_reg (stmt_vec_info current_element)
+{
+  if (current_element->size == 0)
+    {
+      return false;
+    }
+  /* If the gimple STMT was already vectorized in vect pass, it's unable to
+     conduct transpose analysis, skip it.  */
+  bool lhs_vectorized
+	= TREE_CODE (TREE_TYPE (gimple_get_lhs (current_element->stmt)))
+	  == VECTOR_TYPE;
+  bool rhs_vectorized
+	= TREE_CODE (TREE_TYPE (gimple_assign_rhs1 (current_element->stmt)))
+	  == VECTOR_TYPE;
+  if (lhs_vectorized || rhs_vectorized)
+    {
+      return false;
+    }
+  unsigned int store_precision
+    = TYPE_PRECISION (TREE_TYPE (gimple_get_lhs (current_element->stmt)));
+  auto_vector_modes vector_modes;
+  targetm.vectorize.autovectorize_vector_modes (&vector_modes, false);
+  unsigned min_mode_size = -1u;
+  for (unsigned i = 0; i < vector_modes.length (); i++)
+    {
+      unsigned mode_bit_size = (GET_MODE_BITSIZE (vector_modes[i])).coeffs[0];
+      min_mode_size = mode_bit_size < min_mode_size
+			? mode_bit_size : min_mode_size;
+    }
+  return store_precision != 0
+	 && pow2p_hwi (current_element->size)
+	 && (current_element->size * store_precision % min_mode_size == 0);
+}
+
+/* Check if previous groups are suitable to transpose, if not, set their
+   group number to -1, reduce grp_num and clear current_groups.
+   Otherwise, just clear current_groups.  */
+
+static void
+check_and_clear_groups (vec<stmt_vec_info> current_groups,
+			unsigned int &grp_num)
+{
+  stmt_vec_info first_element;
+  if (current_groups.length () == 1
+      || (current_groups.length () != 0
+	  && !pow2p_hwi (current_groups.length ())))
+    {
+      while (current_groups.length () != 0)
+	{
+	  first_element = current_groups.pop ();
+	  first_element->group_number = -1;
+	}
+      grp_num--;
+    }
+  else
+    {
+      while (current_groups.length ())
+	{
+	  current_groups.pop ();
+	}
+    }
+}
+
+
+/* Make sure that transpose slp vectorization is conducted only if grouped
+   stores are one dimension array ref.  */
+
+static bool
+is_store_one_dim_array (gimple *stmt)
+{
+  tree op = gimple_get_lhs (stmt);
+  if (TREE_CODE (op) != ARRAY_REF)
+    return false;
+  return TREE_OPERAND_LENGTH (op) > 0
+	 && TREE_OPERAND_LENGTH (TREE_OPERAND (op, 0)) == 0;
+}
+
+/* Set grouped_stores with similar MEM_REF to the same group and mark their
+   grp_num.  Groups with same grp_num consist the minimum unit to analyze
+   transpose.  Return num of such units.  */
+
+static unsigned
+vect_prepare_transpose (bb_vec_info bb_vinfo)
+{
+  stmt_vec_info current_element = NULL;
+  stmt_vec_info first_element = NULL;
+  unsigned int i = 0;
+  unsigned int grp_num = 0;
+  /* Use arrays to record MEM_REF data in different GROUPED_STORES.  */
+  auto_vec<tree> innermost_inits;
+  auto_vec<tree> innermost_offsets;
+
+  /* A set of stmt_vec_info with same store type.  Analyze them if their size
+     is suitable to transpose.  */
+  auto_vec<stmt_vec_info> current_groups;
+
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_stores, i, current_element)
+    {
+      /* Compare current grouped_store to the first one if first_element exists,
+	 push current_element to current_groups if they are similar on innermost
+	 behavior of MEM_REF.  */
+      if (first_element != NULL
+	  && !check_same_store_type (first_element, current_element)
+	  && compare_innermost (innermost_inits, innermost_offsets,
+				current_element))
+	{
+	  current_groups.safe_push (current_element);
+	  current_element->group_number = grp_num;
+	  /* If current_element is the last element in grouped_stores, continue
+	     will exit the loop and leave the last group unanalyzed.  */
+	  if (i == bb_vinfo->grouped_stores.length () - 1)
+	    {
+	      check_and_clear_groups (current_groups, grp_num);
+	    }
+	  continue;
+	}
+      check_and_clear_groups (current_groups, grp_num);
+      innermost_inits.release ();
+      innermost_offsets.release ();
+      /* Beginning of a new group to analyze whether they are able to consist
+	 a unit to conduct transpose analysis.  */
+      first_element = NULL;
+      if (is_store_one_dim_array (current_element->stmt)
+	  && check_filling_reg (current_element)
+	  && record_innermost (innermost_inits, innermost_offsets,
+			       current_element))
+	{
+	  first_element = current_element;
+	  current_groups.safe_push (current_element);
+	  current_element->group_number = ++grp_num;
+	  if (i == bb_vinfo->grouped_stores.length () - 1)
+	    {
+	      check_and_clear_groups (current_groups, grp_num);
+	    }
+	  continue;
+	}
+      current_element->group_number = -1;
+    }
+  return grp_num;
+}
+
+/* Return a flag to transpose grouped stores before building slp tree.
+   Add bool may_transpose in class vec_info.  */
+
+static bool
+vect_may_transpose (bb_vec_info bb_vinfo)
+{
+  if (targetm.vectorize.vec_perm_const == NULL)
+    {
+      return false;
+    }
+  if (bb_vinfo->grouped_stores.length () < 2)
+    {
+      return false;
+    }
+  DUMP_VECT_SCOPE ("analyze if grouped stores may transpose to slp");
+  /* Sort grouped_stores according to size and type for function
+     vect_prepare_transpose ().  */
+  bb_vinfo->grouped_stores.qsort (grouped_store_cmp);
+
+  int groups = vect_prepare_transpose (bb_vinfo);
+  BB_VINFO_TRANS_GROUPS (bb_vinfo) = groups;
+  if (dump_enabled_p ())
+      dump_printf_loc (MSG_NOTE, vect_location,
+		       "%d groups to analyze transposed slp.\n", groups);
+  return groups != 0;
+}
+
+/* Get the base address of STMT_INFO.  */
+
+static tree
+get_op_base_address (stmt_vec_info stmt_info)
+{
+  struct data_reference *dr = STMT_VINFO_DATA_REF (stmt_info);
+  tree op = DR_BASE_ADDRESS (dr);
+  while (TREE_OPERAND_LENGTH (op) > 0)
+    {
+      op = TREE_OPERAND (op, 0);
+    }
+  return op;
+}
+
+/* Compare the UID of the two stmt_info STMTINFO_A and STMTINFO_B.
+   Sorting them in ascending order.  */
+
+static int
+dr_group_cmp (const void *stmtinfo_a_, const void *stmtinfo_b_)
+{
+  stmt_vec_info stmtinfo_a
+	= *(stmt_vec_info *) const_cast<void *> (stmtinfo_a_);
+  stmt_vec_info stmtinfo_b
+	= *(stmt_vec_info *) const_cast<void *> (stmtinfo_b_);
+
+  /* Stabilize sort.  */
+  if (stmtinfo_a == stmtinfo_b)
+    {
+      return 0;
+    }
+  return gimple_uid (stmtinfo_a->stmt) < gimple_uid (stmtinfo_b->stmt) ? -1 : 1;
+}
+
+/* Find the first elements of the grouped loads which are required to merge.  */
+
+static void
+vect_slp_grouped_load_find (bb_vec_info bb_vinfo, vec<bool> &visited,
+			    vec<stmt_vec_info> &res)
+{
+  unsigned int i = 0;
+  stmt_vec_info merge_first_element = NULL;
+  stmt_vec_info first_element = NULL;
+  tree opa = NULL;
+  unsigned int grp_size_a = 0;
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_loads, i, first_element)
+    {
+      if (visited[i])
+	{
+	  continue;
+	}
+      if (!STMT_VINFO_GROUPED_ACCESS (first_element)
+	  || !pow2p_hwi (DR_GROUP_SIZE (first_element)))
+	{
+	  /* Non-conforming grouped load should be grouped separately.  */
+	  if (merge_first_element == NULL)
+	    {
+	      visited[i] = true;
+	      res.safe_push (first_element);
+	      return;
+	    }
+	}
+      if (merge_first_element == NULL)
+	{
+	  merge_first_element = first_element;
+	  opa = get_op_base_address (first_element);
+	  grp_size_a = DR_GROUP_SIZE (first_element);
+	  res.safe_push (first_element);
+	  visited[i] = true;
+	  continue;
+	}
+
+      /* If the two first elements are of the same base address and group size,
+	 these two grouped loads need to be merged.  */
+      tree opb = get_op_base_address (first_element);
+      unsigned int grp_size_b = DR_GROUP_SIZE (first_element);
+      if (opa == opb && grp_size_a == grp_size_b)
+	{
+	  res.safe_push (first_element);
+	  visited[i] = true;
+	}
+    }
+}
+
+/* Merge the grouped loads that are found from
+   vect_slp_grouped_load_find ().  */
+
+static stmt_vec_info
+vect_slp_grouped_load_merge (vec<stmt_vec_info> res)
+{
+  stmt_vec_info stmt_info = res[0];
+  if (res.length () == 1)
+    {
+      return stmt_info;
+    }
+  unsigned int i = 0;
+  unsigned int size = DR_GROUP_SIZE (res[0]);
+  unsigned int new_group_size = size * res.length ();
+  stmt_vec_info first_element = NULL;
+  stmt_vec_info merge_first_element = NULL;
+  stmt_vec_info last_element = NULL;
+  FOR_EACH_VEC_ELT (res, i, first_element)
+    {
+      if (merge_first_element == NULL)
+	{
+	  merge_first_element = first_element;
+	  last_element = merge_first_element;
+	  size = DR_GROUP_SIZE (merge_first_element);
+	}
+
+      if (last_element != first_element
+	  && !DR_GROUP_NEXT_ELEMENT (last_element))
+	{
+	  DR_GROUP_NEXT_ELEMENT (last_element) = first_element;
+	  /* Store the gap from the previous member of the group.  If there is
+	     no gap in the access, DR_GROUP_GAP is always 1.  */
+	  DR_GROUP_GAP_TRANS (first_element) = DR_GROUP_GAP (first_element);
+	  DR_GROUP_GAP (first_element) = 1;
+	}
+      for (stmt_info = first_element; stmt_info;
+	   stmt_info = DR_GROUP_NEXT_ELEMENT (stmt_info))
+	{
+	  DR_GROUP_FIRST_ELEMENT (stmt_info) = merge_first_element;
+	  DR_GROUP_SIZE_TRANS (stmt_info) = DR_GROUP_SIZE (stmt_info);
+	  DR_GROUP_SIZE (stmt_info) = new_group_size;
+	  last_element = stmt_info;
+	}
+    }
+  DR_GROUP_SIZE (merge_first_element) = new_group_size;
+  DR_GROUP_SLP_TRANSPOSE (merge_first_element) = true;
+  DR_GROUP_NEXT_ELEMENT (last_element) = NULL;
+  return merge_first_element;
+}
+
+/* Merge the grouped loads which have the same base address and group size.
+   For example, for grouped loads (opa_1, opa_2, opb_1, opb_2):
+     opa_1: a0->a1->a2->a3
+     opa_2: a8->a9->a10->a11
+     opb_1: b0->b1
+     opb_2: b16->b17
+   we can probably get two merged grouped loads:
+     opa: a0->a1->a2->a3->a8->a9->a10->a11
+     opb: b0->b1->b16->b17.  */
+
+static bool
+vect_merge_slp_grouped_loads (bb_vec_info bb_vinfo)
+{
+  if (bb_vinfo->grouped_loads.length () <= 0)
+    {
+      if (dump_enabled_p ())
+	{
+	  dump_printf_loc (MSG_NOTE, vect_location,
+			   "The number of grouped loads is 0.\n");
+	}
+      return false;
+    }
+  bb_vinfo->grouped_loads.qsort (dr_group_cmp);
+  auto_vec<bool> visited (bb_vinfo->grouped_loads.length ());
+  auto_vec<stmt_vec_info> grouped_loads_merge;
+  for (unsigned int i = 0; i < bb_vinfo->grouped_loads.length (); i++)
+    {
+      visited.safe_push (false);
+    }
+  while (1)
+    {
+      /* Find grouped loads which are required to merge.  */
+      auto_vec<stmt_vec_info> res;
+      vect_slp_grouped_load_find (bb_vinfo, visited, res);
+      if (res.is_empty ())
+	{
+	  break;
+	}
+      /* Merge the required grouped loads into one group.  */
+      grouped_loads_merge.safe_push (vect_slp_grouped_load_merge (res));
+    }
+  if (grouped_loads_merge.length () == bb_vinfo->grouped_loads.length ())
+    {
+      if (dump_enabled_p ())
+	{
+	  dump_printf_loc (MSG_NOTE, vect_location,
+			   "No grouped loads need to be merged.\n");
+	}
+      return false;
+    }
+  if (dump_enabled_p ())
+    {
+      dump_printf_loc (MSG_NOTE, vect_location,
+		       "Merging grouped loads successfully.\n");
+    }
+  BB_VINFO_GROUPED_LOADS (bb_vinfo).release ();
+  for (unsigned int i = 0; i < grouped_loads_merge.length (); i++)
+    {
+      BB_VINFO_GROUPED_LOADS (bb_vinfo).safe_push (grouped_loads_merge[i]);
+    }
+  return true;
+}
+
+/* Find the first elements of the grouped stores
+   which are required to transpose and merge.  */
+
+static void
+vect_slp_grouped_store_find (bb_vec_info bb_vinfo, vec<bool> &visited,
+			     vec<stmt_vec_info> &res)
+{
+  stmt_vec_info first_element = NULL;
+  stmt_vec_info merge_first_element = NULL;
+  unsigned int k = 0;
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_stores, k, first_element)
+    {
+      if (visited[k])
+	{
+	  continue;
+	}
+      /* Non-conforming grouped store should be grouped separately.  */
+      if (!STMT_VINFO_GROUPED_ACCESS (first_element)
+	  || first_element->group_number == -1)
+	{
+	  if (merge_first_element == NULL)
+	    {
+	      visited[k] = true;
+	      res.safe_push (first_element);
+	      return;
+	    }
+	}
+      if (first_element->group_number != -1
+	  && merge_first_element == NULL)
+	{
+	  merge_first_element = first_element;
+	}
+      if (merge_first_element->group_number == first_element->group_number)
+	{
+	  visited[k] = true;
+	  res.safe_push (first_element);
+	}
+    }
+}
+
+/* Transpose and merge the grouped stores that are found from
+   vect_slp_grouped_store_find ().  */
+
+static stmt_vec_info
+vect_slp_grouped_store_transform (vec<stmt_vec_info> res)
+{
+  stmt_vec_info stmt_info = res[0];
+  if (res.length () == 1)
+    {
+      return stmt_info;
+    }
+  stmt_vec_info rearrange_first_element = stmt_info;
+  stmt_vec_info last_element = rearrange_first_element;
+
+  unsigned int size = DR_GROUP_SIZE (rearrange_first_element);
+  unsigned int new_group_size = size * res.length ();
+  for (unsigned int i = 1; i < res.length (); i++)
+    {
+      /* Store the gap from the previous member of the group.  If there is no
+	 gap in the access, DR_GROUP_GAP is always 1.  */
+      DR_GROUP_GAP_TRANS (res[i]) = DR_GROUP_GAP (res[i]);
+      DR_GROUP_GAP (res[i]) = 1;
+    }
+  while (!res.is_empty ())
+    {
+      stmt_info = res[0];
+      res.ordered_remove (0);
+      if (DR_GROUP_NEXT_ELEMENT (stmt_info))
+	{
+	  res.safe_push (DR_GROUP_NEXT_ELEMENT (stmt_info));
+	}
+      DR_GROUP_FIRST_ELEMENT (stmt_info) = rearrange_first_element;
+      DR_GROUP_NEXT_ELEMENT (last_element) = stmt_info;
+      DR_GROUP_SIZE_TRANS (stmt_info) = DR_GROUP_SIZE (stmt_info);
+      DR_GROUP_SIZE (stmt_info) = new_group_size;
+      last_element = stmt_info;
+    }
+
+  DR_GROUP_SIZE (rearrange_first_element) = new_group_size;
+  DR_GROUP_SLP_TRANSPOSE (rearrange_first_element) = true;
+  DR_GROUP_NEXT_ELEMENT (last_element) = NULL;
+  return rearrange_first_element;
+}
+
+/* Save the STMT_INFO in the grouped stores to BB_VINFO_SCALAR_STORES for
+   transposing back grouped stores.  */
+
+static void
+get_scalar_stores (bb_vec_info bb_vinfo)
+{
+  unsigned int k = 0;
+  stmt_vec_info first_element = NULL;
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_stores, k, first_element)
+    {
+      /* Filter the grouped store which is unnecessary for transposing.  */
+      if (!STMT_VINFO_GROUPED_ACCESS (first_element)
+	  || first_element->group_number == -1)
+	{
+	  continue;
+	}
+      vec<stmt_vec_info> tmp_scalar_store;
+      tmp_scalar_store.create (DR_GROUP_SIZE (first_element));
+      for (stmt_vec_info stmt_info = first_element; stmt_info;
+	   stmt_info = DR_GROUP_NEXT_ELEMENT (stmt_info))
+	{
+	  tmp_scalar_store.safe_push (stmt_info);
+	}
+      BB_VINFO_SCALAR_STORES (bb_vinfo).safe_push (tmp_scalar_store);
+    }
+}
+
+/* Transpose and merge the grouped stores which have the same group number.
+   For example, for grouped stores (opa_0, opa_1, opa_2, opa_3):
+     opa_0: a00->a01->a02->a03
+     opa_1: a10->a11->a12->a13
+     opa_2: a20->a21->a22->a23
+     opa_2: a30->a31->a32->a33
+   we can probably get the merged grouped store:
+     opa: a00->a10->a20->a30
+	->a01->a11->a21->a31
+	->a02->a12->a22->a32
+	->a03->a13->a23->a33.  */
+
+static bool
+vect_transform_slp_grouped_stores (bb_vec_info bb_vinfo)
+{
+  if (bb_vinfo->grouped_stores.length () <= 0)
+    {
+      if (dump_enabled_p ())
+	{
+	  dump_printf_loc (MSG_NOTE, vect_location,
+			   "The number of grouped stores is 0.\n");
+	}
+      return false;
+    }
+
+  bb_vinfo->grouped_stores.qsort (dr_group_cmp);
+  auto_vec<stmt_vec_info> grouped_stores_merge;
+  auto_vec<bool> visited (bb_vinfo->grouped_stores.length ());
+  unsigned int i = 0;
+  for (i = 0; i < bb_vinfo->grouped_stores.length (); i++)
+    {
+      visited.safe_push (false);
+    }
+
+  /* Get scalar stores for the following transposition recovery.  */
+  get_scalar_stores (bb_vinfo);
+
+  while (1)
+    {
+      /* Find grouped stores which are required to transpose and merge.  */
+      auto_vec<stmt_vec_info> res;
+      vect_slp_grouped_store_find (bb_vinfo, visited, res);
+      if (res.is_empty ())
+	{
+	  break;
+	}
+      /* Transpose and merge the required grouped stores into one group.  */
+      grouped_stores_merge.safe_push (vect_slp_grouped_store_transform (res));
+    }
+
+  BB_VINFO_GROUPED_STORES (bb_vinfo).release ();
+  for (i = 0; i < grouped_stores_merge.length (); i++)
+    {
+      BB_VINFO_GROUPED_STORES (bb_vinfo).safe_push (grouped_stores_merge[i]);
+    }
+
+  if (dump_enabled_p ())
+    {
+      dump_printf_loc (MSG_NOTE, vect_location,
+		       "Transposing grouped stores successfully.\n");
+    }
+  return true;
+}
+
+/* A helpful function of vect_transform_back_slp_grouped_stores ().  */
+
+static auto_vec<stmt_vec_info>
+vect_transform_back_slp_grouped_store (bb_vec_info bb_vinfo,
+				       stmt_vec_info first_stmt_info)
+{
+  auto_vec<stmt_vec_info> grouped_stores_split;
+  for (unsigned int i = 0; i < bb_vinfo->scalar_stores.length (); i++)
+    {
+      vec<stmt_vec_info> scalar_tmp = bb_vinfo->scalar_stores[i];
+      if (scalar_tmp.length () > 1
+	  && scalar_tmp[0]->group_number != first_stmt_info->group_number)
+	{
+	  continue;
+	}
+      stmt_vec_info cur_stmt_info = NULL;
+      stmt_vec_info cur_first_stmt_info = NULL;
+      stmt_vec_info last_stmt_info = NULL;
+      unsigned int k = 0;
+      FOR_EACH_VEC_ELT (scalar_tmp, k, cur_stmt_info)
+	{
+	  if (k == 0)
+	    {
+	      cur_first_stmt_info = cur_stmt_info;
+	      last_stmt_info = cur_stmt_info;
+	    }
+	  DR_GROUP_FIRST_ELEMENT (cur_stmt_info) = cur_first_stmt_info;
+	  DR_GROUP_NEXT_ELEMENT (last_stmt_info) = cur_stmt_info;
+	  last_stmt_info = cur_stmt_info;
+	}
+      DR_GROUP_SIZE (cur_first_stmt_info) = k;
+      DR_GROUP_NEXT_ELEMENT (last_stmt_info) = NULL;
+      if (first_stmt_info != cur_first_stmt_info)
+	{
+	  DR_GROUP_GAP (cur_first_stmt_info)
+		= DR_GROUP_GAP_TRANS (cur_first_stmt_info);
+	  DR_GROUP_SLP_TRANSPOSE (cur_first_stmt_info) = false;
+	  DR_GROUP_NUMBER (cur_first_stmt_info) = -1;
+	}
+      grouped_stores_split.safe_push (cur_first_stmt_info);
+    }
+  return grouped_stores_split;
+}
+
+/* Transform the grouped store back.  */
+
+void
+vect_transform_back_slp_grouped_stores (bb_vec_info bb_vinfo,
+					stmt_vec_info first_stmt_info)
+{
+  if (first_stmt_info->group_number == -1)
+    {
+      return;
+    }
+  /* Transform back.  */
+  auto_vec<stmt_vec_info> grouped_stores_split
+	= vect_transform_back_slp_grouped_store (bb_vinfo, first_stmt_info);
+
+  /* Add the remaining grouped stores to grouped_stores_split.  */
+  stmt_vec_info first_element = NULL;
+  unsigned int i = 0;
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_stores, i, first_element)
+    {
+      if (first_element->group_number != first_stmt_info->group_number)
+	{
+	  grouped_stores_split.safe_push (first_element);
+	}
+    }
+  DR_GROUP_SLP_TRANSPOSE (first_stmt_info) = false;
+  DR_GROUP_NUMBER (first_stmt_info) = -1;
+  BB_VINFO_GROUPED_STORES (bb_vinfo).release ();
+  for (i = 0; i < grouped_stores_split.length (); i++)
+    {
+      BB_VINFO_GROUPED_STORES (bb_vinfo).safe_push (grouped_stores_split[i]);
+    }
+}
+
+/* Function check_for_slp_vectype
+
+   Restriction for grouped stores by checking their vectype.
+   If the vectype of the grouped store is changed, it need transform back.
+   If all grouped stores need to be transformed back, return FALSE.  */
+
+static bool
+check_for_slp_vectype (bb_vec_info bb_vinfo)
+{
+  stmt_vec_info first_element = NULL;
+  unsigned int i = 0;
+  int count = 0;
+  auto_vec<stmt_vec_info> grouped_stores_check;
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_stores, i, first_element)
+    {
+      grouped_stores_check.safe_push (first_element);
+    }
+  FOR_EACH_VEC_ELT (grouped_stores_check, i, first_element)
+    {
+      if (STMT_VINFO_GROUPED_ACCESS (first_element)
+	  && first_element->group_number != -1)
+	{
+	  unsigned int group_size_b
+			= DR_GROUP_SIZE_TRANS (first_element);
+	  tree vectype = STMT_VINFO_VECTYPE (first_element);
+	  poly_uint64 nunits = TYPE_VECTOR_SUBPARTS (vectype);
+	  if (nunits.to_constant () > group_size_b)
+	    {
+	      count++;
+	      /* If the vectype is changed, this grouped store need
+		 to be transformed back.  */
+	      vect_transform_back_slp_grouped_stores (bb_vinfo, first_element);
+	      if (dump_enabled_p ())
+		{
+		  dump_printf_loc (MSG_NOTE, vect_location,
+				   "No supported: only supported for"
+				   " group_size geq than nunits.\n");
+		}
+	    }
+	}
+    }
+  if (count == BB_VINFO_TRANS_GROUPS (bb_vinfo))
+    {
+      return false;
+    }
+  return true;
+}
+
+/* Function check_for_dr_alignment
+
+   Check the alignment of the slp instance loads.
+   Return FALSE if a load cannot be vectorized.  */
+
+static bool
+check_for_dr_alignment (slp_instance instance)
+{
+  slp_tree node = NULL;
+  unsigned int i = 0;
+  FOR_EACH_VEC_ELT (SLP_INSTANCE_LOADS (instance), i, node)
+    {
+      stmt_vec_info first_stmt_info = SLP_TREE_SCALAR_STMTS (node)[0];
+      dr_vec_info *first_dr_info = STMT_VINFO_DR_INFO (first_stmt_info);
+      enum dr_alignment_support supportable_dr_alignment
+	= vect_supportable_dr_alignment (first_dr_info, false);
+      if (supportable_dr_alignment == dr_explicit_realign_optimized
+	  || supportable_dr_alignment == dr_explicit_realign)
+	{
+	  return false;
+	}
+    }
+  return true;
+}
+
+/* Initialize slp_transpose flag before transposing.  */
+
+static void
+init_stmt_info_slp_transpose (bb_vec_info bb_vinfo)
+{
+  stmt_vec_info first_element = NULL;
+  unsigned int k = 0;
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_stores, k, first_element)
+    {
+      if (STMT_VINFO_GROUPED_ACCESS (first_element))
+	{
+	  DR_GROUP_SLP_TRANSPOSE (first_element) = false;
+	}
+    }
+  FOR_EACH_VEC_ELT (bb_vinfo->grouped_loads, k, first_element)
+    {
+      if (STMT_VINFO_GROUPED_ACCESS (first_element))
+	{
+	  DR_GROUP_SLP_TRANSPOSE (first_element) = false;
+	}
+    }
+}
+
+/* Analyze and transpose the stmts before building the SLP tree.  */
+
+static bool
+vect_analyze_transpose (bb_vec_info bb_vinfo)
+{
+  DUMP_VECT_SCOPE ("vect_analyze_transpose");
+
+  if (!vect_may_transpose (bb_vinfo))
+    {
+      return false;
+    }
+
+  /* For basic block SLP, try to merge the grouped stores and loads
+     into one group.  */
+  init_stmt_info_slp_transpose (bb_vinfo);
+  if (vect_transform_slp_grouped_stores (bb_vinfo)
+      && vect_merge_slp_grouped_loads (bb_vinfo))
+    {
+      if (dump_enabled_p ())
+	{
+	  dump_printf_loc (MSG_NOTE, vect_location,
+			   "Analysis succeeded with SLP transposed.\n");
+	}
+      return true;
+    }
+  if (dump_enabled_p ())
+    {
+      dump_printf_loc (MSG_NOTE, vect_location,
+		       "Analysis failed with SLP transposed.\n");
+    }
+  return false;
+}
 
 /* Check if there are stmts in the loop can be vectorized using SLP.  Build SLP
    trees of packed scalar stmts if SLP is possible.  */
@@ -3124,7 +4018,11 @@ vect_bb_vectorization_profitable_p (bb_vec_info bb_vinfo)
 
   vec_outside_cost = vec_prologue_cost + vec_epilogue_cost;
 
-  if (dump_enabled_p ())
+  BB_VINFO_VEC_INSIDE_COST (bb_vinfo) = vec_inside_cost;
+  BB_VINFO_VEC_OUTSIDE_COST (bb_vinfo) = vec_outside_cost;
+  BB_VINFO_SCALAR_COST (bb_vinfo) = scalar_cost;
+
+  if (!unlimited_cost_model (NULL) && dump_enabled_p ())
     {
       dump_printf_loc (MSG_NOTE, vect_location, "Cost model analysis: \n");
       dump_printf (MSG_NOTE, "  Vector inside of basic block cost: %d\n",
@@ -3239,6 +4137,22 @@ vect_slp_analyze_bb_1 (bb_vec_info bb_vinfo, int n_stmts, bool &fatal)
 
   vect_pattern_recog (bb_vinfo);
 
+  /* Transpose grouped stores and loads for better vectorizable version.  */
+  if (bb_vinfo->transposed)
+    {
+      if (!vect_analyze_transpose (bb_vinfo))
+	{
+	  if (dump_enabled_p ())
+	    {
+	       dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+				"not vectorized: unhandled slp transposed in "
+				"basic block.\n");
+	    }
+	  return false;
+	}
+    }
+  bb_vinfo->before_slp = true;
+
   /* Check the SLP opportunities in the basic block, analyze and build SLP
      trees.  */
   if (!vect_analyze_slp (bb_vinfo, n_stmts))
@@ -3250,6 +4164,20 @@ vect_slp_analyze_bb_1 (bb_vec_info bb_vinfo, int n_stmts, bool &fatal)
 	  dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location, 
 			   "not vectorized: failed to find SLP opportunities "
 			   "in basic block.\n");
+	}
+      return false;
+    }
+
+  /* Check if the vectype is suitable for SLP transposed.  */
+  if (bb_vinfo->transposed && !check_for_slp_vectype (bb_vinfo))
+    {
+      if (dump_enabled_p ())
+	{
+	  dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+			   "Failed to SLP transposed in the basic block.\n");
+	  dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+			   "not vectorized: vectype is not suitable for "
+			   "SLP transposed in basic block.\n");
 	}
       return false;
     }
@@ -3286,6 +4214,27 @@ vect_slp_analyze_bb_1 (bb_vec_info bb_vinfo, int n_stmts, bool &fatal)
   if (! BB_VINFO_SLP_INSTANCES (bb_vinfo).length ())
     return false;
 
+  /* Check if the alignment is suitable for SLP transposed.  */
+  if (bb_vinfo->transposed)
+    {
+      for (i = 0; BB_VINFO_SLP_INSTANCES (bb_vinfo).iterate (i, &instance); i++)
+	{
+	  if (!check_for_dr_alignment (instance))
+	    {
+	      if (dump_enabled_p ())
+		{
+		  dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+				   "Failed to SLP transposed in the basic "
+				   "block.\n");
+		  dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+				   "not vectorized: alignment is not suitable "
+				   "for SLP transposed in basic block.\n");
+		}
+	      return false;
+	    }
+	}
+    }
+
   if (!vect_slp_analyze_operations (bb_vinfo))
     {
       if (dump_enabled_p ())
@@ -3311,6 +4260,83 @@ vect_slp_analyze_bb_1 (bb_vec_info bb_vinfo, int n_stmts, bool &fatal)
   return true;
 }
 
+static bool
+may_new_transpose_bbvinfo (bb_vec_info bb_vinfo_ori, bool res_ori)
+{
+  /* If the flag is false or the slp analysis is broken before
+     vect_analyze_slp, we don't try to analyze the transposed SLP version.  */
+  if (!flag_tree_slp_transpose_vectorize
+      || !BB_VINFO_BEFORE_SLP (bb_vinfo_ori))
+    {
+      return false;
+    }
+
+  /* If the original bb_vinfo can't be vectorized, try to new a bb_vinfo
+     of the transposed version.  */
+  if (!res_ori)
+    {
+      return true;
+    }
+
+  /* Caculate the cost of the original bb_vinfo.  */
+  if (unlimited_cost_model (NULL))
+    {
+      vect_bb_vectorization_profitable_p (bb_vinfo_ori);
+    }
+  /* If the vec cost and scalar cost are not much difference (here we set the
+     threshold to 4), we try to new a bb_vinfo of the transposed version.  */
+  if (BB_VINFO_SCALAR_COST (bb_vinfo_ori)
+      < 4 * (BB_VINFO_VEC_INSIDE_COST (bb_vinfo_ori)
+	     + BB_VINFO_VEC_OUTSIDE_COST (bb_vinfo_ori)))
+    {
+      return true;
+    }
+  return false;
+}
+
+static bool
+may_choose_transpose_bbvinfo (bb_vec_info bb_vinfo_trans, bool res_trans,
+			     bb_vec_info bb_vinfo_ori, bool res_ori)
+{
+  /* The original bb_vinfo is chosen if the transposed bb_vinfo
+     can't be vectorized.  */
+  if (!res_trans)
+    {
+      return false;
+    }
+  /* Caculate the cost of the transposed bb_vinfo.  */
+  if (unlimited_cost_model (NULL))
+    {
+      vect_bb_vectorization_profitable_p (bb_vinfo_trans);
+    }
+  int diff_bb_cost = -1;
+  int diff_bb_cost_trans = -1;
+  if (res_ori)
+    {
+      diff_bb_cost = BB_VINFO_SCALAR_COST (bb_vinfo_ori)
+		     - BB_VINFO_VEC_INSIDE_COST (bb_vinfo_ori)
+		     - BB_VINFO_VEC_OUTSIDE_COST (bb_vinfo_ori);
+    }
+  if (res_trans)
+    {
+      diff_bb_cost_trans = BB_VINFO_SCALAR_COST (bb_vinfo_trans)
+			   - BB_VINFO_VEC_INSIDE_COST (bb_vinfo_trans)
+			   - BB_VINFO_VEC_OUTSIDE_COST (bb_vinfo_trans);
+    }
+  /* The original bb_vinfo is chosen when one of the following conditions
+     is satisfied as follows:
+	1) The cost of original version is better transposed version.
+	2) The vec cost is similar to scalar cost in the transposed version.  */
+  if ((res_ori && res_trans && diff_bb_cost >= diff_bb_cost_trans)
+      || (res_trans && BB_VINFO_SCALAR_COST (bb_vinfo_trans)
+		       <= (BB_VINFO_VEC_INSIDE_COST (bb_vinfo_trans)
+			  + BB_VINFO_VEC_OUTSIDE_COST (bb_vinfo_trans))))
+    {
+      return false;
+    }
+  return true;
+}
+
 /* Subroutine of vect_slp_bb.  Try to vectorize the statements between
    REGION_BEGIN (inclusive) and REGION_END (exclusive), returning true
    on success.  The region has N_STMTS statements and has the datarefs
@@ -3323,6 +4349,7 @@ vect_slp_bb_region (gimple_stmt_iterator region_begin,
 		    unsigned int n_stmts)
 {
   bb_vec_info bb_vinfo;
+  bb_vec_info bb_vinfo_trans = NULL;
   auto_vector_modes vector_modes;
 
   /* Autodetect first vector size we try.  */
@@ -3337,6 +4364,10 @@ vect_slp_bb_region (gimple_stmt_iterator region_begin,
     {
       bool vectorized = false;
       bool fatal = false;
+      bool res_bb_vinfo_ori = false;
+      bool res_bb_vinfo_trans = false;
+
+      /* New a bb_vinfo of the original version.  */
       bb_vinfo = new _bb_vec_info (region_begin, region_end, &shared);
 
       bool first_time_p = shared.datarefs.is_empty ();
@@ -3346,8 +4377,57 @@ vect_slp_bb_region (gimple_stmt_iterator region_begin,
       else
 	bb_vinfo->shared->check_datarefs ();
       bb_vinfo->vector_mode = next_vector_mode;
+      bb_vinfo->transposed = false;
+      bb_vinfo->before_slp = false;
 
-      if (vect_slp_analyze_bb_1 (bb_vinfo, n_stmts, fatal)
+      res_bb_vinfo_ori = vect_slp_analyze_bb_1 (bb_vinfo, n_stmts, fatal);
+      /* Analyze and new a transposed bb_vinfo.  */
+      if (may_new_transpose_bbvinfo (bb_vinfo, res_bb_vinfo_ori))
+	{
+	  bool fatal_trans = false;
+	  bb_vinfo_trans
+	    = new _bb_vec_info (region_begin, region_end, &shared);
+	  bool first_time_p = shared.datarefs.is_empty ();
+	  BB_VINFO_DATAREFS (bb_vinfo_trans) = datarefs;
+	  if (first_time_p)
+	    {
+	      bb_vinfo_trans->shared->save_datarefs ();
+	    }
+	  else
+	    {
+	      bb_vinfo_trans->shared->check_datarefs ();
+	    }
+	  bb_vinfo_trans->vector_mode = next_vector_mode;
+	  bb_vinfo_trans->transposed = true;
+	  bb_vinfo_trans->before_slp = false;
+
+	  res_bb_vinfo_trans
+	    = vect_slp_analyze_bb_1 (bb_vinfo_trans, n_stmts, fatal_trans);
+	  if (may_choose_transpose_bbvinfo (bb_vinfo_trans,
+					   res_bb_vinfo_trans,
+					   bb_vinfo, res_bb_vinfo_ori))
+	    {
+	      bb_vinfo = bb_vinfo_trans;
+	      fatal = fatal_trans;
+	      if (dump_enabled_p ())
+		{
+		  dump_printf_loc (MSG_NOTE, vect_location,
+				   "Basic block part vectorized "
+				   "using transposed version.\n");
+		}
+	    }
+	  else
+	    {
+	      if (dump_enabled_p ())
+		{
+		  dump_printf_loc (MSG_NOTE, vect_location,
+				   "Basic block part vectorized "
+				   "using original version.\n");
+		}
+	    }
+	}
+
+      if ((res_bb_vinfo_ori || res_bb_vinfo_trans)
 	  && dbg_cnt (vect_slp))
 	{
 	  if (dump_enabled_p ())
@@ -3400,6 +4480,10 @@ vect_slp_bb_region (gimple_stmt_iterator region_begin,
 	  }
 
       delete bb_vinfo;
+      if (bb_vinfo_trans)
+	{
+	  bb_vinfo_trans = NULL;
+	}
 
       if (mode_i < vector_modes.length ()
 	  && VECTOR_MODE_P (autodetected_vector_mode)
