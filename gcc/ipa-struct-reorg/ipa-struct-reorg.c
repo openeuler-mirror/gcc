@@ -252,6 +252,7 @@ enum struct_layout_opt_level
 
 static bool is_result_of_mult (tree arg, tree *num, tree struct_size);
 bool isptrptr (tree type);
+void get_base (tree &base, tree expr);
 
 srmode current_mode;
 
@@ -631,7 +632,15 @@ srtype::analyze (void)
       into 2 different structures.  In future we intend to add profile
       info and/or static heuristics to differentiate splitting process.  */
   if (fields.length () == 2)
-    fields[1]->clusternum = 1;
+    {
+      for (hash_map<tree, tree>::iterator it = replace_type_map.begin ();
+	   it != replace_type_map.end (); ++it)
+	{
+	  if (types_compatible_p ((*it).second, this->type))
+	    return;
+	}
+      fields[1]->clusternum = 1;
+    }
 
   /* Otherwise we do nothing.  */
   if (fields.length () >= 3)
@@ -3278,12 +3287,33 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 /* Update field_access in srfield.  */
 
 static void
-update_field_access (tree record, tree field, unsigned access, void *data)
+update_field_access (tree node, tree op, unsigned access, void *data)
 {
-  srtype *this_srtype = ((ipa_struct_reorg *)data)->find_type (record);
+  HOST_WIDE_INT offset = 0;
+  switch (TREE_CODE (op))
+    {
+      case COMPONENT_REF:
+	{
+	  offset = int_byte_position (TREE_OPERAND (op, 1));
+	  break;
+	}
+      case MEM_REF:
+	{
+	  offset = tree_to_uhwi (TREE_OPERAND (op, 1));
+	  break;
+	}
+      default:
+	return;
+    }
+  tree base = node;
+  get_base (base, node);
+  srdecl *this_srdecl = ((ipa_struct_reorg *)data)->find_decl (base);
+  if (this_srdecl == NULL)
+    return;
+  srtype *this_srtype = this_srdecl->type;
   if (this_srtype == NULL)
     return;
-  srfield *this_srfield = this_srtype->find_field (int_byte_position (field));
+  srfield *this_srfield = this_srtype->find_field (offset);
   if (this_srfield == NULL)
     return;
 
@@ -3291,9 +3321,9 @@ update_field_access (tree record, tree field, unsigned access, void *data)
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "record field access %d:", access);
-      print_generic_expr (dump_file, record);
+      print_generic_expr (dump_file, this_srtype->type);
       fprintf (dump_file, "  field:");
-      print_generic_expr (dump_file, field);
+      print_generic_expr (dump_file, this_srfield->fielddecl);
       fprintf (dump_file, "\n");
     }
   return;
@@ -3302,15 +3332,10 @@ update_field_access (tree record, tree field, unsigned access, void *data)
 /* A callback for walk_stmt_load_store_ops to visit store.  */
 
 static bool
-find_field_p_store (gimple *, tree node, tree op, void *data)
+find_field_p_store (gimple *stmt ATTRIBUTE_UNUSED,
+		    tree node, tree op, void *data)
 {
-  if (TREE_CODE (op) != COMPONENT_REF)
-    return false;
-  tree node_type = TREE_TYPE (node);
-  if (!handled_type (node_type))
-    return false;
-
-  update_field_access (node_type, TREE_OPERAND (op, 1), WRITE_FIELD, data);
+  update_field_access (node, op, WRITE_FIELD, data);
 
   return false;
 }
@@ -3318,15 +3343,10 @@ find_field_p_store (gimple *, tree node, tree op, void *data)
 /* A callback for walk_stmt_load_store_ops to visit load.  */
 
 static bool
-find_field_p_load (gimple *, tree node, tree op, void *data)
+find_field_p_load (gimple *stmt ATTRIBUTE_UNUSED,
+		   tree node, tree op, void *data)
 {
-  if (TREE_CODE (op) != COMPONENT_REF)
-    return false;
-  tree node_type = TREE_TYPE (node);
-  if (!handled_type (node_type))
-    return false;
-
-  update_field_access (node_type, TREE_OPERAND (op, 1), READ_FIELD, data);
+  update_field_access (node, op, READ_FIELD, data);
 
   return false;
 }
@@ -4629,7 +4649,7 @@ ipa_struct_reorg::check_other_side (srdecl *decl, tree other, gimple *stmt, vec<
 
       return;
     }
-  if (!is_replace_type (t1->type, type->type))
+  if (!is_replace_type (inner_type (t), type->type))
     {
       if (t1)
 	t1->mark_escape (escape_cast_another_ptr, stmt);
@@ -5898,7 +5918,16 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	  fprintf (dump_file, "\n rewriting statement (remove): \n");
 	  print_gimple_stmt (dump_file, stmt, 0);
 	}
-      return true;
+      /* Replace the dead field in stmt by creating a dummy ssa.  */
+      tree dummy_ssa = make_ssa_name (TREE_TYPE (gimple_assign_lhs (stmt)));
+      gimple_assign_set_lhs (stmt, dummy_ssa);
+      update_stmt (stmt);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "To: \n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	}
+      return false;
     }
 
   if (gimple_clobber_p (stmt))
