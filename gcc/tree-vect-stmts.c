@@ -7329,6 +7329,153 @@ vectorizable_scan_store (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
   return true;
 }
 
+/* Function vect_permute_store_chains
+
+   Call function vect_permute_store_chain ().
+   Given a chain of interleaved stores in DR_CHAIN, generate
+   interleave_high/low stmts to reorder the data correctly.
+   Return the final references for stores in RESULT_CHAIN.  */
+
+static void
+vect_permute_store_chains (vec<tree> dr_chain, unsigned int num_each,
+			   stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
+			   vec<tree> *result_chain, unsigned int group)
+{
+  unsigned int k = 0;
+  unsigned int t = 0;
+
+  /* Divide vectors into GROUP parts.  And permute every NUM_EACH vectors
+     together.  */
+  for (k = 0; k < group; k++)
+    {
+      auto_vec<tree> dr_chain_transposed (num_each);
+      auto_vec<tree> result_chain_transposed (num_each);
+      for (t = k; t < dr_chain.length (); t = t + group)
+	{
+	  dr_chain_transposed.quick_push (dr_chain[t]);
+	}
+      vect_permute_store_chain (dr_chain_transposed, num_each, stmt_info,
+				gsi, &result_chain_transposed);
+      for (t = 0; t < num_each; t++)
+	{
+	  result_chain->quick_push (result_chain_transposed[t]);
+	}
+    }
+}
+
+/* Function transpose_oprnd_store
+
+    Calculate the transposed results from VEC_OPRNDS (VEC_STMT)
+    for vectorizable_store.  */
+
+static void
+transpose_oprnd_store (vec<tree>vec_oprnds, vec<tree> *result_chain,
+		       unsigned int vec_num, unsigned int const_nunits,
+		       unsigned int array_num, stmt_vec_info first_stmt_info,
+		       gimple_stmt_iterator *gsi)
+{
+  unsigned int group_for_transform = 0;
+  unsigned int num_each = 0;
+
+  /* Transpose back for vec_oprnds.  */
+  /* vec = {vec1, vec2, ...}  */
+  if (array_num < const_nunits
+      && const_nunits % array_num == 0)
+    {
+      vect_transpose_store_chain (vec_oprnds,
+				  vec_num, array_num,
+				  first_stmt_info,
+				  gsi, result_chain);
+    }
+   /* vec1 = {vec_part1}, vec2 = {vec_part2}, ...  */
+  else if (array_num >= const_nunits
+	   && array_num % const_nunits == 0)
+    {
+      group_for_transform = array_num / const_nunits;
+      num_each = vec_oprnds.length () / group_for_transform;
+      vect_permute_store_chains (vec_oprnds,
+				 num_each, first_stmt_info,
+				 gsi, result_chain,
+				 group_for_transform);
+    }
+  else
+    {
+      gcc_unreachable ();
+    }
+}
+
+static dr_vec_info *
+get_dr_info (stmt_vec_info stmt_info)
+{
+  dr_vec_info *dr_info = STMT_VINFO_DR_INFO (stmt_info);
+  if (dr_info->misalignment == DR_MISALIGNMENT_UNINITIALIZED)
+    {
+      SET_DR_MISALIGNMENT (dr_info, DR_MISALIGNMENT_UNKNOWN);
+    }
+  return dr_info;
+}
+
+static unsigned
+dr_align_vect_store (dr_vec_info *cur_first_dr_info,
+		     unsigned HOST_WIDE_INT &align)
+{
+  unsigned misalign = 0;
+  align = known_alignment (DR_TARGET_ALIGNMENT (cur_first_dr_info));
+  if (aligned_access_p (cur_first_dr_info))
+    {
+      return misalign;
+    }
+  else if (DR_MISALIGNMENT (cur_first_dr_info) == -1)
+    {
+      align = dr_alignment (vect_dr_behavior (cur_first_dr_info));
+    }
+  else
+    {
+      misalign = DR_MISALIGNMENT (cur_first_dr_info);
+    }
+  return misalign;
+}
+
+static stmt_vec_info
+add_new_stmt_vect_store (tree vectype, tree dataref_ptr, tree dataref_offset,
+			 tree ref_type, dr_vec_info *cur_first_dr_info,
+			 tree vec_oprnd, gimple_stmt_iterator *gsi,
+			 stmt_vec_info stmt_info)
+{
+  /* Data align.  */
+  unsigned HOST_WIDE_INT align;
+  unsigned misalign = dr_align_vect_store (cur_first_dr_info, align);
+
+  if (dataref_offset == NULL_TREE && TREE_CODE (dataref_ptr) == SSA_NAME)
+    {
+      set_ptr_info_alignment (get_ptr_info (dataref_ptr), align, misalign);
+    }
+
+  /* Get data_ref.  */
+  tree offset = dataref_offset ? dataref_offset : build_int_cst (ref_type, 0);
+  tree data_ref = fold_build2 (MEM_REF, vectype, dataref_ptr, offset);
+  if (aligned_access_p (cur_first_dr_info))
+    {
+      ;
+    }
+  else if (DR_MISALIGNMENT (cur_first_dr_info) == -1)
+    {
+      TREE_TYPE (data_ref) = build_aligned_type (TREE_TYPE (data_ref),
+						 align * BITS_PER_UNIT);
+    }
+  else
+    {
+      tree elem_type = TREE_TYPE (vectype);
+      TREE_TYPE (data_ref) = build_aligned_type (TREE_TYPE (data_ref),
+						 TYPE_ALIGN (elem_type));
+    }
+  /* Add new stmt.  */
+  vect_copy_ref_info (data_ref, DR_REF (cur_first_dr_info->dr));
+  gassign *new_stmt = gimple_build_assign (data_ref, vec_oprnd);
+  stmt_vec_info new_stmt_info
+		= vect_finish_stmt_generation (stmt_info, new_stmt, gsi);
+  return new_stmt_info;
+}
 
 /* Function vectorizable_store.
 
@@ -8208,6 +8355,16 @@ vectorizable_store (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
 	  else if (STMT_VINFO_GATHER_SCATTER_P (stmt_info))
 	    vect_get_gather_scatter_ops (loop, stmt_info, &gs_info,
 					 &dataref_ptr, &vec_offset);
+	  /* If the stmt_info need to be transposed recovery, dataref_ptr
+	     will be caculated later.  */
+	  else if (memory_access_type == VMAT_CONTIGUOUS
+		   && is_a <bb_vec_info> (vinfo)
+		   && STMT_VINFO_GROUPED_ACCESS (stmt_info)
+		   && DR_GROUP_SLP_TRANSPOSE (
+			DR_GROUP_FIRST_ELEMENT (stmt_info)))
+	    {
+	      dataref_ptr = NULL_TREE;
+	    }
 	  else
 	    dataref_ptr
 	      = vect_create_data_ref_ptr (first_stmt_info, aggr_type,
@@ -8299,6 +8456,75 @@ vectorizable_store (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
 	}
       else
 	{
+	  /* group_size: the size of group after transposing and merging.
+	     group_size_b: the size of group before transposing and merging,
+			 and only group_size_b >= const_nunits is supported.
+	     array_num: the number of arrays.
+	     const_nunits: TYPE_VECTOR_SUBPARTS (vectype).
+	     ncontinues: group_size_b / const_nunits, it means the number of
+			 times an array is stored in memory.  */
+	  if (slp && is_a <bb_vec_info> (vinfo)
+	      && STMT_VINFO_GROUPED_ACCESS (stmt_info)
+	      && DR_GROUP_SLP_TRANSPOSE (DR_GROUP_FIRST_ELEMENT (stmt_info)))
+	    {
+	      if (dump_enabled_p ())
+		{
+		  dump_printf_loc (MSG_NOTE, vect_location,
+				   "vectorizable_store for slp transpose.\n");
+		}
+	      /* Transpose back for grouped stores.  */
+	      vect_transform_back_slp_grouped_stores (bb_vinfo,
+						      first_stmt_info);
+
+	      result_chain.create (vec_oprnds.length ());
+	      unsigned int const_nunits = nunits.to_constant ();
+	      unsigned int group_size_b = DR_GROUP_SIZE_TRANS (first_stmt_info);
+	      unsigned int array_num = group_size / group_size_b;
+	      transpose_oprnd_store (vec_oprnds, &result_chain, vec_num,
+				     const_nunits, array_num,
+				     first_stmt_info, gsi);
+
+	      /* For every store group, not for every vec, because transposing
+	      and merging have changed the data reference access.  */
+	      gcc_assert (group_size_b >= const_nunits);
+	      unsigned int ncontinues = group_size_b / const_nunits;
+
+	      unsigned int k = 0;
+	      for (i = 0; i < array_num; i++)
+		{
+		  stmt_vec_info first_stmt_b;
+		  BB_VINFO_GROUPED_STORES (vinfo).iterate (i, &first_stmt_b);
+		  bool simd_lane_access_p
+			= STMT_VINFO_SIMD_LANE_ACCESS_P (first_stmt_b) != 0;
+		  tree ref_type = get_group_alias_ptr_type (first_stmt_b);
+		  dataref_ptr = vect_create_data_ref_ptr (
+				 first_stmt_b, aggr_type,
+				 simd_lane_access_p ? loop : NULL,
+				 offset, &dummy, gsi, &ptr_incr,
+				 simd_lane_access_p, NULL_TREE, bump);
+		  dr_vec_info *cur_first_dr_info = get_dr_info (first_stmt_b);
+		  for (unsigned int t = 0; t < ncontinues; t++)
+		    {
+		      vec_oprnd = result_chain[k];
+		      k++;
+		      if (t > 0)
+			{
+			  /* Bump the vector pointer.  */
+			  dataref_ptr = bump_vector_ptr (dataref_ptr, ptr_incr,
+							 gsi, first_stmt_b,
+							 bump);
+			}
+		      new_stmt_info = add_new_stmt_vect_store (
+					vectype, dataref_ptr, dataref_offset,
+					ref_type, cur_first_dr_info, vec_oprnd,
+					gsi, first_stmt_b);
+		    }
+		}
+	      oprnds.release ();
+	      result_chain.release ();
+	      vec_oprnds.release ();
+	      return true;
+	    }
 	  new_stmt_info = NULL;
 	  if (grouped_store)
 	    {
@@ -8555,6 +8781,447 @@ hoist_defs_of_uses (stmt_vec_info stmt_info, class loop *loop)
     }
 
   return true;
+}
+
+static tree
+calculate_new_type (tree vectype, unsigned int const_nunits,
+		    unsigned int group_size_b, unsigned int &nloads,
+		    unsigned int &ncontinues, tree &lvectype)
+{
+  tree ltype = TREE_TYPE (vectype);
+  /* nloads is the number of ARRAYs in a vector.
+     vectemp = {a[], b[], ...}  */
+  if (group_size_b < const_nunits)
+    {
+      tree ptype;
+      tree vtype
+	= vector_vector_composition_type (vectype,
+					  const_nunits / group_size_b,
+					  &ptype);
+      if (vtype != NULL_TREE)
+	{
+	  nloads = const_nunits / group_size_b;
+	  lvectype = vtype;
+	  ltype = ptype;
+	  ncontinues = 1;
+	}
+    }
+  /* ncontinues is the number of vectors from an ARRAY.
+     vectemp1 = {a[0], a[1], ...}
+     ...
+     vectempm = {a[k], a[k+1], ...}  */
+  else
+    {
+      nloads = 1;
+      ltype = vectype;
+      ncontinues = group_size_b / const_nunits;
+    }
+  ltype = build_aligned_type (ltype, TYPE_ALIGN (TREE_TYPE (vectype)));
+  return ltype;
+}
+
+static void
+generate_old_load_permutations (slp_tree slp_node, unsigned int group_size,
+				vec<unsigned> &old_load_permutation)
+{
+  /* Generate the old load permutations from the slp_node.  */
+  unsigned i = 0;
+  unsigned k = 0;
+
+  /* If SLP_NODE has load_permutation, we copy it to old_load_permutation.
+     Otherwise, we generate a permutation sequentially.  */
+  if (SLP_TREE_LOAD_PERMUTATION (slp_node).exists ())
+    {
+      FOR_EACH_VEC_ELT (SLP_TREE_LOAD_PERMUTATION (slp_node), i, k)
+	{
+	  old_load_permutation.safe_push (k);
+	}
+    }
+  else
+    {
+      for (unsigned i = 0; i < group_size; i++)
+	{
+	  old_load_permutation.safe_push (i);
+	}
+    }
+}
+
+static void
+generate_new_load_permutation_mapping (unsigned slp_node_length,
+				       vec<unsigned> &group_idx,
+				       const vec<unsigned> &load_permutation,
+				       unsigned int group_size_b,
+				       unsigned &new_group_size,
+				       vec<unsigned> &group_from)
+{
+  /* group_num_vec: only stores the group_loads IDs which are caculated from
+     load_permutation.  */
+  auto_vec<unsigned> group_num_vec;
+
+  /* Caculate which group_loads are the stmts in SLP_NODE from.  */
+  unsigned i = 0;
+  unsigned k = 0;
+  FOR_EACH_VEC_ELT (load_permutation, i, k)
+    {
+      unsigned int t0 = k / group_size_b;
+      if (!group_num_vec.contains (t0))
+	{
+	  group_num_vec.safe_push (t0);
+	}
+      group_from.safe_push (t0);
+    }
+  group_num_vec.qsort (cmp_for_group_num);
+  /* n_groups: the number of group_loads.  */
+  unsigned int n_groups = group_num_vec.length ();
+  new_group_size = n_groups * group_size_b;
+  for (i = 0; i < n_groups; i++)
+    {
+      group_idx.safe_push (group_num_vec[i] * group_size_b);
+    }
+  /* A new mapping from group_ind_vec to group_from.
+      For example:
+	Origin: group_from = {1,1,3,3,5,5,7,7};
+	After mapping: group_from = {0,0,1,1,2,2,2,2};  */
+  auto_vec<unsigned> group_ind_vec (n_groups);
+  for (k = 0; k < n_groups; k++)
+    {
+      group_ind_vec.safe_push (k);
+    }
+  for (i = 0; i < slp_node_length; i++)
+    {
+      for (k = 0; k < n_groups; k++)
+	{
+	  if (group_from[i] == group_num_vec[k])
+	    {
+	      group_from[i] = group_ind_vec[k];
+	      break;
+	    }
+	}
+    }
+}
+
+static void
+generate_new_load_permutation (vec<unsigned> &new_load_permutation,
+			       const vec<unsigned> &old_load_permutation,
+			       slp_tree slp_node, bool &this_load_permuted,
+			       const vec<unsigned> &group_from,
+			       unsigned int group_size_b)
+{
+  unsigned slp_node_length = SLP_TREE_SCALAR_STMTS (slp_node).length ();
+  /* Generate the new load permutation from the new mapping.  */
+  new_load_permutation.create (slp_node_length);
+  unsigned i = 0;
+  unsigned k = 0;
+  FOR_EACH_VEC_ELT (old_load_permutation, i, k)
+    {
+      /* t1 is the new permutation of k in the old permutation.
+	 t1 = base_address + offset:
+	 base_address = group_from[i] * group_size_b;
+	 offset = k % group_size_b.  */
+      unsigned int t1
+	= group_from[i] * group_size_b + k % group_size_b;
+      new_load_permutation.safe_push (t1);
+      if (t1 != k)
+	{
+	  this_load_permuted = true;
+	}
+    }
+}
+
+static bool
+is_slp_perm (bool slp_perm, bool this_load_permuted, poly_uint64 nunits,
+	     unsigned int group_size, stmt_vec_info first_stmt_info)
+{
+  /* Calculate the unrolling factor based on the smallest type.  */
+  poly_uint64 unrolling_factor
+    = exact_div (common_multiple (nunits, group_size), group_size);
+  /* The load requires permutation when unrolling exposes
+     a gap either because the group is larger than the SLP
+     group-size or because there is a gap between the groups.  */
+  if (!slp_perm && !this_load_permuted
+      && (known_eq (unrolling_factor, 1U)
+	  || (group_size == DR_GROUP_SIZE (first_stmt_info)
+	      && DR_GROUP_GAP (first_stmt_info) == 0)))
+    {
+      return false;
+    }
+  else
+    {
+      return true;
+    }
+}
+
+static void
+generate_load_permutation (slp_tree slp_node, unsigned &new_group_size,
+			   unsigned int group_size, unsigned int group_size_b,
+			   bool &this_load_permuted, vec<unsigned> &group_idx,
+			   vec<unsigned> &new_load_permutation)
+{
+  /* Generate the old load permutations from SLP_NODE.  */
+  vec<unsigned> old_load_permutation;
+  old_load_permutation.create (group_size);
+  generate_old_load_permutations (slp_node, group_size, old_load_permutation);
+
+  /* Caculate which group_loads are the stmts in SLP_NODE from.  */
+  unsigned slp_node_length = SLP_TREE_SCALAR_STMTS (slp_node).length ();
+  /* group_from: stores the group_loads ID for every stmt in SLP_NODE.  */
+  vec<unsigned> group_from;
+  group_from.create (slp_node_length);
+  generate_new_load_permutation_mapping (slp_node_length, group_idx,
+					 old_load_permutation,
+					 group_size_b, new_group_size,
+					 group_from);
+
+  /* Generate the new load permutation from the new mapping and caculate
+     this_load_permuted flag.  If this_load_permuted is true, we need execute
+     slp permutation by using new load permutation.  */
+  generate_new_load_permutation (new_load_permutation, old_load_permutation,
+				 slp_node, this_load_permuted, group_from,
+				 group_size_b);
+  old_load_permutation.release ();
+  group_from.release ();
+}
+
+static unsigned int
+dr_align_vect_load (dr_vec_info *cur_first_dr_info,
+		    unsigned HOST_WIDE_INT &align,
+		    enum dr_alignment_support alignment_support_scheme)
+{
+  unsigned int misalign = 0;
+
+  align = known_alignment (DR_TARGET_ALIGNMENT (cur_first_dr_info));
+  if (alignment_support_scheme == dr_aligned)
+    {
+      gcc_assert (aligned_access_p (cur_first_dr_info));
+    }
+  else if (DR_MISALIGNMENT (cur_first_dr_info) == -1)
+    {
+      align = dr_alignment (vect_dr_behavior (cur_first_dr_info));
+    }
+  else
+    {
+      misalign = DR_MISALIGNMENT (cur_first_dr_info);
+    }
+  return misalign;
+}
+
+static stmt_vec_info
+add_new_stmt_vect_load (tree vectype, tree dataref_ptr, tree dataref_offset,
+			tree ref_type, tree ltype, gassign *(&new_stmt),
+			dr_vec_info *cur_first_dr_info,
+			gimple_stmt_iterator *gsi, stmt_vec_info stmt_info)
+{
+  /* Data align.  */
+  enum dr_alignment_support alignment_support_scheme
+	= vect_supportable_dr_alignment (cur_first_dr_info, false);
+  unsigned HOST_WIDE_INT align;
+  unsigned int misalign = dr_align_vect_load (cur_first_dr_info, align,
+					      alignment_support_scheme);
+  if (dataref_offset == NULL_TREE && TREE_CODE (dataref_ptr) == SSA_NAME)
+    {
+      set_ptr_info_alignment (get_ptr_info (dataref_ptr), align, misalign);
+    }
+
+  /* Get data_ref.  */
+  tree offset = dataref_offset ? dataref_offset : build_int_cst (ref_type, 0);
+  tree data_ref = fold_build2 (MEM_REF, ltype, dataref_ptr, offset);
+  if (alignment_support_scheme == dr_aligned)
+    {
+      ;
+    }
+  else if (DR_MISALIGNMENT (cur_first_dr_info) == -1)
+    {
+      TREE_TYPE (data_ref)
+	= build_aligned_type (TREE_TYPE (data_ref), align * BITS_PER_UNIT);
+    }
+  else
+    {
+      tree elem_type = TREE_TYPE (vectype);
+      TREE_TYPE (data_ref)
+	= build_aligned_type (TREE_TYPE (data_ref), TYPE_ALIGN (elem_type));
+    }
+
+  /* Add new stmt.  */
+  vect_copy_ref_info (data_ref, DR_REF (cur_first_dr_info->dr));
+  new_stmt = gimple_build_assign (make_ssa_name (ltype), data_ref);
+  stmt_vec_info new_stmt_info
+	= vect_finish_stmt_generation (stmt_info, new_stmt, gsi);
+  return new_stmt_info;
+}
+
+static void
+push_new_stmt_to_dr_chain (bool slp_perm, stmt_vec_info new_stmt_info,
+			   vec<tree> &dr_chain, slp_tree slp_node)
+{
+    if (slp_perm)
+      {
+	dr_chain.quick_push (gimple_assign_lhs (new_stmt_info->stmt));
+      }
+    else
+      {
+	SLP_TREE_VEC_STMTS (slp_node).quick_push (new_stmt_info);
+      }
+}
+
+static stmt_vec_info
+get_first_stmt_info_before_transpose (stmt_vec_info first_stmt_info,
+				      unsigned int group_el,
+				      unsigned int group_size)
+{
+  stmt_vec_info last_stmt_info = first_stmt_info;
+  unsigned int count = 0;
+  gcc_assert (group_el < group_size);
+  while (count < group_el)
+    {
+      last_stmt_info = DR_GROUP_NEXT_ELEMENT (last_stmt_info);
+      count++;
+    }
+  return last_stmt_info;
+}
+
+static stmt_vec_info
+add_new_stmt_for_nloads_greater_than_one (tree lvectype, tree vectype,
+					  vec<constructor_elt, va_gc> *v,
+					  stmt_vec_info stmt_info,
+					  gimple_stmt_iterator *gsi)
+{
+  tree vec_inv = build_constructor (lvectype, v);
+  tree new_temp = vect_init_vector (stmt_info, vec_inv, lvectype, gsi);
+  vec_info *vinfo = stmt_info->vinfo;
+  stmt_vec_info new_stmt_info = vinfo->lookup_def (new_temp);
+  if (lvectype != vectype)
+    {
+      gassign *new_stmt = gimple_build_assign (make_ssa_name (vectype),
+					       VIEW_CONVERT_EXPR,
+					       build1 (VIEW_CONVERT_EXPR,
+						       vectype, new_temp));
+      new_stmt_info = vect_finish_stmt_generation (stmt_info, new_stmt, gsi);
+    }
+  return new_stmt_info;
+}
+
+/* Function new_vect_stmt_for_nloads.
+
+   New a VEC_STMT when nloads Arrays are merged into a vector.
+
+   ncopies is the number of vectors that need to be loaded from memmory.
+   nloads is the number of ARRAYs in a vector.
+   vectemp = {a[], b[], ...}  */
+
+static void
+new_vect_stmt_for_nloads (unsigned int ncopies, unsigned int nloads,
+			  vec<unsigned> group_idx, stmt_vec_info stmt_info,
+			  offset_info *offset_info, vectype_info *vectype_info,
+			  vect_memory_access_type memory_access_type,
+			  bool slp_perm, vec<tree>& dr_chain, slp_tree slp_node,
+			  gimple_stmt_iterator *gsi)
+{
+  vec<constructor_elt, va_gc> *v = NULL;
+  stmt_vec_info first_stmt_info = DR_GROUP_FIRST_ELEMENT (stmt_info);
+  unsigned int group_size = DR_GROUP_SIZE (first_stmt_info);
+  stmt_vec_info first_stmt_info_b = NULL;
+  stmt_vec_info new_stmt_info = NULL;
+  tree dataref_ptr = NULL_TREE;
+  tree dummy;
+  gimple *ptr_incr = NULL;
+  unsigned int n = 0;
+  for (unsigned int i = 0; i < ncopies; i++)
+    {
+      vec_alloc (v, nloads);
+      for (unsigned int t = 0; t < nloads; t++)
+	{
+	  first_stmt_info_b = get_first_stmt_info_before_transpose (
+				first_stmt_info, group_idx[n++], group_size);
+	  dr_vec_info* cur_first_dr_info = get_dr_info (first_stmt_info_b);
+	  tree bump = vect_get_data_ptr_increment (cur_first_dr_info,
+						   vectype_info->ltype,
+						   memory_access_type);
+	  bool simd_lane_access_p
+		= STMT_VINFO_SIMD_LANE_ACCESS_P (first_stmt_info_b) != 0;
+
+	  /* Create dataref_ptr which is point to init_address.  */
+	  dataref_ptr = vect_create_data_ref_ptr (
+			 first_stmt_info_b, vectype_info->ltype, NULL,
+			 offset_info->offset, &dummy, gsi, &ptr_incr,
+			 simd_lane_access_p, offset_info->byte_offset, bump);
+
+	  gassign *new_stmt = NULL;
+	  new_stmt_info = add_new_stmt_vect_load (
+			   vectype_info->vectype, dataref_ptr,
+			   offset_info->dataref_offset, vectype_info->ref_type,
+			   vectype_info->ltype, new_stmt, cur_first_dr_info,
+			   gsi, first_stmt_info_b);
+
+	  CONSTRUCTOR_APPEND_ELT (v, NULL_TREE, gimple_assign_lhs (new_stmt));
+	}
+	new_stmt_info = add_new_stmt_for_nloads_greater_than_one (
+				 vectype_info->lvectype, vectype_info->vectype,
+				 v, first_stmt_info_b, gsi);
+	push_new_stmt_to_dr_chain (slp_perm, new_stmt_info,
+				   dr_chain, slp_node);
+    }
+}
+
+/* Function new_vect_stmt_for_ncontinues.
+
+   New a VEC_STMTs when an Array is divided into several vectors.
+
+   n_groups is the number of ARRAYs.
+   ncontinues is the number of vectors from an ARRAY.
+   vectemp1 = {a[0], a[1], ...}
+   ...
+   vectempm = {a[k], a[k+1], ...}  */
+
+static void
+new_vect_stmt_for_ncontinues (unsigned int ncontinues, vec<unsigned> group_idx,
+			      stmt_vec_info stmt_info, offset_info* offset_info,
+			      vectype_info* vectype_info,
+			      vect_memory_access_type memory_access_type,
+			      bool slp_perm, vec<tree>& dr_chain,
+			      slp_tree slp_node,
+			      gimple_stmt_iterator *gsi)
+{
+  stmt_vec_info first_stmt_info = DR_GROUP_FIRST_ELEMENT (stmt_info);
+  unsigned int group_size = DR_GROUP_SIZE (first_stmt_info);
+  stmt_vec_info new_stmt_info = NULL;
+  tree dataref_ptr = NULL_TREE;
+  tree dummy;
+  gimple *ptr_incr = NULL;
+  unsigned int n_groups = group_idx.length ();
+  for (unsigned int i = 0; i < n_groups; i++)
+    {
+      stmt_vec_info first_stmt_info_b = get_first_stmt_info_before_transpose (
+				first_stmt_info, group_idx[i], group_size);
+      dr_vec_info* cur_first_dr_info = get_dr_info (first_stmt_info_b);
+      tree bump = vect_get_data_ptr_increment (cur_first_dr_info,
+			vectype_info->ltype, memory_access_type);
+      bool simd_lane_access_p
+		= STMT_VINFO_SIMD_LANE_ACCESS_P (first_stmt_info_b) != 0;
+      for (unsigned int k = 0; k < ncontinues; k++)
+	{
+	  /* Create dataref_ptr which is point to init_address.  */
+	  if (k == 0)
+	    {
+	      dataref_ptr = vect_create_data_ref_ptr (
+			 first_stmt_info_b, vectype_info->ltype, NULL,
+			 offset_info->offset, &dummy, gsi, &ptr_incr,
+			 simd_lane_access_p, offset_info->byte_offset, bump);
+	    }
+	  else
+	    {
+	      dataref_ptr = bump_vector_ptr (dataref_ptr, ptr_incr,
+					  gsi, first_stmt_info_b, bump);
+	    }
+	  gassign *new_stmt = NULL;
+	  new_stmt_info = add_new_stmt_vect_load (
+			   vectype_info->vectype, dataref_ptr,
+			   offset_info->dataref_offset, vectype_info->ref_type,
+			   vectype_info->ltype, new_stmt, cur_first_dr_info,
+			   gsi, first_stmt_info_b);
+	  push_new_stmt_to_dr_chain (slp_perm, new_stmt_info,
+				     dr_chain, slp_node);
+	}
+    }
 }
 
 /* vectorizable_load.
@@ -9364,6 +10031,9 @@ vectorizable_load (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
   tree vec_mask = NULL_TREE;
   prev_stmt_info = NULL;
   poly_uint64 group_elt = 0;
+  unsigned new_group_size = 0;
+  vec<unsigned> new_load_permutation;
+
   for (j = 0; j < ncopies; j++)
     {
       stmt_vec_info new_stmt_info = NULL;
@@ -9384,6 +10054,15 @@ vectorizable_load (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
 	    {
 	      dataref_ptr = unshare_expr (DR_BASE_ADDRESS (first_dr_info->dr));
 	      dataref_offset = build_int_cst (ref_type, 0);
+	    }
+	  /* If the stmt_info need to be transposed recovery, dataref_ptr
+	     will be caculated later.  */
+	  else if (slp && is_a <bb_vec_info> (vinfo)
+		   && STMT_VINFO_GROUPED_ACCESS (stmt_info)
+		   && DR_GROUP_SLP_TRANSPOSE (
+			DR_GROUP_FIRST_ELEMENT (stmt_info)))
+	    {
+	      dataref_ptr = NULL_TREE;
 	    }
 	  else if (diff_first_stmt_info)
 	    {
@@ -9500,6 +10179,63 @@ vectorizable_load (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
 
 	  /* Record that VEC_ARRAY is now dead.  */
 	  vect_clobber_variable (stmt_info, gsi, vec_array);
+	}
+      else if (slp && is_a <bb_vec_info> (vinfo)
+	       && STMT_VINFO_GROUPED_ACCESS (stmt_info)
+	       && DR_GROUP_SLP_TRANSPOSE (DR_GROUP_FIRST_ELEMENT (stmt_info)))
+	{
+	  if (dump_enabled_p ())
+	    {
+	      dump_printf_loc (MSG_NOTE, vect_location,
+			       "vectorizable_load for slp transpose.\n");
+	    }
+	  /* group_size: the size of group after merging.
+	     group_size_b: the size of group before merging.
+	     const_nunits: TYPE_VECTOR_SUBPARTS (vectype), it is the number of
+		elements in a vector.
+	     nloads: const_nunits / group_size_b or 1, it means the number
+		of ARRAYs in a vector.
+	     ncontinues: group_size_b / const_nunits or 1, it means the number
+		of vectors from an ARRAY.  */
+	  unsigned int group_size_b = DR_GROUP_SIZE_TRANS (first_stmt_info);
+	  unsigned int const_nunits = nunits.to_constant ();
+	  unsigned int nloads = const_nunits;
+	  unsigned int ncontinues = group_size_b;
+	  tree lvectype = vectype;
+	  tree ltype = calculate_new_type (vectype, const_nunits,
+					   group_size_b, nloads,
+					   ncontinues, lvectype);
+	  bool this_load_permuted = false;
+	  auto_vec<unsigned> group_idx;
+	  generate_load_permutation (slp_node, new_group_size, group_size,
+				     group_size_b, this_load_permuted,
+				     group_idx, new_load_permutation);
+	  slp_perm = is_slp_perm (slp_perm, this_load_permuted, nunits,
+  			  	  group_size, first_stmt_info);
+
+	  /* ncopies: the number of vectors that need to be loaded from
+		 memmory.  */
+	  unsigned int ncopies = new_group_size / const_nunits;
+	  offset_info offset_info = {offset, byte_offset, dataref_offset};
+	  vectype_info vectype_info = {vectype, ltype, lvectype, ref_type};
+	  if (slp_perm)
+	    {
+	       dr_chain.create (ncopies);
+	    }
+	  if (nloads > 1 && ncontinues == 1)
+	    {
+	      new_vect_stmt_for_nloads (ncopies, nloads, group_idx, stmt_info,
+					&offset_info, &vectype_info,
+					memory_access_type, slp_perm, dr_chain,
+					slp_node, gsi);
+	    }
+	  else
+	    {
+	      new_vect_stmt_for_ncontinues (ncontinues, group_idx, stmt_info,
+					    &offset_info, &vectype_info,
+					    memory_access_type, slp_perm,
+					    dr_chain, slp_node, gsi);
+	    }
 	}
       else
 	{
@@ -9840,7 +10576,32 @@ vectorizable_load (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
       if (slp && !slp_perm)
 	continue;
 
-      if (slp_perm)
+      /* Using the new load permutation to generate vector permute statements
+	 from a list of loads in DR_CHAIN.  */
+      if (slp && slp_perm && is_a <bb_vec_info> (vinfo)
+	  && STMT_VINFO_GROUPED_ACCESS (stmt_info)
+	  && DR_GROUP_SLP_TRANSPOSE (DR_GROUP_FIRST_ELEMENT (stmt_info)))
+	{
+	  unsigned n_perms;
+	  stmt_vec_info stmt_info_ = SLP_TREE_SCALAR_STMTS (slp_node)[0];
+	  unsigned int old_size = DR_GROUP_SIZE (stmt_info);
+	  DR_GROUP_SIZE (stmt_info_) = new_group_size;
+	  vec<unsigned> old_load_permutation
+			  = SLP_TREE_LOAD_PERMUTATION (slp_node);
+	  SLP_TREE_LOAD_PERMUTATION (slp_node) = new_load_permutation;
+	  bool perm_load_success = vect_transform_slp_perm_load (
+				     slp_node, dr_chain, gsi, vf,
+				     slp_node_instance, false, &n_perms);
+	  DR_GROUP_SIZE (stmt_info_) = old_size;
+	  SLP_TREE_LOAD_PERMUTATION (slp_node) = old_load_permutation;
+	  new_load_permutation.release ();
+	  if (!perm_load_success)
+	    {
+	      dr_chain.release ();
+	      return false;
+	    }
+	}
+      else if (slp_perm)
         {
 	  unsigned n_perms;
           if (!vect_transform_slp_perm_load (slp_node, dr_chain, gsi, vf,

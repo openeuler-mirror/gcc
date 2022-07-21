@@ -114,6 +114,13 @@ et-dg-runtest dg-runtest [lsort \
 	[glob -nocomplain $srcdir/$subdir/no-vfa-*.\[cS\]]] \
 	"" $DEFAULT_VECTCFLAGS
 
+# -ftree-slp-transpose-vectorize SLP tests
+set VECT_SLP_CFLAGS $SAVED_VECT_SLP_CFLAGS
+lappend VECT_SLP_CFLAGS "-ftree-slp-transpose-vectorize"
+et-dg-runtest dg-runtest [lsort \
+	[glob -nocomplain $srcdir/$subdir/transpose-*.\[cS\]]] \
+	"" "-ftree-slp-transpose-vectorize -fdump-tree-slp-details -O3"
+
 # -ffast-math tests
 set DEFAULT_VECTCFLAGS $SAVED_DEFAULT_VECTCFLAGS
 lappend DEFAULT_VECTCFLAGS "-ffast-math"
