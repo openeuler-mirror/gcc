@@ -3284,33 +3284,31 @@ ipa_struct_reorg::find_vars (gimple *stmt)
     }
 }
 
-/* Update field_access in srfield.  */
-
-static void
-update_field_access (tree node, tree op, unsigned access, void *data)
+static HOST_WIDE_INT
+get_offset (tree op, HOST_WIDE_INT offset)
 {
-  HOST_WIDE_INT offset = 0;
   switch (TREE_CODE (op))
     {
       case COMPONENT_REF:
 	{
-	  offset = int_byte_position (TREE_OPERAND (op, 1));
-	  break;
+	  return int_byte_position (TREE_OPERAND (op, 1));
 	}
       case MEM_REF:
 	{
-	  offset = tree_to_uhwi (TREE_OPERAND (op, 1));
-	  break;
+	  return tree_to_uhwi (TREE_OPERAND (op, 1));
 	}
       default:
-	return;
+	return offset;
     }
-  tree base = node;
-  get_base (base, node);
-  srdecl *this_srdecl = ((ipa_struct_reorg *)data)->find_decl (base);
-  if (this_srdecl == NULL)
-    return;
-  srtype *this_srtype = this_srdecl->type;
+  return offset;
+}
+
+/* Record field access.  */
+static void
+record_field_access (tree type, HOST_WIDE_INT offset,
+		     unsigned access, void *data)
+{
+  srtype *this_srtype = ((ipa_struct_reorg *)data)->find_type (type);
   if (this_srtype == NULL)
     return;
   srfield *this_srfield = this_srtype->find_field (offset);
@@ -3321,10 +3319,31 @@ update_field_access (tree node, tree op, unsigned access, void *data)
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "record field access %d:", access);
-      print_generic_expr (dump_file, this_srtype->type);
+      print_generic_expr (dump_file, type);
       fprintf (dump_file, "  field:");
       print_generic_expr (dump_file, this_srfield->fielddecl);
       fprintf (dump_file, "\n");
+    }
+  return;
+
+}
+
+/* Update field_access in srfield.  */
+
+static void
+update_field_access (tree node, tree op, unsigned access, void *data)
+{
+  HOST_WIDE_INT offset = 0;
+  offset = get_offset (op, offset);
+  tree node_type = inner_type (TREE_TYPE (node));
+  record_field_access (node_type, offset, access, data);
+  tree base = node;
+  get_base (base, node);
+  tree base_type = inner_type (TREE_TYPE (base));
+  if (!types_compatible_p (base_type, node_type))
+    {
+      record_field_access (base_type, get_offset (node, offset),
+			   access, data);
     }
   return;
 }
@@ -3373,8 +3392,7 @@ ipa_struct_reorg::remove_dead_field_stmt (tree lhs)
     return false;
   if (f == NULL)
     return false;
-  if (f->newfield[0] == NULL
-      && (f->field_access & WRITE_FIELD))
+  if (f->newfield[0] == NULL)
     return true;
   return false;
 }
@@ -5927,7 +5945,6 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	  fprintf (dump_file, "To: \n");
 	  print_gimple_stmt (dump_file, stmt, 0);
 	}
-      return false;
     }
 
   if (gimple_clobber_p (stmt))
