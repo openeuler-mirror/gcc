@@ -1798,8 +1798,7 @@ asm_operand_ok (rtx op, const char *constraint, const char **constraints)
 	    case CT_MEMORY:
 	    case CT_SPECIAL_MEMORY:
 	      /* Every memory operand can be reloaded to fit.  */
-	      result = result || memory_operand (extract_mem_from_operand (op),
-						 VOIDmode);
+	      result = result || memory_operand (op, VOIDmode);
 	      break;
 
 	    case CT_ADDRESS:
@@ -2585,9 +2584,7 @@ constrain_operands (int strict, alternative_mask alternatives)
 
 	  /* A unary operator may be accepted by the predicate, but it
 	     is irrelevant for matching constraints.  */
-	  /* For special_memory_operand, there could be a memory operand inside,
-	     and it would cause a mismatch for constraint_satisfied_p.  */
-	  if (UNARY_P (op) && op == extract_mem_from_operand (op))
+	  if (UNARY_P (op))
 	    op = XEXP (op, 0);
 
 	  if (GET_CODE (op) == SUBREG)

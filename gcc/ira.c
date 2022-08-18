@@ -1868,7 +1868,7 @@ ira_setup_alts (rtx_insn *insn)
 
 			case CT_MEMORY:
 			case CT_SPECIAL_MEMORY:
-			  if (MEM_P (extract_mem_from_operand (op)))
+			  if (MEM_P (op))
 			    goto op_success;
 			  win_p = true;
 			  break;
@@ -5130,8 +5130,6 @@ move_unallocated_pseudos (void)
 		   INSN_UID (newinsn), i);
 	SET_REG_N_REFS (i, 0);
       }
-
-  first_moveable_pseudo = last_moveable_pseudo = 0;
 }
 
 /* If the backend knows where to allocate pseudos for hard
