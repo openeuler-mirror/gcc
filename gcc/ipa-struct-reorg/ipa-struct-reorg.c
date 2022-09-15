@@ -104,6 +104,42 @@ along with GCC; see the file COPYING3.  If not see
 
 #define VOID_POINTER_P(type) (POINTER_TYPE_P (type) && VOID_TYPE_P (TREE_TYPE (type)))
 
+/* Check whether in C language or LTO with only C language.  */
+bool
+lang_c_p (void)
+{
+  const char *language_string = lang_hooks.name;
+
+  if (!language_string)
+    {
+      return false;
+    }
+
+  if (lang_GNU_C ())
+    {
+      return true;
+    }
+  else if (strcmp (language_string, "GNU GIMPLE") == 0) // for LTO check
+    {
+      unsigned i = 0;
+      tree t = NULL_TREE;
+
+      FOR_EACH_VEC_SAFE_ELT (all_translation_units, i, t)
+	{
+	  language_string = TRANSLATION_UNIT_LANGUAGE (t);
+	  if (language_string == NULL
+	      || strncmp (language_string, "GNU C", 5)
+	      || (language_string[5] != '\0'
+		  && !(ISDIGIT (language_string[5]))))
+	    {
+	      return false;
+	    }
+	}
+      return true;
+    }
+  return false;
+}
+
 namespace {
 
 using namespace struct_reorg;
@@ -160,42 +196,6 @@ handled_type (tree type)
   type = inner_type (type);
   if (TREE_CODE (type) == RECORD_TYPE)
     return !is_va_list_type (type);
-  return false;
-}
-
-/* Check whether in C language or LTO with only C language.  */
-bool
-lang_c_p (void)
-{
-  const char *language_string = lang_hooks.name;
-
-  if (!language_string)
-    {
-      return false;
-    }
-
-  if (lang_GNU_C ())
-    {
-      return true;
-    }
-  else if (strcmp (language_string, "GNU GIMPLE") == 0) // for LTO check
-    {
-      unsigned i = 0;
-      tree t = NULL_TREE;
-
-      FOR_EACH_VEC_SAFE_ELT (all_translation_units, i, t)
-	{
-	  language_string = TRANSLATION_UNIT_LANGUAGE (t);
-	  if (language_string == NULL
-	      || strncmp (language_string, "GNU C", 5)
-	      || (language_string[5] != '\0'
-		  && !(ISDIGIT (language_string[5]))))
-	    {
-	      return false;
-	    }
-	}
-      return true;
-    }
   return false;
 }
 

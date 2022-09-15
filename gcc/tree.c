@@ -128,6 +128,9 @@ const char *const tree_code_class_strings[] =
 /* obstack.[ch] explicitly declined to prototype this.  */
 extern int _obstack_allocated_p (struct obstack *h, void *obj);
 
+/* Check whether in C language or LTO with only C language.  */
+extern bool lang_c_p (void);
+
 /* Statistics-gathering stuff.  */
 
 static uint64_t tree_code_counts[MAX_TREE_CODES];
@@ -5219,7 +5222,10 @@ fld_simplified_type_name (tree type)
   /* Simplify type will cause that struct A and struct A within
      struct B are different type pointers, so skip it in structure
      optimizations.  */
-  if (flag_ipa_struct_layout || flag_ipa_struct_reorg)
+  if ((flag_ipa_struct_layout || flag_ipa_struct_reorg)
+      && lang_c_p ()
+      && flag_lto_partition == LTO_PARTITION_ONE
+      && (in_lto_p || flag_whole_program))
     return TYPE_NAME (type);
 
   if (!TYPE_NAME (type) || TREE_CODE (TYPE_NAME (type)) != TYPE_DECL)
@@ -5463,7 +5469,10 @@ fld_simplified_type (tree t, class free_lang_data_d *fld)
   /* Simplify type will cause that struct A and struct A within
      struct B are different type pointers, so skip it in structure
      optimizations.  */
-  if (flag_ipa_struct_layout || flag_ipa_struct_reorg)
+  if ((flag_ipa_struct_layout || flag_ipa_struct_reorg)
+      && lang_c_p ()
+      && flag_lto_partition == LTO_PARTITION_ONE
+      && (in_lto_p || flag_whole_program))
     return t;
   if (POINTER_TYPE_P (t))
     return fld_incomplete_type_of (t, fld);
