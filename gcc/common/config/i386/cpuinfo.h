@@ -508,6 +508,8 @@ get_intel_cpu (struct __processor_model *cpu_model,
     case 0x97:
     case 0x9a:
       /* Alder Lake.  */
+    case 0xb7:
+      /* Raptor Lake.  */
       cpu = "alderlake";
       CHECK___builtin_cpu_is ("corei7");
       CHECK___builtin_cpu_is ("alderlake");
