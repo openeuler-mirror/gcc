@@ -213,10 +213,8 @@ struct aarch64_option_extension
 static constexpr aarch64_option_extension all_extensions[] =
 {
 #define AARCH64_OPT_EXTENSION(NAME, IDENT, C, D, E, F) \
-  {NAME, AARCH64_FL_##IDENT, \
-   feature_deps::IDENT ().explicit_on & ~AARCH64_FL_##IDENT, \
-   feature_deps::get_flags_off (feature_deps::root_off_##IDENT) \
-   & ~AARCH64_FL_##IDENT},
+  {NAME, AARCH64_FL_##IDENT, feature_deps::IDENT ().explicit_on, \
+   feature_deps::get_flags_off (feature_deps::root_off_##IDENT)},
 #include "config/aarch64/aarch64-option-extensions.def"
   {NULL, 0, 0, 0}
 };
@@ -304,9 +302,9 @@ aarch64_parse_extension (const char *str, aarch64_feature_flags *isa_flags,
 	    {
 	      /* Add or remove the extension.  */
 	      if (adding_ext)
-		*isa_flags |= (opt->flags_on | opt->flag_canonical);
+		*isa_flags |= opt->flags_on;
 	      else
-		*isa_flags &= ~(opt->flags_off | opt->flag_canonical);
+		*isa_flags &= ~opt->flags_off;
 	      break;
 	    }
 	}
@@ -380,7 +378,7 @@ aarch64_get_extension_string_for_isa_flags
 
       if ((flags & isa_flags & (explicit_flags | ~current_flags)) == flags)
 	{
-	  current_flags |= opt.flag_canonical | opt.flags_on;
+	  current_flags |= opt.flags_on;
 	  added |= opt.flag_canonical;
 	}
     }
@@ -395,7 +393,7 @@ aarch64_get_extension_string_for_isa_flags
   for (auto &opt : all_extensions)
     if (opt.flag_canonical & current_flags & ~isa_flags)
       {
-	current_flags &= ~(opt.flag_canonical | opt.flags_off);
+	current_flags &= ~opt.flags_off;
 	outstr += "+no";
 	outstr += opt.name;
       }
