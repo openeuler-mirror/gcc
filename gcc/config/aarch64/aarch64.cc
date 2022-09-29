@@ -2929,7 +2929,7 @@ struct processor
   aarch64_processor ident;
   aarch64_processor sched_core;
   aarch64_arch arch;
-  uint64_t flags;
+  aarch64_feature_flags flags;
   const tune_params *tune;
 };
 
@@ -17428,7 +17428,8 @@ static void initialize_aarch64_code_model (struct gcc_options *);
 
 static enum aarch64_parse_opt_result
 aarch64_parse_arch (const char *to_parse, const struct processor **res,
-		    uint64_t *isa_flags, std::string *invalid_extension)
+		    aarch64_feature_flags *isa_flags,
+		    std::string *invalid_extension)
 {
   const char *ext;
   const struct processor *arch;
@@ -17451,7 +17452,7 @@ aarch64_parse_arch (const char *to_parse, const struct processor **res,
       if (strlen (arch->name) == len
 	  && strncmp (arch->name, to_parse, len) == 0)
 	{
-	  uint64_t isa_temp = arch->flags;
+	  auto isa_temp = arch->flags;
 
 	  if (ext != NULL)
 	    {
@@ -17483,7 +17484,8 @@ aarch64_parse_arch (const char *to_parse, const struct processor **res,
 
 static enum aarch64_parse_opt_result
 aarch64_parse_cpu (const char *to_parse, const struct processor **res,
-		   uint64_t *isa_flags, std::string *invalid_extension)
+		   aarch64_feature_flags *isa_flags,
+		   std::string *invalid_extension)
 {
   const char *ext;
   const struct processor *cpu;
@@ -17505,8 +17507,7 @@ aarch64_parse_cpu (const char *to_parse, const struct processor **res,
     {
       if (strlen (cpu->name) == len && strncmp (cpu->name, to_parse, len) == 0)
 	{
-	  uint64_t isa_temp = cpu->flags;
-
+	  auto isa_temp = cpu->flags;
 
 	  if (ext != NULL)
 	    {
@@ -18137,7 +18138,7 @@ aarch64_print_hint_for_extensions (const std::string &str)
 
 static bool
 aarch64_validate_mcpu (const char *str, const struct processor **res,
-		       uint64_t *isa_flags)
+		       aarch64_feature_flags *isa_flags)
 {
   std::string invalid_extension;
   enum aarch64_parse_opt_result parse_res
@@ -18351,7 +18352,7 @@ aarch64_validate_mbranch_protection (const char *const_str)
 
 static bool
 aarch64_validate_march (const char *str, const struct processor **res,
-			 uint64_t *isa_flags)
+			aarch64_feature_flags *isa_flags)
 {
   std::string invalid_extension;
   enum aarch64_parse_opt_result parse_res
@@ -18441,8 +18442,8 @@ aarch64_convert_sve_vector_bits (aarch64_sve_vector_bits_enum value)
 static void
 aarch64_override_options (void)
 {
-  uint64_t cpu_isa = 0;
-  uint64_t arch_isa = 0;
+  aarch64_feature_flags cpu_isa = 0;
+  aarch64_feature_flags arch_isa = 0;
   aarch64_isa_flags = 0;
 
   const struct processor *cpu = NULL;
@@ -18890,7 +18891,7 @@ static bool
 aarch64_handle_attr_isa_flags (char *str)
 {
   enum aarch64_parse_opt_result parse_res;
-  uint64_t isa_flags = aarch64_isa_flags;
+  auto isa_flags = aarch64_isa_flags;
 
   /* We allow "+nothing" in the beginning to clear out all architectural
      features if the user wants to handpick specific features.  */
@@ -19162,7 +19163,7 @@ aarch64_process_target_attr (tree args)
 	{
 	  /* Check if token is possibly an arch extension without
 	     leading '+'.  */
-	  uint64_t isa_temp = 0;
+	  aarch64_feature_flags isa_temp = 0;
 	  auto with_plus = std::string ("+") + token;
 	  enum aarch64_parse_opt_result ext_res
 	    = aarch64_parse_extension (with_plus.c_str (), &isa_temp, nullptr);
@@ -22771,7 +22772,7 @@ aarch64_declare_function_name (FILE *stream, const char* name,
   const struct processor *this_arch
     = aarch64_get_arch (targ_options->x_selected_arch);
 
-  uint64_t isa_flags = targ_options->x_aarch64_isa_flags;
+  auto isa_flags = targ_options->x_aarch64_isa_flags;
   std::string extension
     = aarch64_get_extension_string_for_isa_flags (isa_flags,
 						  this_arch->flags);
@@ -22901,7 +22902,7 @@ aarch64_start_file (void)
 
   const struct processor *default_arch
     = aarch64_get_arch (default_options->x_selected_arch);
-  uint64_t default_isa_flags = default_options->x_aarch64_isa_flags;
+  auto default_isa_flags = default_options->x_aarch64_isa_flags;
   std::string extension
     = aarch64_get_extension_string_for_isa_flags (default_isa_flags,
 						  default_arch->flags);
