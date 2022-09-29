@@ -137,6 +137,17 @@ reset_tsv110_option ()
     }
 }
 
+/* Set OPTS->x_aarch64_asm_isa_flags to FLAGS and update
+   OPTS->x_aarch64_isa_flags accordingly.  */
+void
+aarch64_set_asm_isa_flags (gcc_options *opts, aarch64_feature_flags flags)
+{
+  opts->x_aarch64_asm_isa_flags = flags;
+  opts->x_aarch64_isa_flags = flags;
+  if (opts->x_target_flags & MASK_GENERAL_REGS_ONLY)
+    opts->x_aarch64_isa_flags &= ~feature_deps::get_flags_off (AARCH64_FL_FP);
+}
+
 /* Implement TARGET_HANDLE_OPTION.
    This function handles the target specific options for CPU/target selection.
 
@@ -174,6 +185,7 @@ aarch64_handle_option (struct gcc_options *opts,
 
     case OPT_mgeneral_regs_only:
       opts->x_target_flags |= MASK_GENERAL_REGS_ONLY;
+      aarch64_set_asm_isa_flags (opts, opts->x_aarch64_asm_isa_flags);
       return true;
 
     case OPT_mfix_cortex_a53_835769:
