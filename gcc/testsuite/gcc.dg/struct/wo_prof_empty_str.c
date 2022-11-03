@@ -41,4 +41,4 @@ main ()
 }
 
 /*--------------------------------------------------------------------------*/
-/* { dg-final { scan-ipa-dump "No structures to transform" "struct_reorg" } } */
+/* { dg-final { scan-ipa-dump "No structures to transform in struct split" "struct_reorg" } } */

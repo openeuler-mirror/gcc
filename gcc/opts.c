@@ -2696,15 +2696,20 @@ common_handle_option (struct gcc_options *opts,
       break;
 
     case OPT_fipa_struct_reorg_:
-      opts->x_struct_layout_optimize_level = value;
-      if (value > 1)
-	{
-	  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_struct_layout, value);
-	}
       /* No break here - do -fipa-struct-reorg processing.  */
       /* FALLTHRU.  */
     case OPT_fipa_struct_reorg:
       opts->x_flag_ipa_struct_reorg = value;
+      if (value && !opts->x_struct_layout_optimize_level)
+	{
+	  /* Using the -fipa-struct-reorg option is equivalent to using
+	     -fipa-struct-reorg=1.  */
+	  opts->x_struct_layout_optimize_level = 1;
+	}
+      break;
+
+    case OPT_fipa_reorder_fields:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_struct_reorg, value);
       break;
 
     case OPT_fprofile_generate_:
