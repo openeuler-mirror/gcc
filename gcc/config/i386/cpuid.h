@@ -50,6 +50,7 @@
 
 /* %edx */
 #define bit_CMPXCHG8B	(1 << 8)
+#define bit_PREFETCHI	(1 << 14)
 #define bit_CMOV	(1 << 15)
 #define bit_MMX		(1 << 23)
 #define bit_FXSAVE	(1 << 24)
