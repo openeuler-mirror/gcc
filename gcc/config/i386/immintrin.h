@@ -128,4 +128,6 @@
 
 #include <keylockerintrin.h>
 
+#include <amxfp16intrin.h>
+
 #endif /* _IMMINTRIN_H_INCLUDED */

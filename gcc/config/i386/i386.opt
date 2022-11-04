@@ -1226,3 +1226,7 @@ Enable conservative small loop unrolling.
 mscatter
 Target Alias(mtune-ctrl=, use_scatter, ^use_scatter)
 Enable vectorization for scatter instruction.
+
+mamx-fp16
+Target Mask(ISA2_AMX_FP16) Var(ix86_isa_flags2) Save
+Support AMX-FP16 built-in functions and code generation.
