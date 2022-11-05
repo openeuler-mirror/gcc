@@ -3383,6 +3383,27 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
 )
 #endif
 
+#if GIMPLE
+(if (canonicalize_math_p ())
+/* These patterns are mostly used by PHIOPT to move some operations outside of
+   the if statements. They should be done late because it gives jump threading
+   and few other passes to reduce what is going on.  */
+/* a ? x op C : x -> x op (a << log2(C)) when C is power of 2. */
+ (for op (plus minus bit_ior bit_xor lshift rshift lrotate rrotate)
+  (simplify
+   (cond @0 (op:s @1 integer_pow2p@2) @1)
+    /* powerof2cst */
+   (if (INTEGRAL_TYPE_P (type))
+    (with {
+      tree shift = build_int_cst (integer_type_node, tree_log2 (@2));
+     }
+     (op @1 (lshift (convert (convert:boolean_type_node @0)) { shift; })))
+   )
+  )
+ )
+)
+#endif
+
 /* Simplification moved from fold_cond_expr_with_comparison.  It may also
    be extended.  */
 /* This pattern implements two kinds simplification:
