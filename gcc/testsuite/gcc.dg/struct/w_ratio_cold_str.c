@@ -40,4 +40,4 @@ main ()
 
 /*--------------------------------------------------------------------------*/
 /* Arrays are not handled. */
-/* { dg-final { scan-ipa-dump "Number of structures to transform is 1" "struct_reorg" { xfail *-*-* } } } */
+/* { dg-final { scan-ipa-dump "Number of structures to transform in struct split is 1" "struct_reorg" { xfail *-*-* } } } */

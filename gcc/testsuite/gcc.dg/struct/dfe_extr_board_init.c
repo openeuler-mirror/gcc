@@ -74,4 +74,4 @@ LBF_DFU_If_Needed (void)
     }
 }
 
-/* { dg-final { scan-ipa-dump-times "Dead field elimination" 0 "struct_layout" } } */
+/* { dg-final { scan-ipa-dump-times "Dead field elimination" 0 "struct_reorg" } } */

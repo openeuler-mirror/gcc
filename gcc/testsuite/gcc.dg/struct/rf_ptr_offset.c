@@ -31,4 +31,4 @@ main ()
         printf ("   Tree.\n");
 }
 
-/* { dg-final { scan-ipa-dump "No structures to transform." "struct_layout" } } */
+/* { dg-final { scan-ipa-dump "No structures to transform." "struct_reorg" } } */

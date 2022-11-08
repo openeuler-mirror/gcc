@@ -64,4 +64,4 @@ main ()
 }
 
 /*--------------------------------------------------------------------------*/
-/* { dg-final { scan-ipa-dump "Number of structures to transform is 2" "struct_reorg" } } */
+/* { dg-final { scan-ipa-dump "Number of structures to transform in struct split is 2" "struct_reorg" } } */

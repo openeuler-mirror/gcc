@@ -55,4 +55,4 @@ main ()
   return 0;
 }
 
-/* { dg-final { scan-ipa-dump "Number of structures to transform is 2" "struct_layout" } } */
+/* { dg-final { scan-ipa-dump "Number of structures to transform is 2" "struct_reorg" } } */

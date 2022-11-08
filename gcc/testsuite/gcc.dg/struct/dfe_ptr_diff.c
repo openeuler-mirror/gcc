@@ -68,4 +68,4 @@ main ()
   return 0;
 }
 
-/* { dg-final { scan-ipa-dump-times "Dead field elimination" 3 "struct_layout" } } */
+/* { dg-final { scan-ipa-dump-times "Dead field elimination" 3 "struct_reorg" } } */

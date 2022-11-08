@@ -1881,7 +1881,7 @@ Common Ignore
 Does nothing. Preserved for backward compatibility.
 
 fipa-reorder-fields
-Common Report Var(flag_ipa_struct_layout) Init(0) Optimization
+Common Report Var(flag_ipa_reorder_fields) Init(0) Optimization
 Perform structure fields reorder optimizations.
 
 fipa-struct-reorg

@@ -64,8 +64,6 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/complete_struct_relayout
 	"" "-fipa-struct-reorg=1 -fdump-ipa-all -flto-partition=one -fwhole-program"
 
 # -fipa-struct-reorg=2
-gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/rf*.c]] \
- 	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/wo_prof_*.c]] \
  	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/w_ratio_*.c]] \
@@ -79,6 +77,8 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sr_*.c]] \
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/csr_*.c]] \
 	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/complete_struct_relayout.c]] \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/rf*.c]] \
 	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
 
 # -fipa-struct-reorg=3

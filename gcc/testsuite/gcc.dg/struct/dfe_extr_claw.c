@@ -74,4 +74,4 @@ claw_snd_conn_req (struct net_device *dev, __u8 link)
   return rc;
 }
 
-/* { dg-final { scan-ipa-dump-times "Dead field elimination" 1 "struct_layout" } } */
+/* { dg-final { scan-ipa-dump-times "Dead field elimination" 1 "struct_reorg" } } */

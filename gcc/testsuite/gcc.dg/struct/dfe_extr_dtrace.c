@@ -53,4 +53,4 @@ dtrace_bcmp (const void *s1, const void *s2, size_t len)
   return (0);
 }
 
-/* { dg-final { scan-ipa-dump-times "Dead field elimination" 0 "struct_layout" } } */
+/* { dg-final { scan-ipa-dump-times "Dead field elimination" 0 "struct_reorg" } } */
