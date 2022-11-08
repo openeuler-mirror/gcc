@@ -3085,7 +3085,7 @@ vect_get_data_ptr_increment (dr_vec_info *dr_info, tree aggr_type,
   return iv_step;
 }
 
-/* Check and perform vectorization of BUILT_IN_BSWAP{16,32,64}.  */
+/* Check and perform vectorization of BUILT_IN_BSWAP{16,32,64,128}.  */
 
 static bool
 vectorizable_bswap (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
@@ -3454,7 +3454,8 @@ vectorizable_call (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
       else if (modifier == NONE
 	       && (gimple_call_builtin_p (stmt, BUILT_IN_BSWAP16)
 		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP32)
-		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP64)))
+		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP64)
+		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP128)))
 	return vectorizable_bswap (stmt_info, gsi, vec_stmt, slp_node,
 				   vectype_in, cost_vec);
       else
@@ -10716,8 +10717,7 @@ vect_is_simple_cond (tree cond, vec_info *vinfo, slp_tree slp_node,
 	      && tree_int_cst_lt (TYPE_SIZE (scalar_type),
 				  TYPE_SIZE (TREE_TYPE (vectype))))
 	    scalar_type = build_nonstandard_integer_type
-	      (tree_to_uhwi (TYPE_SIZE (TREE_TYPE (vectype))),
-	       TYPE_UNSIGNED (scalar_type));
+	      (vector_element_bits (vectype), TYPE_UNSIGNED (scalar_type));
 	  *comp_vectype = get_vectype_for_scalar_type (vinfo, scalar_type,
 						       slp_node);
 	}
@@ -11100,8 +11100,12 @@ vectorizable_condition (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
 	    {
 	      vec_cond_rhs = vec_oprnds1[i];
 	      if (bitop1 == NOP_EXPR)
-		vec_compare = build2 (cond_code, vec_cmp_type,
-				      vec_cond_lhs, vec_cond_rhs);
+	    {
+	      gimple_seq stmts = NULL;
+	      vec_compare = gimple_build (&stmts, cond_code, vec_cmp_type,
+					   vec_cond_lhs, vec_cond_rhs);
+	      gsi_insert_before (gsi, stmts, GSI_SAME_STMT);
+	    }
 	      else
 		{
 		  new_temp = make_ssa_name (vec_cmp_type);
