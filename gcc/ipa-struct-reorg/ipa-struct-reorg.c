@@ -83,6 +83,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "gimple-iterator.h"
 #include "gimple-walk.h"
 #include "cfg.h"
+#include "cfghooks.h" /* For split_block.  */
 #include "ssa.h"
 #include "tree-dfa.h"
 #include "fold-const.h"
@@ -145,7 +146,27 @@ namespace {
 using namespace struct_reorg;
 using namespace struct_relayout;
 
-/* Return true iff TYPE is stdarg va_list type.  */
+static void
+set_var_attributes (tree var)
+{
+  if (!var)
+    return;
+  gcc_assert (TREE_CODE (var) == VAR_DECL);
+
+  DECL_ARTIFICIAL (var) = 1;
+  DECL_EXTERNAL (var) = 0;
+  TREE_STATIC (var) = 1;
+  TREE_PUBLIC (var) = 0;
+  TREE_USED (var) = 1;
+  DECL_CONTEXT (var) = NULL_TREE;
+  TREE_THIS_VOLATILE (var) = 0;
+  TREE_ADDRESSABLE (var) = 0;
+  TREE_READONLY (var) = 0;
+  if (is_global_var (var))
+    set_decl_tls_model (var, TLS_MODEL_NONE);
+}
+
+/* Return true if TYPE is stdarg va_list type.  */
 
 static inline bool
 is_va_list_type (tree type)
@@ -242,8 +263,14 @@ enum struct_layout_opt_level
   STRUCT_SPLIT = 1 << 0,
   COMPLETE_STRUCT_RELAYOUT = 1 << 1,
   STRUCT_REORDER_FIELDS = 1 << 2,
-  DEAD_FIELD_ELIMINATION = 1 << 3
+  DEAD_FIELD_ELIMINATION = 1 << 3,
+  POINTER_COMPRESSION_SAFE = 1 << 4
 };
+
+/* Defines the target pointer size of compressed pointer, which should be 8,
+   16, 32.  */
+
+static int compressed_size = 32;
 
 static bool is_result_of_mult (tree arg, tree *num, tree struct_size);
 bool isptrptr (tree type);
@@ -366,7 +393,10 @@ srtype::srtype (tree type)
   : type (type),
     chain_type (false),
     escapes (does_not_escape),
+    pc_gptr (NULL_TREE),
     visited (false),
+    pc_candidate (false),
+    has_legal_alloc_num (false),
     has_alloc_array (0)
 {
   for (int i = 0; i < max_split; i++)
@@ -445,6 +475,31 @@ srtype::mark_escape (escape_type e, gimple *stmt)
 	print_gimple_stmt (dump_file, stmt, 0);
       fprintf (dump_file, "\n");
     }
+}
+
+/* Create a global header for compressed struct.  */
+
+void
+srtype::create_global_ptr_for_pc ()
+{
+  if (!pc_candidate || pc_gptr != NULL_TREE)
+    return;
+
+  const char *type_name = get_type_name (type);
+  gcc_assert (type_name != NULL);
+
+  char *gptr_name = concat (type_name, "_pc", NULL);
+  tree new_name = get_identifier (gptr_name);
+  tree new_type = build_pointer_type (newtype[0]);
+  tree new_var = build_decl (UNKNOWN_LOCATION, VAR_DECL, new_name, new_type);
+  set_var_attributes (new_var);
+  pc_gptr = new_var;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nType: %s has create global header for pointer"
+	       " compression: %s\n", type_name, gptr_name);
+
+  free (gptr_name);
 }
 
 /* Add FIELD to the list of fields that use this type.  */
@@ -790,20 +845,31 @@ srfield::create_new_optimized_fields (tree newtype[max_split],
       fields.safe_push (field);
     }
 
-  DECL_NAME (field) = DECL_NAME (fielddecl);
   if (type == NULL)
     {
+      DECL_NAME (field) = DECL_NAME (fielddecl);
       /* Common members do not need to reconstruct.
 	 Otherwise, int* -> int** or void* -> void**.  */
       TREE_TYPE (field) = nt;
+      SET_DECL_ALIGN (field, DECL_ALIGN (fielddecl));
+    }
+  else if (type->pc_candidate)
+    {
+      const char *old_name = IDENTIFIER_POINTER (DECL_NAME (fielddecl));
+      char *new_name = concat (old_name, "_pc", NULL);
+      DECL_NAME (field) = get_identifier (new_name);
+      free (new_name);
+      TREE_TYPE (field) = make_unsigned_type (compressed_size);
+      SET_DECL_ALIGN (field, compressed_size);
     }
   else
     {
-      TREE_TYPE (field)
-	      = reconstruct_complex_type (TREE_TYPE (fielddecl), nt);
+      DECL_NAME (field) = DECL_NAME (fielddecl);
+      TREE_TYPE (field) = reconstruct_complex_type (TREE_TYPE (fielddecl), nt);
+      SET_DECL_ALIGN (field, DECL_ALIGN (fielddecl));
     }
+
   DECL_SOURCE_LOCATION (field) = DECL_SOURCE_LOCATION (fielddecl);
-  SET_DECL_ALIGN (field, DECL_ALIGN (fielddecl));
   DECL_USER_ALIGN (field) = DECL_USER_ALIGN (fielddecl);
   TREE_ADDRESSABLE (field) = TREE_ADDRESSABLE (fielddecl);
   DECL_NONADDRESSABLE_P (field) = !TREE_ADDRESSABLE (fielddecl);
@@ -923,6 +989,10 @@ srtype::create_new_type (void)
 	  && has_dead_field ())
 	fprintf (dump_file, "Dead field elimination.\n");
     }
+
+  if (pc_candidate && pc_gptr == NULL_TREE)
+    create_global_ptr_for_pc ();
+
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "Created %d types:\n", maxclusters);
@@ -1341,6 +1411,30 @@ public:
   void maybe_mark_or_record_other_side (tree side, tree other, gimple *stmt);
   unsigned execute_struct_relayout (void);
   bool remove_dead_field_stmt (tree lhs);
+
+  // Pointer compression methods:
+  void check_and_prune_struct_for_pointer_compression (void);
+  void try_rewrite_with_pointer_compression (gassign *, gimple_stmt_iterator *,
+					     tree, tree, tree &, tree &);
+  bool safe_void_cmp_p (tree, srtype *);
+  bool pc_candidate_st_type_p (tree);
+  bool pc_candidate_tree_p (tree);
+  bool pc_type_conversion_candidate_p (tree);
+  bool pc_direct_rewrite_chance_p (tree, tree &);
+  bool compress_candidate_with_check (gimple_stmt_iterator *, tree, tree &);
+  bool compress_candidate (gassign *, gimple_stmt_iterator *, tree, tree &);
+  bool decompress_candidate_with_check (gimple_stmt_iterator *, tree, tree &);
+  bool decompress_candidate (gimple_stmt_iterator *, tree, tree, tree &,
+			     tree &);
+  srtype *get_compression_candidate_type (tree);
+  tree compress_ptr_to_offset (tree, srtype *, gimple_stmt_iterator *);
+  tree decompress_offset_to_ptr (tree, srtype *, gimple_stmt_iterator *);
+  basic_block create_bb_for_compress_candidate (basic_block, tree, srtype *,
+						tree &);
+  basic_block create_bb_for_decompress_candidate (basic_block, tree, srtype *,
+						  tree &);
+  basic_block create_bb_for_compress_nullptr (basic_block, tree &);
+  basic_block create_bb_for_decompress_nullptr (basic_block, tree, tree &);
 };
 
 struct ipa_struct_relayout
@@ -1391,29 +1485,6 @@ namespace {
 
 /* Methods for ipa_struct_relayout.  */
 
-static void
-set_var_attributes (tree var)
-{
-  if (!var)
-    {
-      return;
-    }
-  gcc_assert (TREE_CODE (var) == VAR_DECL);
-
-  DECL_ARTIFICIAL (var) = 1;
-  DECL_EXTERNAL (var) = 0;
-  TREE_STATIC (var) = 1;
-  TREE_PUBLIC (var) = 0;
-  TREE_USED (var) = 1;
-  DECL_CONTEXT (var) = NULL;
-  TREE_THIS_VOLATILE (var) = 0;
-  TREE_ADDRESSABLE (var) = 0;
-  TREE_READONLY (var) = 0;
-  if (is_global_var (var))
-    {
-      set_decl_tls_model (var, TLS_MODEL_NONE);
-    }
-}
 
 tree
 ipa_struct_relayout::create_new_vars (tree type, const char *name)
@@ -3135,6 +3206,19 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	     records the right value _1 declaration.  */
 	  find_var (gimple_assign_rhs1 (stmt), stmt);
 
+	  /* Pointer types from non-zero pointer need to be escaped in pointer
+	     compression and complete relayout.
+	     e.g _1->t = (struct *) 0x400000.  */
+	  if (current_layout_opt_level >= COMPLETE_STRUCT_RELAYOUT
+	      && TREE_CODE (lhs) == COMPONENT_REF
+	      && TREE_CODE (TREE_TYPE (lhs)) == POINTER_TYPE
+	      && TREE_CODE (rhs) == INTEGER_CST
+	      && !integer_zerop (rhs))
+	    {
+	      mark_type_as_escape (inner_type (TREE_TYPE (lhs)),
+				   escape_cast_int, stmt);
+	    }
+
 	  /* Add a safe func mechanism.  */
 	  bool l_find = true;
 	  bool r_find = true;
@@ -3603,14 +3687,15 @@ is_result_of_mult (tree arg, tree *num, tree struct_size)
 bool
 ipa_struct_reorg::handled_allocation_stmt (gimple *stmt)
 {
-  if ((current_layout_opt_level >= STRUCT_REORDER_FIELDS)
+  if ((current_layout_opt_level & STRUCT_REORDER_FIELDS)
       && (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_CALLOC)))
     {
       return true;
     }
-  if ((current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT)
+  if ((current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT
+       || current_layout_opt_level & POINTER_COMPRESSION_SAFE)
       && gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
     return true;
   if ((current_layout_opt_level == STRUCT_SPLIT)
@@ -3737,15 +3822,20 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other, gimple
 	}
     }
   /* x_1 = y.x_nodes; void *x;
-     Directly mark the structure pointer type assigned
-     to the void* variable as escape.  */
+     Mark the structure pointer type assigned
+     to the void* variable as escape.  Unless the void* is only used to compare
+     with variables of the same type.  */
   else if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
 	   && TREE_CODE (side) == SSA_NAME
 	   && VOID_POINTER_P (TREE_TYPE (side))
 	   && SSA_NAME_VAR (side)
 	   && VOID_POINTER_P (TREE_TYPE (SSA_NAME_VAR (side))))
     {
-      mark_type_as_escape (TREE_TYPE (other), escape_cast_void, stmt);
+      if (current_layout_opt_level < POINTER_COMPRESSION_SAFE
+	  || !safe_void_cmp_p (side, type))
+	{
+	  mark_type_as_escape (TREE_TYPE (other), escape_cast_void, stmt);
+	}
     }
 
   check_ptr_layers (side, other, stmt);
@@ -4361,7 +4451,7 @@ ipa_struct_reorg::check_type_and_push (tree newdecl, srdecl *decl,
 void
 ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type)
 {
-  if (current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT
+  if (current_layout_opt_level >= COMPLETE_STRUCT_RELAYOUT
       && handled_allocation_stmt (stmt))
     {
       tree arg0 = gimple_call_arg (stmt, 0);
@@ -4387,6 +4477,22 @@ ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type)
 	  type->has_alloc_array = type->has_alloc_array < 0
 				  ? type->has_alloc_array
 				  : type->has_alloc_array + 1;
+	}
+      if (current_layout_opt_level & POINTER_COMPRESSION_SAFE
+	  && TREE_CODE (arg0) == INTEGER_CST)
+	{
+	  /* Only known size during compilation can be optimized
+	     at this level.  */
+	  unsigned HOST_WIDE_INT max_alloc_size = 0;
+	  switch (compressed_size)
+	    {
+	      case 8: max_alloc_size = 0xff; break; // max of uint8
+	      case 16: max_alloc_size = 0xffff; break; // max of uint16
+	      case 32: max_alloc_size = 0xffffffff; break; // max of uint32
+	      default: gcc_unreachable (); break;
+	    }
+	  if (tree_to_uhwi (arg0) < max_alloc_size)
+	    type->has_legal_alloc_num = true;
 	}
     }
 }
@@ -4530,7 +4636,11 @@ ipa_struct_reorg::check_definition (srdecl *decl, vec<srdecl*> &worklist)
       && SSA_NAME_VAR (ssa_name)
       && VOID_POINTER_P (TREE_TYPE (SSA_NAME_VAR (ssa_name))))
     {
-      type->mark_escape (escape_cast_void, SSA_NAME_DEF_STMT (ssa_name));
+      if (current_layout_opt_level < POINTER_COMPRESSION_SAFE
+	  || !safe_void_cmp_p (ssa_name, type))
+	{
+	  type->mark_escape (escape_cast_void, SSA_NAME_DEF_STMT (ssa_name));
+	}
     }
   gimple *stmt = SSA_NAME_DEF_STMT (ssa_name);
 
@@ -5509,6 +5619,8 @@ ipa_struct_reorg::create_new_types (void)
   for (unsigned i = 0; i < types.length (); i++)
     newtypes += types[i]->create_new_type ();
 
+  /* Some new types may not have been created at create_new_type (), so
+     recreate new type for all struct fields.  */
   if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
       for (unsigned i = 0; i < types.length (); i++)
@@ -5519,9 +5631,18 @@ ipa_struct_reorg::create_new_types (void)
 	      for (unsigned j = 0; j < fields->length (); j++)
 		{
 		  tree field = (*fields)[j];
-		  TREE_TYPE (field)
-		  = reconstruct_complex_type (TREE_TYPE (field),
-					      types[i]->newtype[0]);
+		  if (types[i]->pc_candidate)
+		    {
+		      TREE_TYPE (field)
+			= make_unsigned_type (compressed_size);
+		      SET_DECL_ALIGN (field, compressed_size);
+		    }
+		  else
+		    {
+		      TREE_TYPE (field)
+			= reconstruct_complex_type (TREE_TYPE (field),
+						    types[i]->newtype[0]);
+		    }
 		}
 	    }
 	}
@@ -5906,6 +6027,556 @@ ipa_struct_reorg::rewrite_expr (tree expr, tree newexpr[max_split], bool ignore_
   return true;
 }
 
+/* Emit a series of gimples to compress the pointer to the index relative to
+   the global header.  The basic blocks where gsi is located must have at least
+   one stmt.  */
+
+tree
+ipa_struct_reorg::compress_ptr_to_offset (tree xhs, srtype *type,
+					  gimple_stmt_iterator *gsi)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nCompress candidate pointer:\n");
+      print_generic_expr (dump_file, xhs);
+      fprintf (dump_file, "\nto offset:\n");
+    }
+
+  /* Emit gimple _X1 = ptr - gptr.  */
+  tree pointer_addr = fold_convert (long_unsigned_type_node, xhs);
+  tree gptr_addr = fold_convert (long_unsigned_type_node, type->pc_gptr);
+  tree step1 = gimplify_build2 (gsi, MINUS_EXPR, long_unsigned_type_node,
+				pointer_addr, gptr_addr);
+
+  /* Emit gimple _X2 = _X1 / sizeof (struct).  */
+  tree step2 = gimplify_build2 (gsi, TRUNC_DIV_EXPR, long_unsigned_type_node,
+				step1, TYPE_SIZE_UNIT (type->newtype[0]));
+
+  /* Emit gimple _X3 = _X2 + 1.  */
+  tree step3 = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node,
+				step2, build_one_cst (long_unsigned_type_node));
+
+  /* Emit _X4 = (compressed_size) _X3.  */
+  tree step4 = gimplify_build1 (gsi, NOP_EXPR,
+				make_unsigned_type (compressed_size), step3);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      print_generic_expr (dump_file, step3);
+      fprintf (dump_file, "\n");
+    }
+  return step4;
+}
+
+/* Emit a series of gimples to decompress the index into the original
+   pointer.  The basic blocks where gsi is located must have at least
+   one stmt.  */
+
+tree
+ipa_struct_reorg::decompress_offset_to_ptr (tree xhs, srtype *type,
+					    gimple_stmt_iterator *gsi)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nDecompress candidate offset:\n");
+      print_generic_expr (dump_file, xhs);
+      fprintf (dump_file, "\nto pointer:\n");
+    }
+
+  /* Emit _X1 = xhs - 1.  */
+  tree offset = fold_convert (long_unsigned_type_node, xhs);
+  tree step1 = gimplify_build2 (gsi, MINUS_EXPR, long_unsigned_type_node,
+				offset,
+				build_one_cst (long_unsigned_type_node));
+
+  /* Emit _X2 = _X1 * sizeof (struct).  */
+  tree step2 = gimplify_build2 (gsi, MULT_EXPR, long_unsigned_type_node,
+				step1, TYPE_SIZE_UNIT (type->newtype[0]));
+
+  /* Emit _X3 = phead + _X2.  */
+  tree gptr_addr = fold_convert (long_unsigned_type_node, type->pc_gptr);
+  tree step3 = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node,
+				gptr_addr, step2);
+
+  /* Emit _X4 = (struct *) _X3.  */
+  tree step4 = gimplify_build1 (gsi, NOP_EXPR, TREE_TYPE (type->pc_gptr),
+				step3);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      print_generic_expr (dump_file, step3);
+      fprintf (dump_file, "\n");
+    }
+  return step4;
+}
+
+/* Return the compression candidate srtype of SSA_NAME or COMPONENT_REF.  */
+
+srtype *
+ipa_struct_reorg::get_compression_candidate_type (tree xhs)
+{
+  if (xhs == NULL_TREE)
+    return NULL;
+
+  if (TREE_CODE (xhs) == SSA_NAME || TREE_CODE (xhs) == COMPONENT_REF)
+    {
+      srtype *access_type = find_type (inner_type (TREE_TYPE (xhs)));
+      if (access_type != NULL && access_type->pc_candidate)
+	return access_type;
+    }
+  return NULL;
+}
+
+/* True if the input type is the candidate type for pointer compression.  */
+
+bool
+ipa_struct_reorg::pc_candidate_st_type_p (tree type)
+{
+  if (type == NULL_TREE)
+    return false;
+
+  if (TREE_CODE (type) == POINTER_TYPE)
+    {
+      if (TREE_CODE (TREE_TYPE (type)) == RECORD_TYPE)
+	{
+	  srtype *access_type = find_type (TREE_TYPE (type));
+	  if (access_type != NULL && access_type->pc_candidate)
+	    return true;
+	}
+    }
+  return false;
+}
+
+/* True if the input xhs is a candidate for pointer compression.  */
+
+bool
+ipa_struct_reorg::pc_candidate_tree_p (tree xhs)
+{
+  if (xhs == NULL_TREE)
+    return false;
+
+  if (TREE_CODE (xhs) == COMPONENT_REF)
+    {
+      srtype *base_type = find_type (TREE_TYPE (TREE_OPERAND (xhs, 0)));
+      if (base_type == NULL || base_type->has_escaped ())
+	return false;
+
+      return pc_candidate_st_type_p (TREE_TYPE (xhs));
+    }
+  return false;
+}
+
+/* True if xhs is a component_ref that base has escaped but uses a compression
+   candidate type.  */
+
+bool
+ipa_struct_reorg::pc_type_conversion_candidate_p (tree xhs)
+{
+  if (xhs == NULL_TREE)
+    return false;
+
+  if (TREE_CODE (xhs) == COMPONENT_REF)
+    {
+      srtype *base_type = find_type (TREE_TYPE (TREE_OPERAND (xhs, 0)));
+      if (base_type != NULL && base_type->has_escaped ())
+	return pc_candidate_st_type_p (TREE_TYPE (xhs));
+
+    }
+  return false;
+}
+
+/* Creates a new basic block with zero for compressed null pointers.  */
+
+basic_block
+ipa_struct_reorg::create_bb_for_compress_nullptr (basic_block last_bb,
+						  tree &phi)
+{
+  basic_block new_bb = create_empty_bb (last_bb);
+  if (last_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (new_bb, last_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+
+  /* Emit phi = 0.  */
+  gimple_stmt_iterator gsi = gsi_last_bb (new_bb);
+  phi = make_ssa_name (make_unsigned_type (compressed_size));
+  tree rhs = build_int_cst (make_unsigned_type (compressed_size), 0);
+  gimple *new_stmt = gimple_build_assign (phi, rhs);
+  gsi_insert_after (&gsi, new_stmt, GSI_NEW_STMT);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nCreate bb %d for compress nullptr:\n",
+	       new_bb->index);
+      gimple_dump_bb (dump_file, new_bb, 0, dump_flags);
+    }
+  return new_bb;
+}
+
+/* Create a new basic block to compress the pointer to the index relative to
+   the allocated memory pool header.  */
+
+basic_block
+ipa_struct_reorg::create_bb_for_compress_candidate (basic_block last_bb,
+						    tree new_rhs, srtype *type,
+						    tree &phi)
+{
+  basic_block new_bb = create_empty_bb (last_bb);
+  if (last_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (new_bb, last_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+
+  gimple_stmt_iterator gsi = gsi_last_bb (new_bb);
+  /* compress_ptr_to_offset () needs at least one stmt in target bb.  */
+  gsi_insert_after (&gsi, gimple_build_nop (), GSI_NEW_STMT);
+  phi = compress_ptr_to_offset (new_rhs, type, &gsi);
+  /* Remove the NOP created above.  */
+  gsi_remove (&gsi, true);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nCreate bb %d for compress candidate:\n",
+	       new_bb->index);
+      gimple_dump_bb (dump_file, new_bb, 0, dump_flags);
+    }
+  return new_bb;
+}
+
+/* Compression can be simplified by these following cases:
+     1.  if rhs is NULL, uses zero to represent it.
+     2.  if new_rhs has been converted into INTEGER_TYPE in the previous stmt,
+	 just use it here.  For example:
+	    _1 = t->s
+	 -> tt->s = _1.  */
+
+bool
+ipa_struct_reorg::pc_direct_rewrite_chance_p (tree rhs, tree &new_rhs)
+{
+  if (integer_zerop (rhs))
+    {
+      new_rhs = build_int_cst (make_unsigned_type (compressed_size), 0);
+      return true;
+    }
+  else if (new_rhs && TREE_CODE (TREE_TYPE (new_rhs)) == INTEGER_TYPE)
+    {
+      return true;
+    }
+  return false;
+}
+
+/* Perform pointer compression with check.  The conversion will be as shown in
+   the following example:
+     Orig bb:
+     bb <1>:
+     _1->t = _2
+
+     will be transformed to:
+     bb <1>:
+     _3 = _2
+     if (_2 == NULL)
+       goto bb <2>
+     else
+       goto bb <3>
+
+     bb <2>:
+     _3 = 0
+     goto bb <4>
+
+     bb <3>:
+     ...
+     _4 = compress (_2)
+     goto bb <4>
+
+     bb <4>:
+     _5 = PHI (_3, _4)
+     _1->t = _5
+   The gsi will move to the beginning of split dst bb <4>, _1->t = _5 will be
+   emitted by rewrite_assign ().  */
+
+bool
+ipa_struct_reorg::compress_candidate_with_check (gimple_stmt_iterator *gsi,
+						 tree rhs, tree &new_rhs)
+{
+  tree cond_lhs = make_ssa_name (TREE_TYPE (new_rhs));
+  gimple *assign_stmt = gimple_build_assign (cond_lhs, new_rhs);
+  gsi_insert_before (gsi, assign_stmt, GSI_SAME_STMT);
+
+  /* Insert cond stmt.  */
+  tree rhs_pointer_type = build_pointer_type (TREE_TYPE (new_rhs));
+  gcond *cond = gimple_build_cond (EQ_EXPR, cond_lhs,
+				   build_int_cst (rhs_pointer_type, 0),
+				   NULL_TREE, NULL_TREE);
+  gimple_set_location (cond, UNKNOWN_LOCATION);
+  gsi_insert_before (gsi, cond, GSI_SAME_STMT);
+
+  gimple* cur_stmt = as_a <gimple *> (cond);
+  edge e = split_block (cur_stmt->bb, cur_stmt);
+  basic_block split_src_bb = e->src;
+  basic_block split_dst_bb = e->dest;
+
+  /* Create bb for nullptr.  */
+  tree phi1 = NULL_TREE;
+  basic_block true_bb = create_bb_for_compress_nullptr (split_src_bb, phi1);
+
+  /* Create bb for comprssion.  */
+  srtype *type = get_compression_candidate_type (rhs);
+  gcc_assert (type != NULL);
+  tree phi2 = NULL_TREE;
+  basic_block false_bb = create_bb_for_compress_candidate (true_bb, new_rhs,
+							   type, phi2);
+
+  /* Rebuild and reset cfg.  */
+  remove_edge_raw (e);
+
+  edge etrue = make_edge (split_src_bb, true_bb, EDGE_TRUE_VALUE);
+  etrue->probability = profile_probability::unlikely ();
+  true_bb->count = etrue->count ();
+
+  edge efalse = make_edge (split_src_bb, false_bb, EDGE_FALSE_VALUE);
+  efalse->probability = profile_probability::likely ();
+  false_bb->count = efalse->count ();
+
+  edge e1 = make_single_succ_edge (true_bb, split_dst_bb, EDGE_FALLTHRU);
+  edge e2 = make_single_succ_edge (false_bb, split_dst_bb, EDGE_FALLTHRU);
+
+  tree phi = make_ssa_name (make_unsigned_type (compressed_size));
+  gphi *phi_node = create_phi_node (phi, split_dst_bb);
+  add_phi_arg (phi_node, phi1, e1, UNKNOWN_LOCATION);
+  add_phi_arg (phi_node, phi2, e2, UNKNOWN_LOCATION);
+
+  if (dom_info_available_p (CDI_DOMINATORS))
+    {
+      set_immediate_dominator (CDI_DOMINATORS, split_dst_bb, split_src_bb);
+      set_immediate_dominator (CDI_DOMINATORS, true_bb, split_src_bb);
+      set_immediate_dominator (CDI_DOMINATORS, false_bb, split_src_bb);
+    }
+  *gsi = gsi_start_bb (split_dst_bb);
+  new_rhs = phi;
+  return true;
+}
+
+/* If there is a direct rewrite chance or simplification opportunity, perform
+   the simplified compression rewrite.  Otherwise, create a cond expression and
+   two basic blocks to implement pointer compression.  */
+
+bool
+ipa_struct_reorg::compress_candidate (gassign *stmt, gimple_stmt_iterator *gsi,
+				      tree rhs, tree &new_rhs)
+{
+  if (pc_direct_rewrite_chance_p (rhs, new_rhs))
+    return true;
+
+  return compress_candidate_with_check (gsi, rhs, new_rhs);
+}
+
+/* Create a new basic block to decompress the index to null pointer.  */
+
+basic_block
+ipa_struct_reorg::create_bb_for_decompress_nullptr (basic_block last_bb,
+						    tree new_rhs,
+						    tree &phi_node)
+{
+  basic_block new_bb = create_empty_bb (last_bb);
+  if (last_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (new_bb, last_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+  gimple_stmt_iterator gsi = gsi_last_bb (new_bb);
+  tree rhs_pointer_type = build_pointer_type (TREE_TYPE (new_rhs));
+  phi_node = make_ssa_name (rhs_pointer_type);
+  gimple *new_stmt = gimple_build_assign (phi_node,
+					  build_int_cst (rhs_pointer_type, 0));
+  gsi_insert_after (&gsi, new_stmt, GSI_NEW_STMT);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nCreate bb %d for decompress nullptr:\n",
+	       new_bb->index);
+      gimple_dump_bb (dump_file, new_bb, 0, dump_flags);
+    }
+  return new_bb;
+}
+
+/* Create a new basic block to decompress the index into original pointer.  */
+
+basic_block
+ipa_struct_reorg::create_bb_for_decompress_candidate (basic_block last_bb,
+						      tree lhs, srtype *type,
+						      tree &phi_node)
+{
+  basic_block new_bb = create_empty_bb (last_bb);
+  if (last_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (new_bb, last_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+  gimple_stmt_iterator gsi = gsi_last_bb (new_bb);
+  /* decompress_ptr_to_offset () needs at least one stmt in target bb.  */
+  gsi_insert_after (&gsi, gimple_build_nop (), GSI_NEW_STMT);
+  phi_node = decompress_offset_to_ptr (lhs, type, &gsi);
+  /* Remove the NOP created above.  */
+  gsi_remove (&gsi, true);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nCreate bb %d for decompress candidate:\n",
+	       new_bb->index);
+      gimple_dump_bb (dump_file, new_bb, 0, dump_flags);
+    }
+  return new_bb;
+}
+
+/* Perform pointer decompression with check.  The conversion will be as shown
+   in the following example:
+     Orig bb:
+     bb <1>:
+     _1 = _2->t
+
+     will be transformed to:
+     bb <1>:
+     _3 = _2->t
+     if (_3 == 0)
+       goto bb <2>
+     else
+       goto bb <3>
+
+     bb <2>:
+     _4 = NULL
+     goto bb <4>
+
+     bb <3>:
+     ...
+     _5 = decompress (_3)
+     goto bb <4>
+
+     bb <4>:
+     _6 = PHI (_4, _5)
+     _1 = _6
+   The gsi will move to the beginning of split dst bb <4>, _1 = _6 will be
+   emitted by rewrite_assign ().  */
+
+bool
+ipa_struct_reorg::decompress_candidate_with_check (gimple_stmt_iterator *gsi,
+						   tree rhs, tree &new_rhs)
+{
+  /* Insert cond stmt.  */
+  tree cond_lhs = make_ssa_name (TREE_TYPE (new_rhs));
+  gassign *cond_assign = gimple_build_assign (cond_lhs, new_rhs);
+  gsi_insert_before (gsi, cond_assign, GSI_SAME_STMT);
+
+  tree pc_type = make_unsigned_type (compressed_size);
+  gcond *cond = gimple_build_cond (EQ_EXPR, cond_lhs,
+				   build_int_cst (pc_type, 0),
+				   NULL_TREE, NULL_TREE);
+  gimple_set_location (cond, UNKNOWN_LOCATION);
+  gsi_insert_before (gsi, cond, GSI_SAME_STMT);
+
+  /* Split bb.  */
+  gimple* cur_stmt = as_a <gimple *> (cond);
+  edge e = split_block (cur_stmt->bb, cur_stmt);
+  basic_block split_src_bb = e->src;
+  basic_block split_dst_bb = e->dest;
+
+  /* Create bb for decompress nullptr.  */
+  tree phi1 = NULL_TREE;
+  basic_block true_bb = create_bb_for_decompress_nullptr (split_src_bb,
+							  new_rhs, phi1);
+
+  /* Create bb for decomprssion candidate.  */
+  tree phi2 = NULL_TREE;
+  srtype *type = get_compression_candidate_type (rhs);
+  gcc_assert (type != NULL);
+  basic_block false_bb = create_bb_for_decompress_candidate (true_bb, cond_lhs,
+							     type, phi2);
+
+  /* Refresh and reset cfg.  */
+  remove_edge_raw (e);
+
+  edge etrue = make_edge (split_src_bb, true_bb, EDGE_TRUE_VALUE);
+  etrue->probability = profile_probability::unlikely ();
+  true_bb->count = etrue->count ();
+
+  edge efalse = make_edge (split_src_bb, false_bb, EDGE_FALSE_VALUE);
+  efalse->probability = profile_probability::likely ();
+  false_bb->count = efalse->count ();
+
+  edge e1 = make_single_succ_edge (true_bb, split_dst_bb, EDGE_FALLTHRU);
+  edge e2 = make_single_succ_edge (false_bb, split_dst_bb, EDGE_FALLTHRU);
+
+  tree phi = make_ssa_name (build_pointer_type (TREE_TYPE (cond_lhs)));
+  gphi *phi_node = create_phi_node (phi, split_dst_bb);
+  add_phi_arg (phi_node, phi1, e1, UNKNOWN_LOCATION);
+  add_phi_arg (phi_node, phi2, e2, UNKNOWN_LOCATION);
+
+  if (dom_info_available_p (CDI_DOMINATORS))
+    {
+      set_immediate_dominator (CDI_DOMINATORS, split_dst_bb, split_src_bb);
+      set_immediate_dominator (CDI_DOMINATORS, true_bb, split_src_bb);
+      set_immediate_dominator (CDI_DOMINATORS, false_bb, split_src_bb);
+    }
+  *gsi = gsi_start_bb (split_dst_bb);
+  new_rhs = phi;
+  return true;
+}
+
+/* If there is a simplification opportunity, perform the simplified
+   decompression rewrite.  Otherwise, create a cond expression and two basic
+   blocks to implement pointer decompression.  */
+
+bool
+ipa_struct_reorg::decompress_candidate (gimple_stmt_iterator *gsi,
+					tree lhs, tree rhs, tree &new_lhs,
+					tree &new_rhs)
+{
+  // TODO: simplifiy check and rewrite will be pushed in next PR.
+  return decompress_candidate_with_check (gsi, rhs, new_rhs);
+}
+
+/* Try to perform pointer compression and decompression.  */
+
+void
+ipa_struct_reorg::try_rewrite_with_pointer_compression (gassign *stmt,
+							gimple_stmt_iterator
+							*gsi, tree lhs,
+							tree rhs, tree &new_lhs,
+							tree &new_rhs)
+{
+  bool l = pc_candidate_tree_p (lhs);
+  bool r = pc_candidate_tree_p (rhs);
+  if (!l && !r)
+    {
+      tree tmp_rhs = new_rhs == NULL_TREE ? rhs : new_rhs;
+      if (pc_type_conversion_candidate_p (lhs))
+	{
+	  /* Transfer MEM[(struct *)_1].files = _4;
+	     to MEM[(struct *)_1].files = (struct *)_4; */
+	  new_rhs = fold_convert (TREE_TYPE (lhs), tmp_rhs);
+	}
+      else if (pc_type_conversion_candidate_p (rhs))
+	{
+	  /* Transfer _4 = MEM[(struct *)_1].nodes;
+	     to _4  = (new_struct *) MEM[(struct *)_1].nodes; */
+	  new_rhs = fold_convert (TREE_TYPE (new_lhs), tmp_rhs);
+	}
+    }
+  else if (l && r)
+    gcc_unreachable ();
+  else if (l)
+    {
+      if (!compress_candidate (stmt, gsi, rhs, new_rhs))
+	gcc_unreachable ();
+    }
+  else if (r)
+    {
+      if (!decompress_candidate (gsi, lhs, rhs, new_lhs, new_rhs))
+	gcc_unreachable ();
+    }
+}
+
 bool
 ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 {
@@ -6109,6 +6780,9 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	fprintf (dump_file, "replaced with:\n");
       for (unsigned i = 0; i < max_split && (newlhs[i] || newrhs[i]); i++)
 	{
+	  if (current_layout_opt_level >= POINTER_COMPRESSION_SAFE)
+	    try_rewrite_with_pointer_compression (stmt, gsi, lhs, rhs,
+						  newlhs[i], newrhs[i]);
 	  gimple *newstmt = gimple_build_assign (newlhs[i] ? newlhs[i] : lhs, newrhs[i] ? newrhs[i] : rhs);
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
@@ -6183,6 +6857,13 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
 	    gcc_assert (false);
 	  gimple_call_set_lhs (g, decl->newdecl[i]);
 	  gsi_insert_before (gsi, g, GSI_SAME_STMT);
+	  if (type->pc_candidate)
+	    {
+	      /* Init global header for pointer compression.  */
+	      gassign *gptr
+		= gimple_build_assign (type->pc_gptr, decl->newdecl[i]);
+	      gsi_insert_before (gsi, gptr, GSI_SAME_STMT);
+	    }
 	}
       return true;
     }
@@ -6649,6 +7330,12 @@ ipa_struct_reorg::rewrite_functions (void)
       push_cfun (DECL_STRUCT_FUNCTION (node->decl));
       current_function = f;
 
+      if (current_layout_opt_level >= POINTER_COMPRESSION_SAFE)
+	{
+	  calculate_dominance_info (CDI_DOMINATORS);
+	  loop_optimizer_init (0);
+	}
+
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
 	  fprintf (dump_file, "\nBefore rewrite: %dth_%s\n",
@@ -6724,6 +7411,9 @@ ipa_struct_reorg::rewrite_functions (void)
 
       free_dominance_info (CDI_DOMINATORS);
 
+      if (current_layout_opt_level >= POINTER_COMPRESSION_SAFE)
+	loop_optimizer_finalize ();
+
       if (dump_file)
 	{
 	  fprintf (dump_file, "\nAfter rewrite: %dth_%s\n",
@@ -6758,6 +7448,10 @@ ipa_struct_reorg::execute_struct_relayout (void)
 	{
 	  continue;
 	}
+      if (get_type_name (types[i]->type) == NULL)
+	{
+	  continue;
+	}
       retval |= ipa_struct_relayout (type, this).execute ();
     }
 
@@ -6776,6 +7470,132 @@ ipa_struct_reorg::execute_struct_relayout (void)
     }
 
   return retval;
+}
+
+
+/* True if the var with void type is only used to compare with the same
+   target type.  */
+
+bool
+ipa_struct_reorg::safe_void_cmp_p (tree var, srtype *type)
+{
+  imm_use_iterator imm_iter;
+  use_operand_p use_p;
+  FOR_EACH_IMM_USE_FAST (use_p, imm_iter, var)
+    {
+      gimple *use_stmt = USE_STMT (use_p);
+      if (is_gimple_debug (use_stmt))
+	continue;
+
+      if (gimple_code (use_stmt) == GIMPLE_COND)
+	{
+	  tree lhs = gimple_cond_lhs (use_stmt);
+	  tree rhs = gimple_cond_rhs (use_stmt);
+	  tree xhs = lhs == var ? rhs : lhs;
+	  if (types_compatible_p (inner_type (TREE_TYPE (xhs)), type->type))
+	    continue;
+
+	}
+      return false;
+    }
+  return true;
+}
+
+/* Mark the structure that should perform pointer compression.  */
+
+void
+ipa_struct_reorg::check_and_prune_struct_for_pointer_compression (void)
+{
+  unsigned pc_transform_num = 0;
+
+  if (dump_file)
+    fprintf (dump_file, "\nMark the structure that should perform pointer"
+			" compression:\n");
+
+  for (unsigned i = 0; i < types.length (); i++)
+    {
+      srtype *type = types[i];
+      if (dump_file)
+	print_generic_expr (dump_file, type->type);
+
+      if (type->has_escaped ())
+	{
+	  if (dump_file)
+	    fprintf (dump_file, " has escaped by %s, skip compression.\n",
+		     type->escape_reason ());
+	  continue;
+	}
+      if (TYPE_FIELDS (type->type) == NULL)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, " has zero field, skip compression.\n");
+	  continue;
+	}
+      if (type->chain_type)
+	{
+	  if (dump_file)
+	      fprintf (dump_file, " is chain_type, skip compression.\n");
+	  continue;
+	}
+      if (type->has_alloc_array != 1)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, " has alloc number: %d, skip compression.\n",
+		     type->has_alloc_array);
+	  continue;
+	}
+      if (get_type_name (type->type) == NULL)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, " has empty struct name,"
+				" skip compression.\n");
+	  continue;
+	}
+      if ((current_layout_opt_level & POINTER_COMPRESSION_SAFE)
+	  && !type->has_legal_alloc_num)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, " has illegal struct array size,"
+				" skip compression.\n");
+	  continue;
+	}
+      pc_transform_num++;
+      type->pc_candidate = true;
+      if (dump_file)
+	fprintf (dump_file, " attemps to do pointer compression.\n");
+    }
+
+  if (dump_file)
+    {
+      if (pc_transform_num)
+	fprintf (dump_file, "\nNumber of structures to transform in "
+			    "pointer compression is %d\n", pc_transform_num);
+      else
+	fprintf (dump_file, "\nNo structures to transform in "
+			    "pointer compression.\n");
+    }
+}
+
+/* Init pointer size from parameter param_pointer_compression_size.  */
+
+static void
+init_pointer_size_for_pointer_compression (void)
+{
+  switch (param_pointer_compression_size)
+    {
+      case 8:
+	compressed_size = 8; // sizeof (uint8)
+	break;
+      case 16:
+	compressed_size = 16; // sizeof (uint16)
+	break;
+      case 32:
+	compressed_size = 32; // sizeof (uint32)
+	break;
+      default:
+	error ("Invalid pointer compression size, using the following param: "
+	       "\"--param pointer-compression-size=[8,16,32]\"");
+    }
 }
 
 unsigned int
@@ -6798,6 +7618,8 @@ ipa_struct_reorg::execute (unsigned int opt)
 	{
 	  analyze_types ();
 	}
+      if (opt >= POINTER_COMPRESSION_SAFE)
+	check_and_prune_struct_for_pointer_compression ();
 
       ret = rewrite_functions ();
     }
@@ -6850,6 +7672,8 @@ public:
     unsigned int level = 0;
     switch (struct_layout_optimize_level)
       {
+	case 4: level |= POINTER_COMPRESSION_SAFE;
+	// FALLTHRU
 	case 3: level |= DEAD_FIELD_ELIMINATION;
 	// FALLTHRU
 	case 2: level |= STRUCT_REORDER_FIELDS;
@@ -6861,6 +7685,9 @@ public:
 	case 0: break;
 	default: gcc_unreachable ();
       }
+
+    if (level & POINTER_COMPRESSION_SAFE)
+      init_pointer_size_for_pointer_compression ();
 
     /* Preserved for backward compatibility, reorder fields needs run before
        struct split and complete struct relayout.  */
