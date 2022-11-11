@@ -5623,6 +5623,7 @@ vect_transpose_store_chain (vec<tree> dr_chain, unsigned int length,
 		...}>  */
   vect_indices_encoding (vectype, array_num, perm_mask_high, perm_mask_low);
 
+  result_chain->quick_grow (length);
   for (unsigned int perm_time = 0; perm_time < log_length; perm_time++)
     {
       for (unsigned int index = 0; index < length / 2; index++)
