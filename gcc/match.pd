@@ -4302,6 +4302,62 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
 #endif
 
 #if GIMPLE
+/* These patterns are mostly used by FORWPROP4 to move some operations outside of
+   the if statements. They should be done late because it gives jump threading
+   and few other passes to reduce what is going on.  */
+/* Mul64 is defined as a multiplication algorithm which compute two 64-bit
+   integers to one 128-bit integer. Try to match the high part of mul pattern
+   after the low part of mul pattern is simplified. The following scenario
+   should be matched:
+  (i64 ResLo, i64 ResHi) = Mul64(i64 In0, i64 In1) {
+    In0Lo = In0(D) & 4294967295;        -- bit_and@4 SSA_NAME@0 @2
+    In0Hi = In0(D) >> 32;               -- rshift@5 SSA_NAME@0 @3
+    In1Lo = In1(D) & 4294967295;        -- bit_and@6 SSA_NAME@1 INTEGER_CST@2
+    In1Hi = In1(D) >> 32;               -- rshift@7 SSA_NAME@1 INTEGER_CST@3
+    Mull_01 = In0Hi * In1Lo;            -- mult@8 @5 @6
+    Addc = In0Lo * In1Hi + Mull_01;     -- plus@9 (mult (@4 @7) @8
+    AddH = (Addc >> 32) + In0Hi * In1Hi -- (plus@11 (rshift @9 @3) (mult @5 @7))
+    addc32 = Addc << 32;                -- lshift@10 @9 @3
+    ResLo = In0(D) * In1(D);            -- mult @0 @1
+    ResHi = ((long unsigned int) (addc32 > ResLo)) +
+	        (((long unsigned int) (Mull_01 > Addc)) << 32) + AddH;
+ } */
+(simplify
+ (plus:c
+  (plus:c
+   (convert
+    (gt (lshift@10 @9 @3)
+        (mult:c @0 @1)))
+   (lshift
+    (convert
+     (gt @8 @9))
+    @3))
+  (plus:c@11
+   (rshift
+    (plus:c@9
+     (mult:c (bit_and@4 SSA_NAME@0 @2) @7)
+             (mult:c@8 @5 (bit_and@6 SSA_NAME@1 INTEGER_CST@2)))
+    @3)
+   (mult:c (rshift@5 SSA_NAME@0 @3)
+           (rshift@7 SSA_NAME@1 INTEGER_CST@3))
+  )
+ )
+ (if (flag_merge_mull && INTEGRAL_TYPE_P (type)
+      && INTEGRAL_TYPE_P (TREE_TYPE (@0)) && types_match (@0, @1)
+      && TYPE_PRECISION (type) == 64)
+  (with {
+      tree i128_type = build_nonstandard_integer_type (128, TYPE_UNSIGNED (type));
+      tree shift = build_int_cst (integer_type_node, 64);
+   }
+  (convert:type (rshift
+	         (mult (convert:i128_type @0)
+                       (convert:i128_type @1))
+                 { shift; })))
+ )
+)
+#endif
+
+#if GIMPLE
 /* These patterns are mostly used by FORWPROP1 to fold some operations into more
    simple IR. The following scenario should be matched:
     In0Lo = In0(D) & 4294967295;
