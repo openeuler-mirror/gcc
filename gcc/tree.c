@@ -5224,8 +5224,7 @@ fld_simplified_type_name (tree type)
      optimizations.  */
   if (flag_ipa_struct_reorg
       && lang_c_p ()
-      && flag_lto_partition == LTO_PARTITION_ONE
-      && (in_lto_p || flag_whole_program))
+      && flag_lto_partition == LTO_PARTITION_ONE)
     return TYPE_NAME (type);
 
   if (!TYPE_NAME (type) || TREE_CODE (TYPE_NAME (type)) != TYPE_DECL)
@@ -5471,8 +5470,7 @@ fld_simplified_type (tree t, class free_lang_data_d *fld)
      optimizations.  */
   if (flag_ipa_struct_reorg
       && lang_c_p ()
-      && flag_lto_partition == LTO_PARTITION_ONE
-      && (in_lto_p || flag_whole_program))
+      && flag_lto_partition == LTO_PARTITION_ONE)
     return t;
   if (POINTER_TYPE_P (t))
     return fld_incomplete_type_of (t, fld);
