@@ -565,12 +565,9 @@ public:
   {}
 
   /* opt_pass methods: */
-  virtual bool gate (function *fun)
+  virtual bool gate (function *)
     {
-      return (flag_unroll_loops || flag_unroll_all_loops || cfun->has_unroll
-	      || (targetm.loop_unroll_adjust
-		  && optimize >= 2
-		  && optimize_function_for_speed_p (fun)));
+      return (flag_unroll_loops || flag_unroll_all_loops || cfun->has_unroll);
     }
 
   virtual unsigned int execute (function *);
@@ -586,8 +583,7 @@ pass_rtl_unroll_loops::execute (function *fun)
       if (dump_file)
 	df_dump (dump_file);
 
-      if (flag_unroll_loops
-	  || targetm.loop_unroll_adjust)
+      if (flag_unroll_loops)
 	flags |= UAP_UNROLL;
       if (flag_unroll_all_loops)
 	flags |= UAP_UNROLL_ALL;
