@@ -984,4 +984,8 @@ High execution rate loops to be analyzed in prefetch (in%).
 Common Joined UInteger Var(param_prefetch_func_counts_threshold) Init(100) Param Optimization
 Threshold functions of cache miss counts to be analyzed in prefetching.
 
+-param=compressed-pointer-size=
+Common Joined UInteger Var(param_pointer_compression_size) Init(32) IntegerRange(8, 32) Param Optimization
+Target size of compressed pointer, which should be 8, 16 or 32.
+
 ; This comment is to ensure we retain the blank line above.
