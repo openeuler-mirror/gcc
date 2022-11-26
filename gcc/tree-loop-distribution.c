@@ -90,6 +90,8 @@ along with GCC; see the file COPYING3.  If not see
 	data reuse.  */
 
 #include "config.h"
+#define INCLUDE_MAP
+#define INCLUDE_ALGORITHM
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -115,6 +117,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-vectorizer.h"
 #include "tree-eh.h"
 #include "gimple-fold.h"
+#include "optabs-tree.h"
 
 
 #define MAX_DATAREFS_NUM \
@@ -182,6 +185,52 @@ struct rdg_vertex
 #define RDG_DATAREFS(RDG, I) RDGV_DATAREFS (&(RDG->vertices[I]))
 #define RDG_MEM_WRITE_STMT(RDG, I) RDGV_HAS_MEM_WRITE (&(RDG->vertices[I]))
 #define RDG_MEM_READS_STMT(RDG, I) RDGV_HAS_MEM_READS (&(RDG->vertices[I]))
+
+/* Results of isomorphic group analysis.  */
+#define UNINITIALIZED	(0)
+#define ISOMORPHIC	(1)
+#define HETEROGENEOUS	(1 << 1)
+#define UNCERTAIN	(1 << 2)
+
+/* Information of a stmt while analyzing isomorphic use in group.  */
+
+typedef struct _group_info
+{
+  gimple *stmt;
+
+  /* True if stmt can be a cut point.  */
+  bool cut_point;
+
+  /* For use_stmt with two rhses, one of which is the lhs of stmt.
+     If the other is unknown to be isomorphic, mark it uncertain.  */
+  bool uncertain;
+
+  /* Searching of isomorphic stmt reaches heterogeneous groups or reaches
+     MEM stmts.  */
+  bool done;
+
+  _group_info ()
+    {
+      stmt = NULL;
+      cut_point = false;
+      uncertain = false;
+      done = false;
+    }
+} *group_info;
+
+/* PAIR of cut points and corresponding profit.  */
+typedef std::pair<vec<gimple *> *, int> stmts_profit;
+
+/* MAP of vector factor VF and corresponding stmts_profit PAIR.  */
+typedef std::map<unsigned, stmts_profit> vf_stmts_profit_map;
+
+/* PAIR of group_num and iteration_num.  We consider rhses from the same
+   group and interation are isomorphic.  */
+typedef std::pair<unsigned, unsigned> group_iteration;
+
+/* An isomorphic stmt is detetmined by lhs of use_stmt, group_num and
+   the iteration_num when we insert this stmt to this map.  */
+typedef std::map<tree, group_iteration> isomer_stmt_lhs;
 
 /* Data dependence type.  */
 
@@ -640,6 +689,18 @@ class loop_distribution
   void finalize_partitions (class loop *loop, vec<struct partition *>
 			    *partitions, vec<ddr_p> *alias_ddrs);
 
+  /* Analyze loop form and if it's vectorizable to decide if we need to
+     insert temp arrays to distribute it.  */
+  bool may_insert_temp_arrays (loop_p loop, struct graph *&rdg,
+			       control_dependences *cd);
+
+  /* Reset gimple_uid of GIMPLE_DEBUG and GIMPLE_LABEL to -1.  */
+  void reset_gimple_uid (loop_p loop);
+
+  bool check_loop_vectorizable (loop_p loop);
+
+  inline void rebuild_rdg (loop_p loop, struct graph *&rdg,
+			   control_dependences *cd);
   /* Distributes the code from LOOP in such a way that producer statements
      are placed before consumer statements.  Tries to separate only the
      statements from STMTS into separate loops.  Returns the number of
@@ -2898,6 +2959,803 @@ loop_distribution::finalize_partitions (class loop *loop,
   /* Fuse memset builtins if possible.  */
   if (partitions->length () > 1)
     fuse_memset_builtins (partitions);
+}
+
+/* Gimple uids of GIMPLE_DEBUG and GIMPLE_LABEL were changed during function
+   vect_analyze_loop, reset them to -1.  */
+
+void
+loop_distribution::reset_gimple_uid (loop_p loop)
+{
+  basic_block *bbs = get_loop_body_in_custom_order (loop, this,
+						    bb_top_order_cmp_r);
+  for (int i = 0; i < int (loop->num_nodes); i++)
+    {
+      basic_block bb = bbs[i];
+      for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
+	   gsi_next (&gsi))
+	{
+	  gimple *stmt = gsi_stmt (gsi);
+	  if (is_gimple_debug (stmt) || gimple_code (stmt) == GIMPLE_LABEL)
+	    gimple_set_uid (stmt, -1);
+	}
+    }
+  free (bbs);
+}
+
+bool
+loop_distribution::check_loop_vectorizable (loop_p loop)
+{
+  vec_info_shared shared;
+  vect_analyze_loop (loop, &shared, true);
+  loop_vec_info vinfo = loop_vec_info_for_loop (loop);
+  reset_gimple_uid (loop);
+  if (vinfo == NULL)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file,
+		 "Loop %d no temp array insertion: bad data access pattern,"
+		 " unable to generate loop_vinfo.\n", loop->num);
+      return false;
+    }
+  if (vinfo->vectorizable)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d no temp array insertion: original loop"
+			    " can be vectorized without distribution.\n",
+			    loop->num);
+      delete vinfo;
+      loop->aux = NULL;
+      return false;
+    }
+  if (vinfo->grouped_loads.length () == 0)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d no temp array insertion: original loop"
+			    " has no grouped loads.\n" , loop->num);
+      delete vinfo;
+      loop->aux = NULL;
+      return false;
+    }
+  return true;
+}
+
+inline void
+loop_distribution::rebuild_rdg (loop_p loop, struct graph *&rdg,
+				control_dependences *cd)
+{
+  free_rdg (rdg);
+  rdg = build_rdg (loop, cd);
+  gcc_checking_assert (rdg != NULL);
+}
+
+bool
+loop_distribution::may_insert_temp_arrays (loop_p loop, struct graph *&rdg,
+					   control_dependences *cd)
+{
+  if (!(flag_tree_slp_transpose_vectorize && flag_tree_loop_vectorize))
+    return false;
+
+  /* Only loops with two basic blocks HEADER and LATCH are supported.  HEADER
+     is the main body of a LOOP and LATCH is the basic block that controls the
+     LOOP execution.  Size of temp array is determined by loop execution time,
+     so it must be a const.  */
+  tree loop_extent = number_of_latch_executions (loop);
+  if (loop->inner != NULL || loop->num_nodes > 2
+      || rdg->n_vertices > param_slp_max_insns_in_bb
+      || TREE_CODE (loop_extent) != INTEGER_CST)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d: no temp array insertion: bad loop"
+			    " form.\n", loop->num);
+      return false;
+    }
+
+  if (loop->dont_vectorize)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d: no temp array insertion: this loop"
+			    " should never be vectorized.\n",
+			    loop->num);
+      return false;
+    }
+
+  /* Do not distribute a LOOP that is able to be vectorized without
+     distribution.  */
+  if (!check_loop_vectorizable (loop))
+    {
+      rebuild_rdg (loop, rdg, cd);
+      return false;
+    }
+
+  rebuild_rdg (loop, rdg, cd);
+  return true;
+}
+
+/* Return max grouped loads' length if all groupes length satisfy len = 2 ^ n.
+   Otherwise, return 0.  */
+
+static unsigned
+get_max_vf (loop_vec_info vinfo)
+{
+  unsigned size = 0;
+  unsigned max = 0;
+  stmt_vec_info stmt_info;
+  unsigned i = 0;
+  FOR_EACH_VEC_ELT (vinfo->grouped_loads, i, stmt_info)
+    {
+      size = stmt_info->size;
+      if (!pow2p_hwi (size))
+	return 0;
+      max = size > max ? size : max;
+    }
+  return max;
+}
+
+/* Convert grouped_loads from linked list to vector with length vf.  Init
+   group_info of each stmt in the same group and put then into a vector.  And
+   these vectors consist WORKLISTS.  We will re-analyze a group if it is
+   uncertain, so we regard WORKLISTS as a circular queue.  */
+
+static unsigned
+build_queue (loop_vec_info vinfo, unsigned vf,
+	     vec<vec<group_info> *> &worklists)
+{
+  stmt_vec_info stmt_info;
+  unsigned i = 0;
+  group_info ginfo = NULL;
+  vec<group_info> *worklist = NULL;
+  FOR_EACH_VEC_ELT (vinfo->grouped_loads, i, stmt_info)
+    {
+      unsigned group_size = stmt_info->size;
+      stmt_vec_info c_stmt_info = stmt_info;
+      while (group_size >= vf)
+	{
+	  vec_alloc (worklist, vf);
+	  for (unsigned j = 0; j < vf; ++j)
+	    {
+	      ginfo = new _group_info ();
+	      ginfo->stmt = c_stmt_info->stmt;
+	      worklist->safe_push (ginfo);
+	      c_stmt_info = c_stmt_info->next_element;
+	    }
+	  worklists.safe_push (worklist);
+	  group_size -= vf;
+	}
+    }
+  return worklists.length ();
+}
+
+static bool
+check_same_oprand_type (tree op1, tree op2)
+{
+  tree type1 = TREE_TYPE (op1);
+  tree type2 = TREE_TYPE (op2);
+  if (TREE_CODE (type1) != INTEGER_TYPE && TREE_CODE (type1) != REAL_TYPE)
+    return false;
+
+  return (TREE_CODE (type1) == TREE_CODE (type2)
+	  && TYPE_UNSIGNED (type1) == TYPE_UNSIGNED (type2)
+	  && TYPE_PRECISION (type1) == TYPE_PRECISION (type2));
+}
+
+static bool
+bit_field_p (gimple *stmt)
+{
+  unsigned i = 0;
+  auto_vec<data_reference_p, 2> datarefs_vec;
+  data_reference_p dr;
+  if (!find_data_references_in_stmt (NULL, stmt, &datarefs_vec))
+    return true;
+
+  FOR_EACH_VEC_ELT (datarefs_vec, i, dr)
+    {
+      if (TREE_CODE (DR_REF (dr)) == COMPONENT_REF
+	  && DECL_BIT_FIELD (TREE_OPERAND (DR_REF (dr), 1)))
+	return true;
+    }
+  return false;
+}
+
+static inline bool
+shift_operation (enum tree_code op)
+{
+  return op == LSHIFT_EXPR || op == RSHIFT_EXPR || op == LROTATE_EXPR
+	 || op == RROTATE_EXPR;
+}
+
+/* Return relationship between USE_STMT and the first use_stmt of the group.
+   RHS1 is the lhs of stmt recorded in group_info.  If another rhs of use_stmt
+   is not a constant, return UNCERTAIN and re-check it later.  */
+
+static unsigned
+check_isomorphic (gimple *use_stmt, gimple *first,
+		  tree rhs1, vec<tree> &hetero_lhs)
+{
+  /* Check same operation.  */
+  enum tree_code rhs_code_first = gimple_assign_rhs_code (first);
+  enum tree_code rhs_code_current = gimple_assign_rhs_code (use_stmt);
+  if (rhs_code_first != rhs_code_current)
+    return HETEROGENEOUS;
+
+  /* For shift operations, oprands should be equal.  */
+  if (shift_operation (rhs_code_current))
+    {
+      tree shift_op_first = gimple_assign_rhs2 (first);
+      tree shift_op_current = gimple_assign_rhs2 (use_stmt);
+      if (!operand_equal_p (shift_op_first, shift_op_current, 0)
+	  || !TREE_CONSTANT (shift_op_first))
+	return HETEROGENEOUS;
+
+      return ISOMORPHIC;
+    }
+  /* Type convertion expr or assignment.  */
+  if (gimple_num_ops (first) == 2)
+    return (rhs_code_first == NOP_EXPR || rhs_code_first == CONVERT_EXPR
+	      || rhs_code_first == SSA_NAME) ? ISOMORPHIC : HETEROGENEOUS;
+
+  /* We find USE_STMT from lhs of a stmt, denote it as rhs1 of USE_STMT and
+     the other one as rhs2.  Check if define-stmt of current rhs2 is isomorphic
+     with define-stmt of rhs2 in the first USE_STMT at this group.  */
+  tree rhs2_first = gimple_assign_rhs1 (use_stmt) == rhs1
+		    ? gimple_assign_rhs2 (first) : gimple_assign_rhs1 (first);
+  tree rhs2_curr = gimple_assign_rhs1 (use_stmt) == rhs1
+	      ? gimple_assign_rhs2 (use_stmt) : gimple_assign_rhs1 (use_stmt);
+
+  if (check_same_oprand_type (rhs2_first, rhs2_curr))
+    {
+      if (TREE_CONSTANT (rhs2_curr))
+	return ISOMORPHIC;
+      else if (hetero_lhs.contains (rhs2_curr))
+	return HETEROGENEOUS;
+
+      /* Provisionally set the stmt as uncertain and analyze the whole group
+	 in function CHECK_UNCERTAIN later if all use_stmts are uncertain.  */
+      return UNCERTAIN;
+    }
+  return HETEROGENEOUS;
+}
+
+static bool
+unsupported_operations (gimple *stmt)
+{
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+  return code == COND_EXPR;
+}
+
+/* Check if the single use_stmt of STMT is isomorphic with the first one's
+   use_stmt in current group.  */
+
+static unsigned
+check_use_stmt (group_info elmt, gimple *&first,
+		vec<gimple *> &tmp_stmts, vec<tree> &hetero_lhs)
+{
+  if (gimple_code (elmt->stmt) != GIMPLE_ASSIGN)
+    return HETEROGENEOUS;
+  use_operand_p dummy;
+  tree lhs = gimple_assign_lhs (elmt->stmt);
+  gimple *use_stmt = NULL;
+  single_imm_use (lhs, &dummy, &use_stmt);
+  /* STMTs with three rhs are not supported, e.g., GIMPLE_COND.  */
+  if (use_stmt == NULL || gimple_code (use_stmt) != GIMPLE_ASSIGN
+      || unsupported_operations (use_stmt) || bit_field_p (use_stmt))
+    return HETEROGENEOUS;
+  tmp_stmts.safe_push (use_stmt);
+  if (first == NULL)
+    {
+      first = use_stmt;
+      return UNINITIALIZED;
+    }
+  /* Check if current use_stmt and the first menber's use_stmt in the group
+     are of the same type.  */
+  tree first_lhs = gimple_assign_lhs (first);
+  tree curr_lhs = gimple_assign_lhs (use_stmt);
+  if (!check_same_oprand_type (first_lhs, curr_lhs))
+    return HETEROGENEOUS;
+  return check_isomorphic (use_stmt, first, lhs, hetero_lhs);
+}
+
+/* Replace stmt field in group with stmts in TMP_STMTS, and insert their
+   lhs_info to ISOMER_LHS.  */
+
+static void
+update_isomer_lhs (vec<group_info> *group, unsigned group_num,
+		   unsigned iteration, isomer_stmt_lhs &isomer_lhs,
+		   vec<gimple *> tmp_stmts, int &profit,
+		   vec<unsigned> &merged_groups)
+{
+  group_info elmt = NULL;
+  /* Do not insert temp array if isomorphic stmts from grouped load have
+     only casting operations.  Once isomorphic calculation has 3 oprands,
+     such as plus operation, this group can be regarded as cut point.  */
+  bool operated = (gimple_num_ops (tmp_stmts[0]) == 3);
+  /* Do not insert temp arrays if search of iosomophic stmts reaches
+     MEM stmts.  */
+  bool has_vdef = gimple_vdef (tmp_stmts[0]) != NULL;
+  bool merge = false;
+  for (unsigned i = 0; i < group->length (); i++)
+    {
+      elmt = (*group)[i];
+      elmt->stmt = has_vdef ? NULL : tmp_stmts[i];
+      elmt->cut_point = has_vdef ? false : (elmt->cut_point || operated);
+      elmt->uncertain = false;
+      elmt->done = has_vdef;
+      tree lhs = gimple_assign_lhs (tmp_stmts[i]);
+      if (isomer_lhs.find (lhs) != isomer_lhs.end ())
+	{
+	  merge = true;
+	  continue;
+	}
+      isomer_lhs[lhs] = std::make_pair (group_num, iteration);
+    }
+  if (merge)
+    {
+      merged_groups.safe_push (group_num);
+      profit = 0;
+      return;
+    }
+  enum vect_cost_for_stmt kind = scalar_stmt;
+  int scalar_cost = builtin_vectorization_cost (kind, NULL_TREE, 0);
+  profit = (tmp_stmts.length () - 1) * scalar_cost;
+}
+
+/* Try to find rhs2 in ISOMER_LHS, if all rhs2 were found and their group_num
+   and iteration are same, GROUP is isomorphic.  */
+
+static unsigned
+check_isomorphic_rhs (vec<group_info> *group, vec<gimple *> &tmp_stmts,
+		      isomer_stmt_lhs &isomer_lhs)
+{
+  group_info elmt = NULL;
+  gimple *stmt = NULL;
+  unsigned j = 0;
+  unsigned group_num = -1u;
+  unsigned iteration = -1u;
+  tree rhs1 = NULL;
+  tree rhs2 = NULL;
+  unsigned status = UNINITIALIZED;
+  FOR_EACH_VEC_ELT (*group, j, elmt)
+    {
+      rhs1 = gimple_assign_lhs (elmt->stmt);
+      stmt = tmp_stmts[j];
+      rhs2 = (rhs1 == gimple_assign_rhs1 (stmt))
+	     ? gimple_assign_rhs2 (stmt) : gimple_assign_rhs1 (stmt);
+      isomer_stmt_lhs::iterator iter = isomer_lhs.find (rhs2);
+      if (iter != isomer_lhs.end ())
+	{
+	  if (group_num == -1u)
+	    {
+	      group_num = iter->second.first;
+	      iteration = iter->second.second;
+	      status |= ISOMORPHIC;
+	      continue;
+	    }
+	  if (iter->second.first == group_num
+	      && iter->second.second == iteration)
+	    {
+	      status |= ISOMORPHIC;
+	      continue;
+	    }
+	  return HETEROGENEOUS;
+	}
+      else
+	status |= UNCERTAIN;
+    }
+  return status;
+}
+
+/* Update group_info for uncertain groups.  */
+
+static void
+update_uncertain_stmts (vec<group_info> *group, unsigned group_num,
+			 unsigned iteration, vec<gimple *> &tmp_stmts)
+{
+  unsigned j = 0;
+  group_info elmt = NULL;
+  FOR_EACH_VEC_ELT (*group, j, elmt)
+    {
+      elmt->uncertain = true;
+      elmt->done = false;
+    }
+}
+
+/* Push stmts in TMP_STMTS into HETERO_LHS.  */
+
+static void
+set_hetero (vec<group_info> *group, vec<tree> &hetero_lhs,
+	    vec<gimple *> &tmp_stmts)
+{
+  group_info elmt = NULL;
+  unsigned i = 0;
+  for (i = 0; i < group->length (); i++)
+    {
+      elmt = (*group)[i];
+      elmt->uncertain = false;
+      elmt->done = true;
+    }
+  gimple *stmt = NULL;
+  FOR_EACH_VEC_ELT (tmp_stmts, i, stmt)
+    if (stmt != NULL)
+      hetero_lhs.safe_push (gimple_assign_lhs (stmt));
+}
+
+/* Given an uncertain group, TMP_STMTS are use_stmts of stmts in GROUP.
+   Rhs1 is the lhs of stmt in GROUP, rhs2 is the other rhs of USE_STMT.
+
+   Try to find rhs2 in ISOMER_LHS, if all found rhs2 have same group_num
+   and iteration, this uncertain group is isomorphic.
+
+   If no rhs matched, this GROUP remains uncertain and update group_info.
+
+   Otherwise, this GROUP is heterogeneous and return true to end analysis
+   for this group.  */
+
+static bool
+check_uncertain (vec<group_info> *group, unsigned group_num,
+		 unsigned iteration, int &profit,
+		 vec<gimple *> &tmp_stmts, isomer_stmt_lhs &isomer_lhs,
+		 vec<tree> &hetero_lhs, vec<unsigned> &merged_groups)
+{
+  unsigned status = check_isomorphic_rhs (group, tmp_stmts, isomer_lhs);
+  bool done = false;
+  switch (status)
+    {
+      case UNCERTAIN:
+	update_uncertain_stmts (group, group_num, iteration, tmp_stmts);
+	break;
+      case ISOMORPHIC:
+	update_isomer_lhs (group, group_num, iteration, isomer_lhs,
+			   tmp_stmts, profit, merged_groups);
+	break;
+      default:
+	set_hetero (group, hetero_lhs, tmp_stmts);
+	done = true;
+    }
+  return done;
+}
+
+/* Return false if analysis of this group is not finished, e.g., isomorphic or
+   uncertain.  Calculate the profit if vectorized.  */
+
+static bool
+check_group (vec<group_info> *group, unsigned group_num, unsigned iteration,
+	     int &profit, vec<unsigned> &merged_groups,
+	     isomer_stmt_lhs &isomer_lhs, vec<tree> &hetero_lhs)
+{
+  unsigned j = 0;
+  group_info elmt = NULL;
+  gimple *first = NULL;
+  unsigned res = 0;
+  /* Record single use stmts in TMP_STMTS and decide whether replace stmts in
+     ginfo in succeeding processes.  */
+  auto_vec<gimple *> tmp_stmts;
+  FOR_EACH_VEC_ELT (*group, j, elmt)
+    {
+      if (merged_groups.contains (group_num))
+	return true;
+      res |= check_use_stmt (elmt, first, tmp_stmts, hetero_lhs);
+    }
+
+  /* Update each group member according to RES.  */
+  switch (res)
+    {
+      case ISOMORPHIC:
+	update_isomer_lhs (group, group_num, iteration, isomer_lhs,
+			   tmp_stmts, profit, merged_groups);
+	return false;
+      case UNCERTAIN:
+	return check_uncertain (group, group_num, iteration, profit,
+				tmp_stmts, isomer_lhs, hetero_lhs,
+				merged_groups);
+      default:
+	set_hetero (group, hetero_lhs, tmp_stmts);
+	return true;
+    }
+}
+
+/* Return true if all analysises are done except uncertain groups.  */
+
+static bool
+end_of_search (vec<vec<group_info> *> &circular_queue,
+	       vec<unsigned> &merged_groups)
+{
+  unsigned i = 0;
+  vec<group_info> *group = NULL;
+  group_info elmt = NULL;
+  FOR_EACH_VEC_ELT (circular_queue, i, group)
+    {
+      if (merged_groups.contains (i))
+	continue;
+      elmt = (*group)[0];
+      /* If there is any isomorphic use_stmts, continue analysis of isomorphic
+	 use_stmts.  */
+      if (!elmt->done && !elmt->uncertain)
+	return false;
+    }
+  return true;
+}
+
+/* Push valid stmts to STMTS as cutpoints.  */
+
+static bool
+check_any_cutpoints (vec<vec<group_info> *> &circular_queue,
+		     vec<gimple *> *&stmts, vec<unsigned> &merged_groups)
+{
+  unsigned front = 0;
+  vec<group_info> *group = NULL;
+  group_info elmt = NULL;
+  unsigned max = circular_queue.length () * circular_queue[0]->length ();
+  vec_alloc (stmts, max);
+  while (front < circular_queue.length ())
+    {
+      unsigned i = 0;
+      if (merged_groups.contains (front))
+	{
+	  front++;
+	  continue;
+	}
+      group = circular_queue[front++];
+      FOR_EACH_VEC_ELT (*group, i, elmt)
+	if (elmt->stmt != NULL && elmt->done && elmt->cut_point)
+	  stmts->safe_push (elmt->stmt);
+    }
+  return stmts->length () != 0;
+}
+
+/* Grouped loads are isomorphic.  Make pair for group number and iteration,
+   map load stmt to this pair.  We set iteration 0 here.  */
+
+static void
+init_isomer_lhs (vec<vec<group_info> *> &groups, isomer_stmt_lhs &isomer_lhs)
+{
+  vec<group_info> *group = NULL;
+  group_info elmt = NULL;
+  unsigned i = 0;
+  FOR_EACH_VEC_ELT (groups, i, group)
+    {
+      unsigned j = 0;
+      FOR_EACH_VEC_ELT (*group, j, elmt)
+	isomer_lhs[gimple_assign_lhs (elmt->stmt)] = std::make_pair (i, 0);
+    }
+}
+
+/* It's not a strict analysis of load/store profit.  Assume scalar and vector
+   load/store are of the same cost.  The result PROFIT equals profit form
+   vectorizing of scalar loads/stores minus cost of a vectorized load/store.  */
+
+static int
+load_store_profit (unsigned scalar_mem_ops, unsigned vf, unsigned new_mem_ops)
+{
+  int profit = 0;
+  enum vect_cost_for_stmt kind = scalar_load;
+  int scalar_cost = builtin_vectorization_cost (kind, NULL_TREE, 0);
+  profit += (scalar_mem_ops - (scalar_mem_ops / vf)) * scalar_cost;
+  profit -= new_mem_ops / vf * scalar_cost;
+  kind = scalar_store;
+  scalar_cost = builtin_vectorization_cost (kind, NULL_TREE, 0);
+  profit -= new_mem_ops / vf * scalar_cost;
+  return profit;
+}
+
+/* Breadth first search the graph consisting of define-use chain starting from
+   the circular queue initialized by function BUILD_QUEUE.  Find single use of
+   each stmt in group and check if they are isomorphic.  Isomorphic is defined
+   as same rhs type, same operator, and isomorphic calculation of each rhs
+   starting from load.  If another rhs is uncertain to be isomorphic, put it
+   at the end of circular queue and re-analyze it during the next iteration.
+   If a group shares the same use_stmt with another group, skip one of them in
+   succeedor prcoesses as merged.  Iterate the circular queue until all
+   remianing groups heterogeneous or reaches MEN stmts.  If all other groups
+   have finishes the analysis, and the remaining groups are uncertain,
+   return false to avoid endless loop.  */
+
+bool
+bfs_find_isomer_stmts (vec<vec<group_info> *> &circular_queue,
+		       stmts_profit &profit_pair, unsigned vf,
+		       bool &reach_vdef)
+{
+  isomer_stmt_lhs isomer_lhs;
+  auto_vec<tree> hetero_lhs;
+  auto_vec<unsigned> merged_groups;
+  vec<group_info> *group = NULL;
+  /* True if analysis finishes.  */
+  bool done = false;
+  int profit_sum = 0;
+  vec<gimple *> *stmts = NULL;
+  init_isomer_lhs (circular_queue, isomer_lhs);
+  for (unsigned i = 1; !done; ++i)
+    {
+      unsigned front = 0;
+      /* Re-initialize DONE to TRUE while a new iteration begins.  */
+      done = true;
+      while (front < circular_queue.length ())
+	{
+	  int profit = 0;
+	  group = circular_queue[front];
+	  done &= check_group (group, front, i, profit, merged_groups,
+			       isomer_lhs, hetero_lhs);
+	  profit_sum += profit;
+	  if (profit != 0 && (*group)[0]->stmt == NULL)
+	    {
+	      reach_vdef = true;
+	      return false;
+	    }
+	  ++front;
+	}
+      /* Uncertain result, return.  */
+      if (!done && end_of_search (circular_queue, merged_groups))
+	return false;
+    }
+  if (check_any_cutpoints (circular_queue, stmts, merged_groups))
+    {
+      profit_pair.first = stmts;
+      unsigned loads = circular_queue.length () * circular_queue[0]->length ();
+      profit_pair.second = profit_sum + load_store_profit (loads, vf,
+							   stmts->length ());
+      if (profit_pair.second > 0)
+	return true;
+    }
+  return false;
+}
+
+/* Free memory allocated by ginfo.  */
+
+static void
+free_ginfos (vec<vec<group_info> *> &worklists)
+{
+  vec<group_info> *worklist;
+  unsigned i = 0;
+  while (i < worklists.length ())
+    {
+      worklist = worklists[i++];
+      group_info ginfo;
+      unsigned j = 0;
+      FOR_EACH_VEC_ELT (*worklist, j, ginfo)
+	delete ginfo;
+    }
+}
+
+static void
+release_tmp_stmts (vf_stmts_profit_map &candi_stmts)
+{
+  vf_stmts_profit_map::iterator iter;
+  for (iter = candi_stmts.begin (); iter != candi_stmts.end (); ++iter)
+    iter->second.first->release ();
+}
+
+/* Choose the group of stmt with maximun profit.  */
+
+static bool
+decide_stmts_by_profit (vf_stmts_profit_map &candi_stmts, vec<gimple *> &stmts)
+{
+  vf_stmts_profit_map::iterator iter;
+  int profit = 0;
+  int max = 0;
+  vec<gimple *> *tmp = NULL;
+  for (iter = candi_stmts.begin (); iter != candi_stmts.end (); ++iter)
+    {
+      profit = iter->second.second;
+      if (profit > max)
+	{
+	  tmp = iter->second.first;
+	  max = profit;
+	}
+    }
+  if (max == 0)
+    {
+      release_tmp_stmts (candi_stmts);
+      return false;
+    }
+  unsigned i = 0;
+  gimple *stmt = NULL;
+  FOR_EACH_VEC_ELT (*tmp, i, stmt)
+    stmts.safe_push (stmt);
+  release_tmp_stmts (candi_stmts);
+  return stmts.length () != 0;
+}
+
+/* Find isomorphic stmts from grouped loads with vector factor VF.
+
+   Given source code as follows and ignore casting.
+
+   a0 = (a[0] + b[0]) + ((a[4] - b[4]) << 16);
+   a1 = (a[1] + b[1]) + ((a[5] - b[5]) << 16);
+   a2 = (a[2] + b[2]) + ((a[6] - b[6]) << 16);
+   a3 = (a[3] + b[3]) + ((a[7] - b[7]) << 16);
+
+   We get grouped loads in VINFO as
+
+   GROUP_1		GROUP_2
+   _1 = *a		_11 = *b
+   _2 = *(a + 1)	_12 = *(b + 1)
+   _3 = *(a + 2)	_13 = *(b + 2)
+   _4 = *(a + 3)	_14 = *(b + 3)
+   _5 = *(a + 4)	_15 = *(b + 4)
+   _6 = *(a + 5)	_16 = *(b + 5)
+   _7 = *(a + 6)	_17 = *(b + 6)
+   _8 = *(a + 7)	_18 = *(b + 7)
+
+   First we try VF = 8, we get two worklists
+
+   WORKLIST_1		WORKLIST_2
+   _1 = *a		_11 = *b
+   _2 = *(a + 1)	_12 = *(b + 1)
+   _3 = *(a + 2)	_13 = *(b + 2)
+   _4 = *(a + 3)	_14 = *(b + 3)
+   _5 = *(a + 4)	_15 = *(b + 4)
+   _6 = *(a + 5)	_16 = *(b + 5)
+   _7 = *(a + 6)	_17 = *(b + 6)
+   _8 = *(a + 7)	_18 = *(b + 7)
+
+   We find _111 = _1 + _11 and _115 = _5 - _15 are not isomorphic,
+   so we try VF = VF / 2.
+
+   GROUP_1		GROUP_2
+   _1 = *a		_5 = *(a + 4)
+   _2 = *(a + 1)	_6 = *(a + 5)
+   _3 = *(a + 2)	_7 = *(a + 6)
+   _4 = *(a + 3)	_8 = *(a + 7)
+
+   GROUP_3		GROUP_4
+   _11 = *b		_15 = *(b + 4)
+   _12 = *(b + 1)	_16 = *(b + 5)
+   _13 = *(b + 2)	_17 = *(b + 6)
+   _14 = *(b + 3)	_18 = *(b + 7)
+
+   We first analyze group_1, and find all operations are isomorphic, then
+   replace stmts in group_1 with their use_stmts.  Group_2 as well.
+
+   GROUP_1		GROUP_2
+   _111 = _1 + _11	_115 = _5 - _15
+   _112 = _2 + _12	_116 = _6 - _16
+   _113 = _3 + _13	_117 = _7 - _17
+   _114 = _4 + _14	_118 = _8 - _18
+
+   When analyzing group_3 and group_4, we find their use_stmts are the same
+   as group_1 and group_2.  So group_3 is regarded as being merged to group_1
+   and group_4 being merged to group_2.  In future procedures, we will skip
+   group_3 and group_4.
+
+   We repeat such processing until opreations are not isomorphic or searching
+   reaches MEM stmts.  In our given case, searching end up at a0, a1, a2 and
+   a3.  */
+
+static bool
+find_isomorphic_stmts (loop_vec_info vinfo, vec<gimple *> &stmts)
+{
+  unsigned vf = get_max_vf (vinfo);
+  if (vf == 0)
+    return false;
+  auto_vec<vec<group_info> *> circular_queue;
+  /* Map of vector factor and corresponding vectorizing profit.  */
+  stmts_profit profit_map;
+  /* Map of cut_points and vector factor.  */
+  vf_stmts_profit_map candi_stmts;
+  bool reach_vdef = false;
+  while (vf > 2)
+    {
+      if (build_queue (vinfo, vf, circular_queue) == 0)
+	return false;
+      if (!bfs_find_isomer_stmts (circular_queue, profit_map, vf, reach_vdef))
+	{
+	  if (reach_vdef)
+	    {
+	      release_tmp_stmts (candi_stmts);
+	      free_ginfos (circular_queue);
+	      circular_queue.release ();
+	      return false;
+	    }
+	  vf /= 2;
+	  free_ginfos (circular_queue);
+	  circular_queue.release ();
+	  continue;
+	}
+      candi_stmts[vf] = profit_map;
+      free_ginfos (circular_queue);
+      vf /= 2;
+      circular_queue.release ();
+    }
+  return decide_stmts_by_profit (candi_stmts, stmts);
 }
 
 /* Distributes the code from LOOP in such a way that producer statements

@@ -2516,9 +2516,11 @@ vect_reanalyze_as_main_loop (loop_vec_info loop_vinfo, unsigned int *n_stmts)
 
    Apply a set of analyses on LOOP, and create a loop_vec_info struct
    for it.  The different analyses will record information in the
-   loop_vec_info struct.  */
+   loop_vec_info struct.  When RESULT_ONLY_P is true, quit analysis
+   if loop is vectorizable, otherwise, do not delete vinfo.*/
 opt_loop_vec_info
-vect_analyze_loop (class loop *loop, vec_info_shared *shared)
+vect_analyze_loop (class loop *loop, vec_info_shared *shared,
+		   bool result_only_p)
 {
   auto_vector_modes vector_modes;
 
@@ -2545,6 +2547,8 @@ vect_analyze_loop (class loop *loop, vec_info_shared *shared)
   unsigned n_stmts = 0;
   machine_mode autodetected_vector_mode = VOIDmode;
   opt_loop_vec_info first_loop_vinfo = opt_loop_vec_info::success (NULL);
+  /* Loop_vinfo for loop-distribution pass.  */
+  opt_loop_vec_info fail_loop_vinfo = opt_loop_vec_info::success (NULL);
   machine_mode next_vector_mode = VOIDmode;
   poly_uint64 lowest_th = 0;
   unsigned vectorized_loops = 0;
@@ -2633,6 +2637,13 @@ vect_analyze_loop (class loop *loop, vec_info_shared *shared)
       if (res)
 	{
 	  LOOP_VINFO_VECTORIZABLE_P (loop_vinfo) = 1;
+	  /* In loop-distribution pass, we only need to get loop_vinfo, do not
+	     conduct further operations.  */
+	  if (result_only_p)
+	    {
+	      loop->aux = (loop_vec_info) loop_vinfo;
+	      return loop_vinfo;
+	    }
 	  vectorized_loops++;
 
 	  /* Once we hit the desired simdlen for the first time,
@@ -2724,7 +2735,19 @@ vect_analyze_loop (class loop *loop, vec_info_shared *shared)
 	}
       else
 	{
-	  delete loop_vinfo;
+	  /* If current analysis shows LOOP is unable to vectorize, loop_vinfo
+	     will be deleted.  If LOOP is under ldist analysis, backup it before
+	     it is deleted and return it if all modes are analyzed and still
+	     fail to vectorize.  */
+	  if (result_only_p && (mode_i == vector_modes.length ()
+	      || autodetected_vector_mode == VOIDmode))
+	    {
+	      fail_loop_vinfo = loop_vinfo;
+	    }
+	  else
+	    {
+	      delete loop_vinfo;
+	    }
 	  if (fatal)
 	    {
 	      gcc_checking_assert (first_loop_vinfo == NULL);
@@ -2771,6 +2794,14 @@ vect_analyze_loop (class loop *loop, vec_info_shared *shared)
 			 GET_MODE_NAME (first_loop_vinfo->vector_mode));
       LOOP_VINFO_VERSIONING_THRESHOLD (first_loop_vinfo) = lowest_th;
       return first_loop_vinfo;
+    }
+
+  /* Return loop_vinfo for ldist if loop is unvectorizable.  */
+  if (result_only_p && (mode_i == vector_modes.length ()
+      || autodetected_vector_mode == VOIDmode))
+    {
+      loop->aux = (loop_vec_info) fail_loop_vinfo;
+      return fail_loop_vinfo;
     }
 
   return opt_loop_vec_info::propagate_failure (res);
