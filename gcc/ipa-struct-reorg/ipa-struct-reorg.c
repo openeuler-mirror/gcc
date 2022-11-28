@@ -264,7 +264,8 @@ enum struct_layout_opt_level
   COMPLETE_STRUCT_RELAYOUT = 1 << 1,
   STRUCT_REORDER_FIELDS = 1 << 2,
   DEAD_FIELD_ELIMINATION = 1 << 3,
-  POINTER_COMPRESSION_SAFE = 1 << 4
+  POINTER_COMPRESSION_SAFE = 1 << 4,
+  POINTER_COMPRESSION_UNSAFE = 1 << 5
 };
 
 /* Defines the target pointer size of compressed pointer, which should be 8,
@@ -1266,12 +1267,12 @@ csrtype::init_type_info (void)
 
   /* Close enough to pad to improve performance.
      33~63 should pad to 64 but 33~48 (first half) are too far away, and
-     65~127 should pad to 128 but 65~80 (first half) are too far away.  */
+     65~127 should pad to 128 but 65~70 (first half) are too far away.  */
   if (old_size > 48 && old_size < 64)
     {
       new_size = 64;
     }
-  if (old_size > 80 && old_size < 128)
+  if (old_size > 70 && old_size < 128)
     {
       new_size = 128;
     }
@@ -1421,8 +1422,12 @@ public:
   bool pc_candidate_tree_p (tree);
   bool pc_type_conversion_candidate_p (tree);
   bool pc_direct_rewrite_chance_p (tree, tree &);
+  bool pc_simplify_chance_for_compress_p (gassign *, tree);
+  bool compress_candidate_without_check (gimple_stmt_iterator *, tree, tree &);
   bool compress_candidate_with_check (gimple_stmt_iterator *, tree, tree &);
   bool compress_candidate (gassign *, gimple_stmt_iterator *, tree, tree &);
+  bool decompress_candidate_without_check (gimple_stmt_iterator *,
+					   tree, tree, tree &, tree &);
   bool decompress_candidate_with_check (gimple_stmt_iterator *, tree, tree &);
   bool decompress_candidate (gimple_stmt_iterator *, tree, tree, tree &,
 			     tree &);
@@ -1996,27 +2001,95 @@ ipa_struct_relayout::maybe_rewrite_cst (tree cst, gimple_stmt_iterator *gsi,
 	{
 	  return false;
 	}
-      gsi_next (gsi);
-      gimple *stmt2 = gsi_stmt (*gsi);
-
-      if (gimple_code (stmt2) == GIMPLE_ASSIGN
-	  && gimple_assign_rhs_code (stmt2) == POINTER_PLUS_EXPR)
+      // Check uses.
+      imm_use_iterator imm_iter_lhs;
+      use_operand_p use_p_lhs;
+      FOR_EACH_IMM_USE_FAST (use_p_lhs, imm_iter_lhs, gimple_assign_lhs (stmt))
 	{
-	  tree lhs = gimple_assign_lhs (stmt2);
-	  tree rhs1 = gimple_assign_rhs1 (stmt2);
-	  if (types_compatible_p (inner_type (TREE_TYPE (rhs1)), ctype.type)
-	      || types_compatible_p (inner_type (TREE_TYPE (lhs)), ctype.type))
+	  gimple *stmt2 = USE_STMT (use_p_lhs);
+	  if (gimple_code (stmt2) != GIMPLE_ASSIGN)
+	    continue;
+	  if (gimple_assign_rhs_code (stmt2) == POINTER_PLUS_EXPR)
 	    {
-	      tree num = NULL;
-	      if (is_result_of_mult (cst, &num, TYPE_SIZE_UNIT (ctype.type)))
+	      tree lhs = gimple_assign_lhs (stmt2);
+	      tree rhs1 = gimple_assign_rhs1 (stmt2);
+	      if (types_compatible_p (inner_type (TREE_TYPE (rhs1)), ctype.type)
+		  || types_compatible_p (inner_type (TREE_TYPE (lhs)),
+					 ctype.type))
 		{
-		  times = TREE_INT_CST_LOW (num);
-		  ret = true;
+		  tree num = NULL;
+		  if (is_result_of_mult (cst, &num,
+					 TYPE_SIZE_UNIT (ctype.type)))
+		    {
+		      times = TREE_INT_CST_LOW (num);
+		      return true;
+		    }
+		}
+	    }
+	  // For pointer compression.
+	  else if (gimple_assign_rhs_code (stmt2) == PLUS_EXPR)
+	    {
+	      // Check uses.
+	      imm_use_iterator imm_iter_cast;
+	      use_operand_p use_p_cast;
+	      FOR_EACH_IMM_USE_FAST (use_p_cast, imm_iter_cast,
+				     gimple_assign_lhs (stmt2))
+		{
+		  gimple *stmt_cast = USE_STMT (use_p_cast);
+		  if (gimple_code (stmt_cast) != GIMPLE_ASSIGN)
+		    continue;
+		  if (gimple_assign_cast_p (stmt_cast))
+		    {
+		      tree lhs_type = inner_type (TREE_TYPE (
+					gimple_assign_lhs (stmt_cast)));
+		      if (types_compatible_p (lhs_type, ctype.type))
+			{
+			  tree num = NULL;
+			  if (is_result_of_mult (cst, &num,
+						 TYPE_SIZE_UNIT (ctype.type)))
+			    {
+			      times = TREE_INT_CST_LOW (num);
+			      return true;
+			    }
+			}
+		    }
 		}
 	    }
 	}
-      gsi_prev (gsi);
-      return ret;
+    }
+  // For pointer compression.
+  if (gimple_assign_rhs_code (stmt) == TRUNC_DIV_EXPR)
+    {
+      imm_use_iterator imm_iter;
+      use_operand_p use_p;
+      tree lhs = gimple_assign_lhs (stmt);
+      if (lhs == NULL_TREE)
+	return false;
+      FOR_EACH_IMM_USE_FAST (use_p, imm_iter, lhs)
+	{
+	  gimple *use_stmt = USE_STMT (use_p);
+	  if (is_gimple_debug (use_stmt))
+	    continue;
+	  if (gimple_code (use_stmt) != GIMPLE_ASSIGN)
+	    continue;
+	  if (gimple_assign_cast_p (use_stmt))
+	    {
+	      tree lhs_type = inner_type (TREE_TYPE (
+				gimple_assign_lhs (use_stmt)));
+	      if (TYPE_UNSIGNED (lhs_type)
+		  && TREE_CODE (lhs_type) == INTEGER_TYPE
+		  && TYPE_PRECISION (lhs_type) == compressed_size)
+		{
+		  tree num = NULL;
+		  if (is_result_of_mult (cst, &num,
+					 TYPE_SIZE_UNIT (ctype.type)))
+		    {
+		      times = TREE_INT_CST_LOW (num);
+		      return true;
+		    }
+		}
+	    }
+	}
     }
   return false;
 }
@@ -3110,7 +3183,9 @@ ipa_struct_reorg::record_var (tree decl, escape_type escapes, int arg)
 	  e = escape_separate_instance;
 	}
 
-      if (e != does_not_escape)
+      if (e != does_not_escape
+	  && (current_layout_opt_level != COMPLETE_STRUCT_RELAYOUT
+	      || replace_type_map.get (type->type) == NULL))
 	type->mark_escape (e, NULL);
     }
 
@@ -3793,7 +3868,9 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other, gimple
       if (TREE_CODE (side) == SSA_NAME
 	  && VOID_POINTER_P (TREE_TYPE (side)))
 	return;
-      d->type->mark_escape (escape_cast_another_ptr, stmt);
+      if (current_layout_opt_level != COMPLETE_STRUCT_RELAYOUT
+	  || replace_type_map.get (d->type->type) == NULL)
+	d->type->mark_escape (escape_cast_another_ptr, stmt);
       return;
     }
 
@@ -3810,7 +3887,9 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other, gimple
       else
 	{
 	  /* *_1 = &MEM[(void *)&x + 8B].  */
-	  type->mark_escape (escape_cast_another_ptr, stmt);
+	  if (current_layout_opt_level != COMPLETE_STRUCT_RELAYOUT
+	      || replace_type_map.get (type->type) == NULL)
+	    type->mark_escape (escape_cast_another_ptr, stmt);
 	}
     }
   else if (type != d->type)
@@ -4550,7 +4629,9 @@ ipa_struct_reorg::check_definition_assign (srdecl *decl, vec<srdecl*> &worklist)
   /* Casts between pointers and integer are escaping.  */
   if (gimple_assign_cast_p (stmt))
     {
-      type->mark_escape (escape_cast_int, stmt);
+      if (current_layout_opt_level != COMPLETE_STRUCT_RELAYOUT
+	  || replace_type_map.get (type->type) == NULL)
+	type->mark_escape (escape_cast_int, stmt);
       return;
     }
 
@@ -4897,7 +4978,9 @@ ipa_struct_reorg::check_use (srdecl *decl, gimple *stmt, vec<srdecl*> &worklist)
   /* Casts between pointers and integer are escaping.  */
   if (gimple_assign_cast_p (stmt))
     {
-      type->mark_escape (escape_cast_int, stmt);
+      if (current_layout_opt_level != COMPLETE_STRUCT_RELAYOUT
+	  || replace_type_map.get (type->type) == NULL)
+	type->mark_escape (escape_cast_int, stmt);
       return;
     }
 
@@ -5566,9 +5649,9 @@ ipa_struct_reorg::prune_escaped_types (void)
 
   /* Prune types that escape, all references to those types
      will have been removed in the above loops.  */
-  /* The escape type is not deleted in STRUCT_LAYOUT_OPTIMIZE,
-     Then the type that contains the escaped type fields
-     can find complete information.  */
+  /* The escape type is not deleted in current_layout_opt_level after
+     STRUCT_REORDER_FIELDS, then the type that contains the
+     escaped type fields can find complete information.  */
   if (current_layout_opt_level < STRUCT_REORDER_FIELDS)
     {
       for (unsigned i = 0; i < types.length ();)
@@ -6052,17 +6135,17 @@ ipa_struct_reorg::compress_ptr_to_offset (tree xhs, srtype *type,
   tree step2 = gimplify_build2 (gsi, TRUNC_DIV_EXPR, long_unsigned_type_node,
 				step1, TYPE_SIZE_UNIT (type->newtype[0]));
 
-  /* Emit gimple _X3 = _X2 + 1.  */
-  tree step3 = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node,
-				step2, build_one_cst (long_unsigned_type_node));
+  /* Emit _X3 = (compressed_size) _X2.  */
+  tree pc_type = make_unsigned_type (compressed_size);
+  tree step3 = gimplify_build1 (gsi, NOP_EXPR, pc_type, step2);
 
-  /* Emit _X4 = (compressed_size) _X3.  */
-  tree step4 = gimplify_build1 (gsi, NOP_EXPR,
-				make_unsigned_type (compressed_size), step3);
+  /* Emit gimple _X4 = _X3 + 1.  */
+  tree step4 = gimplify_build2 (gsi, PLUS_EXPR, pc_type, step3,
+				build_one_cst (pc_type));
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
-      print_generic_expr (dump_file, step3);
+      print_generic_expr (dump_file, step4);
       fprintf (dump_file, "\n");
     }
   return step4;
@@ -6104,7 +6187,7 @@ ipa_struct_reorg::decompress_offset_to_ptr (tree xhs, srtype *type,
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
-      print_generic_expr (dump_file, step3);
+      print_generic_expr (dump_file, step4);
       fprintf (dump_file, "\n");
     }
   return step4;
@@ -6267,6 +6350,49 @@ ipa_struct_reorg::pc_direct_rewrite_chance_p (tree rhs, tree &new_rhs)
   return false;
 }
 
+/* The following cases can simplify the checking of null pointer:
+     1. rhs defined from POINTER_PLUS_EXPR.
+     2. rhs used as COMPONENT_REF in this basic block.  */
+
+bool
+ipa_struct_reorg::pc_simplify_chance_for_compress_p (gassign *stmt,
+						     tree rhs)
+{
+  imm_use_iterator imm_iter;
+  use_operand_p use_p;
+  gimple *def_stmt = SSA_NAME_DEF_STMT (rhs);
+
+  if (def_stmt && is_gimple_assign (def_stmt)
+      && gimple_assign_rhs_code (def_stmt) == POINTER_PLUS_EXPR)
+    return true;
+
+  FOR_EACH_IMM_USE_FAST (use_p, imm_iter, rhs)
+    {
+      gimple *use_stmt = USE_STMT (use_p);
+      if (use_stmt->bb != stmt->bb || !is_gimple_assign (use_stmt))
+	continue;
+
+      tree use_rhs = gimple_assign_rhs1 (use_stmt);
+      if (TREE_CODE (use_rhs) == COMPONENT_REF
+	  && TREE_OPERAND (TREE_OPERAND (use_rhs, 0), 0) == rhs)
+	return true;
+    }
+  return false;
+}
+
+/* Perform compression directly without checking null pointer.  */
+
+bool
+ipa_struct_reorg::compress_candidate_without_check (gimple_stmt_iterator *gsi,
+						    tree rhs,
+						    tree &new_rhs)
+{
+  srtype *type = get_compression_candidate_type (rhs);
+  gcc_assert (type != NULL);
+  new_rhs = compress_ptr_to_offset (new_rhs, type, gsi);
+  return true;
+}
+
 /* Perform pointer compression with check.  The conversion will be as shown in
    the following example:
      Orig bb:
@@ -6368,6 +6494,9 @@ ipa_struct_reorg::compress_candidate (gassign *stmt, gimple_stmt_iterator *gsi,
 {
   if (pc_direct_rewrite_chance_p (rhs, new_rhs))
     return true;
+  else if (current_layout_opt_level & POINTER_COMPRESSION_UNSAFE
+	   && pc_simplify_chance_for_compress_p (stmt, rhs))
+    return compress_candidate_without_check (gsi, rhs, new_rhs);
 
   return compress_candidate_with_check (gsi, rhs, new_rhs);
 }
@@ -6428,6 +6557,79 @@ ipa_struct_reorg::create_bb_for_decompress_candidate (basic_block last_bb,
       gimple_dump_bb (dump_file, new_bb, 0, dump_flags);
     }
   return new_bb;
+}
+
+/* Try decompress candidate without check.  */
+
+bool
+ipa_struct_reorg::decompress_candidate_without_check (gimple_stmt_iterator *gsi,
+						      tree lhs, tree rhs,
+						      tree &new_lhs,
+						      tree &new_rhs)
+{
+  imm_use_iterator imm_iter;
+  use_operand_p use_p;
+  bool processed = false;
+
+  if (!gsi_one_before_end_p (*gsi))
+    {
+      gsi_next (gsi);
+      gimple *next_stmt = gsi_stmt (*gsi);
+      if (gimple_assign_rhs_class (next_stmt) == GIMPLE_SINGLE_RHS)
+	{
+	  tree next_rhs = gimple_assign_rhs1 (next_stmt);
+	  /* If current lhs is used as rhs in the next stmt:
+	     -> _1 = t->s
+		tt->s = _1.  */
+	  if (lhs == next_rhs)
+	    {
+	      /* Check whether:
+	       1. the lhs is only used in the next stmt.
+	       2. the next lhs is candidate type.  */
+	      if (has_single_use (lhs)
+		  && pc_candidate_tree_p (gimple_assign_lhs (next_stmt)))
+		{
+		  processed = true;
+		  /* Copy directly without conversion after update type.  */
+		  TREE_TYPE (new_lhs)
+		    = make_unsigned_type (compressed_size);
+		}
+	    }
+	  /* -> _1 = t->s
+	        _2 = _1->s
+	     In this case, _1 might not be nullptr, so decompress it without
+	     check.  */
+	  else if (TREE_CODE (next_rhs) == COMPONENT_REF)
+	    {
+	      tree use_base = TREE_OPERAND (TREE_OPERAND (next_rhs, 0), 0);
+	      if (use_base == lhs)
+		{
+		  srtype *type = get_compression_candidate_type (rhs);
+		  gcc_assert (type != NULL);
+		  gsi_prev (gsi);
+		  tree new_ref = NULL_TREE;
+		  if (TREE_CODE (new_rhs) == MEM_REF)
+		    new_ref = new_rhs;
+		  else
+		    {
+		      tree base = TREE_OPERAND (TREE_OPERAND (new_rhs, 0), 0);
+		      tree new_mem_ref = build_simple_mem_ref (base);
+		      new_ref = build3 (COMPONENT_REF,
+					TREE_TYPE (new_rhs),
+					new_mem_ref,
+					TREE_OPERAND (new_rhs, 1),
+					NULL_TREE);
+		    }
+		  new_rhs = decompress_offset_to_ptr (new_ref, type, gsi);
+		  processed = true;
+		  gsi_next (gsi);
+		}
+	    }
+	}
+      gsi_prev (gsi);
+      return processed;
+    }
+  return false;
 }
 
 /* Perform pointer decompression with check.  The conversion will be as shown
@@ -6532,7 +6734,10 @@ ipa_struct_reorg::decompress_candidate (gimple_stmt_iterator *gsi,
 					tree lhs, tree rhs, tree &new_lhs,
 					tree &new_rhs)
 {
-  // TODO: simplifiy check and rewrite will be pushed in next PR.
+  if (current_layout_opt_level & POINTER_COMPRESSION_UNSAFE
+      && decompress_candidate_without_check (gsi, lhs, rhs, new_lhs, new_rhs))
+    return true;
+
   return decompress_candidate_with_check (gsi, rhs, new_rhs);
 }
 
@@ -7551,18 +7756,26 @@ ipa_struct_reorg::check_and_prune_struct_for_pointer_compression (void)
 				" skip compression.\n");
 	  continue;
 	}
-      if ((current_layout_opt_level & POINTER_COMPRESSION_SAFE)
-	  && !type->has_legal_alloc_num)
+      if (!type->has_legal_alloc_num)
 	{
-	  if (dump_file)
-	    fprintf (dump_file, " has illegal struct array size,"
-				" skip compression.\n");
-	  continue;
+	  if (current_layout_opt_level & POINTER_COMPRESSION_UNSAFE)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, " has unknown alloc size, but"
+				    " in unsafe mode, so");
+	    }
+	  else
+	    {
+	      if (dump_file)
+		fprintf (dump_file, " has illegal struct array size,"
+				    " skip compression.\n");
+	      continue;
+	    }
 	}
       pc_transform_num++;
       type->pc_candidate = true;
       if (dump_file)
-	fprintf (dump_file, " attemps to do pointer compression.\n");
+	fprintf (dump_file, " attempts to do pointer compression.\n");
     }
 
   if (dump_file)
@@ -7584,14 +7797,10 @@ init_pointer_size_for_pointer_compression (void)
   switch (param_pointer_compression_size)
     {
       case 8:
-	compressed_size = 8; // sizeof (uint8)
-	break;
+      // FALLTHRU
       case 16:
-	compressed_size = 16; // sizeof (uint16)
-	break;
-      case 32:
-	compressed_size = 32; // sizeof (uint32)
-	break;
+      // FALLTHRU
+      case 32: compressed_size = param_pointer_compression_size; break;
       default:
 	error ("Invalid pointer compression size, using the following param: "
 	       "\"--param pointer-compression-size=[8,16,32]\"");
@@ -7672,6 +7881,8 @@ public:
     unsigned int level = 0;
     switch (struct_layout_optimize_level)
       {
+	case 5: level |= POINTER_COMPRESSION_UNSAFE;
+	// FALLTHRU
 	case 4: level |= POINTER_COMPRESSION_SAFE;
 	// FALLTHRU
 	case 3: level |= DEAD_FIELD_ELIMINATION;
