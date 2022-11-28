@@ -1,5 +1,5 @@
 /* If-conversion support.
-   Copyright (C) 2000-2020 Free Software Foundation, Inc.
+   Copyright (C) 2000-2022 Free Software Foundation, Inc.
 
    This file is part of GCC.
 
@@ -876,7 +876,9 @@ noce_emit_store_flag (struct noce_if_info *if_info, rtx x, int reversep,
     }
 
   /* Don't even try if the comparison operands or the mode of X are weird.  */
-  if (cond_complex || !SCALAR_INT_MODE_P (GET_MODE (x)))
+  if (!param_ifcvt_allow_complicated_cmps
+      && (cond_complex
+	  || !SCALAR_INT_MODE_P (GET_MODE (x))))
     return NULL_RTX;
 
   return emit_store_flag (x, code, XEXP (cond, 0),
@@ -1743,8 +1745,9 @@ noce_emit_cmove (struct noce_if_info *if_info, rtx x, enum rtx_code code,
 
   /* Don't even try if the comparison operands are weird
      except that the target supports cbranchcc4.  */
-  if (! general_operand (cmp_a, GET_MODE (cmp_a))
-      || ! general_operand (cmp_b, GET_MODE (cmp_b)))
+  if (! param_ifcvt_allow_complicated_cmps
+      && (! general_operand (cmp_a, GET_MODE (cmp_a))
+	  || ! general_operand (cmp_b, GET_MODE (cmp_b))))
     {
       if (!have_cbranchcc4
 	  || GET_MODE_CLASS (GET_MODE (cmp_a)) != MODE_CC
@@ -1915,19 +1918,6 @@ noce_try_cmove (struct noce_if_info *if_info)
   return FALSE;
 }
 
-/* Return true if X contains a conditional code mode rtx.  */
-
-static bool
-contains_ccmode_rtx_p (rtx x)
-{
-  subrtx_iterator::array_type array;
-  FOR_EACH_SUBRTX (iter, array, x, ALL)
-    if (GET_MODE_CLASS (GET_MODE (*iter)) == MODE_CC)
-      return true;
-
-  return false;
-}
-
 /* Helper for bb_valid_for_noce_process_p.  Validate that
    the rtx insn INSN is a single set that does not set
    the conditional register CC and is in general valid for
@@ -1946,7 +1936,6 @@ insn_valid_noce_process_p (rtx_insn *insn, rtx cc)
   /* Currently support only simple single sets in test_bb.  */
   if (!sset
       || !noce_operand_ok (SET_DEST (sset))
-      || contains_ccmode_rtx_p (SET_DEST (sset))
       || !noce_operand_ok (SET_SRC (sset)))
     return false;
 
@@ -1960,13 +1949,17 @@ insn_valid_noce_process_p (rtx_insn *insn, rtx cc)
    in this function.  */
 
 static bool
-bbs_ok_for_cmove_arith (basic_block bb_a, basic_block bb_b, rtx to_rename)
+bbs_ok_for_cmove_arith (basic_block bb_a,
+			basic_block bb_b,
+			rtx to_rename,
+			bitmap conflict_regs)
 {
   rtx_insn *a_insn;
   bitmap bba_sets = BITMAP_ALLOC (&reg_obstack);
-
+  bitmap intersections = BITMAP_ALLOC (&reg_obstack);
   df_ref def;
   df_ref use;
+  rtx_insn *last_a = last_active_insn (bb_a, FALSE);
 
   FOR_BB_INSNS (bb_a, a_insn)
     {
@@ -1976,30 +1969,25 @@ bbs_ok_for_cmove_arith (basic_block bb_a, basic_block bb_b, rtx to_rename)
       rtx sset_a = single_set (a_insn);
 
       if (!sset_a)
-	{
-	  BITMAP_FREE (bba_sets);
-	  return false;
-	}
+	goto end_cmove_arith_check_and_fail;
+      if (a_insn == last_a)
+	continue;
       /* Record all registers that BB_A sets.  */
       FOR_EACH_INSN_DEF (def, a_insn)
 	if (!(to_rename && DF_REF_REG (def) == to_rename))
 	  bitmap_set_bit (bba_sets, DF_REF_REGNO (def));
     }
 
+  bitmap_and (intersections, df_get_live_in (bb_b), bba_sets);
   rtx_insn *b_insn;
-
   FOR_BB_INSNS (bb_b, b_insn)
     {
       if (!active_insn_p (b_insn))
 	continue;
-
       rtx sset_b = single_set (b_insn);
 
       if (!sset_b)
-	{
-	  BITMAP_FREE (bba_sets);
-	  return false;
-	}
+	goto end_cmove_arith_check_and_fail;
 
       /* Make sure this is a REG and not some instance
 	 of ZERO_EXTRACT or SUBREG or other dangerous stuff.
@@ -2011,25 +1999,34 @@ bbs_ok_for_cmove_arith (basic_block bb_a, basic_block bb_b, rtx to_rename)
       if (MEM_P (SET_DEST (sset_b)))
 	gcc_assert (rtx_equal_p (SET_DEST (sset_b), to_rename));
       else if (!REG_P (SET_DEST (sset_b)))
-	{
-	  BITMAP_FREE (bba_sets);
-	  return false;
-	}
+	goto end_cmove_arith_check_and_fail;
 
-      /* If the insn uses a reg set in BB_A return false.  */
+      /* If the insn uses a reg set in BB_A return false
+	 or try to collect register list for renaming.  */
       FOR_EACH_INSN_USE (use, b_insn)
 	{
-	  if (bitmap_bit_p (bba_sets, DF_REF_REGNO (use)))
+	  if (bitmap_bit_p (intersections, DF_REF_REGNO (use)))
 	    {
-	      BITMAP_FREE (bba_sets);
-	      return false;
+	      if (param_ifcvt_allow_register_renaming < 1)
+		  goto end_cmove_arith_check_and_fail;
+
+	      /* Those regs should be renamed.  We can't rename CC reg, but
+		 possibly we can provide combined comparison in the future.  */
+	      if (GET_MODE_CLASS (GET_MODE (DF_REF_REG (use))) == MODE_CC)
+		goto end_cmove_arith_check_and_fail;
+	      bitmap_set_bit (conflict_regs, DF_REF_REGNO (use));
 	    }
 	}
-
     }
 
   BITMAP_FREE (bba_sets);
+  BITMAP_FREE (intersections);
   return true;
+
+end_cmove_arith_check_and_fail:
+  BITMAP_FREE (bba_sets);
+  BITMAP_FREE (intersections);
+  return false;
 }
 
 /* Emit copies of all the active instructions in BB except the last.
@@ -2082,6 +2079,134 @@ noce_emit_bb (rtx last_insn, basic_block bb, bool simple)
     return false;
 
   return true;
+}
+
+/* This function tries to rename regs that intersect with considered bb.  */
+
+static bool
+noce_rename_regs_in_cond (struct noce_if_info *if_info, bitmap cond_rename_regs)
+{
+  bool success = true;
+  if (bitmap_empty_p (cond_rename_regs))
+    return true;
+  if (param_ifcvt_allow_register_renaming < 2)
+    return false;
+  df_ref use;
+  rtx_insn* cmp_insn = if_info->cond_earliest;
+  /*  Jump instruction as a condion currently unsupported.  */
+  if (JUMP_P (cmp_insn))
+    return false;
+  rtx_insn* before_cmp = PREV_INSN (cmp_insn);
+  start_sequence ();
+  rtx_insn *copy_of_cmp = as_a <rtx_insn *> (copy_rtx (cmp_insn));
+  basic_block cmp_block = BLOCK_FOR_INSN (cmp_insn);
+  FOR_EACH_INSN_USE (use, cmp_insn)
+    {
+      if (bitmap_bit_p (cond_rename_regs, DF_REF_REGNO (use)))
+	{
+	  rtx use_reg = DF_REF_REG (use);
+	  rtx tmp = gen_reg_rtx (GET_MODE (use_reg));
+	  if (!validate_replace_rtx (use_reg, tmp, copy_of_cmp))
+	    {
+	      end_sequence ();
+	      return false;
+	    }
+	  noce_emit_move_insn (tmp, use_reg);
+	}
+    }
+
+  emit_insn (PATTERN (copy_of_cmp));
+  rtx_insn *seq = get_insns ();
+  unshare_all_rtl_in_chain (seq);
+  end_sequence ();
+
+  emit_insn_after_setloc (seq, before_cmp, INSN_LOCATION (cmp_insn));
+  delete_insn_and_edges (cmp_insn);
+  rtx_insn* insn;
+  FOR_BB_INSNS (cmp_block, insn)
+    df_insn_rescan (insn);
+
+  if_info->cond = noce_get_condition (if_info->jump,
+				      &copy_of_cmp,
+				      if_info->then_else_reversed);
+  if_info->cond_earliest = copy_of_cmp;
+  if_info->rev_cond = NULL_RTX;
+
+  return success;
+}
+
+/* This function tries to rename regs that intersect with considered bb.  */
+static bool
+noce_rename_regs_in_bb (basic_block test_bb, bitmap rename_regs)
+{
+  if (bitmap_empty_p (rename_regs))
+    return true;
+  rtx_insn* insn;
+  rtx_insn *last_insn = last_active_insn (test_bb, FALSE);
+  bool res = true;
+  start_sequence ();
+  FOR_BB_INSNS (test_bb, insn)
+    {
+      if (!active_insn_p (insn))
+	continue;
+      /* Only ssets are supported for now.  */
+      rtx sset = single_set (insn);
+      gcc_assert (sset);
+      rtx x = SET_DEST (sset);
+      if (!REG_P (x) || bitmap_bit_p (rename_regs, REGNO (x)))
+	continue;
+
+      machine_mode mode = GET_MODE (x);
+      rtx tmp = gen_reg_rtx (mode);
+      if (!validate_replace_rtx_part (x, tmp, &SET_DEST (sset), insn))
+	{
+	  gcc_assert (insn != last_insn);
+	  /* We can generate additional move for such case,
+	     but it will increase register preasure.
+	     For now just stop transformation.  */
+	  rtx result_rtx = SET_DEST (single_set (last_insn));
+	  if (REG_P (result_rtx) && (x != result_rtx))
+	    {
+	      res = false;
+	      break;
+	    }
+	  if (!validate_replace_rtx (x, tmp, insn))
+	    gcc_unreachable ();
+	  noce_emit_move_insn (tmp,x);
+	}
+      set_used_flags (insn);
+      rtx_insn* rename_candidate;
+      for (rename_candidate = NEXT_INSN (insn);
+	   rename_candidate && rename_candidate!= NEXT_INSN (BB_END (test_bb));
+	   rename_candidate = NEXT_INSN (rename_candidate))
+	{
+	  if (!reg_overlap_mentioned_p (x, rename_candidate))
+	    continue;
+
+	  int replace_res = TRUE;
+	  if (rename_candidate == last_insn)
+	    {
+	      validate_replace_src_group (x, tmp, rename_candidate);
+	      replace_res = apply_change_group ();
+	    }
+	  else
+	    replace_res = validate_replace_rtx (x, tmp, rename_candidate);
+	  gcc_assert (replace_res);
+	  set_used_flags (rename_candidate);
+
+	}
+      set_used_flags (x);
+      set_used_flags (tmp);
+
+    }
+    rtx_insn *seq = get_insns ();
+    unshare_all_rtl_in_chain (seq);
+    end_sequence ();
+    emit_insn_before_setloc (seq, first_active_insn (test_bb),
+			     INSN_LOCATION (first_active_insn (test_bb)));
+  FOR_BB_INSNS (test_bb, insn)
+    df_insn_rescan (insn);
+  return res;
 }
 
 /* Try more complex cases involving conditional_move.  */
@@ -2166,11 +2291,29 @@ noce_try_cmove_arith (struct noce_if_info *if_info)
 	  std::swap (then_bb, else_bb);
 	}
     }
-
+  bitmap else_bb_rename_regs = BITMAP_ALLOC (&reg_obstack);
+  bitmap then_bb_rename_regs = BITMAP_ALLOC (&reg_obstack);
   if (then_bb && else_bb
-      && (!bbs_ok_for_cmove_arith (then_bb, else_bb,  if_info->orig_x)
-	  || !bbs_ok_for_cmove_arith (else_bb, then_bb,  if_info->orig_x)))
-    return FALSE;
+      && (!bbs_ok_for_cmove_arith (then_bb, else_bb,
+				   if_info->orig_x,
+				   then_bb_rename_regs)
+	  || !bbs_ok_for_cmove_arith (else_bb, then_bb,
+				      if_info->orig_x,
+				      else_bb_rename_regs)))
+    {
+      BITMAP_FREE (then_bb_rename_regs);
+      BITMAP_FREE (else_bb_rename_regs);
+      return FALSE;
+    }
+  bool prepass_renaming = true;
+  prepass_renaming |= noce_rename_regs_in_bb (then_bb, then_bb_rename_regs);
+  prepass_renaming |= noce_rename_regs_in_bb (else_bb, else_bb_rename_regs);
+
+  BITMAP_FREE (then_bb_rename_regs);
+  BITMAP_FREE (else_bb_rename_regs);
+
+  if (!prepass_renaming)
+   return FALSE;
 
   start_sequence ();
 
@@ -2178,7 +2321,6 @@ noce_try_cmove_arith (struct noce_if_info *if_info)
      came from the test block.  The non-empty complex block that we will
      emit might clobber the register used by B or A, so move it to a pseudo
      first.  */
-
   rtx tmp_a = NULL_RTX;
   rtx tmp_b = NULL_RTX;
 
@@ -3052,7 +3194,8 @@ noce_operand_ok (const_rtx op)
 
 static bool
 bb_valid_for_noce_process_p (basic_block test_bb, rtx cond,
-			      unsigned int *cost, bool *simple_p)
+			     unsigned int *cost, bool *simple_p,
+			     bitmap cond_rename_regs)
 {
   if (!test_bb)
     return false;
@@ -3086,10 +3229,10 @@ bb_valid_for_noce_process_p (basic_block test_bb, rtx cond,
   rtx_insn *prev_last_insn = PREV_INSN (last_insn);
   gcc_assert (prev_last_insn);
 
-  /* For now, disallow setting x multiple times in test_bb.  */
-  if (REG_P (x) && reg_set_between_p (x, first_insn, prev_last_insn))
+  if (REG_P (x)
+      && reg_set_between_p (x, first_insn, prev_last_insn)
+      && param_ifcvt_allow_register_renaming < 1)
     return false;
-
   bitmap test_bb_temps = BITMAP_ALLOC (&reg_obstack);
 
   /* The regs that are live out of test_bb.  */
@@ -3099,25 +3242,35 @@ bb_valid_for_noce_process_p (basic_block test_bb, rtx cond,
   rtx_insn *insn;
   FOR_BB_INSNS (test_bb, insn)
     {
-      if (insn != last_insn)
+      if (insn == last_insn)
+	continue;
+      if (!active_insn_p (insn))
+	continue;
+
+      if (!insn_valid_noce_process_p (insn, cc))
+	goto free_bitmap_and_fail;
+
+      rtx sset = single_set (insn);
+      gcc_assert (sset);
+
+      if (contains_mem_rtx_p (SET_SRC (sset))
+	  || !REG_P (SET_DEST (sset)))
+	goto free_bitmap_and_fail;
+
+      if (reg_overlap_mentioned_p (SET_DEST (sset), cond))
 	{
-	  if (!active_insn_p (insn))
-	    continue;
-
-	  if (!insn_valid_noce_process_p (insn, cc))
+	  if (param_ifcvt_allow_register_renaming < 1)
 	    goto free_bitmap_and_fail;
-
-	  rtx sset = single_set (insn);
-	  gcc_assert (sset);
-
-	  if (contains_mem_rtx_p (SET_SRC (sset))
-	      || !REG_P (SET_DEST (sset))
-	      || reg_overlap_mentioned_p (SET_DEST (sset), cond))
+	  rtx sset_dest = SET_DEST (sset);
+	  if (REG_P (sset_dest)
+	      && (GET_MODE_CLASS (GET_MODE (sset_dest)) != MODE_CC))
+	    bitmap_set_bit (cond_rename_regs, REGNO (sset_dest));
+	  else
 	    goto free_bitmap_and_fail;
-
-	  potential_cost += pattern_cost (sset, speed_p);
-	  bitmap_set_bit (test_bb_temps, REGNO (SET_DEST (sset)));
 	}
+	  potential_cost += pattern_cost (sset, speed_p);
+	  if (SET_DEST (sset) != SET_DEST (last_set))
+	    bitmap_set_bit (test_bb_temps, REGNO (SET_DEST (sset)));
     }
 
   /* If any of the intermediate results in test_bb are live after test_bb
@@ -3475,14 +3628,27 @@ noce_process_if_block (struct noce_if_info *if_info)
 
   bool speed_p = optimize_bb_for_speed_p (test_bb);
   unsigned int then_cost = 0, else_cost = 0;
+  bitmap cond_rename_regs = BITMAP_ALLOC (&reg_obstack);
   if (!bb_valid_for_noce_process_p (then_bb, cond, &then_cost,
-				    &if_info->then_simple))
-    return false;
+				    &if_info->then_simple, cond_rename_regs))
+    {
+      BITMAP_FREE (cond_rename_regs);
+      return false;
+    }
 
   if (else_bb
       && !bb_valid_for_noce_process_p (else_bb, cond, &else_cost,
-				       &if_info->else_simple))
+				       &if_info->else_simple, cond_rename_regs))
+    {
+      BITMAP_FREE (cond_rename_regs);
+      return false;
+    }
+
+  if (!noce_rename_regs_in_cond (if_info, cond_rename_regs))
     return false;
+  cond = if_info->cond;
+
+  BITMAP_FREE (cond_rename_regs);
 
   if (speed_p)
     if_info->original_cost += average_cost (then_cost, else_cost,
@@ -5426,7 +5592,7 @@ if_convert (bool after_combine)
 {
   basic_block bb;
   int pass;
-
+  cleanup_cfg (CLEANUP_EXPENSIVE);
   if (optimize == 1)
     {
       df_live_add_problem ();
