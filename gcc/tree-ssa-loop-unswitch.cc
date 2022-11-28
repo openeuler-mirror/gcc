@@ -1588,6 +1588,7 @@ clean_up_after_unswitching (int ignored_edge_flag)
   basic_block bb;
   edge e;
   edge_iterator ei;
+  bool removed_edge = false;
 
   FOR_EACH_BB_FN (bb, cfun)
     {
@@ -1612,7 +1613,10 @@ clean_up_after_unswitching (int ignored_edge_flag)
 		     to preserve its edge.  But we can remove the
 		     non-default CASE sharing the edge.  */
 		  if (e != default_e)
-		    remove_edge (e);
+		    {
+		      remove_edge (e);
+		      removed_edge = true;
+		    }
 		}
 	      else
 		{
@@ -1629,6 +1633,10 @@ clean_up_after_unswitching (int ignored_edge_flag)
       FOR_EACH_EDGE (e, ei, bb->succs)
 	e->flags &= ~ignored_edge_flag;
     }
+
+  /* If we removed an edge we possibly have to recompute dominators.  */
+  if (removed_edge)
+    free_dominance_info (CDI_DOMINATORS);
 }
 
 /* Loop unswitching pass.  */
