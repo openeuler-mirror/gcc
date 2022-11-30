@@ -2276,6 +2276,173 @@ vector_vector_composition_type (tree vtype, poly_uint64 nelts, tree *ptype)
   return NULL_TREE;
 }
 
+/* Check succeedor BB, BB without load is regarded as empty BB.  Ignore empty
+   BB in DFS.  */
+
+static unsigned
+mem_refs_in_bb (basic_block bb, vec<gimple *> &stmts)
+{
+  unsigned num = 0;
+  for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
+       !gsi_end_p (gsi); gsi_next (&gsi))
+    {
+      gimple *stmt = gsi_stmt (gsi);
+      if (is_gimple_debug (stmt))
+	continue;
+      if (is_gimple_assign (stmt) && gimple_has_mem_ops (stmt)
+	  && !gimple_has_volatile_ops (stmt))
+	{
+	  if (gimple_assign_rhs_code (stmt) == MEM_REF
+	      || gimple_assign_rhs_code (stmt) == ARRAY_REF)
+	    {
+	      stmts.safe_push (stmt);
+	      num++;
+	    }
+	  else if (TREE_CODE (gimple_get_lhs (stmt)) == MEM_REF
+		   || TREE_CODE (gimple_get_lhs (stmt)) == ARRAY_REF)
+	    num++;
+	}
+    }
+  return num;
+}
+
+static bool
+check_same_base (vec<data_reference_p> *datarefs, data_reference_p dr)
+{
+  for (unsigned ui = 0; ui < datarefs->length (); ui++)
+    {
+      tree op1 = TREE_OPERAND (DR_BASE_OBJECT (dr), 0);
+      tree op2 = TREE_OPERAND (DR_BASE_OBJECT ((*datarefs)[ui]), 0);
+      if (TREE_CODE (op1) != TREE_CODE (op2))
+	continue;
+      if (TREE_CODE (op1) == ADDR_EXPR)
+	{
+	  op1 = TREE_OPERAND (op1, 0);
+	  op2 = TREE_OPERAND (op2, 0);
+	}
+      enum tree_code code = TREE_CODE (op1);
+      switch (code)
+	{
+	case VAR_DECL:
+	  if (DECL_NAME (op1) == DECL_NAME (op2)
+	      && DR_IS_READ ((*datarefs)[ui]))
+	    return true;
+	  break;
+	case SSA_NAME:
+	  if (SSA_NAME_VERSION (op1) == SSA_NAME_VERSION (op2)
+	      && DR_IS_READ ((*datarefs)[ui]))
+	    return true;
+	  break;
+	default:
+	  break;
+	}
+    }
+  return false;
+}
+
+/* Iterate all load STMTS, if staisfying same base vectorized stmt, then return,
+   Otherwise, set false to SUCCESS.  */
+
+static void
+check_vec_use (loop_vec_info loop_vinfo, vec<gimple *> &stmts,
+	       stmt_vec_info stmt_info, bool &success)
+{ 
+  if (stmt_info == NULL)
+    {
+      success = false;
+      return;
+    }
+  if (DR_IS_READ (stmt_info->dr_aux.dr))
+    {
+      success = false;
+      return;
+    }
+  unsigned ui = 0;
+  gimple *candidate = NULL;
+  FOR_EACH_VEC_ELT (stmts, ui, candidate)
+    {
+      if (TREE_CODE (TREE_TYPE (gimple_get_lhs (candidate))) != VECTOR_TYPE)
+	continue;
+
+      if (candidate->bb != candidate->bb->loop_father->header)
+	{
+	  success = false;
+	  return;
+	}
+      auto_vec<data_reference_p> datarefs;
+      tree res = find_data_references_in_bb (candidate->bb->loop_father,
+					     candidate->bb, &datarefs);
+      if (res == chrec_dont_know)
+	{
+	  success = false;
+	  return;
+	}
+      if (check_same_base (&datarefs, stmt_info->dr_aux.dr))
+	return;
+    }
+  success = false;
+}
+
+/* Deep first search from present BB.  If succeedor has load STMTS,
+   stop further searching.  */
+
+static void
+dfs_check_bb (loop_vec_info loop_vinfo, basic_block bb, stmt_vec_info stmt_info,
+	      bool &success, vec<basic_block> &visited_bbs)
+{
+  if (bb == cfun->cfg->x_exit_block_ptr)
+    {
+      success = false;
+      return;
+    }
+  if (!success || visited_bbs.contains (bb) || bb == loop_vinfo->loop->latch)
+    return;
+
+  visited_bbs.safe_push (bb);
+  auto_vec<gimple *> stmts;
+  unsigned num = mem_refs_in_bb (bb, stmts);
+  /* Empty BB.  */
+  if (num == 0)
+    {
+      edge e;
+      edge_iterator ei;
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	{
+	  dfs_check_bb (loop_vinfo, e->dest, stmt_info, success, visited_bbs);
+	  if (!success)
+	    return;
+	}
+      return;
+    }
+  /* Non-empty BB.  */
+  check_vec_use (loop_vinfo, stmts, stmt_info, success);
+}
+
+/* For grouped store, if all succeedors of present BB have vectorized load
+   from same base of store.  If so, set memory_access_type using
+   VMAT_CONTIGUOUS_PERMUTE instead of VMAT_LOAD_STORE_LANES.  */
+
+static bool
+conti_perm (stmt_vec_info stmt_vinfo, loop_vec_info loop_vinfo)
+{
+  gimple *stmt = stmt_vinfo->stmt;
+  if (gimple_code (stmt) != GIMPLE_ASSIGN)
+    return false;
+
+  if (DR_IS_READ (stmt_vinfo->dr_aux.dr))
+    return false;
+
+  basic_block bb = stmt->bb;
+  bool success = true;
+  auto_vec<basic_block> visited_bbs;
+  visited_bbs.safe_push (bb);
+  edge e;
+  edge_iterator ei;
+  FOR_EACH_EDGE (e, ei, bb->succs)
+    dfs_check_bb (loop_vinfo, e->dest, stmt_vinfo, success, visited_bbs);
+  return success;
+}
+
 /* A subroutine of get_load_store_type, with a subset of the same
    arguments.  Handle the case where STMT_INFO is part of a grouped load
    or store.
@@ -2430,6 +2597,20 @@ get_group_load_store_type (stmt_vec_info stmt_info, tree vectype, bool slp,
 		   ? vect_grouped_load_supported (vectype, single_element_p,
 						  group_size)
 		   : vect_grouped_store_supported (vectype, group_size))
+	    {
+	      *memory_access_type = VMAT_CONTIGUOUS_PERMUTE;
+	      overrun_p = would_overrun_p;
+	    }
+
+	  if (*memory_access_type == VMAT_LOAD_STORE_LANES
+	      && TREE_CODE (loop_vinfo->num_iters) == INTEGER_CST
+	      && maybe_eq (tree_to_shwi (loop_vinfo->num_iters),
+			   loop_vinfo->vectorization_factor)
+	      && conti_perm (stmt_info, loop_vinfo)
+	      && (vls_type == VLS_LOAD
+		  ? vect_grouped_load_supported (vectype, single_element_p,
+						 group_size)
+		  : vect_grouped_store_supported (vectype, group_size)))
 	    {
 	      *memory_access_type = VMAT_CONTIGUOUS_PERMUTE;
 	      overrun_p = would_overrun_p;
