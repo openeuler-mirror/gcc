@@ -25,6 +25,9 @@ namespace struct_reorg {
 
 const int max_split = 2;
 
+unsigned semi_relayout_align = semi_relayout_level;
+unsigned relayout_part_size = 1 << semi_relayout_level;
+
 template <typename type>
 struct auto_vec_del : auto_vec<type*>
 {
@@ -127,6 +130,10 @@ public:
   bool pc_candidate;
   bool has_legal_alloc_num;
   int has_alloc_array;
+  bool semi_relayout;
+  hash_map<tree, unsigned long> new_field_offsets;
+  unsigned bucket_parts;
+  unsigned bucket_size;
 
   // Constructors
   srtype(tree type);
@@ -148,6 +155,7 @@ public:
   bool has_dead_field (void);
   void mark_escape (escape_type, gimple *stmt);
   void create_global_ptr_for_pc ();
+  unsigned calculate_bucket_size ();
   bool has_escaped (void)
   {
     return escapes != does_not_escape;

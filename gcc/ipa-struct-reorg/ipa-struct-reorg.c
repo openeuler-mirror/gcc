@@ -265,7 +265,8 @@ enum struct_layout_opt_level
   STRUCT_REORDER_FIELDS = 1 << 2,
   DEAD_FIELD_ELIMINATION = 1 << 3,
   POINTER_COMPRESSION_SAFE = 1 << 4,
-  POINTER_COMPRESSION_UNSAFE = 1 << 5
+  POINTER_COMPRESSION_UNSAFE = 1 << 5,
+  SEMI_RELAYOUT = 1 << 6
 };
 
 /* Defines the target pointer size of compressed pointer, which should be 8,
@@ -280,6 +281,7 @@ void get_base (tree &base, tree expr);
 static unsigned int current_layout_opt_level;
 
 hash_map<tree, tree> replace_type_map;
+hash_map<tree, tree> semi_relayout_map;
 
 /* Return true if one of these types is created by struct-reorg.  */
 
@@ -398,7 +400,9 @@ srtype::srtype (tree type)
     visited (false),
     pc_candidate (false),
     has_legal_alloc_num (false),
-    has_alloc_array (0)
+    has_alloc_array (0),
+    semi_relayout (false),
+    bucket_parts (0)
 {
   for (int i = 0; i < max_split; i++)
     newtype[i] = NULL_TREE;
@@ -883,6 +887,66 @@ srfield::create_new_optimized_fields (tree newtype[max_split],
   newfield[0] = field;
 }
 
+/* Given a struct s whose fields has already reordered by size, we try to
+   combine fields less than 8 bytes together to 8 bytes.  Example:
+   struct s {
+     uint64_t a,
+     uint32_t b,
+     uint32_t c,
+     uint32_t d,
+     uint16_t e,
+     uint8_t f
+   }
+   
+   We allocate memory for arrays of struct S, before semi-relayout, their
+   layout in memory is shown as below:
+   [a,b,c,d,e,f,padding;a,b,c,d,e,f,padding;...]
+   
+   During semi-relayout, we put a number of structs into a same region called
+   bucket.  The number is determined by param realyout-bucket-capacity-level.
+   Using 1024 here as example.  After semi-relayout, the layout in a bucket is
+   shown as below:
+   part1 [a;a;a...]
+   part2 [b,c;b,c;b,c;...]
+   part3 [d,e,f,pad;d,e,f,pad;d,e,f,pad;...]
+   
+   In the last bucket, if the amount of rest structs is less than the capacity
+   of a bucket, the rest of allcated memory will be wasted as padding.  */
+
+unsigned
+srtype::calculate_bucket_size ()
+{
+  unsigned parts = 0;
+  unsigned bit_sum = 0;
+  unsigned relayout_offset = 0;
+  /* Currently, limit each 8 bytes with less than 2 fields.  */
+  unsigned curr_part_num = 0;
+  unsigned field_num = 0;
+  for (tree f = TYPE_FIELDS (newtype[0]); f; f = DECL_CHAIN (f))
+    {
+      unsigned size = TYPE_PRECISION (TREE_TYPE (f));
+      bit_sum += size;
+      field_num++;
+      if (++curr_part_num > 2 || bit_sum > 64)
+	{
+	  bit_sum = size;
+	  parts++;
+	  relayout_offset = relayout_part_size * parts;
+	  curr_part_num = 1;
+	}
+      else
+	{
+	  relayout_offset = relayout_part_size * parts + (bit_sum - size) / 8;
+	}
+      new_field_offsets.put (f, relayout_offset);
+    }
+  /* Donnot relayout a struct with only one field after DFE.  */
+  if (field_num == 1)
+    return 0;
+  bucket_parts = ++parts;
+  return parts * relayout_part_size;
+}
+
 /* Create the new TYPE corresponding to THIS type. */
 
 bool
@@ -993,6 +1057,15 @@ srtype::create_new_type (void)
 
   if (pc_candidate && pc_gptr == NULL_TREE)
     create_global_ptr_for_pc ();
+
+  if (semi_relayout)
+    {
+      bucket_size = calculate_bucket_size ();
+      if (bucket_size == 0)
+	return false;
+      if (semi_relayout_map.get (this->newtype[0]) == NULL)
+	semi_relayout_map.put (this->newtype[0], this->type);
+    }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
@@ -1393,7 +1466,7 @@ public:
 		       bool should_create = false, bool can_escape = false);
   bool wholeaccess (tree expr, tree base, tree accesstype, srtype *t);
 
-  void check_alloc_num (gimple *stmt, srtype *type);
+  void check_alloc_num (gimple *stmt, srtype *type, bool ptrptr);
   void check_definition_assign (srdecl *decl, vec<srdecl*> &worklist);
   void check_definition_call (srdecl *decl, vec<srdecl*> &worklist);
   void check_definition (srdecl *decl, vec<srdecl*>&);
@@ -1440,6 +1513,33 @@ public:
 						  tree &);
   basic_block create_bb_for_compress_nullptr (basic_block, tree &);
   basic_block create_bb_for_decompress_nullptr (basic_block, tree, tree &);
+
+  // Semi-relayout methods:
+  bool is_semi_relayout_candidate (tree);
+  srtype *get_semi_relayout_candidate_type (tree);
+  void check_and_prune_struct_for_semi_relayout (void);
+  tree rewrite_pointer_diff (gimple_stmt_iterator *, tree, tree, srtype *);
+  tree rewrite_pointer_plus_integer (gimple *, gimple_stmt_iterator *, tree,
+				     tree, srtype *);
+  tree build_div_expr (gimple_stmt_iterator *, tree, tree);
+  tree get_true_pointer_base (gimple_stmt_iterator *, tree, srtype *);
+  tree get_real_allocated_ptr (tree, gimple_stmt_iterator *);
+  tree set_ptr_for_use (tree, gimple_stmt_iterator *);
+  void record_allocated_size (tree, gimple_stmt_iterator *, tree);
+  tree read_allocated_size (tree, gimple_stmt_iterator *);
+  gimple *create_aligned_alloc (gimple_stmt_iterator *, srtype *, tree,
+				tree &);
+  void create_memset_zero (tree, gimple_stmt_iterator *, tree);
+  void create_memcpy (tree, tree, tree, gimple_stmt_iterator *);
+  void create_free (tree, gimple_stmt_iterator *);
+  void copy_to_lhs (tree, tree, gimple_stmt_iterator *);
+  srtype *get_relayout_candidate_type (tree);
+  long unsigned int get_true_field_offset (srfield *, srtype *);
+  tree rewrite_address (tree, srfield *, srtype *, gimple_stmt_iterator *);
+  bool check_sr_copy (gimple *);
+  void relayout_field_copy (gimple_stmt_iterator *, gimple *, tree, tree,
+			    tree&, tree &);
+  void do_semi_relayout (gimple_stmt_iterator *, gimple *, tree &, tree &);
 };
 
 struct ipa_struct_relayout
@@ -4528,7 +4628,7 @@ ipa_struct_reorg::check_type_and_push (tree newdecl, srdecl *decl,
 }
 
 void
-ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type)
+ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type, bool ptrptr)
 {
   if (current_layout_opt_level >= COMPLETE_STRUCT_RELAYOUT
       && handled_allocation_stmt (stmt))
@@ -4536,6 +4636,14 @@ ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type)
       tree arg0 = gimple_call_arg (stmt, 0);
       basic_block bb = gimple_bb (stmt);
       cgraph_node *node = current_function->node;
+      if (!ptrptr && current_layout_opt_level >= SEMI_RELAYOUT
+	  && gimple_call_builtin_p (stmt, BUILT_IN_MALLOC))
+	{
+	  /* Malloc is commonly used for allocations of a single struct
+	     and semi-relayout will waste a mess of memory, so we skip it.  */
+	  type->has_alloc_array = -4;
+	  return;
+	}
       if (integer_onep (arg0))
 	{
 	  /* Actually NOT an array, but may ruin other array.  */
@@ -4544,6 +4652,10 @@ ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type)
       else if (bb->loop_father != NULL
 	       && loop_outer (bb->loop_father) != NULL)
 	{
+	  /* For semi-relayout, do not escape realloc.  */
+	  if (current_layout_opt_level & SEMI_RELAYOUT
+	      && gimple_call_builtin_p (stmt, BUILT_IN_REALLOC))
+	    return;
 	  /* The allocation is in a loop.  */
 	  type->has_alloc_array = -2;
 	}
@@ -4635,6 +4747,13 @@ ipa_struct_reorg::check_definition_assign (srdecl *decl, vec<srdecl*> &worklist)
       return;
     }
 
+  if (semi_relayout_map.get (type->type) != NULL)
+    {
+      if (current_layout_opt_level != COMPLETE_STRUCT_RELAYOUT)
+        type->mark_escape (escape_unhandled_rewrite, stmt);
+      return;
+    }
+
   /* d) if the name is from a cast/assignment, make sure it is used as
 	that type or void*
 	i) If void* then push the ssa_name into worklist.  */
@@ -4679,7 +4798,8 @@ ipa_struct_reorg::check_definition_call (srdecl *decl, vec<srdecl*> &worklist)
 	}
     }
 
-  check_alloc_num (stmt, type);
+  bool ptrptr = isptrptr (decl->orig_type);
+  check_alloc_num (stmt, type, ptrptr);
   return;
 }
 
@@ -6249,6 +6369,53 @@ ipa_struct_reorg::pc_candidate_tree_p (tree xhs)
   return false;
 }
 
+srtype *
+ipa_struct_reorg::get_semi_relayout_candidate_type (tree xhs)
+{
+  if (xhs == NULL)
+    return NULL;
+  if (TREE_CODE (xhs) == SSA_NAME || TREE_CODE (xhs) == COMPONENT_REF)
+    {
+      srtype *access_type = find_type (inner_type (TREE_TYPE (xhs)));
+      if (access_type != NULL && access_type->semi_relayout)
+        return access_type;
+    }
+  return NULL;
+}
+
+bool
+ipa_struct_reorg::is_semi_relayout_candidate (tree xhs)
+{
+  if (xhs == NULL)
+    return false;
+
+  if (TREE_CODE (xhs) == SSA_NAME)
+    xhs = TREE_TYPE (xhs);
+
+  if (TREE_CODE (xhs) == POINTER_TYPE)
+    {
+      srtype *var_type = find_type (TREE_TYPE (xhs));
+      if (!var_type || var_type->has_escaped ())
+	return false;
+      if (var_type->semi_relayout)
+	return true;
+    }
+
+  if (TREE_CODE (xhs) == COMPONENT_REF)
+    {
+      tree mem = TREE_OPERAND (xhs, 0);
+      if (TREE_CODE (mem) == MEM_REF)
+        {
+	  tree type = TREE_TYPE (mem);
+	  srtype *old_type = get_relayout_candidate_type (type);
+	  if (types_compatible_p (type, old_type->type)
+	      && old_type->semi_relayout)
+	    return true;
+	}
+    }
+  return false;
+}
+
 /* True if xhs is a component_ref that base has escaped but uses a compression
    candidate type.  */
 
@@ -6782,6 +6949,404 @@ ipa_struct_reorg::try_rewrite_with_pointer_compression (gassign *stmt,
     }
 }
 
+tree
+ipa_struct_reorg::rewrite_pointer_diff (gimple_stmt_iterator *gsi, tree ptr1,
+					tree ptr2, srtype *type)
+{
+  tree shifts = build_int_cst (long_integer_type_node, semi_relayout_align);
+  tree pointer_type = build_pointer_type (unsigned_char_type_node);
+  /* addr_high_1 = (intptr_t)ptr1 >> shifts  */
+  tree ptr1_cvt = fold_convert (pointer_type, ptr1);
+  tree addr_high_1 = gimplify_build2 (gsi, RSHIFT_EXPR, pointer_type,
+				      ptr1_cvt, shifts);
+  /* addr_high_2 = (intptr_t)ptr2 >> shifts  */
+  tree ptr2_cvt = fold_convert (pointer_type, ptr2);
+  tree addr_high_2 = gimplify_build2 (gsi, RSHIFT_EXPR, pointer_type,
+				      ptr2_cvt, shifts);
+  /* off1 = (intptr_t)ptr1 - (addr_high_1 << shifts)  */
+  tree bucket_start_1 = gimplify_build2 (gsi, LSHIFT_EXPR, pointer_type,
+					 addr_high_1, shifts);
+  tree off1 = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+			       ptr1_cvt, bucket_start_1);
+  /* off2 = (intptr_t)ptr2 - (addr_high_2 << shifts)  */
+  tree bucket_start_2 = gimplify_build2 (gsi, LSHIFT_EXPR, pointer_type,
+					 addr_high_2, shifts);
+  tree off2 = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+			       ptr2_cvt, bucket_start_2);
+  /* group_diff = (addr_high_1 - addr_high_2) / bucket_parts  */
+  tree bucket_sub = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+				     addr_high_1, addr_high_2);
+  tree bucket_parts = build_int_cst (long_integer_type_node,
+				     type->bucket_parts);
+  tree group_diff = gimplify_build2 (gsi, TRUNC_DIV_EXPR,
+				     long_integer_type_node,
+				     bucket_sub, bucket_parts);
+  /* off_addr_diff = off1 - off2  */
+  tree off_addr_diff = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+					off1, off2);
+  /* res = group_diff * bucket_capacity + off_diff / 8  */
+  tree capacity = build_int_cst (long_integer_type_node,
+				 relayout_part_size / 8);
+  tree unit_size = build_int_cst (long_integer_type_node, 8);
+  tree bucket_index_diff = gimplify_build2 (gsi, MULT_EXPR,
+					    long_integer_type_node,
+					    group_diff, capacity);
+  tree off_index = gimplify_build2 (gsi, TRUNC_DIV_EXPR,
+				    long_integer_type_node,
+				    off_addr_diff, unit_size);
+  tree res = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node,
+			      bucket_index_diff, off_index);
+  return res;
+}
+
+basic_block
+create_bb_for_group_diff_eq_0 (basic_block last_bb, tree phi, tree new_granule)
+{
+  basic_block new_bb = create_empty_bb (last_bb);
+  if (last_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (new_bb, last_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+  /* Emit res = new_granule;  */
+  gimple_stmt_iterator gsi = gsi_last_bb (new_bb);
+  gimple *new_stmt = gimple_build_assign (phi, new_granule);
+  gsi_insert_after (&gsi, new_stmt, GSI_NEW_STMT);
+  return new_bb;
+}
+
+basic_block
+create_bb_for_group_diff_ne_0 (basic_block new_bb, tree &phi, tree ptr,
+			       tree group_diff, tree off_times_8, srtype *type)
+{
+  tree shifts = build_int_cst (long_unsigned_type_node, semi_relayout_align);
+  gimple_stmt_iterator gsi = gsi_last_bb (new_bb);
+  gsi_insert_after (&gsi, gimple_build_nop (), GSI_NEW_STMT);
+  /* curr_group_start = (ptr >> shifts) << shifts;  */
+  tree ptr_r_1 = gimplify_build2 (&gsi, RSHIFT_EXPR, long_integer_type_node,
+				  ptr, shifts);
+  tree curr_group_start = gimplify_build2 (&gsi, LSHIFT_EXPR, long_integer_type_node,
+					   ptr_r_1, shifts);
+  /* curr_off_from_group = ptr - curr_group_start;  */
+  tree curr_off_from_group = gimplify_build2 (&gsi, MINUS_EXPR,
+					      long_integer_type_node,
+					      ptr, curr_group_start);
+  /* res = curr_group_start + ((group_diff * parts) << shifts)
+	   + ((curr_off_from_group + off_times_8) % shifts);  */
+  tree step1 = gimplify_build2 (&gsi, MULT_EXPR, long_integer_type_node,
+				group_diff, build_int_cst (
+				long_integer_type_node, type->bucket_parts));
+  tree step2 = gimplify_build2 (&gsi, LSHIFT_EXPR, long_integer_type_node,
+				step1, shifts);
+  tree step3 = gimplify_build2 (&gsi, PLUS_EXPR, long_integer_type_node,
+				curr_off_from_group, off_times_8);
+  tree step4 = gimplify_build2 (&gsi, TRUNC_MOD_EXPR, long_integer_type_node,
+				step3, build_int_cst (
+					long_integer_type_node, relayout_part_size));
+  tree step5 = gimplify_build2 (&gsi, PLUS_EXPR, long_integer_type_node,
+				step2, step4);
+  tree res_phi1 = gimplify_build2 (&gsi, PLUS_EXPR, long_integer_type_node,
+				  curr_group_start, step5);
+  /* if (group_diff < 0)  */
+  gcond *cond = gimple_build_cond (LT_EXPR, group_diff,
+				   build_int_cst (long_integer_type_node, 0),
+				   NULL_TREE, NULL_TREE);
+  gsi_insert_before (&gsi, cond, GSI_SAME_STMT);
+  /* remove nop  */
+  gsi_remove (&gsi, true);
+  /* res += shifts  */
+  basic_block true_bb = create_empty_bb (new_bb);
+  if (new_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (true_bb, new_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+  gimple_stmt_iterator true_gsi = gsi_last_bb (true_bb);
+  tree res_phi2 = make_ssa_name (long_integer_type_node);
+  gimple *new_stmt
+	  = gimple_build_assign (res_phi2, PLUS_EXPR, res_phi1,
+		build_int_cst (long_integer_type_node, relayout_part_size));
+  gsi_insert_after (&true_gsi, new_stmt, GSI_NEW_STMT);
+  /* create phi bb  */
+  basic_block res_bb = create_empty_bb (true_bb);
+  if (new_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (res_bb, new_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+  /* rebuild cfg  */
+  edge etrue = make_edge (new_bb, true_bb, EDGE_TRUE_VALUE);
+  etrue->probability = profile_probability::unlikely ();
+  true_bb->count = etrue->count ();
+
+  edge efalse = make_edge (new_bb, res_bb, EDGE_FALSE_VALUE);
+  efalse->probability = profile_probability::likely ();
+  res_bb->count = efalse->count ();
+
+  edge efall = make_single_succ_edge (true_bb, res_bb, EDGE_FALLTHRU);
+  
+  phi = make_ssa_name (long_integer_type_node);
+  gphi *phi_node = create_phi_node (phi, res_bb);
+  add_phi_arg (phi_node, res_phi2, efall, UNKNOWN_LOCATION);
+  add_phi_arg (phi_node, res_phi1, efalse, UNKNOWN_LOCATION);
+
+  if (dom_info_available_p (CDI_DOMINATORS))
+    {
+      set_immediate_dominator (CDI_DOMINATORS, true_bb, new_bb);
+      set_immediate_dominator (CDI_DOMINATORS, res_bb, new_bb);
+    }
+  return res_bb;
+}
+
+tree
+ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt,
+						gimple_stmt_iterator *gsi,
+						tree ptr, tree offset,
+						srtype *type)
+{
+  gcc_assert (type->semi_relayout);
+  tree off = fold_convert (long_integer_type_node, offset);
+  tree num_8 = build_int_cst (integer_type_node, 8);
+  tree shifts = build_int_cst (integer_type_node, semi_relayout_align);
+  /* off_times_8 = off * 8;  */
+  tree off_times_8 = gimplify_build2 (gsi, MULT_EXPR, long_integer_type_node,
+				      off, num_8);
+  /* new_granule = ptr + off * 8;  */
+  tree ptr_int = fold_convert (long_integer_type_node, ptr);
+  tree new_granule = gimplify_build2 (gsi, PLUS_EXPR, long_integer_type_node,
+				      ptr_int, off_times_8);
+  /* group_diff = (new_granule >> shifts) - (ptr >> shifts);  */
+  tree group_diff_rhs_1 = gimplify_build2 (gsi, RSHIFT_EXPR,
+					   long_integer_type_node,
+					   new_granule, shifts);
+  tree group_diff_rhs_2 = gimplify_build2 (gsi, RSHIFT_EXPR,
+					   long_integer_type_node,
+					   ptr, shifts);
+  tree group_diff = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+				     group_diff_rhs_1, group_diff_rhs_2);
+  /* if (group_diff == 0)  */
+  gcond *cond = gimple_build_cond (EQ_EXPR, group_diff,
+				  build_int_cst (long_integer_type_node, 0),
+				  NULL_TREE, NULL_TREE);
+  gimple_set_location (cond, UNKNOWN_LOCATION);
+  gsi_insert_before (gsi, cond, GSI_SAME_STMT);
+
+  gimple *curr_stmt = as_a <gimple *> (cond);
+  edge e = split_block (curr_stmt->bb, curr_stmt);
+  basic_block split_src_bb = e->src;
+  basic_block split_dst_bb = e->dest;
+  remove_edge_raw (e);
+  /* if (group_diff == 0)
+       res = new_granule;  */
+  tree res_phi_1 = make_ssa_name (long_integer_type_node);
+  basic_block true_bb = create_bb_for_group_diff_eq_0 (split_src_bb, res_phi_1,
+						       new_granule);
+  /* else  */
+  tree res_phi_2 = NULL_TREE;
+  basic_block false_bb = create_empty_bb (split_src_bb);
+  if (split_src_bb->loop_father != NULL)
+    {
+      add_bb_to_loop (false_bb, split_src_bb->loop_father);
+      loops_state_set (LOOPS_NEED_FIXUP);
+    }
+
+  edge etrue = make_edge (split_src_bb, true_bb, EDGE_TRUE_VALUE);
+  etrue->probability = profile_probability::very_likely ();
+  true_bb->count = etrue->count ();
+
+  edge efalse = make_edge (split_src_bb, false_bb, EDGE_FALSE_VALUE);
+  efalse->probability = profile_probability::unlikely ();
+  false_bb->count = efalse->count ();
+  basic_block res_bb = create_bb_for_group_diff_ne_0 (false_bb, res_phi_2,
+						      ptr_int, group_diff,
+						      off_times_8, type);
+  /* rebuild cfg  */
+  edge e_true_fall = make_single_succ_edge (true_bb, split_dst_bb,
+					    EDGE_FALLTHRU);
+  edge e_false_fall = make_single_succ_edge (res_bb, split_dst_bb,
+					     EDGE_FALLTHRU);
+  tree res_int = make_ssa_name (long_integer_type_node);
+  gphi *phi_node = create_phi_node (res_int, split_dst_bb);
+  add_phi_arg (phi_node, res_phi_1, e_true_fall, UNKNOWN_LOCATION);
+  add_phi_arg (phi_node, res_phi_2, e_false_fall, UNKNOWN_LOCATION);
+  if (dom_info_available_p (CDI_DOMINATORS))
+    {
+      set_immediate_dominator (CDI_DOMINATORS, split_dst_bb, split_src_bb);
+      set_immediate_dominator (CDI_DOMINATORS, true_bb, split_src_bb);
+      set_immediate_dominator (CDI_DOMINATORS, false_bb, split_src_bb);
+    }
+  *gsi = gsi_start_bb (split_dst_bb);
+  tree pointer_type = build_pointer_type (unsigned_char_type_node);
+  tree res = gimplify_build1 (gsi, NOP_EXPR, pointer_type, res_int);
+  return res;
+}
+
+tree
+ipa_struct_reorg::build_div_expr (gimple_stmt_iterator *gsi,
+				  tree expr, tree orig_size)
+{
+  tree div_expr = build2 (TRUNC_DIV_EXPR, long_unsigned_type_node, 
+			  expr, orig_size);
+  tree num = make_ssa_name (long_unsigned_type_node);
+  gimple *g = gimple_build_assign (num, div_expr);
+  gsi_insert_before (gsi, g, GSI_SAME_STMT);
+  return num;
+}
+
+srtype *
+ipa_struct_reorg::get_relayout_candidate_type (tree type)
+{
+  if (type == NULL)
+    return NULL;
+  if (TREE_CODE (type) != RECORD_TYPE)
+    return NULL;
+  return find_type (inner_type (type));
+}
+
+long unsigned int
+ipa_struct_reorg::get_true_field_offset (srfield *field, srtype *type)
+{
+  unsigned HOST_WIDE_INT new_offset;
+  new_offset = *(type->new_field_offsets.get (field->newfield[0]));
+  return new_offset;
+}
+
+tree
+ipa_struct_reorg::get_true_pointer_base (gimple_stmt_iterator *gsi,
+					 tree mem_ref, srtype *type)
+{
+  tree ptr = TREE_OPERAND (mem_ref, 0);
+  tree off_bytes = TREE_OPERAND (mem_ref, 1);
+  unsigned num = tree_to_shwi (off_bytes);
+  if (num == 0)
+    return ptr;
+  tree orig_size = TYPE_SIZE_UNIT (TREE_TYPE (mem_ref));
+  tree off = build_int_cst (long_integer_type_node,
+			    num / tree_to_uhwi (orig_size));
+  gimple *stmt = gsi_stmt (*gsi);
+  tree new_pointer_base = rewrite_pointer_plus_integer (stmt, gsi, ptr,
+							off, type);
+  return new_pointer_base;
+}
+
+tree
+ipa_struct_reorg::rewrite_address (tree pointer_base, srfield *field,
+				   srtype *type, gimple_stmt_iterator *gsi)
+{
+  unsigned HOST_WIDE_INT field_offset = get_true_field_offset (field, type);
+
+  tree pointer_ssa = fold_convert (long_unsigned_type_node, pointer_base);
+  tree step1 = gimplify_build1 (gsi, NOP_EXPR, long_unsigned_type_node,
+				pointer_ssa);
+  tree new_offset_ssa = build_int_cst (long_unsigned_type_node, field_offset);
+  tree step2 = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node, step1,
+				new_offset_ssa);
+  tree field_ssa = fold_convert (
+		   build_pointer_type (TREE_TYPE (field->newfield[0])), step2);
+  tree step3 = gimplify_build1 (gsi, NOP_EXPR,
+				TREE_TYPE (field_ssa), field_ssa);
+
+  tree new_mem_ref = fold_build2 (MEM_REF, TREE_TYPE (field->newfield[0]),
+			 step3, build_int_cst (TREE_TYPE (field_ssa), 0));
+  return new_mem_ref;
+}
+
+bool
+ipa_struct_reorg::check_sr_copy (gimple *stmt)
+{
+  tree lhs = gimple_assign_lhs (stmt);
+  tree rhs = gimple_assign_rhs1 (stmt);
+
+  if (TREE_CODE (lhs) != MEM_REF || TREE_CODE (rhs) != MEM_REF)
+    return false;
+  srtype *t1 = get_relayout_candidate_type (TREE_TYPE (lhs));
+  srtype *t2 = get_relayout_candidate_type (TREE_TYPE (rhs));
+  if (!t1 || !t2 || !t1->semi_relayout || !t2->semi_relayout || t1 != t2)
+    return false;
+  tree pointer1 = TREE_OPERAND (lhs, 0);
+  tree pointer2 = TREE_OPERAND (rhs, 0);
+  if (TREE_CODE (TREE_TYPE (pointer1)) != POINTER_TYPE
+      || TREE_CODE (TREE_TYPE (pointer2)) != POINTER_TYPE)
+    return false;
+
+  tree type1 = TREE_TYPE (TREE_TYPE (pointer1));
+  tree type2 = TREE_TYPE (TREE_TYPE (pointer2));
+
+  srtype *t3 = get_relayout_candidate_type (type1);
+  srtype *t4 = get_relayout_candidate_type (type2);
+
+  if (t3 != t4 || t3 != t1)
+    return false;
+
+  return true;
+}
+
+void
+ipa_struct_reorg::relayout_field_copy (gimple_stmt_iterator *gsi, gimple *stmt,
+				       tree lhs, tree rhs,
+				       tree &newlhs, tree &newrhs)
+{
+  srtype *type = get_relayout_candidate_type (TREE_TYPE (lhs));
+  tree lhs_base_pointer = get_true_pointer_base (gsi, newlhs, type);
+  tree rhs_base_pointer = get_true_pointer_base (gsi, newrhs, type);
+  tree new_l_mem_ref = NULL_TREE;
+  tree new_r_mem_ref = NULL_TREE;
+  srfield *field = NULL;
+  unsigned i = 0;
+  FOR_EACH_VEC_ELT (type->fields, i, field)
+    {
+      if (!field->newfield[0])
+	continue;
+      new_l_mem_ref = rewrite_address (lhs_base_pointer, field, type, gsi);
+      new_r_mem_ref = rewrite_address (rhs_base_pointer, field, type, gsi);
+      gimple *new_stmt = gimple_build_assign (new_l_mem_ref, new_r_mem_ref);
+      gsi_insert_before (gsi, new_stmt, GSI_SAME_STMT);
+    }
+  newlhs = new_l_mem_ref;
+  newrhs = new_r_mem_ref;
+}
+
+void
+ipa_struct_reorg::do_semi_relayout (gimple_stmt_iterator *gsi, gimple *stmt,
+				    tree &newlhs, tree &newrhs)
+{
+  tree lhs = gimple_assign_lhs (stmt);
+  tree rhs = gimple_assign_rhs1 (stmt);
+
+  bool l = TREE_CODE (lhs) == COMPONENT_REF ? is_semi_relayout_candidate (lhs)
+					    : false;
+  bool r = TREE_CODE (rhs) == COMPONENT_REF ? is_semi_relayout_candidate (rhs)
+					    : false;
+
+  gcc_assert (!(l && r));
+
+  if (!l && !r)
+    {
+      if (check_sr_copy (stmt))
+	relayout_field_copy (gsi, stmt, lhs, rhs, newlhs, newrhs);
+    }
+  else if (l)
+    {
+      srtype *type = get_relayout_candidate_type (
+				TREE_TYPE (TREE_OPERAND (lhs, 0)));
+      srfield *new_field = type->find_field (
+				int_byte_position (TREE_OPERAND (lhs, 1)));
+      tree pointer_base = get_true_pointer_base (
+				gsi, TREE_OPERAND (newlhs, 0), type);
+      newlhs = rewrite_address (pointer_base, new_field, type, gsi);
+    }
+  else if (r)
+    {
+      srtype *type = get_relayout_candidate_type (
+				TREE_TYPE (TREE_OPERAND (rhs, 0)));
+      srfield *new_field = type->find_field (
+				int_byte_position (TREE_OPERAND (rhs, 1)));
+      tree pointer_base = get_true_pointer_base (
+				gsi, TREE_OPERAND (newrhs, 0), type);
+      newrhs = rewrite_address (pointer_base, new_field, type, gsi);
+    }
+}
+
 bool
 ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 {
@@ -6876,7 +7441,8 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
       tree size = TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (lhs)));
       tree num;
       /* Check if rhs2 is a multiplication of the size of the type. */
-      if (!is_result_of_mult (rhs2, &num, size))
+      if (!is_result_of_mult (rhs2, &num, size)
+	  && !(current_layout_opt_level & SEMI_RELAYOUT))
 	internal_error ("the rhs of pointer was not a multiplicate and it slipped through.");
 
       /* Add the judgment of num, support for POINTER_DIFF_EXPR.
@@ -6898,11 +7464,34 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	      tree newsize = TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (newlhs[i])));
 	      newsize = gimplify_build2 (gsi, MULT_EXPR, sizetype, num,
 					 newsize);
+	      if (current_layout_opt_level >= SEMI_RELAYOUT)
+		{
+		  if (is_semi_relayout_candidate (lhs))
+		    {
+		      srtype *type = get_semi_relayout_candidate_type (lhs);
+		      newrhs[i] = rewrite_pointer_plus_integer (stmt, gsi,
+							newrhs[i], num, type);
+		      newsize = build_int_cst (long_unsigned_type_node, 0);
+		    }
+		}
 	      new_stmt = gimple_build_assign (newlhs[i], POINTER_PLUS_EXPR,
 					      newrhs[i], newsize);
 	    }
 	  else
 	    {
+	      /* rhs2 is not a const integer  */
+	      if (current_layout_opt_level >= SEMI_RELAYOUT)
+		{
+		  if (is_semi_relayout_candidate (lhs))
+		    {
+		      num = build_div_expr (gsi, rhs2,
+				build_int_cst (long_unsigned_type_node, 1));
+		      srtype *type = get_semi_relayout_candidate_type (lhs);
+		      newrhs[i] = rewrite_pointer_plus_integer (stmt,
+						gsi, newrhs[i], num, type);
+		      rhs2 = build_int_cst (long_unsigned_type_node, 0);
+		    }
+		}
 	      new_stmt = gimple_build_assign (newlhs[i], POINTER_PLUS_EXPR,
 					      newrhs[i], rhs2);
 	    }
@@ -6952,13 +7541,32 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	return false;
 
       /* The two operands always have pointer/reference type.  */
-      for (unsigned i = 0; i < max_split && newrhs1[i] && newrhs2[i]; i++)
+      if (current_layout_opt_level >= SEMI_RELAYOUT
+	  && (is_semi_relayout_candidate (rhs1)
+	      || is_semi_relayout_candidate (rhs2)))
 	{
-	  gimple_assign_set_rhs1 (stmt, newrhs1[i]);
-	  gimple_assign_set_rhs2 (stmt, newrhs2[i]);
-	  update_stmt (stmt);
+	    for (unsigned i = 0; i < max_split && newrhs1[i] &&newrhs2[i]; i++)
+	      {
+		srtype *type = get_semi_relayout_candidate_type (rhs1);
+		if (!type)
+		  type = get_semi_relayout_candidate_type (rhs2);
+		gcc_assert (type != NULL);
+		tree res = rewrite_pointer_diff (gsi, newrhs1[i],
+						 newrhs2[i], type);
+		gimple *g = gimple_build_assign (gimple_assign_lhs (stmt), res);
+		gsi_insert_before (gsi, g, GSI_SAME_STMT);
+	      }
+	    remove = true;
 	}
-      remove = false;
+      else
+	{
+	  for (unsigned i = 0; i < max_split && newrhs1[i] && newrhs2[i]; i++)
+	    {
+	      gimple_assign_set_rhs1 (stmt, newrhs1[i]);
+	      gimple_assign_set_rhs2 (stmt, newrhs2[i]);
+	      update_stmt (stmt);
+	    }
+	}
       return remove;
     }
 
@@ -6985,6 +7593,8 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	fprintf (dump_file, "replaced with:\n");
       for (unsigned i = 0; i < max_split && (newlhs[i] || newrhs[i]); i++)
 	{
+	  if (current_layout_opt_level & SEMI_RELAYOUT)
+	    do_semi_relayout (gsi, stmt, newlhs[i], newrhs[i]);
 	  if (current_layout_opt_level >= POINTER_COMPRESSION_SAFE)
 	    try_rewrite_with_pointer_compression (stmt, gsi, lhs, rhs,
 						  newlhs[i], newrhs[i]);
@@ -7001,6 +7611,108 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
     }
 
   return remove;
+}
+
+tree
+ipa_struct_reorg::get_real_allocated_ptr (tree ptr, gimple_stmt_iterator *gsi)
+{
+  tree ptr_to_int = fold_convert (long_unsigned_type_node, ptr);
+  tree align = build_int_cst (long_unsigned_type_node, relayout_part_size);
+  tree real_addr = gimplify_build2 (gsi, MINUS_EXPR, long_unsigned_type_node,
+				    ptr_to_int, align);
+  tree res = gimplify_build1 (gsi, NOP_EXPR,
+		build_pointer_type (long_unsigned_type_node), real_addr);
+  return res;
+}
+
+tree
+ipa_struct_reorg::set_ptr_for_use (tree ptr, gimple_stmt_iterator *gsi)
+{
+  tree ptr_to_int = fold_convert (long_unsigned_type_node, ptr);
+  tree align = build_int_cst (long_unsigned_type_node, relayout_part_size);
+  tree ptr_int = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node,
+				  ptr_to_int, align);
+  tree res = gimplify_build1 (gsi, NOP_EXPR,
+			build_pointer_type (long_unsigned_type_node), ptr_int);
+  return res;
+}
+
+void
+ipa_struct_reorg::record_allocated_size (tree ptr, gimple_stmt_iterator *gsi,
+					 tree size)
+{
+  tree to_type = build_pointer_type (long_unsigned_type_node);
+  tree type_cast = fold_convert (to_type, ptr);
+  tree lhs = fold_build2 (MEM_REF, long_unsigned_type_node, ptr,
+	build_int_cst (build_pointer_type (long_unsigned_type_node), 0));
+  gimple *stmt = gimple_build_assign (lhs, size);
+  gsi_insert_before (gsi, stmt, GSI_SAME_STMT);
+}
+
+tree
+ipa_struct_reorg::read_allocated_size (tree ptr, gimple_stmt_iterator *gsi)
+{
+  tree to_type = build_pointer_type (long_unsigned_type_node);
+  tree off = build_int_cst (to_type, 0);
+  tree size = gimplify_build2 (gsi, MEM_REF, long_unsigned_type_node,
+			       ptr, off);
+  return size;
+}
+
+gimple *
+ipa_struct_reorg::create_aligned_alloc (gimple_stmt_iterator *gsi,
+					srtype *type, tree num, tree &size)
+{
+  tree fn = builtin_decl_implicit (BUILT_IN_ALIGNED_ALLOC);
+
+  tree align = build_int_cst (long_unsigned_type_node, relayout_part_size);
+  unsigned bucket_size = type->bucket_size;
+
+  tree nbuckets = gimplify_build2 (gsi, CEIL_DIV_EXPR, long_unsigned_type_node,
+			num, build_int_cst (long_unsigned_type_node,
+					    relayout_part_size / 8));
+  tree use_size = gimplify_build2 (gsi, MULT_EXPR, long_unsigned_type_node,
+					nbuckets, build_int_cst (
+					long_unsigned_type_node, bucket_size));
+  size = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node,
+			  use_size, align);
+  gimple *g = gimple_build_call (fn, 2, align, size);
+  gsi_insert_before (gsi, g, GSI_SAME_STMT);
+  return g;
+}
+
+void
+ipa_struct_reorg::create_memset_zero (tree ptr, gimple_stmt_iterator *gsi,
+				      tree size)
+{
+  tree fn = builtin_decl_implicit (BUILT_IN_MEMSET);
+  tree val = build_int_cst (long_unsigned_type_node, 0);
+  gimple *g = gimple_build_call (fn, 3, ptr, val, size);
+  gsi_insert_before (gsi, g, GSI_SAME_STMT);
+}
+
+void
+ipa_struct_reorg::create_memcpy (tree src, tree dst, tree size,
+				 gimple_stmt_iterator *gsi)
+{
+  tree fn = builtin_decl_implicit (BUILT_IN_MEMCPY);
+  gimple *g = gimple_build_call (fn, 3, dst, src, size);
+  gsi_insert_before (gsi, g, GSI_SAME_STMT);
+}
+
+void
+ipa_struct_reorg::create_free (tree ptr, gimple_stmt_iterator *gsi)
+{
+  tree fn = builtin_decl_implicit (BUILT_IN_FREE);
+  gimple *g = gimple_build_call (fn, 1, ptr);
+  gsi_insert_before (gsi, g, GSI_SAME_STMT);
+}
+
+void
+ipa_struct_reorg::copy_to_lhs (tree lhs, tree new_lhs, gimple_stmt_iterator *gsi)
+{
+  gimple *g = gimple_build_assign (lhs, new_lhs);
+  gsi_insert_before (gsi, g, GSI_SAME_STMT);
 }
 
 /* Rewrite function call statement STMT.  Return TRUE if the statement
@@ -7044,24 +7756,77 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
 			 ? TYPE_SIZE_UNIT (decl->orig_type)
 			 : TYPE_SIZE_UNIT (type->newtype[i]);
 	  gimple *g;
-	  /* Every allocation except for calloc needs the size multiplied out. */
-	  if (!gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
-	    newsize = gimplify_build2 (gsi, MULT_EXPR, sizetype, num, newsize);
-
-	  if (gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
-	      || gimple_call_builtin_p (stmt, BUILT_IN_ALLOCA))
-	    g = gimple_build_call (gimple_call_fndecl (stmt),
-				   1, newsize);
-	  else if (gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
-	    g = gimple_build_call (gimple_call_fndecl (stmt),
-				   2, num, newsize);
-	  else if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC))
-	    g = gimple_build_call (gimple_call_fndecl (stmt),
-				   2, newrhs1[i], newsize);
-	  else
-	    gcc_assert (false);
-	  gimple_call_set_lhs (g, decl->newdecl[i]);
-	  gsi_insert_before (gsi, g, GSI_SAME_STMT);
+	  bool rewrite = false;
+	  if (current_layout_opt_level >= SEMI_RELAYOUT
+	      && type->semi_relayout)
+	    {
+	      if (gimple_call_builtin_p (stmt, BUILT_IN_MALLOC))
+		;
+	      else if (gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
+		{
+		  tree rhs2 = gimple_call_arg (stmt, 1);
+		  if (tree_to_uhwi (rhs2) == tree_to_uhwi (
+						TYPE_SIZE_UNIT (type->type)))
+		    {
+		      rewrite = true;
+		      tree size = NULL_TREE;
+		      g = create_aligned_alloc (gsi, type, num, size);
+		      tree real_ptr = make_ssa_name (
+				build_pointer_type (unsigned_char_type_node));
+		      gimple_set_lhs (g, real_ptr);
+		      create_memset_zero (real_ptr, gsi, size);
+		      record_allocated_size (real_ptr, gsi, size);
+		      tree lhs_use = set_ptr_for_use (real_ptr, gsi);
+		      copy_to_lhs (decl->newdecl[i], lhs_use, gsi);
+		    }
+		}
+	      else if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC))
+		{
+		  rewrite = true;
+		  tree size = NULL_TREE;
+		  g = create_aligned_alloc (gsi, type, num, size);
+		  tree real_ptr = make_ssa_name (
+				build_pointer_type (unsigned_char_type_node));
+		  gimple_set_lhs (g, real_ptr);
+		  create_memset_zero (real_ptr, gsi, size);
+		  tree src = get_real_allocated_ptr (newrhs1[i], gsi);
+		  tree old_size = read_allocated_size (src, gsi);
+		  create_memcpy (src, real_ptr, old_size, gsi);
+		  record_allocated_size (real_ptr, gsi, size);
+		  tree lhs_use = set_ptr_for_use (real_ptr, gsi);
+		  create_free (src, gsi);
+		  copy_to_lhs (decl->newdecl[i], lhs_use, gsi);
+		}
+	      else
+		{
+		  gcc_assert (false);
+		  internal_error ("supported type for semi-relayout.");
+		}
+	    }
+	  if (!rewrite
+	      && (current_layout_opt_level >= STRUCT_REORDER_FIELDS
+		  || current_layout_opt_level == STRUCT_SPLIT))
+	    {
+	      /* Every allocation except for calloc needs the size
+		 multiplied out. */
+	      if (!gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
+		newsize = gimplify_build2 (gsi, MULT_EXPR, sizetype,
+					   num, newsize);
+	      if (gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
+		  || gimple_call_builtin_p (stmt, BUILT_IN_ALLOCA))
+		g = gimple_build_call (gimple_call_fndecl (stmt),
+				       1, newsize);
+	      else if (gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
+		g = gimple_build_call (gimple_call_fndecl (stmt),
+				       2, num, newsize);
+	      else if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC))
+		g = gimple_build_call (gimple_call_fndecl (stmt),
+				       2, newrhs1[i], newsize);
+	      else
+		gcc_assert (false);
+	      gimple_call_set_lhs (g, decl->newdecl[i]);
+	      gsi_insert_before (gsi, g, GSI_SAME_STMT);
+	    }
 	  if (type->pc_candidate)
 	    {
 	      /* Init global header for pointer compression.  */
@@ -7081,8 +7846,11 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
       if (!rewrite_expr (expr, newexpr))
 	return false;
 
+      srtype *t = find_type (TREE_TYPE (TREE_TYPE (expr)));
       if (newexpr[1] == NULL)
 	{
+	  if (t && t->semi_relayout)
+	    newexpr[0] = get_real_allocated_ptr (newexpr[0], gsi);
 	  gimple_call_set_arg (stmt, 0, newexpr[0]);
 	  update_stmt (stmt);
 	  return false;
@@ -7789,6 +8557,85 @@ ipa_struct_reorg::check_and_prune_struct_for_pointer_compression (void)
     }
 }
 
+void
+ipa_struct_reorg::check_and_prune_struct_for_semi_relayout (void)
+{
+  unsigned relayout_transform = 0;
+  for (unsigned i = 0; i < types.length (); i++)
+    {
+      srtype *type = types[i];
+      if (dump_file)
+	{
+	  print_generic_expr (dump_file, type->type);
+	}
+      if (type->has_escaped ())
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, " has escaped by %s, skip relayout.\n",
+		       type->escape_reason ());
+	    }
+	  continue;
+	}
+      if (TYPE_FIELDS (type->type) == NULL)
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, " has zero field, skip relayout.\n");
+	    }
+	  continue;
+	}
+      if (type->chain_type)
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, " is chain_type, skip relayout.\n");
+	    }
+	  continue;
+	}
+      if (type->has_alloc_array == 0 || type->has_alloc_array == 1
+	  || type->has_alloc_array == -1 || type->has_alloc_array == -3
+	  || type->has_alloc_array == -4)
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, " has alloc number: %d, skip relayout.\n",
+		       type->has_alloc_array);
+	    }
+	  continue;
+	}
+      if (get_type_name (type->type) == NULL)
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, " has empty struct name,"
+				  " skip relayout.\n");
+	    }
+	  continue;
+	}
+      relayout_transform++;
+      type->semi_relayout = true;
+      if (dump_file)
+	{
+	  fprintf (dump_file, " attempts to do semi-relayout.\n");
+	}
+    }
+
+  if (dump_file)
+    {
+      if (relayout_transform)
+	{
+	  fprintf (dump_file, "\nNumber of structures to transform in "
+			      "semi-relayout is %d\n", relayout_transform);
+	}
+      else
+	{
+	  fprintf (dump_file, "\nNo structures to transform in "
+			      "semi-relayout.\n");
+	}
+    }
+}
+
 /* Init pointer size from parameter param_pointer_compression_size.  */
 
 static void
@@ -7829,7 +8676,8 @@ ipa_struct_reorg::execute (unsigned int opt)
 	}
       if (opt >= POINTER_COMPRESSION_SAFE)
 	check_and_prune_struct_for_pointer_compression ();
-
+      if (opt >= SEMI_RELAYOUT)
+	check_and_prune_struct_for_semi_relayout ();
       ret = rewrite_functions ();
     }
   else // do COMPLETE_STRUCT_RELAYOUT
@@ -7881,6 +8729,8 @@ public:
     unsigned int level = 0;
     switch (struct_layout_optimize_level)
       {
+	case 6: level |= SEMI_RELAYOUT;
+	// FALLTHRU
 	case 5: level |= POINTER_COMPRESSION_UNSAFE;
 	// FALLTHRU
 	case 4: level |= POINTER_COMPRESSION_SAFE;
@@ -7899,6 +8749,12 @@ public:
 
     if (level & POINTER_COMPRESSION_SAFE)
       init_pointer_size_for_pointer_compression ();
+
+    if (level & SEMI_RELAYOUT)
+      {
+	semi_relayout_align = semi_relayout_level;
+	relayout_part_size = 1 << semi_relayout_level;
+      }
 
     /* Preserved for backward compatibility, reorder fields needs run before
        struct split and complete struct relayout.  */

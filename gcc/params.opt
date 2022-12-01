@@ -988,4 +988,8 @@ Threshold functions of cache miss counts to be analyzed in prefetching.
 Common Joined UInteger Var(param_pointer_compression_size) Init(32) IntegerRange(8, 32) Param Optimization
 Target size of compressed pointer, which should be 8, 16 or 32.
 
+-param=semi-relayout-level=
+Common Joined UInteger Var(semi_relayout_level) Init(13) IntegerRange(11, 15) Param Optimization
+Set capacity of each bucket to semi-relayout to (1 << semi-relayout-level) / 8 .
+
 ; This comment is to ensure we retain the blank line above.
