@@ -3393,7 +3393,7 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
   (simplify
    (cond @0 (op:s @1 integer_pow2p@2) @1)
     /* powerof2cst */
-   (if (INTEGRAL_TYPE_P (type))
+   (if (flag_merge_mull && INTEGRAL_TYPE_P (type))
     (with {
       tree shift = build_int_cst (integer_type_node, tree_log2 (@2));
      }
