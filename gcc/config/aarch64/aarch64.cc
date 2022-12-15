@@ -15210,6 +15210,15 @@ aarch64_builtin_decl (unsigned int code, bool initialize_p)
   gcc_unreachable ();
 }
 
+/* Implement TARGET_GET_CRC_BUILTIN_CODE.  */
+static unsigned 
+aarch64_get_crc_builtin_code(unsigned code, bool initialize_p)
+{
+  unsigned subcode = get_crc_builtin_code(code,initialize_p);
+  unsigned res = subcode << AARCH64_BUILTIN_SHIFT;
+  return res;
+}
+
 /* Return true if it is safe and beneficial to use the approximate rsqrt optabs
    to optimize 1.0/sqrt.  */
 
@@ -27676,6 +27685,9 @@ aarch64_get_v16qi_mode ()
 
 #undef TARGET_BUILTIN_DECL
 #define TARGET_BUILTIN_DECL aarch64_builtin_decl
+
+#undef TARGET_GET_CRC_BUILTIN_CODE
+#define TARGET_GET_CRC_BUILTIN_CODE aarch64_get_crc_builtin_code
 
 #undef TARGET_BUILTIN_RECIPROCAL
 #define TARGET_BUILTIN_RECIPROCAL aarch64_builtin_reciprocal

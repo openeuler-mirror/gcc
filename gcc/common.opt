@@ -1119,6 +1119,10 @@ fcrypto-accel-aes
 Common Var(flag_crypto_accel_aes) Init(0) Optimization
 Perform crypto acceleration AES pattern matching.
 
+floop-crc
+Common Var(flag_loop_crc) Optimization
+Do the loop crc conversion.
+
 fauto-inc-dec
 Common Var(flag_auto_inc_dec) Init(1) Optimization
 Generate auto-inc/dec instructions.

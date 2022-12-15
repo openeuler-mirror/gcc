@@ -95,6 +95,7 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_cd_dce, false /* update_address_taken_p */);
 	  NEXT_PASS (pass_phiopt, true /* early_p */);
 	  NEXT_PASS (pass_array_widen_compare);
+	  NEXT_PASS (pass_loop_crc);
 	  NEXT_PASS (pass_tail_recursion);
 	  NEXT_PASS (pass_if_to_switch);
 	  NEXT_PASS (pass_convert_switch);
