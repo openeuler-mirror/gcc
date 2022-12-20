@@ -6408,6 +6408,8 @@ ipa_struct_reorg::is_semi_relayout_candidate (tree xhs)
         {
 	  tree type = TREE_TYPE (mem);
 	  srtype *old_type = get_relayout_candidate_type (type);
+	  if (!old_type)
+	    return false;
 	  if (types_compatible_p (type, old_type->type)
 	      && old_type->semi_relayout)
 	    return true;
