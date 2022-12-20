@@ -3208,15 +3208,30 @@ build_queue (loop_vec_info vinfo, unsigned vf,
     {
       unsigned group_size = stmt_info->size;
       stmt_vec_info c_stmt_info = stmt_info;
+      bool succ = true;
       while (group_size >= vf)
 	{
 	  vec_alloc (worklist, vf);
 	  for (unsigned j = 0; j < vf; ++j)
 	    {
+	      if (c_stmt_info == NULL)
+		{
+		  succ = false;
+		  break;
+		}
 	      ginfo = new _group_info ();
 	      ginfo->stmt = c_stmt_info->stmt;
 	      worklist->safe_push (ginfo);
 	      c_stmt_info = c_stmt_info->next_element;
+	    }
+	  if (!succ)
+	    {
+	      unsigned k = 0;
+	      ginfo = NULL;
+	      FOR_EACH_VEC_ELT (*worklist, k, ginfo)
+		delete ginfo;
+	      vec_free (worklist);
+	      break;
 	    }
 	  worklists.safe_push (worklist);
 	  group_size -= vf;
@@ -3711,6 +3726,7 @@ free_ginfos (vec<vec<group_info> *> &worklists)
       unsigned j = 0;
       FOR_EACH_VEC_ELT (*worklist, j, ginfo)
 	delete ginfo;
+      vec_free (worklist);
     }
 }
 
