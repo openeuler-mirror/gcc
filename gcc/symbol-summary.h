@@ -65,7 +65,7 @@ protected:
 			     : m_allocator.allocate ();
     /* In structure optimizatons, we call memset to ensure that
        the allocated memory is initialized to 0.  */
-    if (flag_ipa_struct_layout || flag_ipa_struct_reorg)
+    if (flag_ipa_struct_reorg)
       memset (allocated, 0, sizeof (T));
     return allocated;
   }

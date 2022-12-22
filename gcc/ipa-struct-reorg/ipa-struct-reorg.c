@@ -1203,7 +1203,7 @@ srfunction::create_new_decls (void)
       else if (TREE_CODE (decls[i]->decl) == PARM_DECL)
 	;
       else
-	internal_error ("Unhandled decl type stored");
+	internal_error ("Unhandled declaration type stored");
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
@@ -1759,7 +1759,8 @@ ipa_struct_relayout::rewrite (void)
 }
 
 bool
-ipa_struct_relayout::rewrite_debug (gimple *stmt, gimple_stmt_iterator *gsi)
+ipa_struct_relayout::rewrite_debug (gimple *stmt ATTRIBUTE_UNUSED,
+				    gimple_stmt_iterator *gsi ATTRIBUTE_UNUSED)
 {
   /* Delete debug gimple now.  */
   return true;
@@ -2079,7 +2080,6 @@ bool
 ipa_struct_relayout::maybe_rewrite_cst (tree cst, gimple_stmt_iterator *gsi,
 					HOST_WIDE_INT &times)
 {
-  bool ret = false;
   gcc_assert (TREE_CODE (cst) == INTEGER_CST);
 
   gimple *stmt = gsi_stmt (*gsi);
@@ -7166,7 +7166,7 @@ create_bb_for_group_diff_ne_0 (basic_block new_bb, tree &phi, tree ptr,
 }
 
 tree
-ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt,
+ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt ATTRIBUTE_UNUSED,
 						gimple_stmt_iterator *gsi,
 						tree ptr, tree offset,
 						srtype *type)
@@ -7348,8 +7348,9 @@ ipa_struct_reorg::check_sr_copy (gimple *stmt)
 }
 
 void
-ipa_struct_reorg::relayout_field_copy (gimple_stmt_iterator *gsi, gimple *stmt,
-				       tree lhs, tree rhs,
+ipa_struct_reorg::relayout_field_copy (gimple_stmt_iterator *gsi,
+				       gimple *stmt ATTRIBUTE_UNUSED,
+				       tree lhs, tree rhs ATTRIBUTE_UNUSED,
 				       tree &newlhs, tree &newrhs)
 {
   srtype *type = get_relayout_candidate_type (TREE_TYPE (lhs));
@@ -7724,8 +7725,6 @@ void
 ipa_struct_reorg::record_allocated_size (tree ptr, gimple_stmt_iterator *gsi,
 					 tree size)
 {
-  tree to_type = build_pointer_type (long_unsigned_type_node);
-  tree type_cast = fold_convert (to_type, ptr);
   tree lhs = fold_build2 (MEM_REF, long_unsigned_type_node, ptr,
 	build_int_cst (build_pointer_type (long_unsigned_type_node), 0));
   gimple *stmt = gimple_build_assign (lhs, size);
@@ -8084,7 +8083,8 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
    old statement is to be removed. */
 
 bool
-ipa_struct_reorg::rewrite_cond (gcond *stmt, gimple_stmt_iterator *gsi)
+ipa_struct_reorg::rewrite_cond (gcond *stmt,
+				gimple_stmt_iterator *gsi ATTRIBUTE_UNUSED)
 {
   tree_code rhs_code = gimple_cond_code (stmt);
 
@@ -8328,6 +8328,8 @@ ipa_struct_reorg::rewrite_functions (void)
 		  if (current_function_decl)
 		    dump_function_to_file (current_function_decl, dump_file,
 					   dump_flags | TDF_VOPS);
+		  else
+		    fprintf (dump_file, " no declaration\n");
 		}
 	      pop_cfun ();
 	    }
@@ -8360,11 +8362,13 @@ ipa_struct_reorg::rewrite_functions (void)
 	  push_cfun (DECL_STRUCT_FUNCTION (node->decl));
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
-	      fprintf (dump_file, "==== Before create decls: %dth_%s ====\n\n",
+	      fprintf (dump_file, "==== Before create decls: %dth %s ====\n\n",
 		       i, f->node->name ());
 	      if (current_function_decl)
 		dump_function_to_file (current_function_decl, dump_file,
 				       dump_flags | TDF_VOPS);
+	      else
+	        fprintf (dump_file, " no declaration\n");
 	    }
 	  pop_cfun ();
 	}
@@ -8396,11 +8400,13 @@ ipa_struct_reorg::rewrite_functions (void)
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
-	  fprintf (dump_file, "\nBefore rewrite: %dth_%s\n",
+	  fprintf (dump_file, "\nBefore rewrite: %dth %s\n",
 		   i, f->node->name ());
 	  if (current_function_decl)
 	    dump_function_to_file (current_function_decl, dump_file,
 				   dump_flags | TDF_VOPS);
+	  else
+	    fprintf (dump_file, " no declaration\n");
 	  fprintf (dump_file, "\n======== Start to rewrite: %dth_%s ========\n",
 		   i, f->node->name ());
 	}
@@ -8475,10 +8481,13 @@ ipa_struct_reorg::rewrite_functions (void)
 
       if (dump_file)
 	{
-	  fprintf (dump_file, "\nAfter rewrite: %dth_%s\n",
+	  fprintf (dump_file, "\nAfter rewrite: %dth %s\n",
 		   i, f->node->name ());
-	  dump_function_to_file (current_function_decl, dump_file,
-				 dump_flags | TDF_VOPS);
+	  if (current_function_decl)
+	    dump_function_to_file (current_function_decl, dump_file,
+				   dump_flags | TDF_VOPS);
+	  else
+	    fprintf (dump_file, " no declaration\n");
 	}
 
       pop_cfun ();
