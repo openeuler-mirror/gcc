@@ -1821,6 +1821,10 @@ fif-conversion2
 Common Var(flag_if_conversion2) Optimization
 Perform conversion of conditional jumps to conditional execution.
 
+fif-conversion-gimple
+Common Var(flag_if_conversion_gimple) Optimization
+Perform conversion of conditional jumps to branchless equivalents during gimple transformations.
+
 fstack-reuse=
 Common Joined RejectNegative Enum(stack_reuse_level) Var(flag_stack_reuse) Init(SR_ALL) Optimization
 -fstack-reuse=[all|named_vars|none]	Set stack reuse level for local variables.

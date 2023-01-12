@@ -4278,6 +4278,31 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
   )
  )
 )
+
+(if (flag_if_conversion_gimple)
+ (for simple_op (plus minus bit_and bit_ior bit_xor)
+  (simplify
+   (cond @0 (simple_op @1 INTEGER_CST@2) @1)
+   (switch
+    /* a = cond ? a + 1 : a -> a = a + ((int) cond) */
+    (if (integer_onep (@2))
+     (simple_op @1 (convert (convert:boolean_type_node @0))))
+    /* a = cond ? a + powerof2cst : a ->
+       a = a + ((int) cond) << log2 (powerof2cst) */
+    (if (INTEGRAL_TYPE_P (type) && integer_pow2p (@2))
+     (with
+      {
+	tree shift = build_int_cst (integer_type_node, tree_log2 (@2));
+      }
+      (simple_op @1 (lshift (convert (convert:boolean_type_node @0))
+			    { shift; })
+      )
+     )
+    )
+   )
+  )
+ )
+)
 #endif
 
 #if GIMPLE
