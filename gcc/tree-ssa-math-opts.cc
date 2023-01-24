@@ -3468,6 +3468,27 @@ convert_mult_to_fma (gimple *mul_stmt, tree op1, tree op2,
     }
 }
 
+/* Check if the corresponding operation has wider equivalent on the target.  */
+
+static bool
+wider_optab_check_p (optab op, machine_mode mode, int unsignedp)
+{
+  machine_mode wider_mode;
+  FOR_EACH_WIDER_MODE (wider_mode, mode)
+    {
+      machine_mode next_mode;
+      if (optab_handler (op, wider_mode) != CODE_FOR_nothing
+	  || (op == smul_optab
+	      && GET_MODE_WIDER_MODE (wider_mode).exists (&next_mode)
+	      && (find_widening_optab_handler ((unsignedp
+						? umul_widen_optab
+						: smul_widen_optab),
+						next_mode, mode))))
+	return true;
+    }
+
+  return false;
+}
 
 /* Helper function of match_arith_overflow.  For MUL_OVERFLOW, if we have
    a check for non-zero like:
@@ -3903,14 +3924,21 @@ match_arith_overflow (gimple_stmt_iterator *gsi, gimple *stmt,
 		       || code == MINUS_EXPR
 		       || code == MULT_EXPR
 		       || code == BIT_NOT_EXPR);
+  int unsignedp = TYPE_UNSIGNED (type);
   if (!INTEGRAL_TYPE_P (type)
-      || !TYPE_UNSIGNED (type)
-      || has_zero_uses (lhs)
-      || (code != PLUS_EXPR
-	  && code != MULT_EXPR
-	  && optab_handler (code == MINUS_EXPR ? usubv4_optab : uaddv4_optab,
-			    TYPE_MODE (type)) == CODE_FOR_nothing))
+      || !unsignedp
+      || has_zero_uses (lhs))
     return false;
+
+  if (code == PLUS_EXPR || code == MINUS_EXPR)
+    {
+      machine_mode mode = TYPE_MODE (type);
+      optab op = code == PLUS_EXPR ? uaddv4_optab : usubv4_optab;
+      if (optab_handler (op, mode) == CODE_FOR_nothing
+	  && (!flag_uaddsub_overflow_match_all
+	      || !wider_optab_check_p (op, mode, unsignedp)))
+	return false;
+    }
 
   tree rhs1 = gimple_assign_rhs1 (stmt);
   tree rhs2 = gimple_assign_rhs2 (stmt);
@@ -3986,7 +4014,8 @@ match_arith_overflow (gimple_stmt_iterator *gsi, gimple *stmt,
       || (code != MULT_EXPR && (code == BIT_NOT_EXPR ? use_seen : !use_seen))
       || (code == PLUS_EXPR
 	  && optab_handler (uaddv4_optab,
-			    TYPE_MODE (type)) == CODE_FOR_nothing)
+			    TYPE_MODE (type)) == CODE_FOR_nothing
+	  && !flag_uaddsub_overflow_match_all)
       || (code == MULT_EXPR
 	  && optab_handler (cast_stmt ? mulv4_optab : umulv4_optab,
 			    TYPE_MODE (type)) == CODE_FOR_nothing))
