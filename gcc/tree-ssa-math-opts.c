@@ -3290,6 +3290,27 @@ convert_mult_to_fma (gimple *mul_stmt, tree op1, tree op2,
     }
 }
 
+/* Check if the corresponding operation has wider equivalent on the target.  */
+
+static bool
+wider_optab_check_p (optab op, machine_mode mode, int unsignedp)
+{
+  machine_mode wider_mode;
+  FOR_EACH_WIDER_MODE (wider_mode, mode)
+    {
+      machine_mode next_mode;
+      if (optab_handler (op, wider_mode) != CODE_FOR_nothing
+	  || (op == smul_optab
+	      && GET_MODE_WIDER_MODE (wider_mode).exists (&next_mode)
+	      && (find_widening_optab_handler ((unsignedp
+						? umul_widen_optab
+						: smul_widen_optab),
+						next_mode, mode))))
+	return true;
+    }
+
+  return false;
+}
 
 /* Helper function of match_uaddsub_overflow.  Return 1
    if USE_STMT is unsigned overflow check ovf != 0 for
@@ -3390,12 +3411,18 @@ match_uaddsub_overflow (gimple_stmt_iterator *gsi, gimple *stmt,
   gimple *use_stmt;
 
   gcc_checking_assert (code == PLUS_EXPR || code == MINUS_EXPR);
+  optab op = code == PLUS_EXPR ? uaddv4_optab : usubv4_optab;
+  machine_mode mode = TYPE_MODE (type);
+  int unsignedp = TYPE_UNSIGNED (type);
   if (!INTEGRAL_TYPE_P (type)
-      || !TYPE_UNSIGNED (type)
+      || !unsignedp
       || has_zero_uses (lhs)
-      || has_single_use (lhs)
-      || optab_handler (code == PLUS_EXPR ? uaddv4_optab : usubv4_optab,
-			TYPE_MODE (type)) == CODE_FOR_nothing)
+      || has_single_use (lhs))
+    return false;
+
+  if (optab_handler (op, mode) == CODE_FOR_nothing
+      && (!flag_uaddsub_overflow_match_all
+	  || !wider_optab_check_p (op, mode, unsignedp)))
     return false;
 
   FOR_EACH_IMM_USE_FAST (use_p, iter, lhs)
