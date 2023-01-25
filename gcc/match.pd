@@ -7895,3 +7895,139 @@ and,
 	       == TYPE_UNSIGNED (TREE_TYPE (@3))))
        && single_use (@4)
        && single_use (@5))))
+
+/* Match multiplication with double sized result.
+
+   Consider the following calculations:
+   arg0 * arg1 = (2^(bit_size/2) * arg0_hi + arg0_lo)
+	       * (2^(bit_size/2) * arg1_hi + arg1_lo)
+   arg0 * arg1 = 2^bit_size * arg0_hi * arg1_hi
+	       + 2^(bit_size/2) * (arg0_hi * arg1_lo + arg0_lo * arg1_hi)
+	       + arg0_lo * arg1_lo
+
+   The products of high and low parts fits in bit_size values, thus they are
+   placed in high and low parts of result respectively.
+
+   The sum of the mixed products may overflow, so we need a detection for that.
+   Also it has a bit_size/2 offset, thus it intersects with both high and low
+   parts of result.  Overflow detection constant is bit_size/2 due to this.
+
+   With this info:
+   arg0 * arg1 = 2^bit_size * arg0_hi * arg1_hi
+	       + 2^(bit_size/2) * middle
+	       + 2^bit_size * possible_middle_overflow
+	       + arg0_lo * arg1_lo
+   arg0 * arg1 = 2^bit_size * (arg0_hi * arg1_hi + possible_middle_overflow)
+	       + 2^(bit_size/2) * (2^(bit_size/2) * middle_hi + middle_lo)
+	       + arg0_lo * arg1_lo
+   arg0 * arg1 = 2^bit_size * (arg0_hi * arg1_hi + middle_hi
+	       +	       possible_middle_overflow)
+	       + 2^(bit_size/2) * middle_lo
+	       + arg0_lo * arg1_lo
+
+   The last sum can produce overflow for the high result part.  With this:
+   arg0 * arg1 = 2^bit_size * (arg0_hi * arg1_hi + possible_middle_overflow
+	       +	       possible_res_lo_overflow + middle_hi)
+	       + res_lo
+	       = res_hi + res_lo
+
+   This formula is quite big to fit into one match pattern with all of the
+   combinations of terms inside it.  There are many helpers for better code
+   readability.
+
+   The simplification basis is res_hi: assuming that res_lo only is not
+   real practical case for such calculations.
+
+   Overflow handling is done via matching complex calculations:
+   the realpart and imagpart are quite handy here.  */
+/* Match low and high parts of the argument.  */
+(match (double_size_mul_arg_lo @0 @1)
+ (bit_and @0 INTEGER_CST@1)
+  (if (wi::to_wide (@1)
+       == wi::mask (TYPE_PRECISION (type) / 2, false, TYPE_PRECISION (type)))))
+(match (double_size_mul_arg_hi @0 @1)
+ (rshift @0 INTEGER_CST@1)
+  (if (wi::to_wide (@1) == TYPE_PRECISION (type) / 2)))
+
+/* Match various argument parts products.  */
+(match (double_size_mul_lolo @0 @1)
+ (mult@4 (double_size_mul_arg_lo @0 @2) (double_size_mul_arg_lo @1 @3))
+  (if (single_use (@4))))
+(match (double_size_mul_hihi @0 @1)
+ (mult@4 (double_size_mul_arg_hi @0 @2) (double_size_mul_arg_hi @1 @3))
+  (if (single_use (@4))))
+(match (double_size_mul_lohi @0 @1)
+ (mult:c@4 (double_size_mul_arg_lo @0 @2) (double_size_mul_arg_hi @1 @3))
+  (if (single_use (@4))))
+
+/* Match complex middle sum.  */
+(match (double_size_mul_middle_complex @0 @1)
+ (IFN_ADD_OVERFLOW@2 (double_size_mul_lohi @0 @1) (double_size_mul_lohi @1 @0))
+  (if (num_imm_uses (@2) == 2)))
+
+/* Match real middle results.  */
+(match (double_size_mul_middle @0 @1)
+ (realpart@2 (double_size_mul_middle_complex @0 @1))
+  (if (num_imm_uses (@2) == 2)))
+(match (double_size_mul_middleres_lo @0 @1)
+ (lshift@3 (double_size_mul_middle @0 @1) INTEGER_CST@2)
+  (if (wi::to_wide (@2) == TYPE_PRECISION (type) / 2
+       && single_use (@3))))
+(match (double_size_mul_middleres_hi @0 @1)
+ (rshift@3 (double_size_mul_middle @0 @1) INTEGER_CST@2)
+  (if (wi::to_wide (@2) == TYPE_PRECISION (type) / 2
+       && single_use (@3))))
+
+/* Match low result part.  */
+/* Number of uses may be < 2 in case when we are interested in
+   high part only.  */
+(match (double_size_mul_res_lo_complex @0 @1)
+ (IFN_ADD_OVERFLOW:c@2
+  (double_size_mul_lolo:c @0 @1) (double_size_mul_middleres_lo @0 @1))
+  (if (num_imm_uses (@2) <= 2)))
+(match (double_size_mul_res_lo @0 @1)
+ (realpart (double_size_mul_res_lo_complex @0 @1)))
+
+/* Match overflow terms.  */
+(match (double_size_mul_overflow_check_lo @0 @1 @5)
+ (convert@4 (ne@3
+  (imagpart@2 (double_size_mul_res_lo_complex@5 @0 @1)) integer_zerop))
+  (if (single_use (@2) && single_use (@3) && single_use (@4))))
+(match (double_size_mul_overflow_check_hi @0 @1)
+ (lshift@6 (convert@5 (ne@4
+  (imagpart@3 (double_size_mul_middle_complex @0 @1)) integer_zerop))
+	   INTEGER_CST@2)
+  (if (wi::to_wide (@2) == TYPE_PRECISION (type) / 2
+       && single_use (@3) && single_use (@4) && single_use (@5)
+       && single_use (@6))))
+
+/* Match all possible permutations for high result part calculations.  */
+(for op1 (double_size_mul_hihi
+	  double_size_mul_overflow_check_hi
+	  double_size_mul_middleres_hi)
+     op2 (double_size_mul_overflow_check_hi
+	  double_size_mul_middleres_hi
+	  double_size_mul_hihi)
+     op3 (double_size_mul_middleres_hi
+	  double_size_mul_hihi
+	  double_size_mul_overflow_check_hi)
+ (match (double_size_mul_candidate @0 @1 @2 @3)
+  (plus:c@2
+   (plus:c@4 (double_size_mul_overflow_check_lo @0 @1 @3) (op1:c @0 @1))
+   (plus:c@5 (op2:c @0 @1) (op3:c @0 @1)))
+    (if (single_use (@4) && single_use (@5))))
+ (match (double_size_mul_candidate @0 @1 @2 @3)
+  (plus:c@2 (double_size_mul_overflow_check_lo @0 @1 @3)
+   (plus:c@4 (op1:c @0 @1)
+    (plus:c@5 (op2:c @0 @1) (op3:c @0 @1))))
+     (if (single_use (@4) && single_use (@5))))
+ (match (double_size_mul_candidate @0 @1 @2 @3)
+  (plus:c@2 (op1:c @0 @1)
+   (plus:c@4 (double_size_mul_overflow_check_lo @0 @1 @3)
+    (plus:c@5 (op2:c @0 @1) (op3:c @0 @1))))
+     (if (single_use (@4) && single_use (@5))))
+ (match (double_size_mul_candidate @0 @1 @2 @3)
+  (plus:c@2 (op1:c @0 @1)
+   (plus:c@4 (op2:c @0 @1)
+    (plus:c@5 (double_size_mul_overflow_check_lo @0 @1 @3) (op3:c @0 @1))))
+     (if (single_use (@4) && single_use (@5)))))

@@ -210,6 +210,9 @@ static struct
 
   /* Number of highpart multiplication ops inserted.  */
   int highpart_mults_inserted;
+
+  /* Number of optimized double sized multiplications.  */
+  int double_sized_mul_optimized;
 } widen_mul_stats;
 
 /* The instance of "struct occurrence" representing the highest
@@ -4893,6 +4896,78 @@ optimize_spaceship (gimple *stmt)
 }
 
 
+/* Pattern matcher for double sized multiplication defined in match.pd.  */
+extern bool gimple_double_size_mul_candidate (tree, tree*, tree (*)(tree));
+
+static bool
+convert_double_size_mul (gimple_stmt_iterator *gsi, gimple *stmt)
+{
+  gimple *use_stmt, *complex_res_lo;
+  gimple_stmt_iterator insert_before;
+  imm_use_iterator use_iter;
+  tree match[4]; // arg0, arg1, res_hi, complex_res_lo
+  tree arg0, arg1, widen_mult, new_type, tmp;
+  tree lhs = gimple_assign_lhs (stmt);
+  location_t loc = UNKNOWN_LOCATION;
+  machine_mode mode;
+
+  if (!gimple_double_size_mul_candidate (lhs, match, NULL))
+    return false;
+
+  new_type = build_nonstandard_integer_type (
+	  TYPE_PRECISION (TREE_TYPE (match[0])) * 2, 1);
+  mode = TYPE_MODE (new_type);
+
+  /* Early return if the target multiplication doesn't exist on target.  */
+  if (optab_handler (smul_optab, mode) == CODE_FOR_nothing
+      && !wider_optab_check_p (smul_optab, mode, 1))
+    return false;
+
+  /* Determine the point where the wide multiplication
+     should be inserted.  Complex low res is OK since it is required
+     by both high and low part getters, thus it dominates both of them.  */
+  complex_res_lo = SSA_NAME_DEF_STMT (match[3]);
+  insert_before = gsi_for_stmt (complex_res_lo);
+  gsi_next (&insert_before);
+
+  /* Create the widen multiplication.  */
+  arg0 = build_and_insert_cast (&insert_before, loc, new_type, match[0]);
+  arg1 = build_and_insert_cast (&insert_before, loc, new_type, match[1]);
+  widen_mult = build_and_insert_binop (&insert_before, loc, "widen_mult",
+				       MULT_EXPR, arg0, arg1);
+
+  /* Find the mult low part getter.  */
+  FOR_EACH_IMM_USE_STMT (use_stmt, use_iter, match[3])
+    if (gimple_assign_rhs_code (use_stmt) == REALPART_EXPR)
+      break;
+
+  /* Create high and low (if needed) parts extractors.  */
+  /* Low part.  */
+  if (use_stmt)
+    {
+      loc = gimple_location (use_stmt);
+      tmp = build_and_insert_cast (&insert_before, loc,
+	  	      		   TREE_TYPE (gimple_get_lhs (use_stmt)),
+	  			   widen_mult);
+      gassign *new_stmt = gimple_build_assign (gimple_get_lhs (use_stmt),
+	    				       NOP_EXPR, tmp);
+      gsi_replace (&insert_before, new_stmt, true);
+    }
+
+  /* High part.  */
+  loc = gimple_location (stmt);
+  tmp = build_and_insert_binop (gsi, loc, "widen_mult_hi",
+				RSHIFT_EXPR, widen_mult,
+				build_int_cst (new_type,
+					       TYPE_PRECISION (new_type) / 2));
+  tmp = build_and_insert_cast (gsi, loc, TREE_TYPE (lhs), tmp);
+  gassign *new_stmt = gimple_build_assign (lhs, NOP_EXPR, tmp);
+  gsi_replace (gsi, new_stmt, true);
+
+  widen_mul_stats.double_sized_mul_optimized++;
+  return true;
+}
+
 /* Find integer multiplications where the operands are extended from
    smaller types, and replace the MULT_EXPR with a WIDEN_MULT_EXPR
    or MULT_HIGHPART_EXPR where appropriate.  */
@@ -4987,6 +5062,9 @@ math_opts_dom_walker::after_dom_children (basic_block bb)
 	      break;
 
 	    case PLUS_EXPR:
+	      if (convert_double_size_mul (&gsi, stmt))
+		break;
+	      __attribute__ ((fallthrough));
 	    case MINUS_EXPR:
 	      if (!convert_plusminus_to_widen (&gsi, stmt, code))
 		match_arith_overflow (&gsi, stmt, code, m_cfg_changed_p);
@@ -5091,6 +5169,8 @@ pass_optimize_widening_mul::execute (function *fun)
 			    widen_mul_stats.divmod_calls_inserted);
   statistics_counter_event (fun, "highpart multiplications inserted",
 			    widen_mul_stats.highpart_mults_inserted);
+  statistics_counter_event (fun, "double sized mul optimized",
+			    widen_mul_stats.double_sized_mul_optimized);
 
   return cfg_changed ? TODO_cleanup_cfg : 0;
 }
