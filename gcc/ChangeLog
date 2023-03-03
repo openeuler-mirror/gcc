@@ -1,3 +1,11 @@
+2023-03-17  xingyushuai  <xingyushuai@huawei.com>
+  * config/aarch64/aarch64-cores.def: Add support for hip09 CPU
+  * config/aarch64/aarch64-cost-tables.h: Add cost tables for hip09 CPU
+  * config/aarch64/aarch64-tune.md: Regenerated
+  * config/aarch64/aarch64.c: Add tuning table for hip09 CPU
+  * config/aarch64/aarch64.md: Include the new model of hip09 CPU
+  * config/aarch64/lc910.md: New file to support for hip09 CPU
+
 2020-05-12  Richard Sandiford  <richard.sandiford@arm.com>
 
 	PR tree-optimization/94980
