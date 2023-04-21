@@ -113,7 +113,7 @@
   "TARGET_ATOMIC && TARGET_INLINE_SUBWORD_ATOMIC"
   {
     return "1:\;"
-	   "lr.w.aq\t%0, %1\;"
+	   "lr.w.aqrl\t%0, %1\;"
 	   "<insn>\t%5, %0, %2\;"
 	   "and\t%5, %5, %3\;"
 	   "and\t%6, %0, %4\;"
@@ -177,7 +177,7 @@
   "TARGET_ATOMIC && TARGET_INLINE_SUBWORD_ATOMIC"
   {
     return "1:\;"
-	   "lr.w.aq\t%0, %1\;"
+	   "lr.w.aqrl\t%0, %1\;"
 	   "and\t%5, %0, %2\;"
 	   "not\t%5, %5\;"
 	   "and\t%5, %5, %3\;"
@@ -282,7 +282,7 @@
   "TARGET_ATOMIC && TARGET_INLINE_SUBWORD_ATOMIC"
   {
     return "1:\;"
-	   "lr.w.aq\t%0, %1\;"
+	   "lr.w.aqrl\t%0, %1\;"
 	   "and\t%4, %0, %3\;"
 	   "or\t%4, %4, %2\;"
 	   "sc.w.rl\t%4, %4, %1\;"
@@ -447,7 +447,7 @@
   "TARGET_ATOMIC && TARGET_INLINE_SUBWORD_ATOMIC"
   {
     return "1:\;"
-	   "lr.w.aq\t%0, %1\;"
+	   "lr.w.aqrl\t%0, %1\;"
 	   "and\t%6, %0, %4\;"
 	   "bne\t%6, %z2, 1f\;"
 	   "and\t%6, %0, %5\;"
