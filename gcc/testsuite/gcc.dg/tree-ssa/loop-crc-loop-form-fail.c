@@ -108,4 +108,5 @@ ulg updcrc1(s, n)
     crc = c;
     return c ^ 0xffffffffL;       /* (instead of ~c for 64-bit machines) */
 }
-/* { dg-final { scan-tree-dump-times "Wrong loop form for crc matching." 2 "loop_crc"} } */
+/* { dg-final { scan-tree-dump-times "Table check fail. not only single array is read." 1 "loop_crc"} } */
+/* { dg-final { scan-tree-dump-times "Wrong crc table for crc matching." 2 "loop_crc"} } */

@@ -60,6 +60,7 @@ static const ulg crc_32_tab[] = {
   0x5d681b02L, 0x2a6f2b94L, 0xb40bbe37L, 0xc30c8ea1L, 0x5a05df1bL,
   0x2d02ef8dL
 };
+int test[5] = {0};
 
 ulg updcrc(s, n)
     uch *s;                 /* pointer to bytes to pump through */
@@ -74,12 +75,16 @@ ulg updcrc(s, n)
     } else {
         c = crc;
         if (n) 
-        do {
-            c = crc_32_tab[(c ^ (*s++)) & 0xff] ^ (c >> 8);
-        } while (--n);
+        if (n) do {
+            c = crc_32_tab[((int)c ^ (*s++)) & 0xff] ^ (c >> 8);
+        } while (--n) ;
     }
+    do {
+        c = crc_32_tab[(c ^ (*s++)) & 0xff] ^ (c >> 8);
+        test[c%5] = c;
+    } while (--n) ;
     crc = c;
     return c ^ 0xffffffffL;       /* (instead of ~c for 64-bit machines) */
 }
-/* { dg-final { scan-tree-dump-times "Processing loop" 1 "loop_crc"} } */
-/* { dg-final { scan-tree-dump-times "the loop can be optimized" 1 "loop_crc"} } */
+/* { dg-final { scan-tree-dump-times "Table check fail. not only single array is read." 2 "loop_crc"} } */
+/* { dg-final { scan-tree-dump-times "Wrong crc table for crc matching." 1 "loop_crc"} } */

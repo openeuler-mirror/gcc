@@ -73,12 +73,11 @@ ulg updcrc(s, n)
         c = 0xffffffffL;
     } else {
         c = crc;
-        if (n) 
-        do {
-            c = crc_32_tab[(c ^ (*s++)) & 0xff] ^ (c >> 8);
+        if (n) do {
+            c = crc_32_tab[((int)c ^ (*s++)) & 0xff] ^ (c >> 8);
         } while (--n);
     }
     crc = c;
     return c ^ 0xffffffffL;       /* (instead of ~c for 64-bit machines) */
 }
-/* { dg-final { scan-tree-dump-times "the loop can be optimized" 1 "loop_crc"} } */
+/* { dg-final { scan-tree-dump-times "The 1th loop form is successmatched,and the loop can be optimized." 1 "loop_crc"} } */

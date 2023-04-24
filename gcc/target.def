@@ -2421,6 +2421,20 @@ If @var{code} is out of range the function should return\n\
 @code{error_mark_node}.",
  tree, (unsigned code, bool initialize_p), NULL)
 
+/* Initialize (if INITIALIZE_P is true) and return the real code of
+   target-specific built-in function .
+   Return NULL if that is not possible.  Return error_mark_node if CODE
+   is outside of the range of valid crc32 codes.  */
+DEFHOOK
+(get_crc_builtin_code,
+ "Define this hook to get crc32 builtin code.  It should be a function that\n\
+returns the crc32 builtin function code @var{code}.\n\
+If there is no such builtin and it cannot be initialized at this time\n\
+if @var{initialize_p} is true the function should return @code{NULL_TREE}.\n\
+If @var{code} is out of range the function should return\n\
+@code{error_mark_node}.",
+ unsigned , (unsigned code, bool initialize_p), NULL)
+
 /* Expand a target-specific builtin.  */
 DEFHOOK
 (expand_builtin,
