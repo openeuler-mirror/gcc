@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O1 -fdump-tree-optimized" } */
+/* { dg-options "-O1 -ftree-fold-phiopt -fdump-tree-optimized" } */
 
 int nem1_phi (unsigned long a) { return a ? -1 : 0; }
 int eqm1_phi (unsigned long a) { return a ? 0 : -1; }
