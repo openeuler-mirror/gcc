@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O1 -fdump-tree-phiopt2-details" } */
+/* { dg-options "-O1 -ftree-fold-phiopt -fdump-tree-phiopt2-details" } */
 
 int t( int i)
 {
