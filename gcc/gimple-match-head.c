@@ -1023,9 +1023,86 @@ gimple_extract (gimple *stmt, gimple_match_op *res_op,
 bool
 gimple_extract_op (gimple *stmt, gimple_match_op *res_op)
 {
-  auto nop = [](tree op) { return op; };
+  /* This function is not called by other function now, so leave the
+     lambda to minimize modifiers.  */
+  tree (*nop)(tree) = [](tree op)
+  {
+    return op;
+  };
   return gimple_extract (stmt, res_op, nop, nop);
 }
+
+/* The std=gnu++98 doesn't support c++ auto feature, and the origin
+   lambda capture some variables, so they can't be replaced with a
+   simple function pointer.  */
+class __lambda_valueize
+{
+  typedef tree (*tree_op_func)(tree);
+
+  public:
+  inline tree operator () (tree op) const
+  {
+    return do_valueize (op, top_valueize, valueized);
+  }
+
+  private:
+  tree_op_func &top_valueize;
+  bool &valueized;
+
+  public:
+  __lambda_valueize (tree_op_func &_top_valueize, bool &_valueized)
+  : top_valueize{_top_valueize}, valueized {_valueized}
+  {}
+};
+
+class __lambda_condition
+{
+  typedef tree (*tree_op_func)(tree);
+
+  public:
+  inline tree operator () (tree op) const
+  {
+    bool cond_valueized = false;
+    tree lhs = do_valueize (TREE_OPERAND (op, 0), top_valueize,
+			    cond_valueized);
+    tree rhs = do_valueize (TREE_OPERAND (op, 1), top_valueize,
+			    cond_valueized);
+    gimple_match_op res_op2 (res_op->cond, TREE_CODE (op),
+			     TREE_TYPE (op), lhs, rhs);
+    if ((gimple_resimplify2 (seq, &res_op2, valueize) || cond_valueized)
+	&& res_op2.code.is_tree_code ())
+      {
+	if (TREE_CODE_CLASS ((tree_code) res_op2.code) == tcc_comparison)
+	  {
+	    valueized = true;
+	    return build2 (res_op2.code, TREE_TYPE (op), res_op2.ops[0],
+			   res_op2.ops[1]);
+	  }
+	else if (res_op2.code == SSA_NAME
+		 || res_op2.code == INTEGER_CST
+		 || res_op2.code == VECTOR_CST)
+	  {
+	    valueized = true;
+	    return res_op2.ops[0];
+	  }
+      }
+    return do_valueize (op, top_valueize, valueized);
+  }
+
+  private:
+  tree_op_func &top_valueize;
+  tree_op_func &valueize;
+  bool &valueized;
+  gimple_match_op *&res_op;
+  gimple_seq *&seq;
+
+  public:
+  __lambda_condition (tree_op_func &_top_valueize, tree_op_func &_valueize,
+      bool &_valueized, gimple_match_op *&_res_op, gimple_seq *&_seq)
+  : top_valueize{_top_valueize}, valueize{_valueize}, valueized {_valueized},
+    res_op {_res_op}, seq {_seq}
+  {}
+};
 
 /* The main STMT based simplification entry.  It is used by the fold_stmt
    and the fold_stmt_to_constant APIs.  */
@@ -1035,39 +1112,9 @@ gimple_simplify (gimple *stmt, gimple_match_op *res_op, gimple_seq *seq,
 		 tree (*valueize)(tree), tree (*top_valueize)(tree))
 {
   bool valueized = false;
-  auto valueize_op = [&](tree op)
-    {
-      return do_valueize (op, top_valueize, valueized);
-    };
-  auto valueize_condition = [&](tree op) -> tree
-    {
-      bool cond_valueized = false;
-      tree lhs = do_valueize (TREE_OPERAND (op, 0), top_valueize,
-			      cond_valueized);
-      tree rhs = do_valueize (TREE_OPERAND (op, 1), top_valueize,
-			      cond_valueized);
-      gimple_match_op res_op2 (res_op->cond, TREE_CODE (op),
-			       TREE_TYPE (op), lhs, rhs);
-      if ((gimple_resimplify2 (seq, &res_op2, valueize)
-	   || cond_valueized)
-	  && res_op2.code.is_tree_code ())
-	{
-	  if (TREE_CODE_CLASS ((tree_code) res_op2.code) == tcc_comparison)
-	    {
-	      valueized = true;
-	      return build2 (res_op2.code, TREE_TYPE (op),
-			     res_op2.ops[0], res_op2.ops[1]);
-	    }
-	  else if (res_op2.code == SSA_NAME
-		   || res_op2.code == INTEGER_CST
-		   || res_op2.code == VECTOR_CST)
-	    {
-	      valueized = true;
-	      return res_op2.ops[0];
-	    }
-	}
-      return valueize_op (op);
-    };
+  __lambda_valueize valueize_op = __lambda_valueize{top_valueize, valueized};
+  __lambda_condition valueize_condition = __lambda_condition{top_valueize,
+      valueize, valueized, res_op, seq};
 
   if (!gimple_extract (stmt, res_op, valueize_op, valueize_condition))
     return false;

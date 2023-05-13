@@ -3098,10 +3098,10 @@ aarch64_maxmin_plus_const (rtx_code code, rtx *operands, bool generate_p)
 		    == x <= y ? x - y : 0              [z == y]
 		    == x < y ? x - y : 0               [z == y]
 		    == x < y + 1 ? x - (y + 1) : -1    [z == y + 1].  */
-  auto maxmin_val = rtx_mode_t (maxmin_op, mode);
-  auto add_val = rtx_mode_t (add_op, mode);
-  auto sub_val = wi::neg (add_val);
-  auto diff = wi::sub (maxmin_val, sub_val);
+  rtx_mode_t maxmin_val = rtx_mode_t (maxmin_op, mode);
+  rtx_mode_t add_val = rtx_mode_t (add_op, mode);
+  wide_int sub_val = wi::neg (add_val);
+  wide_int diff = wi::sub (maxmin_val, sub_val);
   if (!(diff == 0
 	|| (diff == 1 && wi::gt_p (maxmin_val, sub_val, sgn))
 	|| (diff == -1 && wi::lt_p (maxmin_val, sub_val, sgn))))
