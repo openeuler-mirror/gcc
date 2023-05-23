@@ -688,6 +688,8 @@ srtype::analyze (void)
       info and/or static heuristics to differentiate splitting process.  */
   if (fields.length () == 2)
     {
+      /* Currently, when the replacement structure type exists,
+	 we only split the replacement structure. */
       for (hash_map<tree, tree>::iterator it = replace_type_map.begin ();
 	   it != replace_type_map.end (); ++it)
 	{
@@ -4921,7 +4923,9 @@ ipa_struct_reorg::check_other_side (srdecl *decl, tree other, gimple *stmt, vec<
     }
 
   srtype *t1 = find_type (inner_type (t));
-  if (t1 == type)
+  /* In the other side check, escape mark is added
+     when the replacement struct type exists. */
+  if (t1 == type || is_replace_type (inner_type (t), type->type))
     {
       /* In Complete Struct Relayout opti, if lhs type is the same
 	 as rhs type, we could return without any harm.  */
@@ -4961,13 +4965,10 @@ ipa_struct_reorg::check_other_side (srdecl *decl, tree other, gimple *stmt, vec<
 
       return;
     }
-  if (!is_replace_type (inner_type (t), type->type))
-    {
-      if (t1)
-	t1->mark_escape (escape_cast_another_ptr, stmt);
+  if (t1)
+    t1->mark_escape (escape_cast_another_ptr, stmt);
 
-      type->mark_escape (escape_cast_another_ptr, stmt);
-    }
+  type->mark_escape (escape_cast_another_ptr, stmt);
 }
 
 
