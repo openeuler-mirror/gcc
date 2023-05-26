@@ -6607,8 +6607,7 @@ ipa_struct_reorg::compress_candidate_with_check (gimple_stmt_iterator *gsi,
   gimple_set_location (cond, UNKNOWN_LOCATION);
   gsi_insert_before (gsi, cond, GSI_SAME_STMT);
 
-  gimple* cur_stmt = as_a <gimple *> (cond);
-  edge e = split_block (cur_stmt->bb, cur_stmt);
+  edge e = split_block (cond->bb, cond);
   basic_block split_src_bb = e->src;
   basic_block split_dst_bb = e->dest;
 
@@ -6847,8 +6846,7 @@ ipa_struct_reorg::decompress_candidate_with_check (gimple_stmt_iterator *gsi,
   gsi_insert_before (gsi, cond, GSI_SAME_STMT);
 
   /* Split bb.  */
-  gimple* cur_stmt = as_a <gimple *> (cond);
-  edge e = split_block (cur_stmt->bb, cur_stmt);
+  edge e = split_block (cond->bb, cond);
   basic_block split_src_bb = e->src;
   basic_block split_dst_bb = e->dest;
 
@@ -7133,8 +7131,7 @@ ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt,
   gimple_set_location (cond, UNKNOWN_LOCATION);
   gsi_insert_before (gsi, cond, GSI_SAME_STMT);
 
-  gimple *curr_stmt = as_a <gimple *> (cond);
-  edge e = split_block (curr_stmt->bb, curr_stmt);
+  edge e = split_block (cond->bb, cond);
   basic_block split_src_bb = e->src;
   basic_block split_dst_bb = e->dest;
   remove_edge_raw (e);
