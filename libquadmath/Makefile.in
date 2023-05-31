@@ -90,6 +90,7 @@ POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
 target_triplet = @target@
+@ARCH_AARCH64_TRUE@am__append_1 = -D__float128="long double"
 @BUILD_LIBQUADMATH_FALSE@libquadmath_la_DEPENDENCIES =
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
@@ -337,7 +338,7 @@ CFLAGS = @CFLAGS@
 CPP = @CPP@
 CPPFLAGS = @CPPFLAGS@
 CYGPATH_W = @CYGPATH_W@
-DEFS = @DEFS@
+DEFS = @DEFS@ $(am__append_1)
 DEPDIR = @DEPDIR@
 DSYMUTIL = @DSYMUTIL@
 DUMPBIN = @DUMPBIN@
