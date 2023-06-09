@@ -1412,6 +1412,7 @@ public:
   srglobal globals;
   srfunction *current_function;
   hash_set <cgraph_node *> safe_functions;
+  auto_vec<srtype *> ext_func_types;
 
   bool done_recording;
 
@@ -1426,6 +1427,7 @@ public:
   void propagate_escape (void);
   void propagate_escape_via_original (void);
   void propagate_escape_via_empty_with_no_original (void);
+  void propagate_escape_via_ext_func_types (void);
   void analyze_types (void);
   void clear_visited (void);
   bool create_new_types (void);
@@ -3131,7 +3133,14 @@ ipa_struct_reorg::record_type (tree type)
     return NULL;
 
   if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Recording new type: %u.\n", typeuid);
+    {
+      fprintf (dump_file, "Recording new type: %u.\n", typeuid);
+      const char *type_name = get_type_name (type);
+      if (type_name == NULL)
+	fprintf (dump_file, "Recording new type NULL name\n");
+      else
+	fprintf (dump_file, "Recording new type name: %s.\n", type_name);
+    }
 
   type1 = new srtype (type);
   types.safe_push (type1);
@@ -4478,6 +4487,18 @@ ipa_struct_reorg::maybe_record_call (cgraph_node *node, gcall *stmt)
 					gimple_call_arg (stmt, i));
 	  if (d)
 	    d->type->mark_escape (escapes, stmt);
+
+	  if (escapes == escape_external_function
+	      && !gimple_call_builtin_p (stmt, BUILT_IN_MEMSET))
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "escape_external_function: ");
+		  print_gimple_stmt (dump_file, stmt, 0);
+		}
+	      if (d)
+		ext_func_types.safe_push (d->type);
+	    }
 	}
       return;
     }
@@ -5672,6 +5693,35 @@ ipa_struct_reorg::propagate_escape_via_empty_with_no_original (void)
     }
 }
 
+/* Escape propagation is performed on types that escape through external
+   functions.  */
+
+void
+ipa_struct_reorg::propagate_escape_via_ext_func_types (void)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\n propagate_escape_via_ext_func_types: \n\n");
+  unsigned i = 0;
+  hash_set<srtype *> visited_types;
+  while (i < ext_func_types.length ())
+    {
+      visited_types.add (ext_func_types[i]);
+      unsigned j = 0;
+      srfield * field;
+      FOR_EACH_VEC_ELT (ext_func_types[i]->fields, j, field)
+	{
+	  if (field->type)
+	    {
+	      if (!field->type->has_escaped ())
+		field->type->mark_escape (escape_dependent_type_escapes, NULL);
+	      if (!visited_types.contains (field->type))
+		ext_func_types.safe_push (field->type);
+	    }
+	}
+      i++;
+    }
+}
+
 /* Prune the escaped types and their decls from what was recorded.  */
 
 void
@@ -5689,6 +5739,7 @@ ipa_struct_reorg::prune_escaped_types (void)
     {
       propagate_escape_via_original ();
       propagate_escape_via_empty_with_no_original ();
+      propagate_escape_via_ext_func_types ();
     }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -8242,8 +8293,9 @@ ipa_struct_reorg::rewrite_functions (void)
 	      if (dump_file && (dump_flags & TDF_DETAILS))
 		{
 		  fprintf (dump_file, "\nNo rewrite:\n");
-		  dump_function_to_file (current_function_decl, dump_file,
-			dump_flags | TDF_VOPS);
+		  if (current_function_decl)
+		    dump_function_to_file (current_function_decl, dump_file,
+					   dump_flags | TDF_VOPS);
 		}
 	      pop_cfun ();
 	    }
@@ -8278,8 +8330,9 @@ ipa_struct_reorg::rewrite_functions (void)
 	    {
 	      fprintf (dump_file, "==== Before create decls: %dth_%s ====\n\n",
 		       i, f->node->name ());
-	      dump_function_to_file (current_function_decl, dump_file,
-				     dump_flags | TDF_VOPS);
+	      if (current_function_decl)
+		dump_function_to_file (current_function_decl, dump_file,
+				       dump_flags | TDF_VOPS);
 	    }
 	  pop_cfun ();
 	}
@@ -8313,8 +8366,9 @@ ipa_struct_reorg::rewrite_functions (void)
 	{
 	  fprintf (dump_file, "\nBefore rewrite: %dth_%s\n",
 		   i, f->node->name ());
-	  dump_function_to_file (current_function_decl, dump_file,
-				 dump_flags | TDF_VOPS);
+	  if (current_function_decl)
+	    dump_function_to_file (current_function_decl, dump_file,
+				   dump_flags | TDF_VOPS);
 	  fprintf (dump_file, "\n======== Start to rewrite: %dth_%s ========\n",
 		   i, f->node->name ());
 	}
@@ -8658,6 +8712,9 @@ unsigned int
 ipa_struct_reorg::execute (unsigned int opt)
 {
   unsigned int ret = 0;
+
+  if (dump_file)
+    fprintf (dump_file, "\n\n====== ipa_struct_reorg level %d ======\n\n", opt);
 
   if (opt != COMPLETE_STRUCT_RELAYOUT)
     {

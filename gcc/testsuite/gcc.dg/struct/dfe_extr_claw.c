@@ -42,6 +42,13 @@ int WS_APPL_NAME_PACKED;
 int claw_send_control (struct net_device*, int, int, int, int, int, int);
 int setup;
 
+__attribute__((noinline)) int
+claw_send_control (struct net_device* net, int a, int b, int c, int d, int e, 
+		   int f)
+{
+  return net->ml_priv->system_validate_comp + a + b + c + d + f;
+}
+
 __attribute__((used)) static int
 claw_snd_conn_req (struct net_device *dev, __u8 link)
 {
