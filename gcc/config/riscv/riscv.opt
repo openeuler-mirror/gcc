@@ -145,3 +145,7 @@ Enum(riscv_align_data) String(xlen) Value(riscv_align_data_type_xlen)
 
 EnumValue
 Enum(riscv_align_data) String(natural) Value(riscv_align_data_type_natural)
+
+minline-atomics
+Target Var(TARGET_INLINE_SUBWORD_ATOMIC) Init(1)
+Always inline subword atomic operations.
