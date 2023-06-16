@@ -12726,7 +12726,7 @@ cost_plus:
 	  }
 
 	if (GET_MODE_CLASS (mode) == MODE_INT
-	    && (aarch64_plus_immediate (op1, mode)
+	    && ((CONST_INT_P (op1) && aarch64_uimm12_shift (INTVAL (op1)))
 		|| aarch64_sve_addvl_addpl_immediate (op1, mode)))
 	  {
 	    *cost += rtx_cost (op0, mode, PLUS, 0, speed);
