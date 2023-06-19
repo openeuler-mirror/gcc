@@ -30,6 +30,17 @@ if test $gcc_cv_have_tls = yes ; then
   esac
 fi
 
+# Enabling moutline-atomics improves libgomp performance in multi-thread scenarios.
+case "${target_cpu}" in
+  aarch64*)
+        case "${target}" in
+            aarch64*-*-linux*)
+                XCFLAGS="${XCFLAGS} -moutline-atomics"
+                ;;
+        esac
+        ;;
+esac
+
 # Since we require POSIX threads, assume a POSIX system by default.
 config_path="posix"
 
