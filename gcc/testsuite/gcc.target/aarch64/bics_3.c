@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-options "-O2 --save-temps" } */
+/* { dg-options "-O2 -ftree-fold-phiopt --save-temps" } */
 
 extern void abort (void);
 

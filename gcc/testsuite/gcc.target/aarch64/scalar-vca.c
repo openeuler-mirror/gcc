@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-options "-O3 --save-temps" } */
+/* { dg-options "-O3 -ftree-fold-phiopt --save-temps" } */
 
 #include <arm_neon.h>
 
