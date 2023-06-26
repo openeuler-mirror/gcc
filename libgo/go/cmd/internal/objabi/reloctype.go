@@ -1,5 +1,5 @@
 // Derived from Inferno utils/6l/l.h and related files.
-// https://bitbucket.org/inferno-os/inferno-os/src/default/utils/6l/l.h
+// https://bitbucket.org/inferno-os/inferno-os/src/master/utils/6l/l.h
 //
 //	Copyright © 1994-1999 Lucent Technologies Inc.  All rights reserved.
 //	Portions Copyright © 1995-1997 C H Forsyth (forsyth@terzarima.net)
@@ -50,11 +50,6 @@ const (
 	// R_ADDROFF resolves to a 32-bit offset from the beginning of the section
 	// holding the data being relocated to the referenced symbol.
 	R_ADDROFF
-	// R_WEAKADDROFF resolves just like R_ADDROFF but is a weak relocation.
-	// A weak relocation does not make the symbol it refers to reachable,
-	// and is only honored by the linker if the symbol is in some other way
-	// reachable.
-	R_WEAKADDROFF
 	R_SIZE
 	R_CALL
 	R_CALLARM
@@ -64,8 +59,6 @@ const (
 	// R_CALLMIPS (only used on mips64) resolves to non-PC-relative target address
 	// of a CALL (JAL) instruction, by encoding the address into the instruction.
 	R_CALLMIPS
-	// R_CALLRISCV marks RISC-V CALLs for stack checking.
-	R_CALLRISCV
 	R_CONST
 	R_PCREL
 	// R_TLS_LE, used on 386, amd64, and ARM, resolves to the offset of the
@@ -89,12 +82,31 @@ const (
 	// should be linked into the final binary, even if there are no other
 	// direct references. (This is used for types reachable by reflection.)
 	R_USETYPE
+	// R_USEIFACE marks a type is converted to an interface in the function this
+	// relocation is applied to. The target is a type descriptor.
+	// This is a marker relocation (0-sized), for the linker's reachabililty
+	// analysis.
+	R_USEIFACE
+	// R_USEIFACEMETHOD marks an interface method that is used in the function
+	// this relocation is applied to. The target is an interface type descriptor.
+	// The addend is the offset of the method in the type descriptor.
+	// This is a marker relocation (0-sized), for the linker's reachabililty
+	// analysis.
+	R_USEIFACEMETHOD
+	// Similar to R_USEIFACEMETHOD, except instead of indicating a type +
+	// method offset with Sym+Add, Sym points to a symbol containing the name
+	// of the method being called. See the description in
+	// cmd/compile/internal/reflectdata/reflect.go:MarkUsedIfaceMethod for details.
+	R_USEGENERICIFACEMETHOD
 	// R_METHODOFF resolves to a 32-bit offset from the beginning of the section
 	// holding the data being relocated to the referenced symbol.
 	// It is a variant of R_ADDROFF used when linking from the uncommonType of a
 	// *rtype, and may be set to zero by the linker if it determines the method
 	// text is unreachable by the linked program.
 	R_METHODOFF
+	// R_KEEP tells the linker to keep the referred-to symbol in the final binary
+	// if the symbol containing the R_KEEP relocation is in the final binary.
+	R_KEEP
 	R_POWER_TOC
 	R_GOTPCREL
 	// R_JMPMIPS (only used on mips64) resolves to non-PC-relative target address
@@ -145,6 +157,9 @@ const (
 	// R_ARM64_LDST8 sets a LD/ST immediate value to bits [11:0] of a local address.
 	R_ARM64_LDST8
 
+	// R_ARM64_LDST16 sets a LD/ST immediate value to bits [11:1] of a local address.
+	R_ARM64_LDST16
+
 	// R_ARM64_LDST32 sets a LD/ST immediate value to bits [11:2] of a local address.
 	R_ARM64_LDST32
 
@@ -158,8 +173,8 @@ const (
 
 	// R_POWER_TLS_LE is used to implement the "local exec" model for tls
 	// access. It resolves to the offset of the thread-local symbol from the
-	// thread pointer (R13) and inserts this value into the low 16 bits of an
-	// instruction word.
+	// thread pointer (R13) and is split against a pair of instructions to
+	// support a 32 bit displacement.
 	R_POWER_TLS_LE
 
 	// R_POWER_TLS_IE is used to implement the "initial exec" model for tls access. It
@@ -169,10 +184,12 @@ const (
 	// symbol from the thread pointer (R13)).
 	R_POWER_TLS_IE
 
-	// R_POWER_TLS marks an X-form instruction such as "MOVD 0(R13)(R31*1), g" as
-	// accessing a particular thread-local symbol. It does not affect code generation
-	// but is used by the system linker when relaxing "initial exec" model code to
-	// "local exec" model code.
+	// R_POWER_TLS marks an X-form instruction such as "ADD R3,R13,R4" as completing
+	// a sequence of GOT-relative relocations to compute a TLS address. This can be
+	// used by the system linker to to rewrite the GOT-relative TLS relocation into a
+	// simpler thread-pointer relative relocation. See table 3.26 and 3.28 in the
+	// ppc64 elfv2 1.4 ABI on this transformation.  Likewise, the second argument
+	// (usually called RB in X-form instructions) is assumed to be R13.
 	R_POWER_TLS
 
 	// R_ADDRPOWER_DS is similar to R_ADDRPOWER above, but assumes the second
@@ -204,6 +221,15 @@ const (
 
 	// RISC-V.
 
+	// R_RISCV_CALL relocates a J-type instruction with a 21 bit PC-relative
+	// address.
+	R_RISCV_CALL
+
+	// R_RISCV_CALL_TRAMP is the same as R_RISCV_CALL but denotes the use of a
+	// trampoline, which we may be able to avoid during relocation. These are
+	// only used by the linker and are not emitted by the compiler or assembler.
+	R_RISCV_CALL_TRAMP
+
 	// R_RISCV_PCREL_ITYPE resolves a 32-bit PC-relative address using an
 	// AUIPC + I-type instruction pair.
 	R_RISCV_PCREL_ITYPE
@@ -211,6 +237,14 @@ const (
 	// R_RISCV_PCREL_STYPE resolves a 32-bit PC-relative address using an
 	// AUIPC + S-type instruction pair.
 	R_RISCV_PCREL_STYPE
+
+	// R_RISCV_TLS_IE_ITYPE resolves a 32-bit TLS initial-exec TOC offset
+	// address using an AUIPC + I-type instruction pair.
+	R_RISCV_TLS_IE_ITYPE
+
+	// R_RISCV_TLS_IE_STYPE resolves a 32-bit TLS initial-exec TOC offset
+	// address using an AUIPC + S-type instruction pair.
+	R_RISCV_TLS_IE_STYPE
 
 	// R_PCRELDBL relocates s390x 2-byte aligned PC-relative addresses.
 	// TODO(mundaym): remove once variants can be serialized - see issue 14218.
@@ -234,6 +268,15 @@ const (
 	// of a symbol. This isn't a real relocation, it can be placed in anywhere
 	// in a symbol and target any symbols.
 	R_XCOFFREF
+
+	// R_WEAK marks the relocation as a weak reference.
+	// A weak relocation does not make the symbol it refers to reachable,
+	// and is only honored by the linker if the symbol is in some other way
+	// reachable.
+	R_WEAK = -1 << 15
+
+	R_WEAKADDR    = R_WEAK | R_ADDR
+	R_WEAKADDROFF = R_WEAK | R_ADDROFF
 )
 
 // IsDirectCall reports whether r is a relocation for a direct call.
@@ -243,7 +286,7 @@ const (
 // the target address in register or memory.
 func (r RelocType) IsDirectCall() bool {
 	switch r {
-	case R_CALL, R_CALLARM, R_CALLARM64, R_CALLMIPS, R_CALLPOWER, R_CALLRISCV:
+	case R_CALL, R_CALLARM, R_CALLARM64, R_CALLMIPS, R_CALLPOWER, R_RISCV_CALL, R_RISCV_CALL_TRAMP:
 		return true
 	}
 	return false

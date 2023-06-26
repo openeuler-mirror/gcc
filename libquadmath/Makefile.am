@@ -2,10 +2,6 @@
 
 AUTOMAKE_OPTIONS = foreign info-in-builddir
 
-if ARCH_AARCH64
-DEFS += -D__float128="long double"
-endif
-
 ## Skip over everything if the quadlib is not available:
 if BUILD_LIBQUADMATH
 ACLOCAL_AMFLAGS = -I .. -I ../config

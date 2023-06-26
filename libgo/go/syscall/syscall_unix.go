@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build aix darwin dragonfly freebsd hurd linux netbsd openbsd solaris
+//go:build aix || darwin || dragonfly || freebsd || hurd || linux || netbsd || openbsd || solaris
 
 package syscall
 
 import (
 	"internal/race"
+	"internal/unsafeheader"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -20,7 +21,7 @@ var (
 )
 
 const (
-	darwin64Bit = runtime.GOOS == "darwin" && sizeofPtr == 8
+	darwin64Bit = (runtime.GOOS == "darwin" || runtime.GOOS == "ios") && sizeofPtr == 8
 	netbsd32Bit = runtime.GOOS == "netbsd" && sizeofPtr == 4
 )
 
@@ -55,15 +56,12 @@ func (m *mmapper) Mmap(fd int, offset int64, length int, prot int, flags int) (d
 		return nil, errno
 	}
 
-	// Slice memory layout
-	var sl = struct {
-		addr uintptr
-		len  int
-		cap  int
-	}{addr, length, length}
-
-	// Use unsafe to turn sl into a []byte.
-	b := *(*[]byte)(unsafe.Pointer(&sl))
+	// Use unsafe to turn addr into a []byte.
+	var b []byte
+	hdr := (*unsafeheader.Slice)(unsafe.Pointer(&b))
+	hdr.Data = unsafe.Pointer(addr)
+	hdr.Cap = length
+	hdr.Len = length
 
 	// Register mapping in m and return it.
 	p := &b[cap(b)-1]
@@ -158,6 +156,9 @@ func Read(fd int, p []byte) (n int, err error) {
 	if msanenabled && n > 0 {
 		msanWrite(unsafe.Pointer(&p[0]), n)
 	}
+	if asanenabled && n > 0 {
+		asanWrite(unsafe.Pointer(&p[0]), n)
+	}
 	return
 }
 
@@ -178,6 +179,9 @@ func Write(fd int, p []byte) (n int, err error) {
 	}
 	if msanenabled && n > 0 {
 		msanRead(unsafe.Pointer(&p[0]), n)
+	}
+	if asanenabled && n > 0 {
+		asanRead(unsafe.Pointer(&p[0]), n)
 	}
 	return
 }

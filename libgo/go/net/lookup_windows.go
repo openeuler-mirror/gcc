@@ -226,7 +226,7 @@ func (*Resolver) lookupCNAME(ctx context.Context, name string) (string, error) {
 	// windows returns DNS_INFO_NO_RECORDS if there are no CNAME-s
 	if errno, ok := e.(syscall.Errno); ok && errno == syscall.DNS_INFO_NO_RECORDS {
 		// if there are no aliases, the canonical name is the input name
-		return absDomainName([]byte(name)), nil
+		return absDomainName(name), nil
 	}
 	if e != nil {
 		return "", &DNSError{Err: winError("dnsquery", e).Error(), Name: name}
@@ -234,8 +234,8 @@ func (*Resolver) lookupCNAME(ctx context.Context, name string) (string, error) {
 	defer syscall.DnsRecordListFree(r, 1)
 
 	resolved := resolveCNAME(syscall.StringToUTF16Ptr(name), r)
-	cname := windows.UTF16PtrToString(resolved, 256)
-	return absDomainName([]byte(cname)), nil
+	cname := windows.UTF16PtrToString(resolved)
+	return absDomainName(cname), nil
 }
 
 func (*Resolver) lookupSRV(ctx context.Context, service, proto, name string) (string, []*SRV, error) {
@@ -258,10 +258,10 @@ func (*Resolver) lookupSRV(ctx context.Context, service, proto, name string) (st
 	srvs := make([]*SRV, 0, 10)
 	for _, p := range validRecs(r, syscall.DNS_TYPE_SRV, target) {
 		v := (*syscall.DNSSRVData)(unsafe.Pointer(&p.Data[0]))
-		srvs = append(srvs, &SRV{absDomainName([]byte(syscall.UTF16ToString((*[256]uint16)(unsafe.Pointer(v.Target))[:]))), v.Port, v.Priority, v.Weight})
+		srvs = append(srvs, &SRV{absDomainName(syscall.UTF16ToString((*[256]uint16)(unsafe.Pointer(v.Target))[:])), v.Port, v.Priority, v.Weight})
 	}
 	byPriorityWeight(srvs).sort()
-	return absDomainName([]byte(target)), srvs, nil
+	return absDomainName(target), srvs, nil
 }
 
 func (*Resolver) lookupMX(ctx context.Context, name string) ([]*MX, error) {
@@ -278,7 +278,7 @@ func (*Resolver) lookupMX(ctx context.Context, name string) ([]*MX, error) {
 	mxs := make([]*MX, 0, 10)
 	for _, p := range validRecs(r, syscall.DNS_TYPE_MX, name) {
 		v := (*syscall.DNSMXData)(unsafe.Pointer(&p.Data[0]))
-		mxs = append(mxs, &MX{absDomainName([]byte(windows.UTF16PtrToString(v.NameExchange, 256))), v.Preference})
+		mxs = append(mxs, &MX{absDomainName(windows.UTF16PtrToString(v.NameExchange)), v.Preference})
 	}
 	byPref(mxs).sort()
 	return mxs, nil
@@ -298,7 +298,7 @@ func (*Resolver) lookupNS(ctx context.Context, name string) ([]*NS, error) {
 	nss := make([]*NS, 0, 10)
 	for _, p := range validRecs(r, syscall.DNS_TYPE_NS, name) {
 		v := (*syscall.DNSPTRData)(unsafe.Pointer(&p.Data[0]))
-		nss = append(nss, &NS{absDomainName([]byte(syscall.UTF16ToString((*[256]uint16)(unsafe.Pointer(v.Host))[:])))})
+		nss = append(nss, &NS{absDomainName(syscall.UTF16ToString((*[256]uint16)(unsafe.Pointer(v.Host))[:]))})
 	}
 	return nss, nil
 }
@@ -319,7 +319,7 @@ func (*Resolver) lookupTXT(ctx context.Context, name string) ([]string, error) {
 		d := (*syscall.DNSTXTData)(unsafe.Pointer(&p.Data[0]))
 		s := ""
 		for _, v := range (*[1 << 10]*uint16)(unsafe.Pointer(&(d.StringArray[0])))[:d.StringCount:d.StringCount] {
-			s += windows.UTF16PtrToString(v, 1<<20)
+			s += windows.UTF16PtrToString(v)
 		}
 		txts = append(txts, s)
 	}
@@ -344,7 +344,7 @@ func (*Resolver) lookupAddr(ctx context.Context, addr string) ([]string, error) 
 	ptrs := make([]string, 0, 10)
 	for _, p := range validRecs(r, syscall.DNS_TYPE_PTR, arpa) {
 		v := (*syscall.DNSPTRData)(unsafe.Pointer(&p.Data[0]))
-		ptrs = append(ptrs, absDomainName([]byte(windows.UTF16PtrToString(v.Host, 256))))
+		ptrs = append(ptrs, absDomainName(windows.UTF16PtrToString(v.Host)))
 	}
 	return ptrs, nil
 }

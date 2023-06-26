@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O -ftree-fold-phiopt -fdump-tree-optimized -fdump-tree-phiopt2" } */
+/* { dg-options "-O -fdump-tree-optimized -fdump-tree-phiopt2" } */
 
 int g(int,int);
 int f(int t, int c)

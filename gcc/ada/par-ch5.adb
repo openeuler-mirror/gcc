@@ -6,7 +6,7 @@
 --                                                                          --
 --                                 B o d y                                  --
 --                                                                          --
---          Copyright (C) 1992-2019, Free Software Foundation, Inc.         --
+--          Copyright (C) 1992-2022, Free Software Foundation, Inc.         --
 --                                                                          --
 -- GNAT is free software;  you can  redistribute it  and/or modify it under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -27,7 +27,7 @@ pragma Style_Checks (All_Checks);
 --  Turn off subprogram body ordering check. Subprograms are in order by RM
 --  section rather than alphabetical.
 
-with Sinfo.CN; use Sinfo.CN;
+with Sinfo.CN;       use Sinfo.CN;
 
 separate (Par)
 package body Ch5 is
@@ -61,11 +61,6 @@ package body Ch5 is
    --  Parse for statement. If Loop_Name is non-Empty on entry, it is
    --  the N_Identifier node for the label on the loop. If Loop_Name is
    --  Empty on entry (the default), then the for statement is unlabeled.
-
-   function P_Iterator_Specification (Def_Id : Node_Id) return Node_Id;
-   --  Parse an iterator specification. The defining identifier has already
-   --  been scanned, as it is the common prefix between loop and iterator
-   --  specification.
 
    function P_Loop_Statement (Loop_Name : Node_Id := Empty) return Node_Id;
    --  Parse loop statement. If Loop_Name is non-Empty on entry, it is
@@ -240,10 +235,6 @@ package body Ch5 is
                    and then Statement_Seen)
                 or else All_Pragmas)
             then
-               --  This Ada 2012 construct not allowed in a compiler unit
-
-               Check_Compiler_Unit ("null statement list", Token_Ptr);
-
                declare
                   Null_Stm : constant Node_Id :=
                                Make_Null_Statement (Token_Ptr);
@@ -1304,21 +1295,22 @@ package body Ch5 is
 
          return Cond;
 
-      --  Otherwise check for redundant parentheses
-
-      --  If the condition is a conditional or a quantified expression, it is
-      --  parenthesized in the context of a condition, because of a separate
-      --  syntax rule.
+      --  Otherwise check for redundant parentheses but do not emit messages
+      --  about expressions that require parentheses (e.g. conditional,
+      --  quantified or declaration expressions).
 
       else
-         if Style_Check and then Paren_Count (Cond) > 0 then
-            if not Nkind_In (Cond, N_If_Expression,
-                                   N_Case_Expression,
-                                   N_Quantified_Expression)
-              or else Paren_Count (Cond) > 1
-            then
-               Style.Check_Xtra_Parens (First_Sloc (Cond));
-            end if;
+         if Style_Check
+           and then
+             Paren_Count (Cond) >
+               (if Nkind (Cond) in N_Case_Expression
+                                 | N_Expression_With_Actions
+                                 | N_If_Expression
+                                 | N_Quantified_Expression
+                then 1
+                else 0)
+         then
+            Style.Check_Xtra_Parens (First_Sloc (Cond));
          end if;
 
          --  And return the result
@@ -1660,6 +1652,7 @@ package body Ch5 is
 
    --  LOOP_PARAMETER_SPECIFICATION ::=
    --    DEFINING_IDENTIFIER in [reverse] DISCRETE_SUBTYPE_DEFINITION
+   --    [Iterator_Filter]
 
    --  Error recovery: cannot raise Error_Resync
 
@@ -1715,6 +1708,15 @@ package body Ch5 is
 
       Set_Discrete_Subtype_Definition
         (Loop_Param_Specification_Node, P_Discrete_Subtype_Definition);
+
+      if Token = Tok_When then
+         Error_Msg_Ada_2022_Feature ("iterator filter", Token_Ptr);
+
+         Scan; -- past WHEN
+         Set_Iterator_Filter
+           (Loop_Param_Specification_Node, P_Condition);
+      end if;
+
       return Loop_Param_Specification_Node;
 
    exception
@@ -1735,7 +1737,15 @@ package body Ch5 is
 
       if Token = Tok_Colon then
          Scan;  --  past :
-         Set_Subtype_Indication (Node1, P_Subtype_Indication);
+
+         if Token = Tok_Access then
+            Error_Msg_Ada_2022_Feature
+              ("access definition in loop parameter", Token_Ptr);
+            Set_Subtype_Indication (Node1, P_Access_Definition (False));
+
+         else
+            Set_Subtype_Indication (Node1, P_Subtype_Indication);
+         end if;
       end if;
 
       if Token = Tok_Of then
@@ -1755,7 +1765,7 @@ package body Ch5 is
          Set_Of_Present (Node1);
          Error_Msg_N
            ("subtype indication is only legal on an element iterator",
-              Subtype_Indication (Node1));
+            Subtype_Indication (Node1));
 
       else
          return Error;
@@ -1767,6 +1777,15 @@ package body Ch5 is
       end if;
 
       Set_Name (Node1, P_Name);
+
+      if Token = Tok_When then
+         Error_Msg_Ada_2022_Feature ("iterator filter", Token_Ptr);
+
+         Scan; -- past WHEN
+         Set_Iterator_Filter
+           (Node1, P_Condition);
+      end if;
+
       return Node1;
    end P_Iterator_Specification;
 
@@ -1890,47 +1909,6 @@ package body Ch5 is
    function P_Exit_Statement return Node_Id is
       Exit_Node : Node_Id;
 
-      function Missing_Semicolon_On_Exit return Boolean;
-      --  This function deals with the following specialized situation
-      --
-      --    when 'x' =>
-      --       exit [identifier]
-      --    when 'y' =>
-      --
-      --  This looks like a messed up EXIT WHEN, when in fact the problem
-      --  is a missing semicolon. It is called with Token pointing to the
-      --  WHEN token, and returns True if a semicolon is missing before
-      --  the WHEN as in the above example.
-
-      -------------------------------
-      -- Missing_Semicolon_On_Exit --
-      -------------------------------
-
-      function Missing_Semicolon_On_Exit return Boolean is
-         State : Saved_Scan_State;
-
-      begin
-         if not Token_Is_At_Start_Of_Line then
-            return False;
-
-         elsif Scopes (Scope.Last).Etyp /= E_Case then
-            return False;
-
-         else
-            Save_Scan_State (State);
-            Scan; -- past WHEN
-            Scan; -- past token after WHEN
-
-            if Token = Tok_Arrow then
-               Restore_Scan_State (State);
-               return True;
-            else
-               Restore_Scan_State (State);
-               return False;
-            end if;
-         end if;
-      end Missing_Semicolon_On_Exit;
-
    --  Start of processing for P_Exit_Statement
 
    begin
@@ -1960,7 +1938,7 @@ package body Ch5 is
          end loop Check_No_Exit_Name;
       end if;
 
-      if Token = Tok_When and then not Missing_Semicolon_On_Exit then
+      if Token = Tok_When and then not Missing_Semicolon_On_When then
          Scan; -- past WHEN
          Set_Condition (Exit_Node, P_Condition);
 
@@ -1995,7 +1973,15 @@ package body Ch5 is
       Scan; -- past GOTO (or TO)
       Set_Name (Goto_Node, P_Qualified_Simple_Name_Resync);
       Append_Elmt (Goto_Node, Goto_List);
-      No_Constraint;
+
+      if Token = Tok_When then
+         Error_Msg_GNAT_Extension ("goto when statement");
+
+         Scan; -- past WHEN
+         Mutate_Nkind (Goto_Node, N_Goto_When_Statement);
+         Set_Condition (Goto_Node, P_Expression_No_Right_Paren);
+      end if;
+
       TF_Semicolon;
       return Goto_Node;
    end P_Goto_Statement;

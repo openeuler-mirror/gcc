@@ -6,7 +6,7 @@
 --                                                                          --
 --                                 B o d y                                  --
 --                                                                          --
---          Copyright (C) 1992-2019, Free Software Foundation, Inc.         --
+--          Copyright (C) 1992-2022, Free Software Foundation, Inc.         --
 --                                                                          --
 -- GNAT is free software;  you can  redistribute it  and/or modify it under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -23,33 +23,35 @@
 --                                                                          --
 ------------------------------------------------------------------------------
 
-with Aspects;  use Aspects;
-with Atree;    use Atree;
-with Casing;   use Casing;
-with Debug;    use Debug;
-with Elists;   use Elists;
-with Errout;   use Errout;
-with Fname;    use Fname;
-with Lib;      use Lib;
-with Namet;    use Namet;
-with Namet.Sp; use Namet.Sp;
-with Nlists;   use Nlists;
-with Nmake;    use Nmake;
-with Opt;      use Opt;
-with Output;   use Output;
-with Par_SCO;  use Par_SCO;
-with Restrict; use Restrict;
-with Scans;    use Scans;
-with Scn;      use Scn;
-with Sem_Util; use Sem_Util;
-with Sinput;   use Sinput;
-with Sinput.L; use Sinput.L;
-with Sinfo;    use Sinfo;
-with Snames;   use Snames;
+with Aspects;        use Aspects;
+with Atree;          use Atree;
+with Casing;         use Casing;
+with Debug;          use Debug;
+with Elists;         use Elists;
+with Errout;         use Errout;
+with Fname;          use Fname;
+with Lib;            use Lib;
+with Namet;          use Namet;
+with Namet.Sp;       use Namet.Sp;
+with Nlists;         use Nlists;
+with Nmake;          use Nmake;
+with Opt;            use Opt;
+with Output;         use Output;
+with Par_SCO;        use Par_SCO;
+with Restrict;       use Restrict;
+with Scans;          use Scans;
+with Scn;            use Scn;
+with Sem_Util;       use Sem_Util;
+with Sinput;         use Sinput;
+with Sinput.L;       use Sinput.L;
+with Sinfo;          use Sinfo;
+with Sinfo.Nodes;    use Sinfo.Nodes;
+with Sinfo.Utils;    use Sinfo.Utils;
+with Snames;         use Snames;
 with Style;
-with Stylesw;  use Stylesw;
+with Stylesw;        use Stylesw;
 with Table;
-with Tbuild;   use Tbuild;
+with Tbuild;         use Tbuild;
 
 ---------
 -- Par --
@@ -482,11 +484,11 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       --  This field is used to provide the name of the construct being parsed
       --  and indirectly its kind. For loops and blocks, the field contains the
       --  source name or the generated one. For package specifications, bodies,
-      --  subprogram specifications and bodies the field holds the correponding
-      --  program unit name. For task declarations and bodies, protected types
-      --  and bodies, and accept statements the field hold the name of the type
-      --  or operation. For if-statements, case-statements, return statements,
-      --  and selects, the field is initialized to Error.
+      --  subprogram specifications and bodies the field holds the
+      --  corresponding program unit name. For task declarations and bodies,
+      --  protected types and bodies, and accept statements the field hold the
+      --  name of the type or operation. For if-statements, case-statements,
+      --  return statements, and selects, the field is initialized to Error.
 
       --  Note: this is a bit of an odd (mis)use of Error, since there is no
       --  Error, but we use this value as a place holder to indicate that it
@@ -562,7 +564,7 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
    -- Table for Handling Suspicious Labels --
    ------------------------------------------
 
-   --  This is a special data structure which is used to deal very spefifically
+   --  This is a special data structure which is used to deal very specifically
    --  with the following error case
 
    --     label;
@@ -647,9 +649,15 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       --  procedure more than once for the same pragma. All parse-time pragma
       --  handling must be prepared to handle such multiple calls correctly.
 
-      function P_Identifier (C : Id_Check := None) return Node_Id;
+      function P_Identifier
+        (C         : Id_Check := None;
+         Force_Msg : Boolean  := False) return Node_Id;
       --  Scans out an identifier. The parameter C determines the treatment
       --  of reserved identifiers. See declaration of Id_Check for details.
+
+      --  An appropriate error message, pointing to the token, is also issued
+      --  if either this is the first occurrence of misuse of this identifier,
+      --  or if Force_Msg is True.
 
       function P_Pragmas_Opt return List_Id;
       --  This function scans for a sequence of pragmas in other than a
@@ -679,7 +687,6 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       --  begin message if indeed the BEGIN is missing.
 
       function P_Array_Type_Definition                return Node_Id;
-      function P_Basic_Declarative_Items              return List_Id;
       function P_Constraint_Opt                       return Node_Id;
       function P_Declarative_Part                     return List_Id;
       function P_Discrete_Choice_List                 return List_Id;
@@ -693,6 +700,15 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       function P_Subtype_Mark                         return Node_Id;
       function P_Subtype_Mark_Resync                  return Node_Id;
       function P_Unknown_Discriminant_Part_Opt        return Boolean;
+
+      function P_Basic_Declarative_Items
+        (Declare_Expression : Boolean) return List_Id;
+      --  Used to parse the declarative items in a package visible or
+      --  private part (in which case Declare_Expression is False), and
+      --  the declare_items of a declare_expression (in which case
+      --  Declare_Expression is True). Declare_Expression is used to
+      --  affect the wording of error messages, and to control style
+      --  checking.
 
       function P_Access_Definition
         (Null_Exclusion_Present : Boolean) return Node_Id;
@@ -787,11 +803,6 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       function P_Simple_Expression                    return Node_Id;
       function P_Simple_Expression_Or_Range_Attribute return Node_Id;
 
-      function P_Case_Expression return Node_Id;
-      --  Scans out a case expression. Called with Token pointing to the CASE
-      --  keyword, and returns pointing to the terminating right parent,
-      --  semicolon, or comma, but does not consume this terminating token.
-
       function P_Expression_If_OK return Node_Id;
       --  Scans out an expression allowing an unparenthesized case expression,
       --  if expression, or quantified expression to appear without enclosing
@@ -838,6 +849,11 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       --  Similar to the above, but the caller has already scanned out the
       --  conditional expression and passes it as an argument. This form of
       --  the call does not check for a following right parenthesis.
+
+      function P_Iterator_Specification (Def_Id : Node_Id) return Node_Id;
+      --  Parse an iterator specification. The defining identifier has already
+      --  been scanned, as it is the common prefix between loop and iterator
+      --  specification.
 
       function P_Loop_Parameter_Specification return Node_Id;
       --  Used in loop constructs and quantified expressions.
@@ -987,10 +1003,10 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       procedure P_Aspect_Specifications
         (Decl      : Node_Id;
          Semicolon : Boolean := True);
-      --  This procedure scans out a series of aspect spefications. If argument
-      --  Semicolon is True, a terminating semicolon is also scanned. If this
-      --  argument is False, the scan pointer is left pointing past the aspects
-      --  and the caller must check for a proper terminator.
+      --  This procedure scans out a series of aspect specifications. If
+      --  argument Semicolon is True, a terminating semicolon is also scanned.
+      --  If this argument is False, the scan pointer is left pointing past the
+      --  aspects and the caller must check for a proper terminator.
       --
       --  P_Aspect_Specifications is called with the current token pointing
       --  to either a WITH keyword starting an aspect specification, or an
@@ -1204,6 +1220,7 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       procedure T_Private;
       procedure T_Range;
       procedure T_Record;
+      procedure T_Right_Bracket;
       procedure T_Right_Paren;
       procedure T_Semicolon;
       procedure T_Then;
@@ -1339,6 +1356,18 @@ function Par (Configuration_Pragmas : Boolean) return List_Id is
       --  merge is only attempted if the following token matches Nxt. If all
       --  conditions are met, an error message is issued, and the merge is
       --  carried out, modifying the Chars field of Prev.
+
+      function Missing_Semicolon_On_When return Boolean;
+      --  This function deals with the following specialized situations
+      --
+      --    when 'x' =>
+      --       exit/return [identifier]
+      --    when 'y' =>
+      --
+      --  This looks like a messed up EXIT WHEN or RETURN WHEN, when in fact
+      --  the problem is a missing semicolon. It is called with Token pointing
+      --  to the WHEN token, and returns True if a semicolon is missing before
+      --  the WHEN as in the above example.
 
       function Next_Token_Is (Tok : Token_Type) return Boolean;
       --  Looks at token after current one and returns True if the token type
@@ -1537,6 +1566,10 @@ begin
          end loop;
       end;
 
+      if Config_Files_Store_Basename then
+         Complete_Source_File_Entry;
+      end if;
+
    --  Normal case of compilation unit
 
    else
@@ -1623,14 +1656,12 @@ begin
                      Uname : constant String :=
                                Get_Name_String
                                  (Unit_Name (Current_Source_Unit));
-                     Name  : String (1 .. Uname'Length - 2);
-
-                  begin
+                     Name  : String renames
+                       Uname (Uname'First .. Uname'Last - 2);
                      --  Because Unit_Name includes "%s"/"%b", we need to strip
                      --  the last two characters to get the real unit name.
 
-                     Name := Uname (Uname'First .. Uname'Last - 2);
-
+                  begin
                      if Name = "ada"         or else
                         Name = "interfaces"  or else
                         Name = "system"

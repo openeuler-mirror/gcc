@@ -13,8 +13,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"internal/testenv"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	. "net/http"
@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,7 +36,7 @@ var robotsTxtHandler = HandlerFunc(func(w ResponseWriter, r *Request) {
 	fmt.Fprintf(w, "User-agent: go\nDisallow: /something/")
 })
 
-// pedanticReadAll works like ioutil.ReadAll but additionally
+// pedanticReadAll works like io.ReadAll but additionally
 // verifies that r obeys the documented io.Reader contract.
 func pedanticReadAll(r io.Reader) (b []byte, err error) {
 	var bufa [64]byte
@@ -190,7 +191,7 @@ func TestPostFormRequestFormat(t *testing.T) {
 	if g, e := tr.req.ContentLength, int64(len(expectedBody)); g != e {
 		t.Errorf("got ContentLength %d, want %d", g, e)
 	}
-	bodyb, err := ioutil.ReadAll(tr.req.Body)
+	bodyb, err := io.ReadAll(tr.req.Body)
 	if err != nil {
 		t.Fatalf("ReadAll on req.Body: %v", err)
 	}
@@ -258,12 +259,12 @@ func TestClientRedirects(t *testing.T) {
 		t.Fatalf("Get error: %v", err)
 	}
 	res.Body.Close()
-	finalUrl := res.Request.URL.String()
+	finalURL := res.Request.URL.String()
 	if e, g := "<nil>", fmt.Sprintf("%v", err); e != g {
 		t.Errorf("with custom client, expected error %q, got %q", e, g)
 	}
-	if !strings.HasSuffix(finalUrl, "/?n=15") {
-		t.Errorf("expected final url to end in /?n=15; got url %q", finalUrl)
+	if !strings.HasSuffix(finalURL, "/?n=15") {
+		t.Errorf("expected final url to end in /?n=15; got url %q", finalURL)
 	}
 	if e, g := 15, len(lastVia); e != g {
 		t.Errorf("expected lastVia to have contained %d elements; got %d", e, g)
@@ -421,7 +422,7 @@ func testRedirectsByMethod(t *testing.T, method string, table []redirectTest, wa
 	var ts *httptest.Server
 	ts = httptest.NewServer(HandlerFunc(func(w ResponseWriter, r *Request) {
 		log.Lock()
-		slurp, _ := ioutil.ReadAll(r.Body)
+		slurp, _ := io.ReadAll(r.Body)
 		fmt.Fprintf(&log.Buffer, "%s %s %q", r.Method, r.RequestURI, slurp)
 		if cl := r.Header.Get("Content-Length"); r.Method == "GET" && len(slurp) == 0 && (r.ContentLength != 0 || cl != "") {
 			fmt.Fprintf(&log.Buffer, " (but with body=%T, content-length = %v, %q)", r.Body, r.ContentLength, cl)
@@ -432,11 +433,10 @@ func testRedirectsByMethod(t *testing.T, method string, table []redirectTest, wa
 		if v := urlQuery.Get("code"); v != "" {
 			location := ts.URL
 			if final := urlQuery.Get("next"); final != "" {
-				splits := strings.Split(final, ",")
-				first, rest := splits[0], splits[1:]
+				first, rest, _ := strings.Cut(final, ",")
 				location = fmt.Sprintf("%s?code=%s", location, first)
-				if len(rest) > 0 {
-					location = fmt.Sprintf("%s&next=%s", location, strings.Join(rest, ","))
+				if rest != "" {
+					location = fmt.Sprintf("%s&next=%s", location, rest)
 				}
 			}
 			code, _ := strconv.Atoi(v)
@@ -452,7 +452,7 @@ func testRedirectsByMethod(t *testing.T, method string, table []redirectTest, wa
 	for _, tt := range table {
 		content := tt.redirectBody
 		req, _ := NewRequest(method, ts.URL+tt.suffix, strings.NewReader(content))
-		req.GetBody = func() (io.ReadCloser, error) { return ioutil.NopCloser(strings.NewReader(content)), nil }
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(content)), nil }
 		res, err := c.Do(req)
 
 		if err != nil {
@@ -522,7 +522,7 @@ func TestClientRedirectUseResponse(t *testing.T) {
 		t.Errorf("status = %d; want %d", res.StatusCode, StatusFound)
 	}
 	defer res.Body.Close()
-	slurp, err := ioutil.ReadAll(res.Body)
+	slurp, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +747,7 @@ func (j *RecordingJar) Cookies(u *url.URL) []*Cookie {
 	return nil
 }
 
-func (j *RecordingJar) logf(format string, args ...interface{}) {
+func (j *RecordingJar) logf(format string, args ...any) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	fmt.Fprintf(&j.log, format, args...)
@@ -1042,7 +1042,7 @@ func testClientHeadContentLength(t *testing.T, h2 bool) {
 		if res.ContentLength != tt.want {
 			t.Errorf("Content-Length = %d; want %d", res.ContentLength, tt.want)
 		}
-		bs, err := ioutil.ReadAll(res.Body)
+		bs, err := io.ReadAll(res.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1207,64 +1207,80 @@ func TestClientTimeout_h2(t *testing.T) { testClientTimeout(t, h2Mode) }
 func testClientTimeout(t *testing.T, h2 bool) {
 	setParallel(t)
 	defer afterTest(t)
-	testDone := make(chan struct{}) // closed in defer below
 
-	sawRoot := make(chan bool, 1)
-	sawSlow := make(chan bool, 1)
+	var (
+		mu           sync.Mutex
+		nonce        string // a unique per-request string
+		sawSlowNonce bool   // true if the handler saw /slow?nonce=<nonce>
+	)
 	cst := newClientServerTest(t, h2, HandlerFunc(func(w ResponseWriter, r *Request) {
+		_ = r.ParseForm()
 		if r.URL.Path == "/" {
-			sawRoot <- true
-			Redirect(w, r, "/slow", StatusFound)
+			Redirect(w, r, "/slow?nonce="+r.Form.Get("nonce"), StatusFound)
 			return
 		}
 		if r.URL.Path == "/slow" {
-			sawSlow <- true
+			mu.Lock()
+			if r.Form.Get("nonce") == nonce {
+				sawSlowNonce = true
+			} else {
+				t.Logf("mismatched nonce: received %s, want %s", r.Form.Get("nonce"), nonce)
+			}
+			mu.Unlock()
+
 			w.Write([]byte("Hello"))
 			w.(Flusher).Flush()
-			<-testDone
+			<-r.Context().Done()
 			return
 		}
 	}))
 	defer cst.close()
-	defer close(testDone) // before cst.close, to unblock /slow handler
 
-	// 200ms should be long enough to get a normal request (the /
-	// handler), but not so long that it makes the test slow.
-	const timeout = 200 * time.Millisecond
-	cst.c.Timeout = timeout
-
-	res, err := cst.c.Get(cst.ts.URL)
-	if err != nil {
-		if strings.Contains(err.Error(), "Client.Timeout") {
-			t.Skipf("host too slow to get fast resource in %v", timeout)
+	// Try to trigger a timeout after reading part of the response body.
+	// The initial timeout is emprically usually long enough on a decently fast
+	// machine, but if we undershoot we'll retry with exponentially longer
+	// timeouts until the test either passes or times out completely.
+	// This keeps the test reasonably fast in the typical case but allows it to
+	// also eventually succeed on arbitrarily slow machines.
+	timeout := 10 * time.Millisecond
+	nextNonce := 0
+	for ; ; timeout *= 2 {
+		if timeout <= 0 {
+			// The only way we can feasibly hit this while the test is running is if
+			// the request fails without actually waiting for the timeout to occur.
+			t.Fatalf("timeout overflow")
 		}
-		t.Fatal(err)
-	}
+		if deadline, ok := t.Deadline(); ok && !time.Now().Add(timeout).Before(deadline) {
+			t.Fatalf("failed to produce expected timeout before test deadline")
+		}
+		t.Logf("attempting test with timeout %v", timeout)
+		cst.c.Timeout = timeout
 
-	select {
-	case <-sawRoot:
-		// good.
-	default:
-		t.Fatal("handler never got / request")
-	}
+		mu.Lock()
+		nonce = fmt.Sprint(nextNonce)
+		nextNonce++
+		sawSlowNonce = false
+		mu.Unlock()
+		res, err := cst.c.Get(cst.ts.URL + "/?nonce=" + nonce)
+		if err != nil {
+			if strings.Contains(err.Error(), "Client.Timeout") {
+				// Timed out before handler could respond.
+				t.Logf("timeout before response received")
+				continue
+			}
+			t.Fatal(err)
+		}
 
-	select {
-	case <-sawSlow:
-		// good.
-	default:
-		t.Fatal("handler never got /slow request")
-	}
+		mu.Lock()
+		ok := sawSlowNonce
+		mu.Unlock()
+		if !ok {
+			t.Fatal("handler never got /slow request, but client returned response")
+		}
 
-	errc := make(chan error, 1)
-	go func() {
-		_, err := ioutil.ReadAll(res.Body)
-		errc <- err
+		_, err = io.ReadAll(res.Body)
 		res.Body.Close()
-	}()
 
-	const failTime = 5 * time.Second
-	select {
-	case err := <-errc:
 		if err == nil {
 			t.Fatal("expected error from ReadAll")
 		}
@@ -1275,10 +1291,13 @@ func testClientTimeout(t *testing.T, h2 bool) {
 			t.Errorf("net.Error.Timeout = false; want true")
 		}
 		if got := ne.Error(); !strings.Contains(got, "(Client.Timeout") {
+			if runtime.GOOS == "windows" && strings.HasPrefix(runtime.GOARCH, "arm") {
+				testenv.SkipFlaky(t, 43120)
+			}
 			t.Errorf("error string = %q; missing timeout substring", got)
 		}
-	case <-time.After(failTime):
-		t.Errorf("timeout after %v waiting for timeout of %v", failTime, timeout)
+
+		break
 	}
 }
 
@@ -1320,6 +1339,9 @@ func testClientTimeout_Headers(t *testing.T, h2 bool) {
 		t.Error("net.Error.Timeout = false; want true")
 	}
 	if got := ne.Error(); !strings.Contains(got, "Client.Timeout exceeded") {
+		if runtime.GOOS == "windows" && strings.HasPrefix(runtime.GOARCH, "arm") {
+			testenv.SkipFlaky(t, 43120)
+		}
 		t.Errorf("error string = %q; missing timeout substring", got)
 	}
 }
@@ -1348,9 +1370,36 @@ func TestClientTimeoutCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	_, err = io.Copy(ioutil.Discard, res.Body)
+	_, err = io.Copy(io.Discard, res.Body)
 	if err != ExportErrRequestCanceled {
 		t.Fatalf("error = %v; want errRequestCanceled", err)
+	}
+}
+
+func TestClientTimeoutDoesNotExpire_h1(t *testing.T) { testClientTimeoutDoesNotExpire(t, h1Mode) }
+func TestClientTimeoutDoesNotExpire_h2(t *testing.T) { testClientTimeoutDoesNotExpire(t, h2Mode) }
+
+// Issue 49366: if Client.Timeout is set but not hit, no error should be returned.
+func testClientTimeoutDoesNotExpire(t *testing.T, h2 bool) {
+	setParallel(t)
+	defer afterTest(t)
+
+	cst := newClientServerTest(t, h2, HandlerFunc(func(w ResponseWriter, r *Request) {
+		w.Write([]byte("body"))
+	}))
+	defer cst.close()
+
+	cst.c.Timeout = 1 * time.Hour
+	req, _ := NewRequest("GET", cst.ts.URL, nil)
+	res, err := cst.c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.Copy(io.Discard, res.Body); err != nil {
+		t.Fatalf("io.Copy(io.Discard, res.Body) = %v, want nil", err)
+	}
+	if err = res.Body.Close(); err != nil {
+		t.Fatalf("res.Body.Close() = %v, want nil", err)
 	}
 }
 
@@ -1372,7 +1421,7 @@ func testClientRedirectEatsBody(t *testing.T, h2 bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ioutil.ReadAll(res.Body)
+	_, err = io.ReadAll(res.Body)
 	res.Body.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -1450,7 +1499,7 @@ func (issue15577Tripper) RoundTrip(*Request) (*Response, error) {
 	resp := &Response{
 		StatusCode: 303,
 		Header:     map[string][]string{"Location": {"http://www.example.com/"}},
-		Body:       ioutil.NopCloser(strings.NewReader("")),
+		Body:       io.NopCloser(strings.NewReader("")),
 	}
 	return resp, nil
 }
@@ -1591,7 +1640,7 @@ func TestClientCopyHostOnRedirect(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatal(resp.Status)
 	}
-	if got, err := ioutil.ReadAll(resp.Body); err != nil || string(got) != wantBody {
+	if got, err := io.ReadAll(resp.Body); err != nil || string(got) != wantBody {
 		t.Errorf("body = %q; want %q", got, wantBody)
 	}
 }
@@ -1946,7 +1995,7 @@ func TestClientDoCanceledVsTimeout_h2(t *testing.T) {
 }
 
 // Issue 33545: lock-in the behavior promised by Client.Do's
-// docs about request cancelation vs timing out.
+// docs about request cancellation vs timing out.
 func testClientDoCanceledVsTimeout(t *testing.T, h2 bool) {
 	defer afterTest(t)
 	cst := newClientServerTest(t, h2, HandlerFunc(func(w ResponseWriter, r *Request) {
@@ -1989,5 +2038,141 @@ func testClientDoCanceledVsTimeout(t *testing.T, h2 bool) {
 				t.Errorf("url.Error.Err = %v; want %v", g, w)
 			}
 		})
+	}
+}
+
+type nilBodyRoundTripper struct{}
+
+func (nilBodyRoundTripper) RoundTrip(req *Request) (*Response, error) {
+	return &Response{
+		StatusCode: StatusOK,
+		Status:     StatusText(StatusOK),
+		Body:       nil,
+		Request:    req,
+	}, nil
+}
+
+func TestClientPopulatesNilResponseBody(t *testing.T) {
+	c := &Client{Transport: nilBodyRoundTripper{}}
+
+	resp, err := c.Get("http://localhost/anything")
+	if err != nil {
+		t.Fatalf("Client.Get rejected Response with nil Body: %v", err)
+	}
+
+	if resp.Body == nil {
+		t.Fatalf("Client failed to provide a non-nil Body as documented")
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Fatalf("error from Close on substitute Response.Body: %v", err)
+		}
+	}()
+
+	if b, err := io.ReadAll(resp.Body); err != nil {
+		t.Errorf("read error from substitute Response.Body: %v", err)
+	} else if len(b) != 0 {
+		t.Errorf("substitute Response.Body was unexpectedly non-empty: %q", b)
+	}
+}
+
+// Issue 40382: Client calls Close multiple times on Request.Body.
+func TestClientCallsCloseOnlyOnce(t *testing.T) {
+	setParallel(t)
+	defer afterTest(t)
+	cst := newClientServerTest(t, h1Mode, HandlerFunc(func(w ResponseWriter, r *Request) {
+		w.WriteHeader(StatusNoContent)
+	}))
+	defer cst.close()
+
+	// Issue occurred non-deterministically: needed to occur after a successful
+	// write (into TCP buffer) but before end of body.
+	for i := 0; i < 50 && !t.Failed(); i++ {
+		body := &issue40382Body{t: t, n: 300000}
+		req, err := NewRequest(MethodPost, cst.ts.URL, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := cst.tr.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+}
+
+// issue40382Body is an io.ReadCloser for TestClientCallsCloseOnlyOnce.
+// Its Read reads n bytes before returning io.EOF.
+// Its Close returns nil but fails the test if called more than once.
+type issue40382Body struct {
+	t                *testing.T
+	n                int
+	closeCallsAtomic int32
+}
+
+func (b *issue40382Body) Read(p []byte) (int, error) {
+	switch {
+	case b.n == 0:
+		return 0, io.EOF
+	case b.n < len(p):
+		p = p[:b.n]
+		fallthrough
+	default:
+		for i := range p {
+			p[i] = 'x'
+		}
+		b.n -= len(p)
+		return len(p), nil
+	}
+}
+
+func (b *issue40382Body) Close() error {
+	if atomic.AddInt32(&b.closeCallsAtomic, 1) == 2 {
+		b.t.Error("Body closed more than once")
+	}
+	return nil
+}
+
+func TestProbeZeroLengthBody(t *testing.T) {
+	setParallel(t)
+	defer afterTest(t)
+	reqc := make(chan struct{})
+	cst := newClientServerTest(t, false, HandlerFunc(func(w ResponseWriter, r *Request) {
+		close(reqc)
+		if _, err := io.Copy(w, r.Body); err != nil {
+			t.Errorf("error copying request body: %v", err)
+		}
+	}))
+	defer cst.close()
+
+	bodyr, bodyw := io.Pipe()
+	var gotBody string
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req, _ := NewRequest("GET", cst.ts.URL, bodyr)
+		res, err := cst.c.Do(req)
+		b, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		gotBody = string(b)
+	}()
+
+	select {
+	case <-reqc:
+		// Request should be sent after trying to probe the request body for 200ms.
+	case <-time.After(60 * time.Second):
+		t.Errorf("request not sent after 60s")
+	}
+
+	// Write the request body and wait for the request to complete.
+	const content = "body"
+	bodyw.Write([]byte(content))
+	bodyw.Close()
+	wg.Wait()
+	if gotBody != content {
+		t.Fatalf("server got body %q, want %q", gotBody, content)
 	}
 }

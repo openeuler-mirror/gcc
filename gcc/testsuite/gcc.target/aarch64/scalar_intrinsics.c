@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -ftree-fold-phiopt -dp" } */
+/* { dg-options "-O2 -dp" } */
 
 #include <arm_neon.h>
 

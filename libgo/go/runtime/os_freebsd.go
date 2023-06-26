@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -87,9 +88,9 @@ func getncpu() int32 {
 		return 1
 	}
 
-	maskSize := uintptr(int(maxcpus+7) / 8)
-	if maskSize < sys.PtrSize {
-		maskSize = sys.PtrSize
+	maskSize := int(maxcpus+7) / 8
+	if maskSize < goarch.PtrSize {
+		maskSize = goarch.PtrSize
 	}
 	if maskSize > uintptr(len(mask)) {
 		maskSize = uintptr(len(mask))
@@ -143,7 +144,7 @@ func futexsleep1(addr *uint32, val uint32, ns int64) {
 		utp = &ut
 	}
 	ret := sys_umtx_op(addr, _UMTX_OP_WAIT_UINT_PRIVATE, val, unsafe.Sizeof(*utp), utp)
-	if ret >= 0 || ret == -_EINTR {
+	if ret >= 0 || ret == -_EINTR || ret == -_ETIMEDOUT {
 		return
 	}
 	print("umtx_wait addr=", addr, " val=", val, " ret=", ret, "\n")
@@ -181,7 +182,7 @@ func sysargs(argc int32, argv **byte) {
 	n++
 
 	// now argv+n is auxv
-	auxv := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*sys.PtrSize))
+	auxv := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*goarch.PtrSize))
 	sysauxv(auxv[:])
 }
 

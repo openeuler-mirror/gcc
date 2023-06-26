@@ -22,14 +22,14 @@ f (void)
   if (pv != 0)
     for (const P *ph = pv; ph < &pv[ps]; ++ph)
       switch (ph->p1)
-       {
-       case 1:
-       v2 = ph->p2;
-       break;
-       case 2:
-       var.field = ph->p3;
-       break;
-       }
+	{
+	case 1:
+	v2 = ph->p2;
+	break;
+	case 2:
+	var.field = ph->p3;
+	break;
+	}
   if (var.field != 0) /* { dg-bogus "uninitialized" } */
     foo (&var);
 }

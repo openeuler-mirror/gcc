@@ -1,4 +1,4 @@
-// { dg-do compile { target c++2a } }
+// { dg-do compile { target c++20 } }
 
 struct A {
   bool operator==(const A&) const;
@@ -12,5 +12,5 @@ struct D
 };
 
 constexpr D d{A()};
-static_assert (d == d);		// { dg-error "non-constant|constexpr" }
-static_assert (!(d != d));	// { dg-error "non-constant|constexpr" }
+static_assert (d == d);		// { dg-error "constant|constexpr" }
+static_assert (!(d != d));	// { dg-error "constant|constexpr" }

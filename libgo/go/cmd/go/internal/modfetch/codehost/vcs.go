@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"internal/lazyregexp"
 	"io"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,7 +38,7 @@ type VCSError struct {
 
 func (e *VCSError) Error() string { return e.Err.Error() }
 
-func vcsErrorf(format string, a ...interface{}) error {
+func vcsErrorf(format string, a ...any) error {
 	return &VCSError{Err: fmt.Errorf(format, a...)}
 }
 
@@ -51,7 +51,7 @@ func NewRepo(vcs, remote string) (Repo, error) {
 		repo Repo
 		err  error
 	}
-	c := vcsRepoCache.Do(key{vcs, remote}, func() interface{} {
+	c := vcsRepoCache.Do(key{vcs, remote}, func() any {
 		repo, err := newVCSRepo(vcs, remote)
 		if err != nil {
 			err = &VCSError{err}
@@ -377,25 +377,12 @@ func (r *vcsRepo) ReadFile(rev, file string, maxSize int64) ([]byte, error) {
 
 	out, err := Run(r.dir, r.cmd.readFile(rev, file, r.remote))
 	if err != nil {
-		return nil, os.ErrNotExist
+		return nil, fs.ErrNotExist
 	}
 	return out, nil
 }
 
-func (r *vcsRepo) ReadFileRevs(revs []string, file string, maxSize int64) (map[string]*FileRev, error) {
-	// We don't technically need to lock here since we're returning an error
-	// uncondititonally, but doing so anyway will help to avoid baking in
-	// lock-inversion bugs.
-	unlock, err := r.mu.Lock()
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-
-	return nil, vcsErrorf("ReadFileRevs not implemented")
-}
-
-func (r *vcsRepo) RecentTag(rev, prefix, major string) (tag string, err error) {
+func (r *vcsRepo) RecentTag(rev, prefix string, allowed func(string) bool) (tag string, err error) {
 	// We don't technically need to lock here since we're returning an error
 	// uncondititonally, but doing so anyway will help to avoid baking in
 	// lock-inversion bugs.
@@ -432,7 +419,7 @@ func (r *vcsRepo) ReadZip(rev, subdir string, maxSize int64) (zip io.ReadCloser,
 	if rev == "latest" {
 		rev = r.cmd.latest
 	}
-	f, err := ioutil.TempFile("", "go-readzip-*.zip")
+	f, err := os.CreateTemp("", "go-readzip-*.zip")
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +554,7 @@ func bzrParseStat(rev, out string) (*RevInfo, error) {
 
 func fossilParseStat(rev, out string) (*RevInfo, error) {
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "uuid:") {
+		if strings.HasPrefix(line, "uuid:") || strings.HasPrefix(line, "hash:") {
 			f := strings.Fields(line)
 			if len(f) != 5 || len(f[1]) != 40 || f[4] != "UTC" {
 				return nil, vcsErrorf("unexpected response from fossil info: %q", line)

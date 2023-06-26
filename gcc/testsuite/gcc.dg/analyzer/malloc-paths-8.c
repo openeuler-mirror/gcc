@@ -1,7 +1,7 @@
 /* { dg-additional-options "-fanalyzer-transitivity" } */
+/* { dg-require-effective-target alloca } */
 
 #include <stddef.h>
-#include <alloca.h>
 #include <stdlib.h>
 
 extern void do_stuff (const void *);
@@ -14,7 +14,7 @@ void test_1 (size_t sz)
   if (sz >= LIMIT)
     ptr = malloc (sz);
   else
-    ptr = alloca (sz);
+    ptr = __builtin_alloca (sz);
 
   do_stuff (ptr);
 
@@ -26,7 +26,7 @@ void test_2 (size_t sz)
 {
   void *ptr;
   if (sz < LIMIT)
-    ptr = alloca (sz);
+    ptr = __builtin_alloca (sz);
   else
     ptr = malloc (sz);
 
@@ -40,7 +40,7 @@ void test_3 (size_t sz)
 {
   void *ptr;
   if (sz <= LIMIT)
-    ptr = alloca (sz); /* { dg-message "memory is allocated on the stack here" } */
+    ptr = __builtin_alloca (sz); /* { dg-message "region created on stack here" } */
   else
     ptr = malloc (sz);
 
@@ -49,7 +49,7 @@ void test_3 (size_t sz)
   /* Bug: the "sz <= LIMIT" above should have been "sz < LIMIT",
      so there's a free-of-alloca when sz == LIMIT.  */
   if (sz >= LIMIT)
-    free (ptr); /* { dg-warning "'free' of memory allocated on the stack by 'alloca'" } */
+    free (ptr); /* { dg-warning "'free' of 'ptr' which points to memory on the stack" } */
 }
 /* { dg-bogus "leak of 'ptr'" } */
 /* This can't happen, as "sz > 1024" && "sz <= 1023" is impossible.  */

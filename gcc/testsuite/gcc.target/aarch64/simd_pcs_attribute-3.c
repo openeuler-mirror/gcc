@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-Ofast -msimdmath-64" } */
+/* { dg-options "-Ofast" } */
 
 __attribute__ ((__simd__))
 __attribute__ ((__nothrow__ , __leaf__ , __const__))

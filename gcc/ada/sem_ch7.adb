@@ -6,7 +6,7 @@
 --                                                                          --
 --                                 B o d y                                  --
 --                                                                          --
---          Copyright (C) 1992-2019, Free Software Foundation, Inc.         --
+--          Copyright (C) 1992-2022, Free Software Foundation, Inc.         --
 --                                                                          --
 -- GNAT is free software;  you can  redistribute it  and/or modify it under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -28,47 +28,50 @@
 --  handling of private and full declarations, and the construction of dispatch
 --  tables for tagged types.
 
-with Aspects;   use Aspects;
-with Atree;     use Atree;
-with Contracts; use Contracts;
-with Debug;     use Debug;
-with Einfo;     use Einfo;
-with Elists;    use Elists;
-with Errout;    use Errout;
-with Exp_Disp;  use Exp_Disp;
-with Exp_Dist;  use Exp_Dist;
-with Exp_Dbug;  use Exp_Dbug;
-with Freeze;    use Freeze;
-with Ghost;     use Ghost;
-with Lib;       use Lib;
-with Lib.Xref;  use Lib.Xref;
-with Namet;     use Namet;
-with Nmake;     use Nmake;
-with Nlists;    use Nlists;
-with Opt;       use Opt;
-with Output;    use Output;
-with Restrict;  use Restrict;
-with Rtsfind;   use Rtsfind;
-with Sem;       use Sem;
-with Sem_Aux;   use Sem_Aux;
-with Sem_Cat;   use Sem_Cat;
-with Sem_Ch3;   use Sem_Ch3;
-with Sem_Ch6;   use Sem_Ch6;
-with Sem_Ch8;   use Sem_Ch8;
-with Sem_Ch10;  use Sem_Ch10;
-with Sem_Ch12;  use Sem_Ch12;
-with Sem_Ch13;  use Sem_Ch13;
-with Sem_Disp;  use Sem_Disp;
-with Sem_Eval;  use Sem_Eval;
-with Sem_Prag;  use Sem_Prag;
-with Sem_Util;  use Sem_Util;
-with Sem_Warn;  use Sem_Warn;
-with Snames;    use Snames;
-with Stand;     use Stand;
-with Sinfo;     use Sinfo;
-with Sinput;    use Sinput;
+with Aspects;        use Aspects;
+with Atree;          use Atree;
+with Contracts;      use Contracts;
+with Debug;          use Debug;
+with Einfo;          use Einfo;
+with Einfo.Entities; use Einfo.Entities;
+with Einfo.Utils;    use Einfo.Utils;
+with Elists;         use Elists;
+with Errout;         use Errout;
+with Exp_Disp;       use Exp_Disp;
+with Exp_Dist;       use Exp_Dist;
+with Exp_Dbug;       use Exp_Dbug;
+with Freeze;         use Freeze;
+with Ghost;          use Ghost;
+with Lib;            use Lib;
+with Lib.Xref;       use Lib.Xref;
+with Namet;          use Namet;
+with Nmake;          use Nmake;
+with Nlists;         use Nlists;
+with Opt;            use Opt;
+with Output;         use Output;
+with Rtsfind;        use Rtsfind;
+with Sem;            use Sem;
+with Sem_Aux;        use Sem_Aux;
+with Sem_Cat;        use Sem_Cat;
+with Sem_Ch3;        use Sem_Ch3;
+with Sem_Ch6;        use Sem_Ch6;
+with Sem_Ch8;        use Sem_Ch8;
+with Sem_Ch10;       use Sem_Ch10;
+with Sem_Ch12;       use Sem_Ch12;
+with Sem_Ch13;       use Sem_Ch13;
+with Sem_Disp;       use Sem_Disp;
+with Sem_Eval;       use Sem_Eval;
+with Sem_Prag;       use Sem_Prag;
+with Sem_Util;       use Sem_Util;
+with Sem_Warn;       use Sem_Warn;
+with Snames;         use Snames;
+with Stand;          use Stand;
+with Sinfo;          use Sinfo;
+with Sinfo.Nodes;    use Sinfo.Nodes;
+with Sinfo.Utils;    use Sinfo.Utils;
+with Sinput;         use Sinput;
 with Style;
-with Uintp;     use Uintp;
+with Uintp;          use Uintp;
 
 with GNAT.HTable;
 
@@ -463,17 +466,11 @@ package body Sem_Ch7 is
 
                --  Exceptions, objects and renamings do not need to be public
                --  if they are not followed by a construct which can reference
-               --  and export them. Likewise for subprograms but we work harder
-               --  for them to see whether they are referenced on an individual
-               --  basis by looking into the table of referenced subprograms.
-               --  But we cannot say anything for entities declared in nested
-               --  instances because instantiations are not done yet so the
-               --  bodies are not visible and could contain references to them.
-               elsif Nkind_In (Decl, N_Exception_Declaration,
-                                     N_Object_Declaration,
-                                     N_Object_Renaming_Declaration,
-                                     N_Subprogram_Declaration,
-                                     N_Subprogram_Renaming_Declaration)
+               --  and export them.
+
+               elsif Nkind (Decl) in N_Exception_Declaration
+                                   | N_Object_Declaration
+                                   | N_Object_Renaming_Declaration
                then
                   Decl_Id := Defining_Entity (Decl);
 
@@ -481,11 +478,32 @@ package body Sem_Ch7 is
                     and then not Is_Imported (Decl_Id)
                     and then not Is_Exported (Decl_Id)
                     and then No (Interface_Name (Decl_Id))
-                    and then
-                      ((Nkind (Decl) /= N_Subprogram_Declaration
-                         and then not Has_Referencer_Of_Non_Subprograms)
-                        or else (Nkind (Decl) = N_Subprogram_Declaration
-                                  and then not Subprogram_Table.Get (Decl_Id)))
+                    and then not Has_Referencer_Of_Non_Subprograms
+                  then
+                     Set_Is_Public (Decl_Id, False);
+                  end if;
+
+               --  Likewise for subprograms and renamings, but we work harder
+               --  for them to see whether they are referenced on an individual
+               --  basis by looking into the table of referenced subprograms.
+
+               elsif Nkind (Decl) in N_Subprogram_Declaration
+                                   | N_Subprogram_Renaming_Declaration
+               then
+                  Decl_Id := Defining_Entity (Decl);
+
+                  --  We cannot say anything for subprograms declared in nested
+                  --  instances because instantiations are not done yet so the
+                  --  bodies are not visible and could contain references to
+                  --  them, except if we still have no subprograms at all which
+                  --  are referenced by an inlined body.
+
+                  if (not In_Nested_Instance
+                       or else not Subprogram_Table.Get_First)
+                    and then not Is_Imported (Decl_Id)
+                    and then not Is_Exported (Decl_Id)
+                    and then No (Interface_Name (Decl_Id))
+                    and then not Subprogram_Table.Get (Decl_Id)
                   then
                      Set_Is_Public (Decl_Id, False);
                   end if;
@@ -741,6 +759,8 @@ package body Sem_Ch7 is
                  ("optional package body (not allowed in Ada 95)??", N);
             else
                Error_Msg_N ("spec of this package does not allow a body", N);
+               Error_Msg_N ("\either remove the body or add pragma "
+                            & "Elaborate_Body in the spec", N);
             end if;
          end if;
       end if;
@@ -825,7 +845,7 @@ package body Sem_Ch7 is
          --  unannotated body will be used in all instantiations.
 
          Body_Id := Defining_Entity (N);
-         Set_Ekind (Body_Id, E_Package_Body);
+         Mutate_Ekind (Body_Id, E_Package_Body);
          Set_Scope (Body_Id, Scope (Spec_Id));
          Set_Is_Obsolescent (Body_Id, Is_Obsolescent (Spec_Id));
          Set_Body_Entity (Spec_Id, Body_Id);
@@ -857,7 +877,7 @@ package body Sem_Ch7 is
       --  current node otherwise. Note that N was rewritten above, so we must
       --  be sure to get the latest Body_Id value.
 
-      Set_Ekind (Body_Id, E_Package_Body);
+      Mutate_Ekind (Body_Id, E_Package_Body);
       Set_Body_Entity (Spec_Id, Body_Id);
       Set_Spec_Entity (Body_Id, Spec_Id);
 
@@ -955,6 +975,15 @@ package body Sem_Ch7 is
                Error_Msg_NE
                  ("\value Off was set for SPARK_Mode on & #", N, Spec_Id);
             end if;
+
+         --  SPARK_Mode Off could complete no SPARK_Mode in a generic, either
+         --  as specified in source code, or because SPARK_Mode On is ignored
+         --  in an instance where the context is SPARK_Mode Off/Auto.
+
+         elsif Get_SPARK_Mode_From_Annotation (SPARK_Pragma (Body_Id)) = Off
+           and then (Is_Generic_Unit (Spec_Id) or else In_Instance)
+         then
+            null;
 
          else
             Error_Msg_Sloc := Sloc (SPARK_Pragma (Body_Id));
@@ -1073,9 +1102,13 @@ package body Sem_Ch7 is
       --        unit, especially subprograms.
 
       --  This is done only for top-level library packages or child units as
-      --  the algorithm does a top-down traversal of the package body.
+      --  the algorithm does a top-down traversal of the package body. This is
+      --  also done for instances because instantiations are still pending by
+      --  the time the enclosing package body is analyzed.
 
-      if (Scope (Spec_Id) = Standard_Standard or else Is_Child_Unit (Spec_Id))
+      if (Scope (Spec_Id) = Standard_Standard
+           or else Is_Child_Unit (Spec_Id)
+           or else Is_Generic_Instance (Spec_Id))
         and then not Is_Generic_Unit (Spec_Id)
       then
          Hide_Public_Entities (Declarations (N));
@@ -1130,7 +1163,7 @@ package body Sem_Ch7 is
 
       Generate_Definition (Id);
       Enter_Name (Id);
-      Set_Ekind  (Id, E_Package);
+      Mutate_Ekind  (Id, E_Package);
       Set_Etype  (Id, Standard_Void_Type);
 
       --  Set SPARK_Mode from context
@@ -1262,10 +1295,6 @@ package body Sem_Ch7 is
       --  private_with_clauses, and remove them at the end of the nested
       --  package.
 
-      procedure Check_One_Tagged_Type_Or_Extension_At_Most;
-      --  Issue an error in SPARK mode if a package specification contains
-      --  more than one tagged type or type extension.
-
       procedure Clear_Constants (Id : Entity_Id; FE : Entity_Id);
       --  Clears constant indications (Never_Set_In_Source, Constant_Value, and
       --  Is_True_Constant) on all variables that are entities of Id, and on
@@ -1291,58 +1320,6 @@ package body Sem_Ch7 is
       --  This has to be done at the point of entering the instance package's
       --  private part rather than being done in Sem_Ch12.Install_Parent
       --  (which is where the parents' visible declarations are installed).
-
-      ------------------------------------------------
-      -- Check_One_Tagged_Type_Or_Extension_At_Most --
-      ------------------------------------------------
-
-      procedure Check_One_Tagged_Type_Or_Extension_At_Most is
-         Previous : Node_Id;
-
-         procedure Check_Decls (Decls : List_Id);
-         --  Check that either Previous is Empty and Decls does not contain
-         --  more than one tagged type or type extension, or Previous is
-         --  already set and Decls contains no tagged type or type extension.
-
-         -----------------
-         -- Check_Decls --
-         -----------------
-
-         procedure Check_Decls (Decls : List_Id) is
-            Decl : Node_Id;
-
-         begin
-            Decl := First (Decls);
-            while Present (Decl) loop
-               if Nkind (Decl) = N_Full_Type_Declaration
-                 and then Is_Tagged_Type (Defining_Identifier (Decl))
-               then
-                  if No (Previous) then
-                     Previous := Decl;
-
-                  else
-                     Error_Msg_Sloc := Sloc (Previous);
-                     Check_SPARK_05_Restriction
-                       ("at most one tagged type or type extension allowed",
-                        "\\ previous declaration#",
-                        Decl);
-                  end if;
-               end if;
-
-               Next (Decl);
-            end loop;
-         end Check_Decls;
-
-      --  Start of processing for Check_One_Tagged_Type_Or_Extension_At_Most
-
-      begin
-         Previous := Empty;
-         Check_Decls (Vis_Decls);
-
-         if Present (Priv_Decls) then
-            Check_Decls (Priv_Decls);
-         end if;
-      end Check_One_Tagged_Type_Or_Extension_At_Most;
 
       ---------------------
       -- Clear_Constants --
@@ -1399,8 +1376,8 @@ package body Sem_Ch7 is
          then
             Generate_Reference (Id, Scope (Id), 'k', False);
 
-         elsif not Nkind_In (Unit (Cunit (Main_Unit)), N_Subprogram_Body,
-                                                       N_Subunit)
+         elsif Nkind (Unit (Cunit (Main_Unit))) not in
+                 N_Subprogram_Body | N_Subunit
          then
             --  If current unit is an ancestor of main unit, generate a
             --  reference to its own parent.
@@ -1466,8 +1443,8 @@ package body Sem_Ch7 is
             --  prevents cascaded errors when routines defined only for type
             --  entities are called with non-type entities.
 
-            if Nkind_In (Decl, N_Incomplete_Type_Declaration,
-                               N_Private_Type_Declaration)
+            if Nkind (Decl) in N_Incomplete_Type_Declaration
+                             | N_Private_Type_Declaration
               and then Is_Type (Defining_Identifier (Decl))
               and then Has_Discriminants (Defining_Identifier (Decl))
               and then Present (Full_View (Defining_Identifier (Decl)))
@@ -1501,8 +1478,8 @@ package body Sem_Ch7 is
          while Present (Gen_Par) and then Is_Child_Unit (Gen_Par) loop
             Inst_Node := Get_Unit_Instantiation_Node (Inst_Par);
 
-            if Nkind_In (Inst_Node, N_Package_Instantiation,
-                                    N_Formal_Package_Declaration)
+            if Nkind (Inst_Node) in
+                 N_Package_Instantiation | N_Formal_Package_Declaration
               and then Nkind (Name (Inst_Node)) = N_Expanded_Name
             then
                Inst_Par := Entity (Prefix (Name (Inst_Node)));
@@ -1793,14 +1770,34 @@ package body Sem_Ch7 is
          end if;
 
          --  Check preelaborable initialization for full type completing a
-         --  private type for which pragma Preelaborable_Initialization given.
+         --  private type when aspect Preelaborable_Initialization is True
+         --  or is specified by Preelaborable_Initialization attributes
+         --  (in the case of a private type in a generic unit). We pass
+         --  the expression of the aspect (when present) to the parameter
+         --  Preelab_Init_Expr to take into account the rule that presumes
+         --  that subcomponents of generic formal types mentioned in the
+         --  type's P_I aspect have preelaborable initialization (see
+         --  AI12-0409 and RM 10.2.1(11.8/5)).
 
-         if Is_Type (E)
-           and then Must_Have_Preelab_Init (E)
-           and then not Has_Preelaborable_Initialization (E)
-         then
-            Error_Msg_N
-              ("full view of & does not have preelaborable initialization", E);
+         if Is_Type (E) and then Must_Have_Preelab_Init (E) then
+            declare
+               PI_Aspect : constant Node_Id :=
+                             Find_Aspect
+                               (E, Aspect_Preelaborable_Initialization);
+               PI_Expr   : Node_Id := Empty;
+            begin
+               if Present (PI_Aspect) then
+                  PI_Expr := Expression (PI_Aspect);
+               end if;
+
+               if not Has_Preelaborable_Initialization
+                        (E, Preelab_Init_Expr => PI_Expr)
+               then
+                  Error_Msg_N
+                    ("full view of & does not have "
+                     & "preelaborable initialization", E);
+               end if;
+            end;
          end if;
 
          Next_Entity (E);
@@ -1880,11 +1877,6 @@ package body Sem_Ch7 is
          Clear_Constants (Id, First_Private_Entity (Id));
       end if;
 
-      --  Issue an error in SPARK mode if a package specification contains
-      --  more than one tagged type or type extension.
-
-      Check_One_Tagged_Type_Or_Extension_At_Most;
-
       --  Output relevant information as to why the package requires a body.
       --  Do not consider generated packages as this exposes internal symbols
       --  and leads to confusing messages.
@@ -1921,7 +1913,7 @@ package body Sem_Ch7 is
    begin
       Generate_Definition (Id);
       Set_Is_Pure         (Id, PF);
-      Init_Size_Align     (Id);
+      Reinit_Size_Align   (Id);
 
       if not Is_Package_Or_Generic_Package (Current_Scope)
         or else In_Private_Part (Current_Scope)
@@ -2091,6 +2083,8 @@ package body Sem_Ch7 is
                            Replace_Elmt (Op_Elmt, New_Op);
                            Remove_Elmt  (Op_List, Op_Elmt_2);
                            Set_Overridden_Operation (New_Op, Parent_Subp);
+                           Set_Is_Ada_2022_Only     (New_Op,
+                             Is_Ada_2022_Only (Parent_Subp));
 
                            --  We don't need to inherit its dispatching slot.
                            --  Set_All_DT_Position has previously ensured that
@@ -2428,7 +2422,7 @@ package body Sem_Ch7 is
       --  defined in the associated package, subject to at least one Part_Of
       --  constituent.
 
-      if Ekind_In (P, E_Generic_Package, E_Package) then
+      if Is_Package_Or_Generic_Package (P) then
          declare
             States     : constant Elist_Id := Abstract_States (P);
             State_Elmt : Elmt_Id;
@@ -2588,15 +2582,15 @@ package body Sem_Ch7 is
       end if;
 
       if Limited_Present (Def) then
-         Set_Ekind (Id, E_Limited_Private_Type);
+         Mutate_Ekind (Id, E_Limited_Private_Type);
       else
-         Set_Ekind (Id, E_Private_Type);
+         Mutate_Ekind (Id, E_Private_Type);
       end if;
 
       Set_Etype              (Id, Id);
       Set_Has_Delayed_Freeze (Id);
       Set_Is_First_Subtype   (Id);
-      Init_Size_Align        (Id);
+      Reinit_Size_Align      (Id);
 
       Set_Is_Constrained (Id,
         No (Discriminant_Specifications (N))
@@ -2622,7 +2616,7 @@ package body Sem_Ch7 is
       Set_Private_Dependents (Id, New_Elmt_List);
 
       if Tagged_Present (Def) then
-         Set_Ekind                       (Id, E_Record_Type_With_Private);
+         Mutate_Ekind                    (Id, E_Record_Type_With_Private);
          Set_Direct_Primitive_Operations (Id, New_Elmt_List);
          Set_Is_Abstract_Type            (Id, Abstract_Present (Def));
          Set_Is_Limited_Record           (Id, Limited_Present (Def));
@@ -2640,6 +2634,15 @@ package body Sem_Ch7 is
 
       elsif Abstract_Present (Def) then
          Error_Msg_N ("only a tagged type can be abstract", N);
+
+      --  We initialize the primitive operations list of an untagged private
+      --  type to an empty element list. Do this even when Extensions_Allowed
+      --  is False to issue better error messages. (Note: This could be done
+      --  for all private types and shared with the tagged case above, but
+      --  for now we do it separately.)
+
+      else
+         Set_Direct_Primitive_Operations (Id, New_Elmt_List);
       end if;
    end New_Private_Type;
 
@@ -2674,7 +2677,7 @@ package body Sem_Ch7 is
       --  implicit completion at some point.
 
       elsif (Is_Overloadable (Id)
-              and then not Ekind_In (Id, E_Enumeration_Literal, E_Operator)
+              and then Ekind (Id) not in E_Enumeration_Literal | E_Operator
               and then not Is_Abstract_Subprogram (Id)
               and then not Has_Completion (Id)
               and then Comes_From_Source (Parent (Id)))
@@ -2691,7 +2694,7 @@ package body Sem_Ch7 is
             and then not Is_Generic_Type (Id))
 
         or else
-          (Ekind_In (Id, E_Task_Type, E_Protected_Type)
+          (Ekind (Id) in E_Task_Type | E_Protected_Type
             and then not Has_Completion (Id))
 
         or else
@@ -2747,22 +2750,24 @@ package body Sem_Ch7 is
 
       begin
          Set_Size_Info               (Priv,                             Full);
-         Set_RM_Size                 (Priv, RM_Size                    (Full));
+         Copy_RM_Size                (To => Priv, From => Full);
          Set_Size_Known_At_Compile_Time
                                      (Priv, Size_Known_At_Compile_Time (Full));
          Set_Is_Volatile             (Priv, Is_Volatile                (Full));
          Set_Treat_As_Volatile       (Priv, Treat_As_Volatile          (Full));
+         Set_Is_Atomic               (Priv, Is_Atomic                  (Full));
          Set_Is_Ada_2005_Only        (Priv, Is_Ada_2005_Only           (Full));
          Set_Is_Ada_2012_Only        (Priv, Is_Ada_2012_Only           (Full));
+         Set_Is_Ada_2022_Only        (Priv, Is_Ada_2022_Only           (Full));
          Set_Has_Pragma_Unmodified   (Priv, Has_Pragma_Unmodified      (Full));
          Set_Has_Pragma_Unreferenced (Priv, Has_Pragma_Unreferenced    (Full));
          Set_Has_Pragma_Unreferenced_Objects
                                      (Priv, Has_Pragma_Unreferenced_Objects
                                                                        (Full));
+         Set_Predicates_Ignored      (Priv, Predicates_Ignored         (Full));
          if Is_Unchecked_Union (Full) then
             Set_Is_Unchecked_Union (Base_Type (Priv));
          end if;
-         --  Why is atomic not copied here ???
 
          if Referenced (Full) then
             Set_Referenced (Priv);
@@ -2792,33 +2797,19 @@ package body Sem_Ch7 is
          Set_Freeze_Node (Priv, Freeze_Node (Full));
 
          --  Propagate Default_Initial_Condition-related attributes from the
-         --  base type of the full view to the full view and vice versa. This
-         --  may seem strange, but is necessary depending on which type
-         --  triggered the generation of the DIC procedure body. As a result,
-         --  both the full view and its base type carry the same DIC-related
-         --  information.
-
-         Propagate_DIC_Attributes (Full, From_Typ => Full_Base);
-         Propagate_DIC_Attributes (Full_Base, From_Typ => Full);
-
-         --  Propagate Default_Initial_Condition-related attributes from the
          --  full view to the private view.
 
          Propagate_DIC_Attributes (Priv, From_Typ => Full);
-
-         --  Propagate invariant-related attributes from the base type of the
-         --  full view to the full view and vice versa. This may seem strange,
-         --  but is necessary depending on which type triggered the generation
-         --  of the invariant procedure body. As a result, both the full view
-         --  and its base type carry the same invariant-related information.
-
-         Propagate_Invariant_Attributes (Full, From_Typ => Full_Base);
-         Propagate_Invariant_Attributes (Full_Base, From_Typ => Full);
 
          --  Propagate invariant-related attributes from the full view to the
          --  private view.
 
          Propagate_Invariant_Attributes (Priv, From_Typ => Full);
+
+         --  Propagate predicate-related attributes from the full view to the
+         --  private view.
+
+         Propagate_Predicate_Attributes (Priv, From_Typ => Full);
 
          if Is_Tagged_Type (Priv)
            and then Is_Tagged_Type (Full)
@@ -2971,6 +2962,11 @@ package body Sem_Ch7 is
                   Set_Is_Potentially_Use_Visible (Id);
                end if;
 
+            --  Avoid crash caused by previous errors
+
+            elsif No (Etype (Id)) and then Serious_Errors_Detected /= 0 then
+               null;
+
             --  We need to avoid incorrectly marking enumeration literals as
             --  non-visible when a visible use-all-type clause is in effect.
 
@@ -3007,7 +3003,7 @@ package body Sem_Ch7 is
             Check_Conventions (Id);
          end if;
 
-         if Ekind_In (Id, E_Private_Type, E_Limited_Private_Type)
+         if Ekind (Id) in E_Private_Type | E_Limited_Private_Type
            and then No (Full_View (Id))
            and then not Is_Generic_Type (Id)
            and then not Is_Derived_Type (Id)
@@ -3232,6 +3228,25 @@ package body Sem_Ch7 is
                end loop;
             end;
 
+         --  For subtypes of private types the frontend generates two entities:
+         --  one associated with the partial view and the other associated with
+         --  the full view. When the subtype declaration is public the frontend
+         --  places the former entity in the list of public entities of the
+         --  package and the latter entity in the private part of the package.
+         --  When the subtype declaration is private it generates these two
+         --  entities but both are placed in the private part of the package
+         --  (and the full view has the same source location as the partial
+         --  view and no parent; see Prepare_Private_Subtype_Completion).
+
+         elsif Ekind (Id) in E_Private_Subtype
+                           | E_Limited_Private_Subtype
+           and then Present (Full_View (Id))
+           and then Sloc (Id) = Sloc (Full_View (Id))
+           and then No (Parent (Full_View (Id)))
+         then
+            Set_Is_Hidden (Id);
+            Set_Is_Potentially_Use_Visible (Id, False);
+
          elsif not Is_Child_Unit (Id)
            and then (not Is_Private_Type (Id) or else No (Full_View (Id)))
          then
@@ -3322,7 +3337,7 @@ package body Sem_Ch7 is
       --  performed if the caller requests this behavior.
 
       if Do_Abstract_States
-        and then Ekind_In (Pack_Id, E_Generic_Package, E_Package)
+        and then Is_Package_Or_Generic_Package (Pack_Id)
         and then Has_Non_Null_Abstract_State (Pack_Id)
         and then Requires_Body
       then
@@ -3350,12 +3365,12 @@ package body Sem_Ch7 is
       --  Body required if library package with pragma Elaborate_Body
 
       elsif Has_Pragma_Elaborate_Body (Pack_Id) then
-         Error_Msg_N ("info: & requires body (Elaborate_Body)?Y?", Pack_Id);
+         Error_Msg_N ("info: & requires body (Elaborate_Body)?.y?", Pack_Id);
 
       --  Body required if subprogram
 
       elsif Is_Subprogram_Or_Generic_Subprogram (Pack_Id) then
-         Error_Msg_N ("info: & requires body (subprogram case)?Y?", Pack_Id);
+         Error_Msg_N ("info: & requires body (subprogram case)?.y?", Pack_Id);
 
       --  Body required if generic parent has Elaborate_Body
 
@@ -3368,7 +3383,7 @@ package body Sem_Ch7 is
          begin
             if Has_Pragma_Elaborate_Body (G_P) then
                Error_Msg_N
-                 ("info: & requires body (generic parent Elaborate_Body)?Y?",
+                 ("info: & requires body (generic parent Elaborate_Body)?.y?",
                   Pack_Id);
             end if;
          end;
@@ -3380,13 +3395,13 @@ package body Sem_Ch7 is
       --  provided). If Ignore_Abstract_State is True, we don't do this check
       --  (so we can use Unit_Requires_Body to check for some other reason).
 
-      elsif Ekind_In (Pack_Id, E_Generic_Package, E_Package)
+      elsif Is_Package_Or_Generic_Package (Pack_Id)
         and then Present (Abstract_States (Pack_Id))
         and then not Is_Null_State
                        (Node (First_Elmt (Abstract_States (Pack_Id))))
       then
          Error_Msg_N
-           ("info: & requires body (non-null abstract state aspect)?Y?",
+           ("info: & requires body (non-null abstract state aspect)?.y?",
             Pack_Id);
       end if;
 
@@ -3397,7 +3412,8 @@ package body Sem_Ch7 is
          if Requires_Completion_In_Body (E, Pack_Id) then
             Error_Msg_Node_2 := E;
             Error_Msg_NE
-              ("info: & requires body (& requires completion)?Y?", E, Pack_Id);
+              ("info: & requires body (& requires completion)?.y?", E,
+               Pack_Id);
          end if;
 
          Next_Entity (E);

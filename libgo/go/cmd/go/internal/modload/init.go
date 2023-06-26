@@ -6,6 +6,7 @@ package modload
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,19 +16,16 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 
 	"cmd/go/internal/base"
-	"cmd/go/internal/cache"
 	"cmd/go/internal/cfg"
-	"cmd/go/internal/load"
+	"cmd/go/internal/fsys"
 	"cmd/go/internal/lockedfile"
 	"cmd/go/internal/modconv"
 	"cmd/go/internal/modfetch"
-	"cmd/go/internal/modfetch/codehost"
-	"cmd/go/internal/mvs"
 	"cmd/go/internal/search"
 
 	"golang.org/x/mod/modfile"
@@ -35,61 +33,240 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// Variables set by other packages.
+//
+// TODO(#40775): See if these can be plumbed as explicit parameters.
 var (
-	mustUseModules = false
-	initialized    bool
+	// RootMode determines whether a module root is needed.
+	RootMode Root
 
-	modRoot string
-	Target  module.Version
-
-	// targetPrefix is the path prefix for packages in Target, without a trailing
-	// slash. For most modules, targetPrefix is just Target.Path, but the
-	// standard-library module "std" has an empty prefix.
-	targetPrefix string
-
-	// targetInGorootSrc caches whether modRoot is within GOROOT/src.
-	// The "std" module is special within GOROOT/src, but not otherwise.
-	targetInGorootSrc bool
-
-	gopath string
-
-	CmdModInit   bool   // running 'go mod init'
-	CmdModModule string // module argument for 'go mod init'
+	// ForceUseModules may be set to force modules to be enabled when
+	// GO111MODULE=auto or to report an error when GO111MODULE=off.
+	ForceUseModules bool
 
 	allowMissingModuleImports bool
+
+	// ExplicitWriteGoMod prevents LoadPackages, ListModules, and other functions
+	// from updating go.mod and go.sum or reporting errors when updates are
+	// needed. A package should set this if it would cause go.mod to be written
+	// multiple times (for example, 'go get' calls LoadPackages multiple times) or
+	// if it needs some other operation to be successful before go.mod and go.sum
+	// can be written (for example, 'go mod download' must download modules before
+	// adding sums to go.sum). Packages that set this are responsible for calling
+	// WriteGoMod explicitly.
+	ExplicitWriteGoMod bool
 )
 
-var modFile *modfile.File
+// Variables set in Init.
+var (
+	initialized bool
 
-// A modFileIndex is an index of data corresponding to a modFile
-// at a specific point in time.
-type modFileIndex struct {
-	data         []byte
-	dataNeedsFix bool // true if fixVersion applied a change while parsing data
-	module       module.Version
-	goVersion    string
-	require      map[module.Version]requireMeta
-	replace      map[module.Version]module.Version
-	exclude      map[module.Version]bool
+	// These are primarily used to initialize the MainModules, and should be
+	// eventually superceded by them but are still used in cases where the module
+	// roots are required but MainModules hasn't been initialized yet. Set to
+	// the modRoots of the main modules.
+	// modRoots != nil implies len(modRoots) > 0
+	modRoots []string
+	gopath   string
+)
+
+// EnterModule resets MainModules and requirements to refer to just this one module.
+func EnterModule(ctx context.Context, enterModroot string) {
+	MainModules = nil // reset MainModules
+	requirements = nil
+	workFilePath = "" // Force module mode
+	modfetch.Reset()
+
+	modRoots = []string{enterModroot}
+	LoadModFile(ctx)
 }
 
-// index is the index of the go.mod file as of when it was last read or written.
-var index *modFileIndex
+// Variable set in InitWorkfile
+var (
+	// Set to the path to the go.work file, or "" if workspace mode is disabled.
+	workFilePath string
+)
 
-type requireMeta struct {
-	indirect bool
+type MainModuleSet struct {
+	// versions are the module.Version values of each of the main modules.
+	// For each of them, the Path fields are ordinary module paths and the Version
+	// fields are empty strings.
+	versions []module.Version
+
+	// modRoot maps each module in versions to its absolute filesystem path.
+	modRoot map[module.Version]string
+
+	// pathPrefix is the path prefix for packages in the module, without a trailing
+	// slash. For most modules, pathPrefix is just version.Path, but the
+	// standard-library module "std" has an empty prefix.
+	pathPrefix map[module.Version]string
+
+	// inGorootSrc caches whether modRoot is within GOROOT/src.
+	// The "std" module is special within GOROOT/src, but not otherwise.
+	inGorootSrc map[module.Version]bool
+
+	modFiles map[module.Version]*modfile.File
+
+	modContainingCWD module.Version
+
+	workFileGoVersion string
+
+	workFileReplaceMap map[module.Version]module.Version
+	// highest replaced version of each module path; empty string for wildcard-only replacements
+	highestReplaced map[string]string
+
+	indexMu sync.Mutex
+	indices map[module.Version]*modFileIndex
 }
+
+func (mms *MainModuleSet) PathPrefix(m module.Version) string {
+	return mms.pathPrefix[m]
+}
+
+// Versions returns the module.Version values of each of the main modules.
+// For each of them, the Path fields are ordinary module paths and the Version
+// fields are empty strings.
+// Callers should not modify the returned slice.
+func (mms *MainModuleSet) Versions() []module.Version {
+	if mms == nil {
+		return nil
+	}
+	return mms.versions
+}
+
+func (mms *MainModuleSet) Contains(path string) bool {
+	if mms == nil {
+		return false
+	}
+	for _, v := range mms.versions {
+		if v.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func (mms *MainModuleSet) ModRoot(m module.Version) string {
+	if mms == nil {
+		return ""
+	}
+	return mms.modRoot[m]
+}
+
+func (mms *MainModuleSet) InGorootSrc(m module.Version) bool {
+	if mms == nil {
+		return false
+	}
+	return mms.inGorootSrc[m]
+}
+
+func (mms *MainModuleSet) mustGetSingleMainModule() module.Version {
+	if mms == nil || len(mms.versions) == 0 {
+		panic("internal error: mustGetSingleMainModule called in context with no main modules")
+	}
+	if len(mms.versions) != 1 {
+		if inWorkspaceMode() {
+			panic("internal error: mustGetSingleMainModule called in workspace mode")
+		} else {
+			panic("internal error: multiple main modules present outside of workspace mode")
+		}
+	}
+	return mms.versions[0]
+}
+
+func (mms *MainModuleSet) GetSingleIndexOrNil() *modFileIndex {
+	if mms == nil {
+		return nil
+	}
+	if len(mms.versions) == 0 {
+		return nil
+	}
+	return mms.indices[mms.mustGetSingleMainModule()]
+}
+
+func (mms *MainModuleSet) Index(m module.Version) *modFileIndex {
+	mms.indexMu.Lock()
+	defer mms.indexMu.Unlock()
+	return mms.indices[m]
+}
+
+func (mms *MainModuleSet) SetIndex(m module.Version, index *modFileIndex) {
+	mms.indexMu.Lock()
+	defer mms.indexMu.Unlock()
+	mms.indices[m] = index
+}
+
+func (mms *MainModuleSet) ModFile(m module.Version) *modfile.File {
+	return mms.modFiles[m]
+}
+
+func (mms *MainModuleSet) Len() int {
+	if mms == nil {
+		return 0
+	}
+	return len(mms.versions)
+}
+
+// ModContainingCWD returns the main module containing the working directory,
+// or module.Version{} if none of the main modules contain the working
+// directory.
+func (mms *MainModuleSet) ModContainingCWD() module.Version {
+	return mms.modContainingCWD
+}
+
+func (mms *MainModuleSet) HighestReplaced() map[string]string {
+	return mms.highestReplaced
+}
+
+// GoVersion returns the go version set on the single module, in module mode,
+// or the go.work file in workspace mode.
+func (mms *MainModuleSet) GoVersion() string {
+	if !inWorkspaceMode() {
+		return modFileGoVersion(mms.ModFile(mms.mustGetSingleMainModule()))
+	}
+	v := mms.workFileGoVersion
+	if v == "" {
+		// Fall back to 1.18 for go.work files.
+		v = "1.18"
+	}
+	return v
+}
+
+func (mms *MainModuleSet) WorkFileReplaceMap() map[module.Version]module.Version {
+	return mms.workFileReplaceMap
+}
+
+var MainModules *MainModuleSet
+
+type Root int
+
+const (
+	// AutoRoot is the default for most commands. modload.Init will look for
+	// a go.mod file in the current directory or any parent. If none is found,
+	// modules may be disabled (GO111MODULE=auto) or commands may run in a
+	// limited module mode.
+	AutoRoot Root = iota
+
+	// NoRoot is used for commands that run in module mode and ignore any go.mod
+	// file the current directory or in parent directories.
+	NoRoot
+
+	// NeedRoot is used for commands that must run in module mode and don't
+	// make sense without a main module.
+	NeedRoot
+)
 
 // ModFile returns the parsed go.mod file.
 //
-// Note that after calling ImportPaths or LoadBuildList,
+// Note that after calling LoadPackages or LoadModGraph,
 // the require statements in the modfile.File are no longer
 // the source of truth and will be ignored: edits made directly
 // will be lost at the next call to WriteGoMod.
 // To make permanent changes to the require statements
-// in go.mod, edit it before calling ImportPaths or LoadBuildList.
+// in go.mod, edit it before loading.
 func ModFile() *modfile.File {
 	Init()
+	modFile := MainModules.ModFile(MainModules.mustGetSingleMainModule())
 	if modFile == nil {
 		die()
 	}
@@ -98,7 +275,41 @@ func ModFile() *modfile.File {
 
 func BinDir() string {
 	Init()
+	if cfg.GOBIN != "" {
+		return cfg.GOBIN
+	}
+	if gopath == "" {
+		return ""
+	}
 	return filepath.Join(gopath, "bin")
+}
+
+// InitWorkfile initializes the workFilePath variable for commands that
+// operate in workspace mode. It should not be called by other commands,
+// for example 'go mod tidy', that don't operate in workspace mode.
+func InitWorkfile() {
+	if RootMode == NoRoot {
+		workFilePath = ""
+		return
+	}
+
+	switch gowork := cfg.Getenv("GOWORK"); gowork {
+	case "off":
+		workFilePath = ""
+	case "", "auto":
+		workFilePath = findWorkspaceFile(base.Cwd())
+	default:
+		if !filepath.IsAbs(gowork) {
+			base.Fatalf("the path provided to GOWORK must be an absolute path")
+		}
+		workFilePath = gowork
+	}
+}
+
+// WorkFilePath returns the absolute path of the go.work file, or "" if not in
+// workspace mode. WorkFilePath must be called after InitWorkfile.
+func WorkFilePath() string {
+	return workFilePath
 }
 
 // Init determines whether module mode is enabled, locates the root of the
@@ -114,17 +325,25 @@ func Init() {
 	// Keep in sync with WillBeEnabled. We perform extra validation here, and
 	// there are lots of diagnostics and side effects, so we can't use
 	// WillBeEnabled directly.
+	var mustUseModules bool
 	env := cfg.Getenv("GO111MODULE")
 	switch env {
 	default:
 		base.Fatalf("go: unknown environment setting GO111MODULE=%s", env)
-	case "auto", "":
-		mustUseModules = false
-	case "on":
+	case "auto":
+		mustUseModules = ForceUseModules
+	case "on", "":
 		mustUseModules = true
 	case "off":
+		if ForceUseModules {
+			base.Fatalf("go: modules disabled by GO111MODULE=off; see 'go help modules'")
+		}
 		mustUseModules = false
 		return
+	}
+
+	if err := fsys.Init(base.Cwd()); err != nil {
+		base.Fatalf("go: %v", err)
 	}
 
 	// Disable any prompting for passwords by Git.
@@ -151,17 +370,29 @@ func Init() {
 	// assume they know what they are doing and don't step on it.
 	// But default to turning off ControlMaster.
 	if os.Getenv("GIT_SSH") == "" && os.Getenv("GIT_SSH_COMMAND") == "" {
-		os.Setenv("GIT_SSH_COMMAND", "ssh -o ControlMaster=no")
+		os.Setenv("GIT_SSH_COMMAND", "ssh -o ControlMaster=no -o BatchMode=yes")
 	}
 
-	if CmdModInit {
-		// Running 'go mod init': go.mod will be created in current directory.
-		modRoot = base.Cwd
+	if os.Getenv("GCM_INTERACTIVE") == "" {
+		os.Setenv("GCM_INTERACTIVE", "never")
+	}
+	if modRoots != nil {
+		// modRoot set before Init was called ("go mod init" does this).
+		// No need to search for go.mod.
+	} else if RootMode == NoRoot {
+		if cfg.ModFile != "" && !base.InGOFLAGS("-modfile") {
+			base.Fatalf("go: -modfile cannot be used with commands that ignore the current module")
+		}
+		modRoots = nil
+	} else if inWorkspaceMode() {
+		// We're in workspace mode.
 	} else {
-		modRoot = findModuleRoot(base.Cwd)
-		if modRoot == "" {
+		if modRoot := findModuleRoot(base.Cwd()); modRoot == "" {
 			if cfg.ModFile != "" {
 				base.Fatalf("go: cannot find main module, but -modfile was set.\n\t-modfile cannot be used to set the module root directory.")
+			}
+			if RootMode == NeedRoot {
+				base.Fatalf("go: %v", ErrNoModRoot)
 			}
 			if !mustUseModules {
 				// GO111MODULE is 'auto', and we can't find a module root.
@@ -174,84 +405,27 @@ func Init() {
 			// will find it and get modules when they're not expecting them.
 			// It's a bit of a peculiar thing to disallow but quite mysterious
 			// when it happens. See golang.org/issue/26708.
-			modRoot = ""
 			fmt.Fprintf(os.Stderr, "go: warning: ignoring go.mod in system temp root %v\n", os.TempDir())
+			if !mustUseModules {
+				return
+			}
+		} else {
+			modRoots = []string{modRoot}
 		}
 	}
 	if cfg.ModFile != "" && !strings.HasSuffix(cfg.ModFile, ".mod") {
 		base.Fatalf("go: -modfile=%s: file does not have .mod extension", cfg.ModFile)
 	}
 
-	// We're in module mode. Install the hooks to make it work.
-
-	if c := cache.Default(); c == nil {
-		// With modules, there are no install locations for packages
-		// other than the build cache.
-		base.Fatalf("go: cannot use modules with build cache disabled")
-	}
-
-	list := filepath.SplitList(cfg.BuildContext.GOPATH)
-	if len(list) == 0 || list[0] == "" {
-		base.Fatalf("missing $GOPATH")
-	}
-	gopath = list[0]
-	if _, err := os.Stat(filepath.Join(gopath, "go.mod")); err == nil {
-		base.Fatalf("$GOPATH/go.mod exists but should not")
-	}
-
-	oldSrcMod := filepath.Join(list[0], "src/mod")
-	pkgMod := filepath.Join(list[0], "pkg/mod")
-	infoOld, errOld := os.Stat(oldSrcMod)
-	_, errMod := os.Stat(pkgMod)
-	if errOld == nil && infoOld.IsDir() && errMod != nil && os.IsNotExist(errMod) {
-		os.Rename(oldSrcMod, pkgMod)
-	}
-
-	modfetch.PkgMod = pkgMod
-	codehost.WorkRoot = filepath.Join(pkgMod, "cache/vcs")
-
+	// We're in module mode. Set any global variables that need to be set.
 	cfg.ModulesEnabled = true
-	load.ModBinDir = BinDir
-	load.ModLookup = Lookup
-	load.ModPackageModuleInfo = PackageModuleInfo
-	load.ModImportPaths = ImportPaths
-	load.ModPackageBuildInfo = PackageBuildInfo
-	load.ModInfoProg = ModInfoProg
-	load.ModImportFromFiles = ImportFromFiles
-	load.ModDirImportPath = DirImportPath
-
-	if modRoot == "" {
-		// We're in module mode, but not inside a module.
-		//
-		// Commands like 'go build', 'go run', 'go list' have no go.mod file to
-		// read or write. They would need to find and download the latest versions
-		// of a potentially large number of modules with no way to save version
-		// information. We can succeed slowly (but not reproducibly), but that's
-		// not usually a good experience.
-		//
-		// Instead, we forbid resolving import paths to modules other than std and
-		// cmd. Users may still build packages specified with .go files on the
-		// command line, but they'll see an error if those files import anything
-		// outside std.
-		//
-		// This can be overridden by calling AllowMissingModuleImports.
-		// For example, 'go get' does this, since it is expected to resolve paths.
-		//
-		// See golang.org/issue/32027.
-	} else {
-		modfetch.GoSumFile = strings.TrimSuffix(ModFilePath(), ".mod") + ".sum"
-		search.SetModRoot(modRoot)
-	}
-}
-
-func init() {
-	load.ModInit = Init
-
-	// Set modfetch.PkgMod and codehost.WorkRoot unconditionally,
-	// so that go clean -modcache and go mod download can run even without modules enabled.
-	if list := filepath.SplitList(cfg.BuildContext.GOPATH); len(list) > 0 && list[0] != "" {
-		modfetch.PkgMod = filepath.Join(list[0], "pkg/mod")
-		codehost.WorkRoot = filepath.Join(list[0], "pkg/mod/cache/vcs")
+	setDefaultBuildMod()
+	list := filepath.SplitList(cfg.BuildContext.GOPATH)
+	if len(list) > 0 && list[0] != "" {
+		gopath = list[0]
+		if _, err := fsys.Stat(filepath.Join(gopath, "go.mod")); err == nil {
+			base.Fatalf("$GOPATH/go.mod exists but should not")
+		}
 	}
 }
 
@@ -265,10 +439,12 @@ func init() {
 // be called until the command is installed and flags are parsed. Instead of
 // calling Init and Enabled, the main package can call this function.
 func WillBeEnabled() bool {
-	if modRoot != "" || mustUseModules {
+	if modRoots != nil || cfg.ModulesEnabled {
+		// Already enabled.
 		return true
 	}
 	if initialized {
+		// Initialized, not enabled.
 		return false
 	}
 
@@ -276,19 +452,15 @@ func WillBeEnabled() bool {
 	// exits, so it can't call this function directly.
 	env := cfg.Getenv("GO111MODULE")
 	switch env {
-	case "on":
+	case "on", "":
 		return true
-	case "auto", "":
+	case "auto":
 		break
 	default:
 		return false
 	}
 
-	if CmdModInit {
-		// Running 'go mod init': go.mod will be created in current directory.
-		return true
-	}
-	if modRoot := findModuleRoot(base.Cwd); modRoot == "" {
+	if modRoot := findModuleRoot(base.Cwd()); modRoot == "" {
 		// GO111MODULE is 'auto', and we can't find a module root.
 		// Stay in GOPATH mode.
 		return false
@@ -309,16 +481,18 @@ func WillBeEnabled() bool {
 // (usually through MustModRoot).
 func Enabled() bool {
 	Init()
-	return modRoot != "" || mustUseModules
+	return modRoots != nil || cfg.ModulesEnabled
 }
 
-// ModRoot returns the root of the main module.
-// It calls base.Fatalf if there is no main module.
-func ModRoot() string {
-	if !HasModRoot() {
-		die()
+func VendorDir() string {
+	return filepath.Join(MainModules.ModRoot(MainModules.mustGetSingleMainModule()), "vendor")
+}
+
+func inWorkspaceMode() bool {
+	if !initialized {
+		panic("inWorkspaceMode called before modload.Init called")
 	}
-	return modRoot
+	return workFilePath != ""
 }
 
 // HasModRoot reports whether a main module is present.
@@ -326,38 +500,42 @@ func ModRoot() string {
 // does not require a main module.
 func HasModRoot() bool {
 	Init()
-	return modRoot != ""
+	return modRoots != nil
 }
 
-// ModFilePath returns the effective path of the go.mod file. Normally, this
-// "go.mod" in the directory returned by ModRoot, but the -modfile flag may
-// change its location. ModFilePath calls base.Fatalf if there is no main
-// module, even if -modfile is set.
-func ModFilePath() string {
+// MustHaveModRoot checks that a main module or main modules are present,
+// and calls base.Fatalf if there are no main modules.
+func MustHaveModRoot() {
+	Init()
 	if !HasModRoot() {
 		die()
 	}
+}
+
+// ModFilePath returns the path that would be used for the go.mod
+// file, if in module mode. ModFilePath calls base.Fatalf if there is no main
+// module, even if -modfile is set.
+func ModFilePath() string {
+	MustHaveModRoot()
+	return modFilePath(findModuleRoot(base.Cwd()))
+}
+
+func modFilePath(modRoot string) string {
 	if cfg.ModFile != "" {
 		return cfg.ModFile
 	}
 	return filepath.Join(modRoot, "go.mod")
 }
 
-// printStackInDie causes die to print a stack trace.
-//
-// It is enabled by the testgo tag, and helps to diagnose paths that
-// unexpectedly require a main module.
-var printStackInDie = false
-
 func die() {
-	if printStackInDie {
-		debug.PrintStack()
-	}
 	if cfg.Getenv("GO111MODULE") == "off" {
 		base.Fatalf("go: modules disabled by GO111MODULE=off; see 'go help modules'")
 	}
-	if dir, name := findAltConfig(base.Cwd); dir != "" {
-		rel, err := filepath.Rel(base.Cwd, dir)
+	if inWorkspaceMode() {
+		base.Fatalf("go: no modules were found in the current workspace; see 'go help work'")
+	}
+	if dir, name := findAltConfig(base.Cwd()); dir != "" {
+		rel, err := filepath.Rel(base.Cwd(), dir)
 		if err != nil {
 			rel = dir
 		}
@@ -367,74 +545,368 @@ func die() {
 		}
 		base.Fatalf("go: cannot find main module, but found %s in %s\n\tto create a module there, run:\n\t%sgo mod init", name, dir, cdCmd)
 	}
-	base.Fatalf("go: cannot find main module; see 'go help modules'")
+	base.Fatalf("go: %v", ErrNoModRoot)
 }
 
-// InitMod sets Target and, if there is a main module, parses the initial build
-// list from its go.mod file, creating and populating that file if needed.
+var ErrNoModRoot = errors.New("go.mod file not found in current directory or any parent directory; see 'go help modules'")
+
+type goModDirtyError struct{}
+
+func (goModDirtyError) Error() string {
+	if cfg.BuildModExplicit {
+		return fmt.Sprintf("updates to go.mod needed, disabled by -mod=%v; to update it:\n\tgo mod tidy", cfg.BuildMod)
+	}
+	if cfg.BuildModReason != "" {
+		return fmt.Sprintf("updates to go.mod needed, disabled by -mod=%s\n\t(%s)\n\tto update it:\n\tgo mod tidy", cfg.BuildMod, cfg.BuildModReason)
+	}
+	return "updates to go.mod needed; to update it:\n\tgo mod tidy"
+}
+
+var errGoModDirty error = goModDirtyError{}
+
+func loadWorkFile(path string) (goVersion string, modRoots []string, replaces []*modfile.Replace, err error) {
+	workDir := filepath.Dir(path)
+	wf, err := ReadWorkFile(path)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if wf.Go != nil {
+		goVersion = wf.Go.Version
+	}
+	seen := map[string]bool{}
+	for _, d := range wf.Use {
+		modRoot := d.Path
+		if !filepath.IsAbs(modRoot) {
+			modRoot = filepath.Join(workDir, modRoot)
+		}
+
+		if seen[modRoot] {
+			return "", nil, nil, fmt.Errorf("path %s appears multiple times in workspace", modRoot)
+		}
+		seen[modRoot] = true
+		modRoots = append(modRoots, modRoot)
+	}
+
+	return goVersion, modRoots, wf.Replace, nil
+}
+
+// ReadWorkFile reads and parses the go.work file at the given path.
+func ReadWorkFile(path string) (*modfile.WorkFile, error) {
+	workData, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return modfile.ParseWork(path, workData, nil)
+}
+
+// WriteWorkFile cleans and writes out the go.work file to the given path.
+func WriteWorkFile(path string, wf *modfile.WorkFile) error {
+	wf.SortBlocks()
+	wf.Cleanup()
+	out := modfile.Format(wf.Syntax)
+
+	return ioutil.WriteFile(path, out, 0666)
+}
+
+// UpdateWorkFile updates comments on directory directives in the go.work
+// file to include the associated module path.
+func UpdateWorkFile(wf *modfile.WorkFile) {
+	missingModulePaths := map[string]string{} // module directory listed in file -> abspath modroot
+
+	for _, d := range wf.Use {
+		if d.Path == "" {
+			continue // d is marked for deletion.
+		}
+		modRoot := d.Path
+		if d.ModulePath == "" {
+			missingModulePaths[d.Path] = modRoot
+		}
+	}
+
+	// Clean up and annotate directories.
+	// TODO(matloob): update x/mod to actually add module paths.
+	for moddir, absmodroot := range missingModulePaths {
+		_, f, err := ReadModFile(filepath.Join(absmodroot, "go.mod"), nil)
+		if err != nil {
+			continue // Error will be reported if modules are loaded.
+		}
+		wf.AddUse(moddir, f.Module.Mod.Path)
+	}
+}
+
+// LoadModFile sets Target and, if there is a main module, parses the initial
+// build list from its go.mod file.
 //
-// As a side-effect, InitMod sets a default for cfg.BuildMod if it does not
-// already have an explicit value.
-func InitMod() {
-	if len(buildList) > 0 {
-		return
+// LoadModFile may make changes in memory, like adding a go directive and
+// ensuring requirements are consistent. The caller is responsible for ensuring
+// those changes are written to disk by calling LoadPackages or ListModules
+// (unless ExplicitWriteGoMod is set) or by calling WriteGoMod directly.
+//
+// As a side-effect, LoadModFile may change cfg.BuildMod to "vendor" if
+// -mod wasn't set explicitly and automatic vendoring should be enabled.
+//
+// If LoadModFile or CreateModFile has already been called, LoadModFile returns
+// the existing in-memory requirements (rather than re-reading them from disk).
+//
+// LoadModFile checks the roots of the module graph for consistency with each
+// other, but unlike LoadModGraph does not load the full module graph or check
+// it for global consistency. Most callers outside of the modload package should
+// use LoadModGraph instead.
+func LoadModFile(ctx context.Context) *Requirements {
+	if requirements != nil {
+		return requirements
 	}
 
 	Init()
-	if modRoot == "" {
-		Target = module.Version{Path: "command-line-arguments"}
-		targetPrefix = "command-line-arguments"
-		buildList = []module.Version{Target}
-		return
+	var (
+		workFileGoVersion string
+		workFileReplaces  []*modfile.Replace
+	)
+	if inWorkspaceMode() {
+		var err error
+		workFileGoVersion, modRoots, workFileReplaces, err = loadWorkFile(workFilePath)
+		if err != nil {
+			base.Fatalf("reading go.work: %v", err)
+		}
+		for _, modRoot := range modRoots {
+			sumFile := strings.TrimSuffix(modFilePath(modRoot), ".mod") + ".sum"
+			modfetch.WorkspaceGoSumFiles = append(modfetch.WorkspaceGoSumFiles, sumFile)
+		}
+		modfetch.GoSumFile = workFilePath + ".sum"
+	} else if modRoots == nil {
+		// We're in module mode, but not inside a module.
+		//
+		// Commands like 'go build', 'go run', 'go list' have no go.mod file to
+		// read or write. They would need to find and download the latest versions
+		// of a potentially large number of modules with no way to save version
+		// information. We can succeed slowly (but not reproducibly), but that's
+		// not usually a good experience.
+		//
+		// Instead, we forbid resolving import paths to modules other than std and
+		// cmd. Users may still build packages specified with .go files on the
+		// command line, but they'll see an error if those files import anything
+		// outside std.
+		//
+		// This can be overridden by calling AllowMissingModuleImports.
+		// For example, 'go get' does this, since it is expected to resolve paths.
+		//
+		// See golang.org/issue/32027.
+	} else {
+		modfetch.GoSumFile = strings.TrimSuffix(modFilePath(modRoots[0]), ".mod") + ".sum"
+	}
+	if len(modRoots) == 0 {
+		// TODO(#49228): Instead of creating a fake module with an empty modroot,
+		// make MainModules.Len() == 0 mean that we're in module mode but not inside
+		// any module.
+		mainModule := module.Version{Path: "command-line-arguments"}
+		MainModules = makeMainModules([]module.Version{mainModule}, []string{""}, []*modfile.File{nil}, []*modFileIndex{nil}, "", nil)
+		goVersion := LatestGoVersion()
+		rawGoVersion.Store(mainModule, goVersion)
+		pruning := pruningForGoVersion(goVersion)
+		if inWorkspaceMode() {
+			pruning = workspace
+		}
+		requirements = newRequirements(pruning, nil, nil)
+		return requirements
 	}
 
-	if CmdModInit {
-		// Running go mod init: do legacy module conversion
-		legacyModInit()
-		modFileToBuildList()
-		WriteGoMod()
-		return
+	var modFiles []*modfile.File
+	var mainModules []module.Version
+	var indices []*modFileIndex
+	for _, modroot := range modRoots {
+		gomod := modFilePath(modroot)
+		var fixed bool
+		data, f, err := ReadModFile(gomod, fixVersion(ctx, &fixed))
+		if err != nil {
+			base.Fatalf("go: %v", err)
+		}
+
+		modFiles = append(modFiles, f)
+		mainModule := f.Module.Mod
+		mainModules = append(mainModules, mainModule)
+		indices = append(indices, indexModFile(data, f, mainModule, fixed))
+
+		if err := module.CheckImportPath(f.Module.Mod.Path); err != nil {
+			if pathErr, ok := err.(*module.InvalidPathError); ok {
+				pathErr.Kind = "module"
+			}
+			base.Fatalf("go: %v", err)
+		}
 	}
 
-	gomod := ModFilePath()
-	data, err := lockedfile.Read(gomod)
+	MainModules = makeMainModules(mainModules, modRoots, modFiles, indices, workFileGoVersion, workFileReplaces)
+	setDefaultBuildMod() // possibly enable automatic vendoring
+	rs := requirementsFromModFiles(ctx, modFiles)
+
+	if inWorkspaceMode() {
+		// We don't need to do anything for vendor or update the mod file so
+		// return early.
+		requirements = rs
+		return rs
+	}
+
+	mainModule := MainModules.mustGetSingleMainModule()
+
+	if cfg.BuildMod == "vendor" {
+		readVendorList(mainModule)
+		index := MainModules.Index(mainModule)
+		modFile := MainModules.ModFile(mainModule)
+		checkVendorConsistency(index, modFile)
+		rs.initVendor(vendorList)
+	}
+
+	if rs.hasRedundantRoot() {
+		// If any module path appears more than once in the roots, we know that the
+		// go.mod file needs to be updated even though we have not yet loaded any
+		// transitive dependencies.
+		var err error
+		rs, err = updateRoots(ctx, rs.direct, rs, nil, nil, false)
+		if err != nil {
+			base.Fatalf("go: %v", err)
+		}
+	}
+
+	if MainModules.Index(mainModule).goVersionV == "" && rs.pruning != workspace {
+		// TODO(#45551): Do something more principled instead of checking
+		// cfg.CmdName directly here.
+		if cfg.BuildMod == "mod" && cfg.CmdName != "mod graph" && cfg.CmdName != "mod why" {
+			addGoStmt(MainModules.ModFile(mainModule), mainModule, LatestGoVersion())
+
+			// We need to add a 'go' version to the go.mod file, but we must assume
+			// that its existing contents match something between Go 1.11 and 1.16.
+			// Go 1.11 through 1.16 do not support graph pruning, but the latest Go
+			// version uses a pruned module graph — so we need to convert the
+			// requirements to support pruning.
+			var err error
+			rs, err = convertPruning(ctx, rs, pruned)
+			if err != nil {
+				base.Fatalf("go: %v", err)
+			}
+		} else {
+			rawGoVersion.Store(mainModule, modFileGoVersion(MainModules.ModFile(mainModule)))
+		}
+	}
+
+	requirements = rs
+	return requirements
+}
+
+// CreateModFile initializes a new module by creating a go.mod file.
+//
+// If modPath is empty, CreateModFile will attempt to infer the path from the
+// directory location within GOPATH.
+//
+// If a vendoring configuration file is present, CreateModFile will attempt to
+// translate it to go.mod directives. The resulting build list may not be
+// exactly the same as in the legacy configuration (for example, we can't get
+// packages at multiple versions from the same module).
+func CreateModFile(ctx context.Context, modPath string) {
+	modRoot := base.Cwd()
+	modRoots = []string{modRoot}
+	Init()
+	modFilePath := modFilePath(modRoot)
+	if _, err := fsys.Stat(modFilePath); err == nil {
+		base.Fatalf("go: %s already exists", modFilePath)
+	}
+
+	if modPath == "" {
+		var err error
+		modPath, err = findModulePath(modRoot)
+		if err != nil {
+			base.Fatalf("go: %v", err)
+		}
+	} else if err := module.CheckImportPath(modPath); err != nil {
+		if pathErr, ok := err.(*module.InvalidPathError); ok {
+			pathErr.Kind = "module"
+			// Same as build.IsLocalPath()
+			if pathErr.Path == "." || pathErr.Path == ".." ||
+				strings.HasPrefix(pathErr.Path, "./") || strings.HasPrefix(pathErr.Path, "../") {
+				pathErr.Err = errors.New("is a local import path")
+			}
+		}
+		base.Fatalf("go: %v", err)
+	} else if _, _, ok := module.SplitPathVersion(modPath); !ok {
+		if strings.HasPrefix(modPath, "gopkg.in/") {
+			invalidMajorVersionMsg := fmt.Errorf("module paths beginning with gopkg.in/ must always have a major version suffix in the form of .vN:\n\tgo mod init %s", suggestGopkgIn(modPath))
+			base.Fatalf(`go: invalid module path "%v": %v`, modPath, invalidMajorVersionMsg)
+		}
+		invalidMajorVersionMsg := fmt.Errorf("major version suffixes must be in the form of /vN and are only allowed for v2 or later:\n\tgo mod init %s", suggestModulePath(modPath))
+		base.Fatalf(`go: invalid module path "%v": %v`, modPath, invalidMajorVersionMsg)
+	}
+
+	fmt.Fprintf(os.Stderr, "go: creating new go.mod: module %s\n", modPath)
+	modFile := new(modfile.File)
+	modFile.AddModuleStmt(modPath)
+	MainModules = makeMainModules([]module.Version{modFile.Module.Mod}, []string{modRoot}, []*modfile.File{modFile}, []*modFileIndex{nil}, "", nil)
+	addGoStmt(modFile, modFile.Module.Mod, LatestGoVersion()) // Add the go directive before converted module requirements.
+
+	convertedFrom, err := convertLegacyConfig(modFile, modRoot)
+	if convertedFrom != "" {
+		fmt.Fprintf(os.Stderr, "go: copying requirements from %s\n", base.ShortPath(convertedFrom))
+	}
 	if err != nil {
 		base.Fatalf("go: %v", err)
 	}
 
-	var fixed bool
-	f, err := modfile.Parse(gomod, data, fixVersion(&fixed))
+	rs := requirementsFromModFiles(ctx, []*modfile.File{modFile})
+	rs, err = updateRoots(ctx, rs.direct, rs, nil, nil, false)
 	if err != nil {
-		// Errors returned by modfile.Parse begin with file:line.
-		base.Fatalf("go: errors parsing go.mod:\n%s\n", err)
+		base.Fatalf("go: %v", err)
 	}
-	modFile = f
-	index = indexModFile(data, f, fixed)
+	requirements = rs
+	if err := commitRequirements(ctx); err != nil {
+		base.Fatalf("go: %v", err)
+	}
 
-	if len(f.Syntax.Stmt) == 0 || f.Module == nil {
-		// Empty mod file. Must add module path.
-		path, err := findModulePath(modRoot)
-		if err != nil {
-			base.Fatalf("go: %v", err)
+	// Suggest running 'go mod tidy' unless the project is empty. Even if we
+	// imported all the correct requirements above, we're probably missing
+	// some sums, so the next build command in -mod=readonly will likely fail.
+	//
+	// We look for non-hidden .go files or subdirectories to determine whether
+	// this is an existing project. Walking the tree for packages would be more
+	// accurate, but could take much longer.
+	empty := true
+	files, _ := os.ReadDir(modRoot)
+	for _, f := range files {
+		name := f.Name()
+		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+			continue
 		}
-		f.AddModuleStmt(path)
+		if strings.HasSuffix(name, ".go") || f.IsDir() {
+			empty = false
+			break
+		}
+	}
+	if !empty {
+		fmt.Fprintf(os.Stderr, "go: to add module requirements and sums:\n\tgo mod tidy\n")
+	}
+}
+
+// CreateWorkFile initializes a new workspace by creating a go.work file.
+func CreateWorkFile(ctx context.Context, workFile string, modDirs []string) {
+	if _, err := fsys.Stat(workFile); err == nil {
+		base.Fatalf("go: %s already exists", workFile)
 	}
 
-	if len(f.Syntax.Stmt) == 1 && f.Module != nil {
-		// Entire file is just a module statement.
-		// Populate require if possible.
-		legacyModInit()
+	goV := LatestGoVersion() // Use current Go version by default
+	workF := new(modfile.WorkFile)
+	workF.Syntax = new(modfile.FileSyntax)
+	workF.AddGoStmt(goV)
+
+	for _, dir := range modDirs {
+		_, f, err := ReadModFile(filepath.Join(dir, "go.mod"), nil)
+		if err != nil {
+			if os.IsNotExist(err) {
+				base.Fatalf("go: creating workspace file: no go.mod file exists in directory %v", dir)
+			}
+			base.Fatalf("go: error parsing go.mod in directory %s: %v", dir, err)
+		}
+		workF.AddUse(ToDirectoryPath(dir), f.Module.Mod.Path)
 	}
 
-	modFileToBuildList()
-	setDefaultBuildMod()
-	if cfg.BuildMod == "vendor" {
-		readVendorList()
-		checkVendorConsistency()
-	} else {
-		// TODO(golang.org/issue/33326): if cfg.BuildMod != "readonly"?
-		WriteGoMod()
-	}
+	UpdateWorkFile(workF)
+	WriteWorkFile(workFile, workF)
 }
 
 // fixVersion returns a modfile.VersionFixer implemented using the Query function.
@@ -444,7 +916,7 @@ func InitMod() {
 // and does nothing for versions that already appear to be canonical.
 //
 // The VersionFixer sets 'fixed' if it ever returns a non-canonical version.
-func fixVersion(fixed *bool) modfile.VersionFixer {
+func fixVersion(ctx context.Context, fixed *bool) modfile.VersionFixer {
 	return func(path, vers string) (resolved string, err error) {
 		defer func() {
 			if err == nil && resolved != vers {
@@ -471,12 +943,13 @@ func fixVersion(fixed *bool) modfile.VersionFixer {
 			}
 		}
 		if vers != "" && module.CanonicalVersion(vers) == vers {
-			if err := module.CheckPathMajor(vers, pathMajor); err == nil {
-				return vers, nil
+			if err := module.CheckPathMajor(vers, pathMajor); err != nil {
+				return "", module.VersionError(module.Version{Path: path, Version: vers}, err)
 			}
+			return vers, nil
 		}
 
-		info, err := Query(path, vers, "", nil)
+		info, err := Query(ctx, path, vers, "", nil)
 		if err != nil {
 			return "", err
 		}
@@ -488,216 +961,296 @@ func fixVersion(fixed *bool) modfile.VersionFixer {
 // when there is no module root. Normally, this is forbidden because it's slow
 // and there's no way to make the result reproducible, but some commands
 // like 'go get' are expected to do this.
+//
+// This function affects the default cfg.BuildMod when outside of a module,
+// so it can only be called prior to Init.
 func AllowMissingModuleImports() {
+	if initialized {
+		panic("AllowMissingModuleImports after Init")
+	}
 	allowMissingModuleImports = true
 }
 
-// modFileToBuildList initializes buildList from the modFile.
-func modFileToBuildList() {
-	Target = modFile.Module.Mod
-	targetPrefix = Target.Path
-	if rel := search.InDir(base.Cwd, cfg.GOROOTsrc); rel != "" {
-		targetInGorootSrc = true
-		if Target.Path == "std" {
-			targetPrefix = ""
+// makeMainModules creates a MainModuleSet and associated variables according to
+// the given main modules.
+func makeMainModules(ms []module.Version, rootDirs []string, modFiles []*modfile.File, indices []*modFileIndex, workFileGoVersion string, workFileReplaces []*modfile.Replace) *MainModuleSet {
+	for _, m := range ms {
+		if m.Version != "" {
+			panic("mainModulesCalled with module.Version with non empty Version field: " + fmt.Sprintf("%#v", m))
 		}
 	}
-
-	list := []module.Version{Target}
-	for _, r := range modFile.Require {
-		list = append(list, r.Mod)
+	modRootContainingCWD := findModuleRoot(base.Cwd())
+	mainModules := &MainModuleSet{
+		versions:           ms[:len(ms):len(ms)],
+		inGorootSrc:        map[module.Version]bool{},
+		pathPrefix:         map[module.Version]string{},
+		modRoot:            map[module.Version]string{},
+		modFiles:           map[module.Version]*modfile.File{},
+		indices:            map[module.Version]*modFileIndex{},
+		workFileGoVersion:  workFileGoVersion,
+		workFileReplaceMap: toReplaceMap(workFileReplaces),
+		highestReplaced:    map[string]string{},
 	}
-	buildList = list
+	mainModulePaths := make(map[string]bool)
+	for _, m := range ms {
+		mainModulePaths[m.Path] = true
+	}
+	replacedByWorkFile := make(map[string]bool)
+	replacements := make(map[module.Version]module.Version)
+	for _, r := range workFileReplaces {
+		if mainModulePaths[r.Old.Path] && r.Old.Version == "" {
+			base.Errorf("go: workspace module %v is replaced at all versions in the go.work file. To fix, remove the replacement from the go.work file or specify the version at which to replace the module.", r.Old.Path)
+		}
+		replacedByWorkFile[r.Old.Path] = true
+		v, ok := mainModules.highestReplaced[r.Old.Path]
+		if !ok || semver.Compare(r.Old.Version, v) > 0 {
+			mainModules.highestReplaced[r.Old.Path] = r.Old.Version
+		}
+		replacements[r.Old] = r.New
+	}
+	for i, m := range ms {
+		mainModules.pathPrefix[m] = m.Path
+		mainModules.modRoot[m] = rootDirs[i]
+		mainModules.modFiles[m] = modFiles[i]
+		mainModules.indices[m] = indices[i]
+
+		if mainModules.modRoot[m] == modRootContainingCWD {
+			mainModules.modContainingCWD = m
+		}
+
+		if rel := search.InDir(rootDirs[i], cfg.GOROOTsrc); rel != "" {
+			mainModules.inGorootSrc[m] = true
+			if m.Path == "std" {
+				// The "std" module in GOROOT/src is the Go standard library. Unlike other
+				// modules, the packages in the "std" module have no import-path prefix.
+				//
+				// Modules named "std" outside of GOROOT/src do not receive this special
+				// treatment, so it is possible to run 'go test .' in other GOROOTs to
+				// test individual packages using a combination of the modified package
+				// and the ordinary standard library.
+				// (See https://golang.org/issue/30756.)
+				mainModules.pathPrefix[m] = ""
+			}
+		}
+
+		if modFiles[i] != nil {
+			curModuleReplaces := make(map[module.Version]bool)
+			for _, r := range modFiles[i].Replace {
+				if replacedByWorkFile[r.Old.Path] {
+					continue
+				}
+				var newV module.Version = r.New
+				if WorkFilePath() != "" && newV.Version == "" && !filepath.IsAbs(newV.Path) {
+					// Since we are in a workspace, we may be loading replacements from
+					// multiple go.mod files. Relative paths in those replacement are
+					// relative to the go.mod file, not the workspace, so the same string
+					// may refer to two different paths and different strings may refer to
+					// the same path. Convert them all to be absolute instead.
+					//
+					// (We could do this outside of a workspace too, but it would mean that
+					// replacement paths in error strings needlessly differ from what's in
+					// the go.mod file.)
+					newV.Path = filepath.Join(rootDirs[i], newV.Path)
+				}
+				if prev, ok := replacements[r.Old]; ok && !curModuleReplaces[r.Old] && prev != newV {
+					base.Fatalf("go: conflicting replacements for %v:\n\t%v\n\t%v\nuse \"go work edit -replace %v=[override]\" to resolve", r.Old, prev, newV, r.Old)
+				}
+				curModuleReplaces[r.Old] = true
+				replacements[r.Old] = newV
+
+				v, ok := mainModules.highestReplaced[r.Old.Path]
+				if !ok || semver.Compare(r.Old.Version, v) > 0 {
+					mainModules.highestReplaced[r.Old.Path] = r.Old.Version
+				}
+			}
+		}
+	}
+	return mainModules
 }
 
-// setDefaultBuildMod sets a default value for cfg.BuildMod
-// if it is currently empty.
+// requirementsFromModFiles returns the set of non-excluded requirements from
+// the global modFile.
+func requirementsFromModFiles(ctx context.Context, modFiles []*modfile.File) *Requirements {
+	var roots []module.Version
+	direct := map[string]bool{}
+	var pruning modPruning
+	if inWorkspaceMode() {
+		pruning = workspace
+		roots = make([]module.Version, len(MainModules.Versions()))
+		copy(roots, MainModules.Versions())
+	} else {
+		pruning = pruningForGoVersion(MainModules.GoVersion())
+		if len(modFiles) != 1 {
+			panic(fmt.Errorf("requirementsFromModFiles called with %v modfiles outside workspace mode", len(modFiles)))
+		}
+		modFile := modFiles[0]
+		roots = make([]module.Version, 0, len(modFile.Require))
+		mm := MainModules.mustGetSingleMainModule()
+		for _, r := range modFile.Require {
+			if index := MainModules.Index(mm); index != nil && index.exclude[r.Mod] {
+				if cfg.BuildMod == "mod" {
+					fmt.Fprintf(os.Stderr, "go: dropping requirement on excluded version %s %s\n", r.Mod.Path, r.Mod.Version)
+				} else {
+					fmt.Fprintf(os.Stderr, "go: ignoring requirement on excluded version %s %s\n", r.Mod.Path, r.Mod.Version)
+				}
+				continue
+			}
+
+			roots = append(roots, r.Mod)
+			if !r.Indirect {
+				direct[r.Mod.Path] = true
+			}
+		}
+	}
+	module.Sort(roots)
+	rs := newRequirements(pruning, roots, direct)
+	return rs
+}
+
+// setDefaultBuildMod sets a default value for cfg.BuildMod if the -mod flag
+// wasn't provided. setDefaultBuildMod may be called multiple times.
 func setDefaultBuildMod() {
-	if cfg.BuildMod != "" {
+	if cfg.BuildModExplicit {
+		if inWorkspaceMode() && cfg.BuildMod != "readonly" {
+			base.Fatalf("go: -mod may only be set to readonly when in workspace mode, but it is set to %q"+
+				"\n\tRemove the -mod flag to use the default readonly value,"+
+				"\n\tor set GOWORK=off to disable workspace mode.", cfg.BuildMod)
+		}
 		// Don't override an explicit '-mod=' argument.
 		return
 	}
-	cfg.BuildMod = "mod"
-	if cfg.CmdName == "get" || strings.HasPrefix(cfg.CmdName, "mod ") {
-		// Don't set -mod implicitly for commands whose purpose is to
-		// manipulate the build list.
+
+	// TODO(#40775): commands should pass in the module mode as an option
+	// to modload functions instead of relying on an implicit setting
+	// based on command name.
+	switch cfg.CmdName {
+	case "get", "mod download", "mod init", "mod tidy", "work sync":
+		// These commands are intended to update go.mod and go.sum.
+		cfg.BuildMod = "mod"
 		return
-	}
-	if modRoot == "" {
+	case "mod graph", "mod verify", "mod why":
+		// These commands should not update go.mod or go.sum, but they should be
+		// able to fetch modules not in go.sum and should not report errors if
+		// go.mod is inconsistent. They're useful for debugging, and they need
+		// to work in buggy situations.
+		cfg.BuildMod = "mod"
 		return
-	}
-
-	if fi, err := os.Stat(filepath.Join(modRoot, "vendor")); err == nil && fi.IsDir() {
-		modGo := "unspecified"
-		if index.goVersion != "" {
-			if semver.Compare("v"+index.goVersion, "v1.14") >= 0 {
-				// The Go version is at least 1.14, and a vendor directory exists.
-				// Set -mod=vendor by default.
-				cfg.BuildMod = "vendor"
-				cfg.BuildModReason = "Go version in go.mod is at least 1.14 and vendor directory exists."
-				return
-			} else {
-				modGo = index.goVersion
-			}
-		}
-
-		// Since a vendor directory exists, we have a non-trivial reason for
-		// choosing -mod=mod, although it probably won't be used for anything.
-		// Record the reason anyway for consistency.
-		// It may be overridden if we switch to mod=readonly below.
-		cfg.BuildModReason = fmt.Sprintf("Go version in go.mod is %s.", modGo)
-	}
-
-	p := ModFilePath()
-	if fi, err := os.Stat(p); err == nil && !hasWritePerm(p, fi) {
+	case "mod vendor":
 		cfg.BuildMod = "readonly"
-		cfg.BuildModReason = "go.mod file is read-only."
+		return
 	}
-}
-
-// checkVendorConsistency verifies that the vendor/modules.txt file matches (if
-// go 1.14) or at least does not contradict (go 1.13 or earlier) the
-// requirements and replacements listed in the main module's go.mod file.
-func checkVendorConsistency() {
-	readVendorList()
-
-	pre114 := false
-	if modFile.Go == nil || semver.Compare("v"+modFile.Go.Version, "v1.14") < 0 {
-		// Go versions before 1.14 did not include enough information in
-		// vendor/modules.txt to check for consistency.
-		// If we know that we're on an earlier version, relax the consistency check.
-		pre114 = true
-	}
-
-	vendErrors := new(strings.Builder)
-	vendErrorf := func(mod module.Version, format string, args ...interface{}) {
-		detail := fmt.Sprintf(format, args...)
-		if mod.Version == "" {
-			fmt.Fprintf(vendErrors, "\n\t%s: %s", mod.Path, detail)
+	if modRoots == nil {
+		if allowMissingModuleImports {
+			cfg.BuildMod = "mod"
 		} else {
-			fmt.Fprintf(vendErrors, "\n\t%s@%s: %s", mod.Path, mod.Version, detail)
+			cfg.BuildMod = "readonly"
 		}
+		return
 	}
 
-	for _, r := range modFile.Require {
-		if !vendorMeta[r.Mod].Explicit {
-			if pre114 {
-				// Before 1.14, modules.txt did not indicate whether modules were listed
-				// explicitly in the main module's go.mod file.
-				// However, we can at least detect a version mismatch if packages were
-				// vendored from a non-matching version.
-				if vv, ok := vendorVersion[r.Mod.Path]; ok && vv != r.Mod.Version {
-					vendErrorf(r.Mod, fmt.Sprintf("is explicitly required in go.mod, but vendor/modules.txt indicates %s@%s", r.Mod.Path, vv))
+	if len(modRoots) == 1 {
+		index := MainModules.GetSingleIndexOrNil()
+		if fi, err := fsys.Stat(filepath.Join(modRoots[0], "vendor")); err == nil && fi.IsDir() {
+			modGo := "unspecified"
+			if index != nil && index.goVersionV != "" {
+				if semver.Compare(index.goVersionV, "v1.14") >= 0 {
+					// The Go version is at least 1.14, and a vendor directory exists.
+					// Set -mod=vendor by default.
+					cfg.BuildMod = "vendor"
+					cfg.BuildModReason = "Go version in go.mod is at least 1.14 and vendor directory exists."
+					return
+				} else {
+					modGo = index.goVersionV[1:]
 				}
-			} else {
-				vendErrorf(r.Mod, "is explicitly required in go.mod, but not marked as explicit in vendor/modules.txt")
 			}
+
+			// Since a vendor directory exists, we should record why we didn't use it.
+			// This message won't normally be shown, but it may appear with import errors.
+			cfg.BuildModReason = fmt.Sprintf("Go version in go.mod is %s, so vendor directory was not used.", modGo)
 		}
 	}
 
-	describe := func(m module.Version) string {
-		if m.Version == "" {
-			return m.Path
-		}
-		return m.Path + "@" + m.Version
-	}
-
-	// We need to verify *all* replacements that occur in modfile: even if they
-	// don't directly apply to any module in the vendor list, the replacement
-	// go.mod file can affect the selected versions of other (transitive)
-	// dependencies
-	for _, r := range modFile.Replace {
-		vr := vendorMeta[r.Old].Replacement
-		if vr == (module.Version{}) {
-			if pre114 && (r.Old.Version == "" || vendorVersion[r.Old.Path] != r.Old.Version) {
-				// Before 1.14, modules.txt omitted wildcard replacements and
-				// replacements for modules that did not have any packages to vendor.
-			} else {
-				vendErrorf(r.Old, "is replaced in go.mod, but not marked as replaced in vendor/modules.txt")
-			}
-		} else if vr != r.New {
-			vendErrorf(r.Old, "is replaced by %s in go.mod, but marked as replaced by %s in vendor/modules.txt", describe(r.New), describe(vr))
-		}
-	}
-
-	for _, mod := range vendorList {
-		meta := vendorMeta[mod]
-		if meta.Explicit {
-			if _, inGoMod := index.require[mod]; !inGoMod {
-				vendErrorf(mod, "is marked as explicit in vendor/modules.txt, but not explicitly required in go.mod")
-			}
-		}
-	}
-
-	for _, mod := range vendorReplaced {
-		r := Replacement(mod)
-		if r == (module.Version{}) {
-			vendErrorf(mod, "is marked as replaced in vendor/modules.txt, but not replaced in go.mod")
-			continue
-		}
-		if meta := vendorMeta[mod]; r != meta.Replacement {
-			vendErrorf(mod, "is marked as replaced by %s in vendor/modules.txt, but replaced by %s in go.mod", describe(meta.Replacement), describe(r))
-		}
-	}
-
-	if vendErrors.Len() > 0 {
-		base.Fatalf("go: inconsistent vendoring in %s:%s\n\nrun 'go mod vendor' to sync, or use -mod=mod or -mod=readonly to ignore the vendor directory", modRoot, vendErrors)
-	}
+	cfg.BuildMod = "readonly"
 }
 
-// Allowed reports whether module m is allowed (not excluded) by the main module's go.mod.
-func Allowed(m module.Version) bool {
-	return index == nil || !index.exclude[m]
+func mustHaveCompleteRequirements() bool {
+	return cfg.BuildMod != "mod" && !inWorkspaceMode()
 }
 
-func legacyModInit() {
-	if modFile == nil {
-		path, err := findModulePath(modRoot)
+// convertLegacyConfig imports module requirements from a legacy vendoring
+// configuration file, if one is present.
+func convertLegacyConfig(modFile *modfile.File, modRoot string) (from string, err error) {
+	noneSelected := func(path string) (version string) { return "none" }
+	queryPackage := func(path, rev string) (module.Version, error) {
+		pkgMods, modOnly, err := QueryPattern(context.Background(), path, rev, noneSelected, nil)
 		if err != nil {
-			base.Fatalf("go: %v", err)
+			return module.Version{}, err
 		}
-		fmt.Fprintf(os.Stderr, "go: creating new go.mod: module %s\n", path)
-		modFile = new(modfile.File)
-		modFile.AddModuleStmt(path)
-		addGoStmt() // Add the go directive before converted module requirements.
+		if len(pkgMods) > 0 {
+			return pkgMods[0].Mod, nil
+		}
+		return modOnly.Mod, nil
 	}
-
 	for _, name := range altConfigs {
 		cfg := filepath.Join(modRoot, name)
-		data, err := ioutil.ReadFile(cfg)
+		data, err := os.ReadFile(cfg)
 		if err == nil {
 			convert := modconv.Converters[name]
 			if convert == nil {
-				return
+				return "", nil
 			}
-			fmt.Fprintf(os.Stderr, "go: copying requirements from %s\n", base.ShortPath(cfg))
 			cfg = filepath.ToSlash(cfg)
-			if err := modconv.ConvertLegacyConfig(modFile, cfg, data); err != nil {
-				base.Fatalf("go: %v", err)
-			}
-			if len(modFile.Syntax.Stmt) == 1 {
-				// Add comment to avoid re-converting every time it runs.
-				modFile.AddComment("// go: no requirements found in " + name)
-			}
-			return
+			err := modconv.ConvertLegacyConfig(modFile, cfg, data, queryPackage)
+			return name, err
 		}
 	}
+	return "", nil
 }
 
-// addGoStmt adds a go directive to the go.mod file if it does not already include one.
-// The 'go' version added, if any, is the latest version supported by this toolchain.
-func addGoStmt() {
+// addGoStmt adds a go directive to the go.mod file if it does not already
+// include one. The 'go' version added, if any, is the latest version supported
+// by this toolchain.
+func addGoStmt(modFile *modfile.File, mod module.Version, v string) {
 	if modFile.Go != nil && modFile.Go.Version != "" {
 		return
 	}
+	if err := modFile.AddGoStmt(v); err != nil {
+		base.Fatalf("go: internal error: %v", err)
+	}
+	rawGoVersion.Store(mod, v)
+}
+
+// LatestGoVersion returns the latest version of the Go language supported by
+// this toolchain, like "1.17".
+func LatestGoVersion() string {
 	tags := build.Default.ReleaseTags
 	version := tags[len(tags)-1]
 	if !strings.HasPrefix(version, "go") || !modfile.GoVersionRE.MatchString(version[2:]) {
-		base.Fatalf("go: unrecognized default version %q", version)
+		base.Fatalf("go: internal error: unrecognized default version %q", version)
 	}
-	if err := modFile.AddGoStmt(version[2:]); err != nil {
-		base.Fatalf("go: internal error: %v", err)
+	return version[2:]
+}
+
+// priorGoVersion returns the Go major release immediately preceding v,
+// or v itself if v is the first Go major release (1.0) or not a supported
+// Go version.
+func priorGoVersion(v string) string {
+	vTag := "go" + v
+	tags := build.Default.ReleaseTags
+	for i, tag := range tags {
+		if tag == vTag {
+			if i == 0 {
+				return v
+			}
+
+			version := tags[i-1]
+			if !strings.HasPrefix(version, "go") || !modfile.GoVersionRE.MatchString(version[2:]) {
+				base.Fatalf("go: internal error: unrecognized version %q", version)
+			}
+			return version[2:]
+		}
 	}
+	return v
 }
 
 var altConfigs = []string{
@@ -715,7 +1268,7 @@ var altConfigs = []string{
 	".git/config",
 }
 
-func findModuleRoot(dir string) (root string) {
+func findModuleRoot(dir string) (roots string) {
 	if dir == "" {
 		panic("dir not set")
 	}
@@ -723,7 +1276,7 @@ func findModuleRoot(dir string) (root string) {
 
 	// Look for enclosing go.mod.
 	for {
-		if fi, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil && !fi.IsDir() {
+		if fi, err := fsys.Stat(filepath.Join(dir, "go.mod")); err == nil && !fi.IsDir() {
 			return dir
 		}
 		d := filepath.Dir(dir)
@@ -735,18 +1288,46 @@ func findModuleRoot(dir string) (root string) {
 	return ""
 }
 
+func findWorkspaceFile(dir string) (root string) {
+	if dir == "" {
+		panic("dir not set")
+	}
+	dir = filepath.Clean(dir)
+
+	// Look for enclosing go.mod.
+	for {
+		f := filepath.Join(dir, "go.work")
+		if fi, err := fsys.Stat(f); err == nil && !fi.IsDir() {
+			return f
+		}
+		d := filepath.Dir(dir)
+		if d == dir {
+			break
+		}
+		if d == cfg.GOROOT {
+			// As a special case, don't cross GOROOT to find a go.work file.
+			// The standard library and commands built in go always use the vendored
+			// dependencies, so avoid using a most likely irrelevant go.work file.
+			return ""
+		}
+		dir = d
+	}
+	return ""
+}
+
 func findAltConfig(dir string) (root, name string) {
 	if dir == "" {
 		panic("dir not set")
 	}
 	dir = filepath.Clean(dir)
+	if rel := search.InDir(dir, cfg.BuildContext.GOROOT); rel != "" {
+		// Don't suggest creating a module from $GOROOT/.git/config
+		// or a config file found in any parent of $GOROOT (see #34191).
+		return "", ""
+	}
 	for {
 		for _, name := range altConfigs {
-			if fi, err := os.Stat(filepath.Join(dir, name)); err == nil && !fi.IsDir() {
-				if rel := search.InDir(dir, cfg.BuildContext.GOROOT); rel == "." {
-					// Don't suggest creating a module from $GOROOT/.git/config.
-					return "", ""
-				}
+			if fi, err := fsys.Stat(filepath.Join(dir, name)); err == nil && !fi.IsDir() {
 				return dir, name
 			}
 		}
@@ -760,14 +1341,6 @@ func findAltConfig(dir string) (root, name string) {
 }
 
 func findModulePath(dir string) (string, error) {
-	if CmdModModule != "" {
-		// Running go mod init x/y/z; return x/y/z.
-		if err := module.CheckImportPath(CmdModModule); err != nil {
-			return "", err
-		}
-		return CmdModModule, nil
-	}
-
 	// TODO(bcmills): once we have located a plausible module path, we should
 	// query version control (if available) to verify that it matches the major
 	// version of the most recent tag.
@@ -776,9 +1349,9 @@ func findModulePath(dir string) (string, error) {
 
 	// Cast about for import comments,
 	// first in top-level directory, then in subdirectories.
-	list, _ := ioutil.ReadDir(dir)
+	list, _ := os.ReadDir(dir)
 	for _, info := range list {
-		if info.Mode().IsRegular() && strings.HasSuffix(info.Name(), ".go") {
+		if info.Type().IsRegular() && strings.HasSuffix(info.Name(), ".go") {
 			if com := findImportComment(filepath.Join(dir, info.Name())); com != "" {
 				return com, nil
 			}
@@ -786,9 +1359,9 @@ func findModulePath(dir string) (string, error) {
 	}
 	for _, info1 := range list {
 		if info1.IsDir() {
-			files, _ := ioutil.ReadDir(filepath.Join(dir, info1.Name()))
+			files, _ := os.ReadDir(filepath.Join(dir, info1.Name()))
 			for _, info2 := range files {
-				if info2.Mode().IsRegular() && strings.HasSuffix(info2.Name(), ".go") {
+				if info2.Type().IsRegular() && strings.HasSuffix(info2.Name(), ".go") {
 					if com := findImportComment(filepath.Join(dir, info1.Name(), info2.Name())); com != "" {
 						return path.Dir(com), nil
 					}
@@ -798,7 +1371,7 @@ func findModulePath(dir string) (string, error) {
 	}
 
 	// Look for Godeps.json declaring import path.
-	data, _ := ioutil.ReadFile(filepath.Join(dir, "Godeps/Godeps.json"))
+	data, _ := os.ReadFile(filepath.Join(dir, "Godeps/Godeps.json"))
 	var cfg1 struct{ ImportPath string }
 	json.Unmarshal(data, &cfg1)
 	if cfg1.ImportPath != "" {
@@ -806,7 +1379,7 @@ func findModulePath(dir string) (string, error) {
 	}
 
 	// Look for vendor.json declaring import path.
-	data, _ = ioutil.ReadFile(filepath.Join(dir, "vendor/vendor.json"))
+	data, _ = os.ReadFile(filepath.Join(dir, "vendor/vendor.json"))
 	var cfg2 struct{ RootPath string }
 	json.Unmarshal(data, &cfg2)
 	if cfg2.RootPath != "" {
@@ -814,16 +1387,29 @@ func findModulePath(dir string) (string, error) {
 	}
 
 	// Look for path in GOPATH.
+	var badPathErr error
 	for _, gpdir := range filepath.SplitList(cfg.BuildContext.GOPATH) {
 		if gpdir == "" {
 			continue
 		}
 		if rel := search.InDir(dir, filepath.Join(gpdir, "src")); rel != "" && rel != "." {
-			return filepath.ToSlash(rel), nil
+			path := filepath.ToSlash(rel)
+			// gorelease will alert users publishing their modules to fix their paths.
+			if err := module.CheckImportPath(path); err != nil {
+				badPathErr = err
+				break
+			}
+			return path, nil
 		}
 	}
 
-	msg := `cannot determine module path for source directory %s (outside GOPATH, module path must be specified)
+	reason := "outside GOPATH, module path must be specified"
+	if badPathErr != nil {
+		// return a different error message if the module was in GOPATH, but
+		// the module path determined above would be an invalid path.
+		reason = fmt.Sprintf("bad module path inferred from directory in GOPATH: %v", badPathErr)
+	}
+	msg := `cannot determine module path for source directory %s (%s)
 
 Example usage:
 	'go mod init example.com/m' to initialize a v0 or v1 module
@@ -831,7 +1417,7 @@ Example usage:
 
 Run 'go help mod init' for more information.
 `
-	return "", fmt.Errorf(msg, dir)
+	return "", fmt.Errorf(msg, dir, reason)
 }
 
 var (
@@ -839,7 +1425,7 @@ var (
 )
 
 func findImportComment(file string) string {
-	data, err := ioutil.ReadFile(file)
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return ""
 	}
@@ -854,101 +1440,98 @@ func findImportComment(file string) string {
 	return path
 }
 
-var allowWriteGoMod = true
-
-// DisallowWriteGoMod causes future calls to WriteGoMod to do nothing at all.
-func DisallowWriteGoMod() {
-	allowWriteGoMod = false
-}
-
-// AllowWriteGoMod undoes the effect of DisallowWriteGoMod:
-// future calls to WriteGoMod will update go.mod if needed.
-// Note that any past calls have been discarded, so typically
-// a call to AlowWriteGoMod should be followed by a call to WriteGoMod.
-func AllowWriteGoMod() {
-	allowWriteGoMod = true
-}
-
-// MinReqs returns a Reqs with minimal additional dependencies of Target,
-// as will be written to go.mod.
-func MinReqs() mvs.Reqs {
-	var retain []string
-	for _, m := range buildList[1:] {
-		_, explicit := index.require[m]
-		if explicit || loaded.direct[m.Path] {
-			retain = append(retain, m.Path)
-		}
-	}
-	min, err := mvs.Req(Target, retain, Reqs())
-	if err != nil {
-		base.Fatalf("go: %v", err)
-	}
-	return &mvsReqs{buildList: append([]module.Version{Target}, min...)}
-}
-
 // WriteGoMod writes the current build list back to go.mod.
-func WriteGoMod() {
-	// If we're using -mod=vendor we basically ignored
-	// go.mod, so definitely don't try to write back our
-	// incomplete view of the world.
-	if !allowWriteGoMod || cfg.BuildMod == "vendor" {
-		return
-	}
+func WriteGoMod(ctx context.Context) error {
+	requirements = LoadModFile(ctx)
+	return commitRequirements(ctx)
+}
 
-	// If we aren't in a module, we don't have anywhere to write a go.mod file.
-	if modRoot == "" {
-		return
+// commitRequirements ensures go.mod and go.sum are up to date with the current
+// requirements.
+//
+// In "mod" mode, commitRequirements writes changes to go.mod and go.sum.
+//
+// In "readonly" and "vendor" modes, commitRequirements returns an error if
+// go.mod or go.sum are out of date in a semantically significant way.
+//
+// In workspace mode, commitRequirements only writes changes to go.work.sum.
+func commitRequirements(ctx context.Context) (err error) {
+	if inWorkspaceMode() {
+		// go.mod files aren't updated in workspace mode, but we still want to
+		// update the go.work.sum file.
+		return modfetch.WriteGoSum(keepSums(ctx, loaded, requirements, addBuildListZipSums), mustHaveCompleteRequirements())
 	}
-
-	if cfg.BuildMod != "readonly" {
-		addGoStmt()
+	if MainModules.Len() != 1 || MainModules.ModRoot(MainModules.Versions()[0]) == "" {
+		// We aren't in a module, so we don't have anywhere to write a go.mod file.
+		return nil
 	}
+	mainModule := MainModules.mustGetSingleMainModule()
+	modFile := MainModules.ModFile(mainModule)
+	if modFile == nil {
+		// command-line-arguments has no .mod file to write.
+		return nil
+	}
+	modFilePath := modFilePath(MainModules.ModRoot(mainModule))
 
-	if loaded != nil {
-		reqs := MinReqs()
-		min, err := reqs.Required(Target)
-		if err != nil {
-			base.Fatalf("go: %v", err)
-		}
-		var list []*modfile.Require
-		for _, m := range min {
-			list = append(list, &modfile.Require{
-				Mod:      m,
-				Indirect: !loaded.direct[m.Path],
-			})
-		}
+	var list []*modfile.Require
+	for _, m := range requirements.rootModules {
+		list = append(list, &modfile.Require{
+			Mod:      m,
+			Indirect: !requirements.direct[m.Path],
+		})
+	}
+	if modFile.Go == nil || modFile.Go.Version == "" {
+		modFile.AddGoStmt(modFileGoVersion(modFile))
+	}
+	if semver.Compare("v"+modFileGoVersion(modFile), separateIndirectVersionV) < 0 {
 		modFile.SetRequire(list)
+	} else {
+		modFile.SetRequireSeparateIndirect(list)
 	}
 	modFile.Cleanup()
 
+	index := MainModules.GetSingleIndexOrNil()
 	dirty := index.modFileIsDirty(modFile)
-	if dirty && cfg.BuildMod == "readonly" {
+	if dirty && cfg.BuildMod != "mod" {
 		// If we're about to fail due to -mod=readonly,
 		// prefer to report a dirty go.mod over a dirty go.sum
-		if cfg.BuildModReason != "" {
-			base.Fatalf("go: updates to go.mod needed, disabled by -mod=readonly\n\t(%s)", cfg.BuildModReason)
-		} else {
-			base.Fatalf("go: updates to go.mod needed, disabled by -mod=readonly")
-		}
+		return errGoModDirty
 	}
-	// Always update go.sum, even if we didn't change go.mod: we may have
-	// downloaded modules that we didn't have before.
-	modfetch.WriteGoSum()
 
 	if !dirty && cfg.CmdName != "mod tidy" {
 		// The go.mod file has the same semantic content that it had before
 		// (but not necessarily the same exact bytes).
-		// Ignore any intervening edits.
-		return
+		// Don't write go.mod, but write go.sum in case we added or trimmed sums.
+		// 'go mod init' shouldn't write go.sum, since it will be incomplete.
+		if cfg.CmdName != "mod init" {
+			if err := modfetch.WriteGoSum(keepSums(ctx, loaded, requirements, addBuildListZipSums), mustHaveCompleteRequirements()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if _, ok := fsys.OverlayPath(modFilePath); ok {
+		if dirty {
+			return errors.New("updates to go.mod needed, but go.mod is part of the overlay specified with -overlay")
+		}
+		return nil
 	}
 
 	new, err := modFile.Format()
 	if err != nil {
-		base.Fatalf("go: %v", err)
+		return err
 	}
 	defer func() {
 		// At this point we have determined to make the go.mod file on disk equal to new.
-		index = indexModFile(new, modFile, false)
+		MainModules.SetIndex(mainModule, indexModFile(new, modFile, mainModule, false))
+
+		// Update go.sum after releasing the side lock and refreshing the index.
+		// 'go mod init' shouldn't write go.sum, since it will be incomplete.
+		if cfg.CmdName != "mod init" {
+			if err == nil {
+				err = modfetch.WriteGoSum(keepSums(ctx, loaded, requirements, addBuildListZipSums), mustHaveCompleteRequirements())
+			}
+		}
 	}()
 
 	// Make a best-effort attempt to acquire the side lock, only to exclude
@@ -959,7 +1542,7 @@ func WriteGoMod() {
 
 	errNoChange := errors.New("no update needed")
 
-	err = lockedfile.Transform(ModFilePath(), func(old []byte) ([]byte, error) {
+	err = lockedfile.Transform(modFilePath, func(old []byte) ([]byte, error) {
 		if bytes.Equal(old, new) {
 			// The go.mod file is already equal to new, possibly as the result of some
 			// other process.
@@ -980,116 +1563,161 @@ func WriteGoMod() {
 	})
 
 	if err != nil && err != errNoChange {
-		base.Fatalf("go: updating go.mod: %v", err)
+		return fmt.Errorf("updating go.mod: %w", err)
 	}
+	return nil
 }
 
-// indexModFile rebuilds the index of modFile.
-// If modFile has been changed since it was first read,
-// modFile.Cleanup must be called before indexModFile.
-func indexModFile(data []byte, modFile *modfile.File, needsFix bool) *modFileIndex {
-	i := new(modFileIndex)
-	i.data = data
-	i.dataNeedsFix = needsFix
+// keepSums returns the set of modules (and go.mod file entries) for which
+// checksums would be needed in order to reload the same set of packages
+// loaded by the most recent call to LoadPackages or ImportFromFiles,
+// including any go.mod files needed to reconstruct the MVS result,
+// in addition to the checksums for every module in keepMods.
+func keepSums(ctx context.Context, ld *loader, rs *Requirements, which whichSums) map[module.Version]bool {
+	// Every module in the full module graph contributes its requirements,
+	// so in order to ensure that the build list itself is reproducible,
+	// we need sums for every go.mod in the graph (regardless of whether
+	// that version is selected).
+	keep := make(map[module.Version]bool)
 
-	i.module = module.Version{}
-	if modFile.Module != nil {
-		i.module = modFile.Module.Mod
-	}
+	// Add entries for modules in the build list with paths that are prefixes of
+	// paths of loaded packages. We need to retain sums for all of these modules —
+	// not just the modules containing the actual packages — in order to rule out
+	// ambiguous import errors the next time we load the package.
+	if ld != nil {
+		for _, pkg := range ld.pkgs {
+			// We check pkg.mod.Path here instead of pkg.inStd because the
+			// pseudo-package "C" is not in std, but not provided by any module (and
+			// shouldn't force loading the whole module graph).
+			if pkg.testOf != nil || (pkg.mod.Path == "" && pkg.err == nil) || module.CheckImportPath(pkg.path) != nil {
+				continue
+			}
 
-	i.goVersion = ""
-	if modFile.Go != nil {
-		i.goVersion = modFile.Go.Version
-	}
+			if rs.pruning == pruned && pkg.mod.Path != "" {
+				if v, ok := rs.rootSelected(pkg.mod.Path); ok && v == pkg.mod.Version {
+					// pkg was loaded from a root module, and because the main module has
+					// a pruned module graph we do not check non-root modules for
+					// conflicts for packages that can be found in roots. So we only need
+					// the checksums for the root modules that may contain pkg, not all
+					// possible modules.
+					for prefix := pkg.path; prefix != "."; prefix = path.Dir(prefix) {
+						if v, ok := rs.rootSelected(prefix); ok && v != "none" {
+							m := module.Version{Path: prefix, Version: v}
+							r := resolveReplacement(m)
+							keep[r] = true
+						}
+					}
+					continue
+				}
+			}
 
-	i.require = make(map[module.Version]requireMeta, len(modFile.Require))
-	for _, r := range modFile.Require {
-		i.require[r.Mod] = requireMeta{indirect: r.Indirect}
-	}
-
-	i.replace = make(map[module.Version]module.Version, len(modFile.Replace))
-	for _, r := range modFile.Replace {
-		if prev, dup := i.replace[r.Old]; dup && prev != r.New {
-			base.Fatalf("go: conflicting replacements for %v:\n\t%v\n\t%v", r.Old, prev, r.New)
-		}
-		i.replace[r.Old] = r.New
-	}
-
-	i.exclude = make(map[module.Version]bool, len(modFile.Exclude))
-	for _, x := range modFile.Exclude {
-		i.exclude[x.Mod] = true
-	}
-
-	return i
-}
-
-// modFileIsDirty reports whether the go.mod file differs meaningfully
-// from what was indexed.
-// If modFile has been changed (even cosmetically) since it was first read,
-// modFile.Cleanup must be called before modFileIsDirty.
-func (i *modFileIndex) modFileIsDirty(modFile *modfile.File) bool {
-	if i == nil {
-		return modFile != nil
-	}
-
-	if i.dataNeedsFix {
-		return true
-	}
-
-	if modFile.Module == nil {
-		if i.module != (module.Version{}) {
-			return true
-		}
-	} else if modFile.Module.Mod != i.module {
-		return true
-	}
-
-	if modFile.Go == nil {
-		if i.goVersion != "" {
-			return true
-		}
-	} else if modFile.Go.Version != i.goVersion {
-		if i.goVersion == "" && cfg.BuildMod == "readonly" {
-			// go.mod files did not always require a 'go' version, so do not error out
-			// if one is missing — we may be inside an older module in the module
-			// cache, and should bias toward providing useful behavior.
-		} else {
-			return true
-		}
-	}
-
-	if len(modFile.Require) != len(i.require) ||
-		len(modFile.Replace) != len(i.replace) ||
-		len(modFile.Exclude) != len(i.exclude) {
-		return true
-	}
-
-	for _, r := range modFile.Require {
-		if meta, ok := i.require[r.Mod]; !ok {
-			return true
-		} else if r.Indirect != meta.indirect {
-			if cfg.BuildMod == "readonly" {
-				// The module's requirements are consistent; only the "// indirect"
-				// comments that are wrong. But those are only guaranteed to be accurate
-				// after a "go mod tidy" — it's a good idea to run those before
-				// committing a change, but it's certainly not mandatory.
-			} else {
-				return true
+			mg, _ := rs.Graph(ctx)
+			for prefix := pkg.path; prefix != "."; prefix = path.Dir(prefix) {
+				if v := mg.Selected(prefix); v != "none" {
+					m := module.Version{Path: prefix, Version: v}
+					r := resolveReplacement(m)
+					keep[r] = true
+				}
 			}
 		}
 	}
 
-	for _, r := range modFile.Replace {
-		if r.New != i.replace[r.Old] {
-			return true
+	if rs.graph.Load() == nil {
+		// We haven't needed to load the module graph so far.
+		// Save sums for the root modules (or their replacements), but don't
+		// incur the cost of loading the graph just to find and retain the sums.
+		for _, m := range rs.rootModules {
+			r := resolveReplacement(m)
+			keep[modkey(r)] = true
+			if which == addBuildListZipSums {
+				keep[r] = true
+			}
+		}
+	} else {
+		mg, _ := rs.Graph(ctx)
+		mg.WalkBreadthFirst(func(m module.Version) {
+			if _, ok := mg.RequiredBy(m); ok {
+				// The requirements from m's go.mod file are present in the module graph,
+				// so they are relevant to the MVS result regardless of whether m was
+				// actually selected.
+				r := resolveReplacement(m)
+				keep[modkey(r)] = true
+			}
+		})
+
+		if which == addBuildListZipSums {
+			for _, m := range mg.BuildList() {
+				r := resolveReplacement(m)
+				keep[r] = true
+			}
 		}
 	}
 
-	for _, x := range modFile.Exclude {
-		if !i.exclude[x.Mod] {
-			return true
-		}
+	return keep
+}
+
+type whichSums int8
+
+const (
+	loadedZipSumsOnly = whichSums(iota)
+	addBuildListZipSums
+)
+
+// modKey returns the module.Version under which the checksum for m's go.mod
+// file is stored in the go.sum file.
+func modkey(m module.Version) module.Version {
+	return module.Version{Path: m.Path, Version: m.Version + "/go.mod"}
+}
+
+func suggestModulePath(path string) string {
+	var m string
+
+	i := len(path)
+	for i > 0 && ('0' <= path[i-1] && path[i-1] <= '9' || path[i-1] == '.') {
+		i--
+	}
+	url := path[:i]
+	url = strings.TrimSuffix(url, "/v")
+	url = strings.TrimSuffix(url, "/")
+
+	f := func(c rune) bool {
+		return c > '9' || c < '0'
+	}
+	s := strings.FieldsFunc(path[i:], f)
+	if len(s) > 0 {
+		m = s[0]
+	}
+	m = strings.TrimLeft(m, "0")
+	if m == "" || m == "1" {
+		return url + "/v2"
 	}
 
-	return false
+	return url + "/v" + m
+}
+
+func suggestGopkgIn(path string) string {
+	var m string
+	i := len(path)
+	for i > 0 && (('0' <= path[i-1] && path[i-1] <= '9') || (path[i-1] == '.')) {
+		i--
+	}
+	url := path[:i]
+	url = strings.TrimSuffix(url, ".v")
+	url = strings.TrimSuffix(url, "/v")
+	url = strings.TrimSuffix(url, "/")
+
+	f := func(c rune) bool {
+		return c > '9' || c < '0'
+	}
+	s := strings.FieldsFunc(path, f)
+	if len(s) > 0 {
+		m = s[0]
+	}
+
+	m = strings.TrimLeft(m, "0")
+
+	if m == "" {
+		return url + ".v1"
+	}
+	return url + ".v" + m
 }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build windows
+//go:build windows
 
 package registry_test
 
@@ -34,7 +34,7 @@ func TestReadSubKeyNames(t *testing.T) {
 	}
 	defer k.Close()
 
-	names, err := k.ReadSubKeyNames(-1)
+	names, err := k.ReadSubKeyNames()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func equalStringSlice(a, b []string) bool {
 type ValueTest struct {
 	Type     uint32
 	Name     string
-	Value    interface{}
+	Value    any
 	WillFail bool
 }
 
@@ -190,7 +190,7 @@ func setValues(t *testing.T, k registry.Key) {
 }
 
 func enumerateValues(t *testing.T, k registry.Key) {
-	names, err := k.ReadValueNames(-1)
+	names, err := k.ReadValueNames()
 	if err != nil {
 		t.Error(err)
 		return
@@ -480,7 +480,7 @@ func deleteValues(t *testing.T, k registry.Key) {
 			continue
 		}
 	}
-	names, err := k.ReadValueNames(-1)
+	names, err := k.ReadValueNames()
 	if err != nil {
 		t.Error(err)
 		return

@@ -3,4 +3,4 @@
 
 template <auto> struct a {};
 template <int i, a <i> s = a <i> {}> using b = a <s>;
-template <int i> constexpr auto g (const b <i> &) { return true; }
+template <int i> constexpr auto g (const b <i> &) { return true; };

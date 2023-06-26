@@ -1,4 +1,4 @@
-<book xmlns="http://docbook.org/ns/docbook" version="5.0" 
+<book xmlns="http://docbook.org/ns/docbook" version="5.0"
  xml:id="manual" xreflabel="Manual">
 <?dbhtml dir="manual"?>
 <?dbhtml filename="index.html"?>
@@ -48,17 +48,12 @@
       </address>
     </affiliation>
 
-    <authorblurb>
+    <personblurb>
       <para>
       </para>
-    </authorblurb>
+    </personblurb>
   </author>
 -->
-
-  <author><personname><firstname/><surname/></personname><personblurb>
-      <para>
-      </para>
-    </personblurb></author>
 
   <author><personname><firstname>Paolo</firstname><surname>Carlini</surname></personname><personblurb>
       <para>

@@ -1,4 +1,5 @@
-#include <alloca.h>
+/* { dg-require-effective-target alloca } */
+
 #include <stdlib.h>
 
 extern int foo (void);
@@ -28,14 +29,14 @@ void test_2a (void *ptr)
 int *test_3 (void)
 {
   int *ptr = (int *)malloc (sizeof (int));
-  *ptr = 42; /* { dg-warning "dereference of possibly-NULL 'ptr'" } */
+  *ptr = 42; /* { dg-warning "dereference of possibly-NULL 'ptr' \\\[CWE-690\\\]" } */
   return ptr;
 }
 
 int *test_3a (void)
 {
   int *ptr = (int *)__builtin_malloc (sizeof (int));
-  *ptr = 42; /* { dg-warning "dereference of possibly-NULL 'ptr'" } */
+  *ptr = 42; /* { dg-warning "dereference of possibly-NULL 'ptr' \\\[CWE-690\\\]" } */
   return ptr;
 }
 
@@ -45,7 +46,7 @@ int *test_4 (void)
   if (ptr)
     *ptr = 42;
   else
-    *ptr = 43; /* { dg-warning "dereference of NULL 'ptr'" } */
+    *ptr = 43; /* { dg-warning "dereference of NULL 'ptr' \\\[CWE-476\\\]" } */
   return ptr;
 }
 
@@ -188,7 +189,7 @@ void test_15 (void)
 
 void test_16 (void)
 {
-  void *p, *q;
+  void *p, *q; /* { dg-message "region created on stack here" } */
 
   p = malloc (1024);
   if (!p)
@@ -203,8 +204,7 @@ void test_16 (void)
   bar ();
 
  fail:
-  free (q); /* { dg-warning "free of uninitialized 'q'" "" { xfail *-*-* } } */ 
-  /* TODO(xfail): implement uninitialized detection.  */
+  free (q); /* { dg-warning "use of uninitialized value 'q'" } */
   free (p);
 }
 
@@ -258,36 +258,36 @@ void test_22 (void)
 int *test_23 (int n)
 {
   int *ptr = (int *)calloc (n, sizeof (int));
-  ptr[0] = 42; /* { dg-warning "dereference of possibly-NULL 'ptr'" } */
+  ptr[0] = 42; /* { dg-warning "dereference of possibly-NULL 'ptr' \\\[CWE-690\\\]" } */
   return ptr;
 }
 
 int *test_23a (int n)
 {
   int *ptr = (int *)__builtin_calloc (n, sizeof (int));
-  ptr[0] = 42; /* { dg-warning "dereference of possibly-NULL 'ptr'" } */
+  ptr[0] = 42; /* { dg-warning "dereference of possibly-NULL 'ptr' \\\[CWE-690\\\]" } */
   return ptr;
 }
 
 int test_24 (void)
 {
-  void *ptr = alloca (sizeof (int)); /* { dg-message "memory is allocated on the stack here" } */
-  free (ptr); /* { dg-warning "'free' of memory allocated on the stack by 'alloca' \\('ptr'\\) will corrupt the heap \\\[CWE-590\\\]" } */
+  void *ptr = __builtin_alloca (sizeof (int)); /* { dg-message "region created on stack here" } */
+  free (ptr); /* { dg-warning "'free' of 'ptr' which points to memory on the stack \\\[CWE-590\\\]" } */
 }
 
 int test_25 (void)
 {
-  char tmp[100];
-  void *p = tmp; /* { dg-message "pointer is from here" } */
-  free (p); /* { dg-warning "'free' of 'p' which points to memory not on the heap \\\[CWE-590\\\]" } */
+  char tmp[100]; /* { dg-message "region created on stack here" } */
+  void *p = tmp;
+  free (p); /* { dg-warning "'free' of 'p' which points to memory on the stack \\\[CWE-590\\\]" } */
   /* TODO: more precise messages here.  */
 }
 
-char global_buffer[100];
+char global_buffer[100]; /* { dg-message "region created here" } */
 
 int test_26 (void)
 {
-  void *p = global_buffer; /* { dg-message "pointer is from here" } */
+  void *p = global_buffer;
   free (p); /* { dg-warning "'free' of 'p' which points to memory not on the heap \\\[CWE-590\\\]" } */
   /* TODO: more precise messages here.  */
 }
@@ -300,7 +300,7 @@ struct coord {
 struct coord *test_27 (void)
 {
   struct coord *p = (struct coord *) malloc (sizeof (struct coord)); /* { dg-message "this call could return NULL" } */
-  p->x = 0.f;  /* { dg-warning "dereference of possibly-NULL 'p'" } */
+  p->x = 0.f;  /* { dg-warning "dereference of possibly-NULL 'p' \\\[CWE-690\\\]" } */
 
   /* Only the first such usage should be reported: */
   p->y = 0.f;
@@ -311,7 +311,7 @@ struct coord *test_27 (void)
 struct coord *test_28 (void)
 {
   struct coord *p = NULL;
-  p->x = 0.f; /* { dg-warning "dereference of NULL 'p'" } */
+  p->x = 0.f; /* { dg-warning "dereference of NULL 'p' \\\[CWE-476\\\]" } */
 
   /* Only the first such usage should be reported: */
   p->y = 0.f;
@@ -358,7 +358,7 @@ void test_30 (void)
   struct link tmp;
   tmp.m_ptr = (struct link *)malloc (sizeof (struct link)); /* { dg-message "allocated here" } */
 } /* { dg-warning "leak of 'tmp.m_ptr'" } */ 
-/* { dg-bogus "leak of '<unknown>'" "" { xfail *-*-* } .-1 } */ 
+/* { dg-bogus "leak of '<unknown>'" "leak of unknown" { target *-*-* } .-1 } */
 
 void test_31 (void)
 {
@@ -366,7 +366,7 @@ void test_31 (void)
   void *ptr = malloc (sizeof (struct link)); /* { dg-message "allocated here" } */
   tmp.m_ptr = (struct link *)ptr;
 } /* { dg-warning "leak of 'ptr'" } */ 
-/* { dg-bogus "leak of 'tmp.m_ptr'" "" { xfail *-*-* } .-1 } */ 
+/* { dg-bogus "leak of 'tmp.m_ptr'" "" { target *-*-* } .-1 } */
 
 void test_32 (void)
 {
@@ -414,7 +414,7 @@ void test_36 (void)
 void *test_37a (void)
 {
   void *ptr = malloc(4096); /* { dg-message "this call could return NULL" } */
-  __builtin_memset(ptr, 0, 4096); /* { dg-warning "use of possibly-NULL 'ptr' where non-null expected" } */
+  __builtin_memset(ptr, 0, 4096); /* { dg-warning "use of possibly-NULL 'ptr' where non-null expected \\\[CWE-690\\\]" } */
   return ptr;
 }
 
@@ -425,7 +425,7 @@ int test_37b (void)
   if (p) {
     __builtin_memset(p, 0, 4096); /* Not a bug: checked */
   } else {
-    __builtin_memset(q, 0, 4096); /* { dg-warning "use of possibly-NULL 'q' where non-null expected" } */
+    __builtin_memset(q, 0, 4096); /* { dg-warning "use of possibly-NULL 'q' where non-null expected \\\[CWE-690\\\]" } */
   }
   free(p);
   free(q);
@@ -450,16 +450,16 @@ int *
 test_39 (int i)
 {
   int *p = (int*)malloc(sizeof(int*)); /* { dg-message "this call could return NULL" } */
-  *p = i; /* { dg-warning "dereference of possibly-NULL 'p'" } */
+  *p = i; /* { dg-warning "dereference of possibly-NULL 'p' \\\[CWE-690\\\]" } */
   return p;
 }
 
 int *
 test_40 (int i)
 {
-  int *p = (int*)malloc(sizeof(int*));
-  i = *p; /* { dg-warning "dereference of possibly-NULL 'p'" } */
-  /* TODO: (it's also uninitialized) */
+  int *p = (int*)malloc(sizeof(int*)); /* { dg-message "region created on heap here" } */
+  i = *p; /* { dg-warning "dereference of possibly-NULL 'p' \\\[CWE-690\\\]" "possibly-null" } */
+  /* { dg-warning "use of uninitialized value '\\*p'" "uninit" { target *-*-*} .-1 } */
   return p;
 }
 
@@ -474,8 +474,8 @@ test_41 (int flag)
     buffer = NULL;
   }
 
-  buffer[0] = 'a'; /* { dg-warning "dereference of possibly-NULL 'buffer'" "possibly-NULL" } */
-  /* { dg-warning "dereference of NULL 'buffer'" "NULL" { target *-*-* } .-1 } */
+  buffer[0] = 'a'; /* { dg-warning "dereference of possibly-NULL 'buffer' \\\[CWE-690\\\]" "possibly-NULL" } */
+  /* { dg-warning "dereference of NULL 'buffer' \\\[CWE-476\\\]" "NULL" { target *-*-* } .-1 } */
 
   return buffer;
 }
@@ -505,8 +505,15 @@ void test_42c (void)
   void *p = malloc (1024);
   void *q = p + 64;
   free (q - 64); /* this is probably OK.  */
-} /* { dg-bogus "leak of 'p'" "" { xfail *-*-* } } */
-// TODO(xfail)
+} /* { dg-bogus "leak of 'p'" } */
+
+void *
+test_42d (void)
+{
+  void *p = malloc (1024);
+  void *q = p + 64;
+  return q;
+} /* { dg-bogus "leak of 'p'" } */
 
 #if 0
 void test_31 (void *p)
@@ -529,10 +536,8 @@ struct link global_link;
 void test_43 (void)
 {
   global_link.m_ptr = malloc (sizeof (struct link)); /* { dg-message "allocated here" } */
-  global_link.m_ptr = NULL;
-} /* { dg-warning "leak of '<unknown>'" } */
-/* TODO: should be more precise than just '<unknown>', and
-   ideally would be at the assigment to NULL.  */
+  global_link.m_ptr = NULL; /* { dg-warning "leak of 'global_link.m_ptr'" } */
+}
 
 struct link *global_ptr;
 
@@ -587,5 +592,38 @@ int test_47 (void)
 void test_48 (void)
 {
   int *p = NULL; /* { dg-message "'p' is NULL" } */
-  *p = 1; /* { dg-warning "dereference of NULL 'p'" } */
+  *p = 1; /* { dg-warning "dereference of NULL 'p' \\\[CWE-476\\\]" } */
 }
+
+/* As test_48, but where the assignment of NULL is not at the start of a BB.  */
+
+int test_49 (int i)
+{
+  int *p;
+  int x;
+
+  x = i * 2;
+  p = NULL; /* { dg-message "'p' is NULL" } */
+  *p = 1; /* { dg-warning "dereference of NULL 'p' \\\[CWE-476\\\]" } */
+  return x;
+}
+
+/* Free of function, and of label within function.  */
+
+void test_50a (void)
+{
+}
+
+void test_50b (void)
+{
+  free (test_50a); /* { dg-warning "'free' of '&test_50a' which points to memory not on the heap \\\[CWE-590\\\]" } */
+}
+
+void test_50c (void)
+{
+ my_label:
+  free (&&my_label); /* { dg-warning "'free' of '&my_label' which points to memory not on the heap \\\[CWE-590\\\]" } */
+}
+
+
+/* { dg-prune-output "\\\[-Wfree-nonheap-object" } */

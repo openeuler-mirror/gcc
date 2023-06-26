@@ -1,7 +1,3 @@
-/* { dg-additional-options "-Wno-analyzer-too-complex" } */
-/* TODO: the above ought not to be necessary, but currently is due to a
-   state explosion within the for loop.  */
-
 typedef struct list
 {
   struct list *next;
@@ -16,8 +12,8 @@ bar (struct list *l)
 void
 foo (void)
 {
-  struct list l;
-  tlist t = l;
+  struct list l; /* { dg-message "region created on stack here" } */
+  tlist t = l; /* { dg-warning "use of uninitialized value 'l'" } */
   for (;;)
     bar (&t);
 }

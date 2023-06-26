@@ -1,6 +1,5 @@
 // PR c++/98481
 // { dg-do compile { target c++11 } }
-// { dg-additional-options -fabi-version=0 }
 inline namespace N __attribute ((__abi_tag__ ("myabi")))
 {
   struct A {};

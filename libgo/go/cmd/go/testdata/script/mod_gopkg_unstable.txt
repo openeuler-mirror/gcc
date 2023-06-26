@@ -1,7 +1,7 @@
 env GO111MODULE=on
 
 cp go.mod.empty go.mod
-go get -d gopkg.in/dummy.v2-unstable
+go get gopkg.in/dummy.v2-unstable
 
 cp x.go.txt x.go
 cp go.mod.empty go.mod

@@ -222,6 +222,9 @@ runtime_m(void)
 }
 
 // Set g.
+
+void runtime_setg(G*) __attribute__ ((no_split_stack));
+
 void
 runtime_setg(G* gp)
 {
@@ -591,7 +594,7 @@ runtime_mstart(void *arg)
 		gp->entry = nil;
 		gp->param = nil;
 		__builtin_call_with_static_chain(pfn(gp1), fv);
-		*(int*)0x21 = 0x21;
+		abort();
 	}
 
 	if(mp->exiting) {
@@ -659,7 +662,7 @@ setGContext(void)
 		gp->entry = nil;
 		gp->param = nil;
 		__builtin_call_with_static_chain(pfn(gp1), fv);
-		*(int*)0x22 = 0x22;
+		abort();
 	}
 }
 

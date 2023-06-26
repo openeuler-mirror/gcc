@@ -5,5 +5,5 @@ struct A {};
 struct B { int t(); };
 using pmf = decltype(&B::t);
 constexpr pmf f() { return &B::t; }
-constexpr A g(pmf) { return {}; }
+constexpr A g(pmf) { return {}; };
 constexpr A x = g(f());

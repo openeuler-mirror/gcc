@@ -9,6 +9,7 @@ package log
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -20,7 +21,7 @@ const (
 	Rdate         = `[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]`
 	Rtime         = `[0-9][0-9]:[0-9][0-9]:[0-9][0-9]`
 	Rmicroseconds = `\.[0-9][0-9][0-9][0-9][0-9][0-9]`
-	Rline         = `(60|62):` // must update if the calls to l.Printf / l.Print below move
+	Rline         = `(61|63):` // must update if the calls to l.Printf / l.Print below move
 	Rlongfile     = `.*/[A-Za-z0-9_\-]+\.go:` + Rline
 	Rshortfile    = `[A-Za-z0-9_\-]+\.go:` + Rline
 )
@@ -72,6 +73,12 @@ func testPrint(t *testing.T, flag int, prefix string, pattern string, useFormat 
 		t.Errorf("log output should match %q is %q", pattern, line)
 	}
 	SetOutput(os.Stderr)
+}
+
+func TestDefault(t *testing.T) {
+	if got := Default(); got != std {
+		t.Errorf("Default [%p] should be std [%p]", got, std)
+	}
 }
 
 func TestAll(t *testing.T) {
@@ -170,6 +177,17 @@ func TestEmptyPrintCreatesLine(t *testing.T) {
 	}
 	if n := strings.Count(output, "\n"); n != 2 {
 		t.Errorf("expected 2 lines, got %d", n)
+	}
+}
+
+func TestDiscard(t *testing.T) {
+	l := New(io.Discard, "", 0)
+	s := strings.Repeat("a", 102400)
+	c := testing.AllocsPerRun(100, func() { l.Printf("%s", s) })
+	// One allocation for slice passed to Printf,
+	// but none for formatting of long string.
+	if c > 1 {
+		t.Errorf("got %v allocs, want at most 1", c)
 	}
 }
 

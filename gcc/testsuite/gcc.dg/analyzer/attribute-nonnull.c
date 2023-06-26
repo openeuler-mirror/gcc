@@ -1,3 +1,5 @@
+#include "analyzer-decls.h"
+
 #include <stdlib.h>
 
 extern void foo(void *ptrA, void *ptrB, void *ptrC) /* { dg-message "argument 1 of 'foo' must be non-null" } */
@@ -12,9 +14,10 @@ extern void bar(void *ptrA, void *ptrB, void *ptrC) /* { dg-message "argument 1 
 void test_1 (void *p, void *q, void *r)
 {
   foo(p, q, r);
-  foo(NULL, q, r);
+  foo(NULL, q, r); /* { dg-warning "use of NULL where non-null expected" "warning" } */
+  /* { dg-message "argument 1 NULL where non-null expected" "note" { target *-*-* } .-1 } */
   foo(p, NULL, r);
-  foo(p, q, NULL);
+  foo(p, q, NULL); /* { dg-warning "use of NULL where non-null expected" } */
 }
 
 void test_1a (void *q, void *r)
@@ -27,9 +30,10 @@ void test_1a (void *q, void *r)
 void test_2 (void *p, void *q, void *r)
 {
   bar(p, q, r);
-  bar(NULL, q, r);
-  bar(p, NULL, r);
-  bar(p, q, NULL);
+  bar(NULL, q, r); /* { dg-warning "use of NULL where non-null expected" "warning" } */
+  bar(p, NULL, r); /* { dg-warning "use of NULL where non-null expected" "warning" } */
+  /* { dg-message "argument 2 NULL where non-null expected" "note" { target *-*-* } .-1 } */
+  bar(p, q, NULL); /* { dg-warning "use of NULL where non-null expected" "warning" } */
 }
 
 void test_3 (void *q, void *r)
@@ -78,4 +82,20 @@ void test_5 (void *q, void *r)
   cb(p, q, r);
 
   free(p);
+}
+
+__attribute__((nonnull(1, 3)))
+void test_6 (void *p, void *q, void *r)
+{
+  __analyzer_eval (p != NULL); /* { dg-warning "TRUE" } */
+  __analyzer_eval (q != NULL); /* { dg-warning "UNKNOWN" } */
+  __analyzer_eval (r != NULL); /* { dg-warning "TRUE" } */
+}
+
+__attribute__((nonnull))
+void test_7 (void *p, void *q, void *r)
+{
+  __analyzer_eval (p != NULL); /* { dg-warning "TRUE" } */
+  __analyzer_eval (q != NULL); /* { dg-warning "TRUE" } */
+  __analyzer_eval (r != NULL); /* { dg-warning "TRUE" } */
 }

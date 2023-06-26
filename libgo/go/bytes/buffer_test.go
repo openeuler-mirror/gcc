@@ -6,9 +6,9 @@ package bytes_test
 
 import (
 	. "bytes"
+	"fmt"
 	"io"
 	"math/rand"
-	"runtime"
 	"testing"
 	"unicode/utf8"
 )
@@ -388,6 +388,16 @@ func TestRuneIO(t *testing.T) {
 	}
 }
 
+func TestWriteInvalidRune(t *testing.T) {
+	// Invalid runes, including negative ones, should be written as
+	// utf8.RuneError.
+	for _, r := range []rune{-1, utf8.MaxRune + 1} {
+		var buf Buffer
+		buf.WriteRune(r)
+		check(t, fmt.Sprintf("TestWriteInvalidRune (%d)", r), &buf, "\uFFFD")
+	}
+}
+
 func TestNext(t *testing.T) {
 	b := []byte{0, 1, 2, 3, 4}
 	tmp := make([]byte, 5)
@@ -495,20 +505,20 @@ func TestGrow(t *testing.T) {
 	x := []byte{'x'}
 	y := []byte{'y'}
 	tmp := make([]byte, 72)
-	for _, startLen := range []int{0, 100, 1000, 10000, 100000} {
-		xBytes := Repeat(x, startLen)
-		for _, growLen := range []int{0, 100, 1000, 10000, 100000} {
+	for _, growLen := range []int{0, 100, 1000, 10000, 100000} {
+		for _, startLen := range []int{0, 100, 1000, 10000, 100000} {
+			xBytes := Repeat(x, startLen)
+
 			buf := NewBuffer(xBytes)
 			// If we read, this affects buf.off, which is good to test.
 			readBytes, _ := buf.Read(tmp)
-			buf.Grow(growLen)
 			yBytes := Repeat(y, growLen)
+			allocs := testing.AllocsPerRun(100, func() {
+				buf.Grow(growLen)
+				buf.Write(yBytes)
+			})
 			// Check no allocation occurs in write, as long as we're single-threaded.
-			var m1, m2 runtime.MemStats
-			runtime.ReadMemStats(&m1)
-			buf.Write(yBytes)
-			runtime.ReadMemStats(&m2)
-			if runtime.GOMAXPROCS(-1) == 1 && m1.Mallocs != m2.Mallocs {
+			if allocs != 0 {
 				t.Errorf("allocation occurred during write")
 			}
 			// Check that buffer has correct data.

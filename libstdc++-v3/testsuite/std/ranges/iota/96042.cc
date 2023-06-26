@@ -1,4 +1,4 @@
-// Copyright (C) 2020 Free Software Foundation, Inc.
+// Copyright (C) 2020-2022 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -19,6 +19,7 @@
 // { dg-do compile { target c++2a } }
 
 #include <ranges>
+#include <limits>
 
 void
 test01()
@@ -28,8 +29,7 @@ test01()
 
   // In strict -std=c++20 mode there is no integer wider than long long,
   // so V's difference type is an integer-class type, [iterator.concept.winc].
-  // In practice we use __int128 for this where that type is available,
-  // and cannot meet the requirement otherwise (this is fixed in GCC 11).
+  // In practice this is either __int128 or __detail::__max_diff_type.
   using D = std::ranges::range_difference_t<V>;
   // Ensure that numeric_limits is correctly specialized for the type.
   using L = std::numeric_limits<D>;
@@ -37,9 +37,7 @@ test01()
   static_assert( L::is_signed );
   static_assert( L::is_integer );
   static_assert( L::is_exact );
-#ifdef __SIZEOF_INT128__
   static_assert( L::digits > std::numeric_limits<long long>::digits );
-#endif
   static_assert( L::digits10 == static_cast<int>(L::digits * 0.30103) );
   static_assert( L::min() == (D(1) << L::digits) );
   static_assert( L::max() == ~L::min() );

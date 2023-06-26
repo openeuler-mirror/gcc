@@ -6,6 +6,7 @@ package runtime_test
 
 import (
 	"fmt"
+	"internal/goos"
 	"math/rand"
 	. "runtime"
 	"testing"
@@ -152,12 +153,6 @@ func TestPallocDataFindScavengeCandidate(t *testing.T) {
 			max:   PallocChunkPages,
 			want:  BitRange{0, uint(m)},
 		}
-		tests["StartFree"+suffix] = test{
-			alloc: []BitRange{{uint(m), PallocChunkPages - uint(m)}},
-			min:   m,
-			max:   PallocChunkPages,
-			want:  BitRange{0, uint(m)},
-		}
 		tests["EndFree"+suffix] = test{
 			alloc: []BitRange{{0, PallocChunkPages - uint(m)}},
 			min:   m,
@@ -235,26 +230,43 @@ func TestPallocDataFindScavengeCandidate(t *testing.T) {
 	if PhysHugePageSize > uintptr(PageSize) {
 		// Check hugepage preserving behavior.
 		bits := uint(PhysHugePageSize / uintptr(PageSize))
-		tests["PreserveHugePageBottom"] = test{
-			alloc: []BitRange{{bits + 2, PallocChunkPages - (bits + 2)}},
-			min:   1,
-			max:   3, // Make it so that max would have us try to break the huge page.
-			want:  BitRange{0, bits + 2},
-		}
-		if 3*bits < PallocChunkPages {
-			// We need at least 3 huge pages in a chunk for this test to make sense.
-			tests["PreserveHugePageMiddle"] = test{
-				alloc: []BitRange{{0, bits - 10}, {2*bits + 10, PallocChunkPages - (2*bits + 10)}},
+		if bits < PallocChunkPages {
+			tests["PreserveHugePageBottom"] = test{
+				alloc: []BitRange{{bits + 2, PallocChunkPages - (bits + 2)}},
 				min:   1,
-				max:   12, // Make it so that max would have us try to break the huge page.
-				want:  BitRange{bits, bits + 10},
+				max:   3, // Make it so that max would have us try to break the huge page.
+				want:  BitRange{0, bits + 2},
 			}
-		}
-		tests["PreserveHugePageTop"] = test{
-			alloc: []BitRange{{0, PallocChunkPages - bits}},
-			min:   1,
-			max:   1, // Even one page would break a huge page in this case.
-			want:  BitRange{PallocChunkPages - bits, bits},
+			if 3*bits < PallocChunkPages {
+				// We need at least 3 huge pages in a chunk for this test to make sense.
+				tests["PreserveHugePageMiddle"] = test{
+					alloc: []BitRange{{0, bits - 10}, {2*bits + 10, PallocChunkPages - (2*bits + 10)}},
+					min:   1,
+					max:   12, // Make it so that max would have us try to break the huge page.
+					want:  BitRange{bits, bits + 10},
+				}
+			}
+			tests["PreserveHugePageTop"] = test{
+				alloc: []BitRange{{0, PallocChunkPages - bits}},
+				min:   1,
+				max:   1, // Even one page would break a huge page in this case.
+				want:  BitRange{PallocChunkPages - bits, bits},
+			}
+		} else if bits == PallocChunkPages {
+			tests["PreserveHugePageAll"] = test{
+				min:  1,
+				max:  1, // Even one page would break a huge page in this case.
+				want: BitRange{0, PallocChunkPages},
+			}
+		} else {
+			// The huge page size is greater than pallocChunkPages, so it should
+			// be effectively disabled. There's no way we can possible scavenge
+			// a huge page out of this bitmap chunk.
+			tests["PreserveHugePageNone"] = test{
+				min:  1,
+				max:  1,
+				want: BitRange{PallocChunkPages - 1, 1},
+			}
 		}
 	}
 	for name, v := range tests {
@@ -397,7 +409,9 @@ func TestPageAllocScavenge(t *testing.T) {
 			},
 		},
 	}
-	if PageAlloc64Bit != 0 {
+	// Disable these tests on iOS since we have a small address space.
+	// See #46860.
+	if PageAlloc64Bit != 0 && goos.IsIos == 0 {
 		tests["ScavAllVeryDiscontiguous"] = setup{
 			beforeAlloc: map[ChunkIdx][]BitRange{
 				BaseChunkIdx:          {},
@@ -419,12 +433,12 @@ func TestPageAllocScavenge(t *testing.T) {
 	}
 	for name, v := range tests {
 		v := v
-		runTest := func(t *testing.T, locked bool) {
+		t.Run(name, func(t *testing.T) {
 			b := NewPageAlloc(v.beforeAlloc, v.beforeScav)
 			defer FreePageAlloc(b)
 
 			for iter, h := range v.expect {
-				if got := b.Scavenge(h.request, locked); got != h.expect {
+				if got := b.Scavenge(h.request); got != h.expect {
 					t.Fatalf("bad scavenge #%d: want %d, got %d", iter+1, h.expect, got)
 				}
 			}
@@ -432,12 +446,6 @@ func TestPageAllocScavenge(t *testing.T) {
 			defer FreePageAlloc(want)
 
 			checkPageAlloc(t, want, b)
-		}
-		t.Run(name, func(t *testing.T) {
-			runTest(t, false)
-		})
-		t.Run(name+"Locked", func(t *testing.T) {
-			runTest(t, true)
 		})
 	}
 }

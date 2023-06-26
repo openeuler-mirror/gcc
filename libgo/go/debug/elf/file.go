@@ -120,6 +120,9 @@ func (f *File) stringTable(link uint32) ([]byte, error) {
 // Even if the section is stored compressed in the ELF file,
 // the ReadSeeker reads uncompressed data.
 func (s *Section) Open() io.ReadSeeker {
+	if s.Type == SHT_NOBITS {
+		return io.NewSectionReader(&zeroReader{}, 0, int64(s.Size))
+	}
 	if s.Flags&SHF_COMPRESSED == 0 {
 		return io.NewSectionReader(s.sr, 0, 1<<63-1)
 	}
@@ -185,7 +188,7 @@ type Symbol struct {
 type FormatError struct {
 	off int64
 	msg string
-	val interface{}
+	val any
 }
 
 func (e *FormatError) Error() string {
@@ -494,7 +497,7 @@ func (f *File) getSymbols32(typ SectionType) ([]Symbol, []byte, error) {
 
 	data, err := symtabSection.Data()
 	if err != nil {
-		return nil, nil, errors.New("cannot load symbol section")
+		return nil, nil, fmt.Errorf("cannot load symbol section: %w", err)
 	}
 	symtab := bytes.NewReader(data)
 	if symtab.Len()%Sym32Size != 0 {
@@ -503,7 +506,7 @@ func (f *File) getSymbols32(typ SectionType) ([]Symbol, []byte, error) {
 
 	strdata, err := f.stringTable(symtabSection.Link)
 	if err != nil {
-		return nil, nil, errors.New("cannot load string table section")
+		return nil, nil, fmt.Errorf("cannot load string table section: %w", err)
 	}
 
 	// The first entry is all zeros.
@@ -537,7 +540,7 @@ func (f *File) getSymbols64(typ SectionType) ([]Symbol, []byte, error) {
 
 	data, err := symtabSection.Data()
 	if err != nil {
-		return nil, nil, errors.New("cannot load symbol section")
+		return nil, nil, fmt.Errorf("cannot load symbol section: %w", err)
 	}
 	symtab := bytes.NewReader(data)
 	if symtab.Len()%Sym64Size != 0 {
@@ -546,7 +549,7 @@ func (f *File) getSymbols64(typ SectionType) ([]Symbol, []byte, error) {
 
 	strdata, err := f.stringTable(symtabSection.Link)
 	if err != nil {
-		return nil, nil, errors.New("cannot load string table section")
+		return nil, nil, fmt.Errorf("cannot load string table section: %w", err)
 	}
 
 	// The first entry is all zeros.
@@ -617,6 +620,8 @@ func (f *File) applyRelocations(dst []byte, rels []byte) error {
 		return f.applyRelocationsMIPS(dst, rels)
 	case f.Class == ELFCLASS64 && f.Machine == EM_MIPS:
 		return f.applyRelocationsMIPS64(dst, rels)
+	case f.Class == ELFCLASS32 && f.Machine == EM_RISCV:
+		return f.applyRelocationsRISCV(dst, rels)
 	case f.Class == ELFCLASS64 && f.Machine == EM_RISCV:
 		return f.applyRelocationsRISCV64(dst, rels)
 	case f.Class == ELFCLASS64 && f.Machine == EM_S390:
@@ -632,23 +637,14 @@ func (f *File) applyRelocations(dst []byte, rels []byte) error {
 	}
 }
 
-// relocSymbolTargetOK decides whether we should try to apply a
+// canApplyRelocation reports whether we should try to apply a
 // relocation to a DWARF data section, given a pointer to the symbol
-// targeted by the relocation. Most relocations in DWARF data tend to
-// be section-relative, but some target non-section symbols (for
-// example, low_PC attrs on subprogram or compilation unit DIEs that
-// target function symbols), and we need to include these as well.
-// Return value is a pair (X,Y) where X is a boolean indicating
-// whether the relocation is needed, and Y is the symbol value in the
-// case of a non-section relocation that needs to be applied.
-func relocSymbolTargetOK(sym *Symbol) (bool, uint64) {
-	if ST_TYPE(sym.Info) == STT_SECTION {
-		return true, 0
-	}
-	if sym.Section != SHN_UNDEF && sym.Section < SHN_LORESERVE {
-		return true, sym.Value
-	}
-	return false, 0
+// targeted by the relocation.
+// Most relocations in DWARF data tend to be section-relative, but
+// some target non-section symbols (for example, low_PC attrs on
+// subprogram or compilation unit DIEs that target function symbols).
+func canApplyRelocation(sym *Symbol) bool {
+	return sym.Section != SHN_UNDEF && sym.Section < SHN_LORESERVE
 }
 
 func (f *File) applyRelocationsAMD64(dst []byte, rels []byte) error {
@@ -674,8 +670,7 @@ func (f *File) applyRelocationsAMD64(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -688,13 +683,13 @@ func (f *File) applyRelocationsAMD64(dst []byte, rels []byte) error {
 			if rela.Off+8 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val64 := val + uint64(rela.Addend)
+			val64 := sym.Value + uint64(rela.Addend)
 			f.ByteOrder.PutUint64(dst[rela.Off:rela.Off+8], val64)
 		case R_X86_64_32:
 			if rela.Off+4 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -800,8 +795,7 @@ func (f *File) applyRelocationsARM64(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -814,13 +808,13 @@ func (f *File) applyRelocationsARM64(dst []byte, rels []byte) error {
 			if rela.Off+8 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val64 := uint64(val) + uint64(rela.Addend)
+			val64 := sym.Value + uint64(rela.Addend)
 			f.ByteOrder.PutUint64(dst[rela.Off:rela.Off+8], val64)
 		case R_AARCH64_ABS32:
 			if rela.Off+4 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -851,8 +845,7 @@ func (f *File) applyRelocationsPPC(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -861,7 +854,7 @@ func (f *File) applyRelocationsPPC(dst []byte, rels []byte) error {
 			if rela.Off+4 >= uint32(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -892,8 +885,7 @@ func (f *File) applyRelocationsPPC64(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -902,13 +894,13 @@ func (f *File) applyRelocationsPPC64(dst []byte, rels []byte) error {
 			if rela.Off+8 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val64 := val + uint64(rela.Addend)
+			val64 := sym.Value + uint64(rela.Addend)
 			f.ByteOrder.PutUint64(dst[rela.Off:rela.Off+8], val64)
 		case R_PPC64_ADDR32:
 			if rela.Off+4 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -984,8 +976,7 @@ func (f *File) applyRelocationsMIPS64(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -994,13 +985,53 @@ func (f *File) applyRelocationsMIPS64(dst []byte, rels []byte) error {
 			if rela.Off+8 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val64 := val + uint64(rela.Addend)
+			val64 := sym.Value + uint64(rela.Addend)
 			f.ByteOrder.PutUint64(dst[rela.Off:rela.Off+8], val64)
 		case R_MIPS_32:
 			if rela.Off+4 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
+			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
+		}
+	}
+
+	return nil
+}
+
+func (f *File) applyRelocationsRISCV(dst []byte, rels []byte) error {
+	// 12 is the size of Rela32.
+	if len(rels)%12 != 0 {
+		return errors.New("length of relocation section is not a multiple of 12")
+	}
+
+	symbols, _, err := f.getSymbols(SHT_SYMTAB)
+	if err != nil {
+		return err
+	}
+
+	b := bytes.NewReader(rels)
+	var rela Rela32
+
+	for b.Len() > 0 {
+		binary.Read(b, f.ByteOrder, &rela)
+		symNo := rela.Info >> 8
+		t := R_RISCV(rela.Info & 0xff)
+
+		if symNo == 0 || symNo > uint32(len(symbols)) {
+			continue
+		}
+		sym := &symbols[symNo-1]
+		if !canApplyRelocation(sym) {
+			continue
+		}
+
+		switch t {
+		case R_RISCV_32:
+			if rela.Off+4 >= uint32(len(dst)) || rela.Addend < 0 {
+				continue
+			}
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -1031,8 +1062,7 @@ func (f *File) applyRelocationsRISCV64(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -1041,13 +1071,13 @@ func (f *File) applyRelocationsRISCV64(dst []byte, rels []byte) error {
 			if rela.Off+8 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val64 := val + uint64(rela.Addend)
+			val64 := sym.Value + uint64(rela.Addend)
 			f.ByteOrder.PutUint64(dst[rela.Off:rela.Off+8], val64)
 		case R_RISCV_32:
 			if rela.Off+4 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -1078,8 +1108,7 @@ func (f *File) applyRelocationss390x(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -1088,13 +1117,13 @@ func (f *File) applyRelocationss390x(dst []byte, rels []byte) error {
 			if rela.Off+8 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val64 := val + uint64(rela.Addend)
+			val64 := sym.Value + uint64(rela.Addend)
 			f.ByteOrder.PutUint64(dst[rela.Off:rela.Off+8], val64)
 		case R_390_32:
 			if rela.Off+4 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -1165,8 +1194,7 @@ func (f *File) applyRelocationsSPARC64(dst []byte, rels []byte) error {
 			continue
 		}
 		sym := &symbols[symNo-1]
-		needed, val := relocSymbolTargetOK(sym)
-		if !needed {
+		if !canApplyRelocation(sym) {
 			continue
 		}
 
@@ -1175,13 +1203,13 @@ func (f *File) applyRelocationsSPARC64(dst []byte, rels []byte) error {
 			if rela.Off+8 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val64 := val + uint64(rela.Addend)
+			val64 := sym.Value + uint64(rela.Addend)
 			f.ByteOrder.PutUint64(dst[rela.Off:rela.Off+8], val64)
 		case R_SPARC_32, R_SPARC_UA32:
 			if rela.Off+4 >= uint64(len(dst)) || rela.Addend < 0 {
 				continue
 			}
-			val32 := uint32(val) + uint32(rela.Addend)
+			val32 := uint32(sym.Value) + uint32(rela.Addend)
 			f.ByteOrder.PutUint32(dst[rela.Off:rela.Off+4], val32)
 		}
 	}
@@ -1272,6 +1300,13 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 				return nil, err
 			}
 			b = dbuf
+		}
+
+		if f.Type == ET_EXEC {
+			// Do not apply relocations to DWARF sections for ET_EXEC binaries.
+			// Relocations should already be applied, and .rela sections may
+			// contain incorrect data.
+			return b, nil
 		}
 
 		for _, r := range f.Sections {
@@ -1555,4 +1590,13 @@ func (f *File) DynString(tag DynTag) ([]string, error) {
 		}
 	}
 	return all, nil
+}
+
+type zeroReader struct{}
+
+func (*zeroReader) ReadAt(p []byte, off int64) (n int, err error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }

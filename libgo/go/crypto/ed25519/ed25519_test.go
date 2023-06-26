@@ -9,10 +9,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto"
-	"crypto/ed25519/internal/edwards25519"
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -24,24 +24,6 @@ func (zeroReader) Read(buf []byte) (int, error) {
 		buf[i] = 0
 	}
 	return len(buf), nil
-}
-
-func TestUnmarshalMarshal(t *testing.T) {
-	pub, _, _ := GenerateKey(rand.Reader)
-
-	var A edwards25519.ExtendedGroupElement
-	var pubBytes [32]byte
-	copy(pubBytes[:], pub)
-	if !A.FromBytes(&pubBytes) {
-		t.Fatalf("ExtendedGroupElement.FromBytes failed")
-	}
-
-	var pub2 [32]byte
-	A.ToBytes(&pub2)
-
-	if pubBytes != pub2 {
-		t.Errorf("FromBytes(%v)->ToBytes does not round-trip, got %x\n", pubBytes, pub2)
-	}
 }
 
 func TestSignVerify(t *testing.T) {
@@ -85,6 +67,28 @@ func TestCryptoSigner(t *testing.T) {
 
 	if !Verify(public, message, signature) {
 		t.Errorf("Verify failed on signature from Sign()")
+	}
+}
+
+func TestEqual(t *testing.T) {
+	public, private, _ := GenerateKey(rand.Reader)
+
+	if !public.Equal(public) {
+		t.Errorf("public key is not equal to itself: %q", public)
+	}
+	if !public.Equal(crypto.Signer(private).Public()) {
+		t.Errorf("private.Public() is not Equal to public: %q", public)
+	}
+	if !private.Equal(private) {
+		t.Errorf("private key is not equal to itself: %q", private)
+	}
+
+	otherPub, otherPriv, _ := GenerateKey(rand.Reader)
+	if public.Equal(otherPub) {
+		t.Errorf("different public keys are Equal")
+	}
+	if private.Equal(otherPriv) {
+		t.Errorf("different private keys are Equal")
 	}
 }
 
@@ -182,6 +186,27 @@ func TestMalleability(t *testing.T) {
 	}
 }
 
+func TestAllocations(t *testing.T) {
+	if runtime.Compiler == "gccgo" {
+		t.Skip("gofronted escape analysis not good enough")
+	}
+	if strings.HasSuffix(os.Getenv("GO_BUILDER_NAME"), "-noopt") {
+		t.Skip("skipping allocations test without relevant optimizations")
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		seed := make([]byte, SeedSize)
+		message := []byte("Hello, world!")
+		priv := NewKeyFromSeed(seed)
+		pub := priv.Public().(PublicKey)
+		signature := Sign(priv, message)
+		if !Verify(pub, message, signature) {
+			t.Fatal("signature didn't verify")
+		}
+	}); allocs > 0 {
+		t.Errorf("expected zero allocations, got %0.1v", allocs)
+	}
+}
+
 func BenchmarkKeyGeneration(b *testing.B) {
 	var zero zeroReader
 	for i := 0; i < b.N; i++ {
@@ -193,7 +218,6 @@ func BenchmarkKeyGeneration(b *testing.B) {
 
 func BenchmarkNewKeyFromSeed(b *testing.B) {
 	seed := make([]byte, SeedSize)
-	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = NewKeyFromSeed(seed)
 	}
@@ -206,7 +230,6 @@ func BenchmarkSigning(b *testing.B) {
 		b.Fatal(err)
 	}
 	message := []byte("Hello, world!")
-	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Sign(priv, message)

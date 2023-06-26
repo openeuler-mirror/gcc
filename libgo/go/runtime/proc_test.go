@@ -6,6 +6,7 @@ package runtime_test
 
 import (
 	"fmt"
+	"internal/race"
 	"internal/testenv"
 	"math"
 	"net"
@@ -118,6 +119,10 @@ func TestGoroutineParallelism(t *testing.T) {
 	// since the goroutines can't be stopped/preempted.
 	// Disable GC for this test (see issue #10958).
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	// SetGCPercent waits until the mark phase is over, but the runtime
+	// also preempts at the start of the sweep phase, so make sure that's
+	// done too. See #45867.
+	runtime.GC()
 	for try := 0; try < N; try++ {
 		done := make(chan bool)
 		x := uint32(0)
@@ -162,6 +167,10 @@ func testGoroutineParallelism2(t *testing.T, load, netpoll bool) {
 	// since the goroutines can't be stopped/preempted.
 	// Disable GC for this test (see issue #10958).
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	// SetGCPercent waits until the mark phase is over, but the runtime
+	// also preempts at the start of the sweep phase, so make sure that's
+	// done too. See #45867.
+	runtime.GC()
 	for try := 0; try < N; try++ {
 		if load {
 			// Create P goroutines and wait until they all run.
@@ -429,6 +438,11 @@ func TestPingPongHog(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in -short mode")
 	}
+	if race.Enabled {
+		// The race detector randomizes the scheduler,
+		// which causes this test to fail (#38266).
+		t.Skip("skipping in -race mode")
+	}
 
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
 	done := make(chan bool)
@@ -523,9 +537,17 @@ func BenchmarkPingPongHog(b *testing.B) {
 	<-done
 }
 
+var padData [128]uint64
+
 func stackGrowthRecursive(i int) {
 	var pad [128]uint64
-	if i != 0 && pad[0] == 0 {
+	pad = padData
+	for j := range pad {
+		if pad[j] != 0 {
+			return
+		}
+	}
+	if i != 0 {
 		stackGrowthRecursive(i - 1)
 	}
 }
@@ -616,6 +638,10 @@ func TestSchedLocalQueueEmpty(t *testing.T) {
 	// If runtime triggers a forced GC during this test then it will deadlock,
 	// since the goroutines can't be stopped/preempted during spin wait.
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	// SetGCPercent waits until the mark phase is over, but the runtime
+	// also preempts at the start of the sweep phase, so make sure that's
+	// done too. See #45867.
+	runtime.GC()
 
 	iters := int(1e5)
 	if testing.Short() {
@@ -683,6 +709,55 @@ func BenchmarkCreateGoroutinesCapture(b *testing.B) {
 		}
 		wg.Wait()
 	}
+}
+
+// warmupScheduler ensures the scheduler has at least targetThreadCount threads
+// in its thread pool.
+func warmupScheduler(targetThreadCount int) {
+	var wg sync.WaitGroup
+	var count int32
+	for i := 0; i < targetThreadCount; i++ {
+		wg.Add(1)
+		go func() {
+			atomic.AddInt32(&count, 1)
+			for atomic.LoadInt32(&count) < int32(targetThreadCount) {
+				// spin until all threads started
+			}
+
+			// spin a bit more to ensure they are all running on separate CPUs.
+			doWork(time.Millisecond)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func doWork(dur time.Duration) {
+	start := time.Now()
+	for time.Since(start) < dur {
+	}
+}
+
+// BenchmarkCreateGoroutinesSingle creates many goroutines, all from a single
+// producer (the main benchmark goroutine).
+//
+// Compared to BenchmarkCreateGoroutines, this causes different behavior in the
+// scheduler because Ms are much more likely to need to steal work from the
+// main P rather than having work in the local run queue.
+func BenchmarkCreateGoroutinesSingle(b *testing.B) {
+	// Since we are interested in stealing behavior, warm the scheduler to
+	// get all the Ps running first.
+	warmupScheduler(runtime.GOMAXPROCS(0))
+	b.ResetTimer()
+
+	var wg sync.WaitGroup
+	wg.Add(b.N)
+	for i := 0; i < b.N; i++ {
+		go func() {
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 }
 
 func BenchmarkClosureCall(b *testing.B) {
@@ -976,7 +1051,7 @@ func testPreemptionAfterSyscall(t *testing.T, syscallDuration time.Duration) {
 		interations = 1
 	}
 	const (
-		maxDuration = 3 * time.Second
+		maxDuration = 5 * time.Second
 		nroutines   = 8
 	)
 
@@ -1012,6 +1087,10 @@ func testPreemptionAfterSyscall(t *testing.T, syscallDuration time.Duration) {
 }
 
 func TestPreemptionAfterSyscall(t *testing.T) {
+	if runtime.GOOS == "plan9" {
+		testenv.SkipFlaky(t, 41015)
+	}
+
 	for _, i := range []time.Duration{10, 100, 1000} {
 		d := i * time.Microsecond
 		t.Run(fmt.Sprint(d), func(t *testing.T) {
@@ -1060,5 +1139,24 @@ loop:
 	}
 	if dur := time.Since(start); dur > 5*time.Second {
 		t.Errorf("netpollBreak did not interrupt netpoll: slept for: %v", dur)
+	}
+}
+
+// TestBigGOMAXPROCS tests that setting GOMAXPROCS to a large value
+// doesn't cause a crash at startup. See issue 38474.
+func TestBigGOMAXPROCS(t *testing.T) {
+	t.Parallel()
+	output := runTestProg(t, "testprog", "NonexistentTest", "GOMAXPROCS=1024")
+	// Ignore error conditions on small machines.
+	for _, errstr := range []string{
+		"failed to create new OS thread",
+		"cannot allocate memory",
+	} {
+		if strings.Contains(output, errstr) {
+			t.Skipf("failed to create 1024 threads")
+		}
+	}
+	if !strings.Contains(output, "unknown function: NonexistentTest") {
+		t.Errorf("output:\n%s\nwanted:\nunknown function: NonexistentTest", output)
 	}
 }

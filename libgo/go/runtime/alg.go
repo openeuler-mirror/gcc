@@ -6,7 +6,7 @@ package runtime
 
 import (
 	"internal/cpu"
-	"runtime/internal/sys"
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -49,8 +49,8 @@ import (
 //go:linkname alginit
 
 const (
-	c0 = uintptr((8-sys.PtrSize)/4*2860486313 + (sys.PtrSize-4)/4*33054211828000289)
-	c1 = uintptr((8-sys.PtrSize)/4*3267000013 + (sys.PtrSize-4)/4*23344194077549503)
+	c0 = uintptr((8-goarch.PtrSize)/4*2860486313 + (goarch.PtrSize-4)/4*33054211828000289)
+	c1 = uintptr((8-goarch.PtrSize)/4*3267000013 + (goarch.PtrSize-4)/4*23344194077549503)
 )
 
 func memhash0(p unsafe.Pointer, h uintptr) uintptr {
@@ -216,7 +216,6 @@ func typehash(t *_type, p unsafe.Pointer, h uintptr) uintptr {
 	case kindStruct:
 		s := (*structtype)(unsafe.Pointer(t))
 		for _, f := range s.fields {
-			// TODO: maybe we could hash several contiguous fields all at once.
 			if f.name != nil && *f.name == "_" {
 				continue
 			}
@@ -276,7 +275,7 @@ func nilinterequal(p, q unsafe.Pointer) bool {
 }
 func efaceeq(x, y eface) bool {
 	t := x._type
-	if t != y._type {
+	if !eqtype(t, y._type) {
 		return false
 	}
 	if t == nil {
@@ -301,7 +300,7 @@ func ifaceeq(x, y iface) bool {
 		return false
 	}
 	t := *(**_type)(xtab)
-	if t != *(**_type)(y.tab) {
+	if !eqtype(t, *(**_type)(y.tab)) {
 		return false
 	}
 	eq := t.equal
@@ -322,7 +321,7 @@ func ifacevaleq(x iface, t *_type, p unsafe.Pointer) bool {
 		return false
 	}
 	xt := *(**_type)(x.tab)
-	if xt != t {
+	if !eqtype(xt, t) {
 		return false
 	}
 	eq := t.equal
@@ -343,7 +342,7 @@ func ifaceefaceeq(x iface, y eface) bool {
 		return false
 	}
 	xt := *(**_type)(x.tab)
-	if xt != y._type {
+	if !eqtype(xt, y._type) {
 		return false
 	}
 	eq := xt.equal
@@ -360,7 +359,7 @@ func efacevaleq(x eface, t *_type, p unsafe.Pointer) bool {
 	if x._type == nil {
 		return false
 	}
-	if x._type != t {
+	if !eqtype(x._type, t) {
 		return false
 	}
 	eq := t.equal
@@ -453,7 +452,7 @@ func int64Hash(i uint64, seed uintptr) uintptr {
 	return memhash64(noescape(unsafe.Pointer(&i)), seed)
 }
 
-func efaceHash(i interface{}, seed uintptr) uintptr {
+func efaceHash(i any, seed uintptr) uintptr {
 	return nilinterhash(noescape(unsafe.Pointer(&i)), seed)
 }
 
@@ -463,7 +462,7 @@ func ifaceHash(i interface {
 	return interhash(noescape(unsafe.Pointer(&i)), seed)
 }
 
-const hashRandomBytes = sys.PtrSize / 4 * 64
+const hashRandomBytes = goarch.PtrSize / 4 * 64
 
 // used in asm_{386,amd64,arm64}.s to seed the hash function
 var aeskeysched [hashRandomBytes]byte
@@ -485,7 +484,7 @@ func alginit() {
 		initAlgAES()
 		return
 	}
-	getRandomData((*[len(hashkey) * sys.PtrSize]byte)(unsafe.Pointer(&hashkey))[:])
+	getRandomData((*[len(hashkey) * goarch.PtrSize]byte)(unsafe.Pointer(&hashkey))[:])
 	hashkey[0] |= 1 // make sure these numbers are odd
 	hashkey[1] |= 1
 	hashkey[2] |= 1
@@ -501,7 +500,7 @@ func initAlgAES() {
 // Note: These routines perform the read with a native endianness.
 func readUnaligned32(p unsafe.Pointer) uint32 {
 	q := (*[4]byte)(p)
-	if sys.BigEndian {
+	if goarch.BigEndian {
 		return uint32(q[3]) | uint32(q[2])<<8 | uint32(q[1])<<16 | uint32(q[0])<<24
 	}
 	return uint32(q[0]) | uint32(q[1])<<8 | uint32(q[2])<<16 | uint32(q[3])<<24
@@ -509,7 +508,7 @@ func readUnaligned32(p unsafe.Pointer) uint32 {
 
 func readUnaligned64(p unsafe.Pointer) uint64 {
 	q := (*[8]byte)(p)
-	if sys.BigEndian {
+	if goarch.BigEndian {
 		return uint64(q[7]) | uint64(q[6])<<8 | uint64(q[5])<<16 | uint64(q[4])<<24 |
 			uint64(q[3])<<32 | uint64(q[2])<<40 | uint64(q[1])<<48 | uint64(q[0])<<56
 	}
