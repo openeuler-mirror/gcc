@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Test broken pipes on Unix systems.
-// +build !plan9,!js
+//go:build !plan9 && !js
 
 package os_test
 
@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"internal/testenv"
 	"io"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	osexec "os/exec"
 	"os/signal"
@@ -46,7 +46,7 @@ func TestEPIPE(t *testing.T) {
 		if err == nil {
 			t.Fatal("unexpected success of Write to broken pipe")
 		}
-		if pe, ok := err.(*os.PathError); ok {
+		if pe, ok := err.(*fs.PathError); ok {
 			err = pe.Err
 		}
 		if se, ok := err.(*os.SyscallError); ok {
@@ -104,6 +104,25 @@ func TestStdPipe(t *testing.T) {
 			}
 		}
 	}
+
+	// Test redirecting stdout but not stderr.  Issue 40076.
+	cmd := osexec.Command(os.Args[0], "-test.run", "TestStdPipeHelper")
+	cmd.Stdout = w
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Env = append(os.Environ(), "GO_TEST_STD_PIPE_HELPER=1")
+	if err := cmd.Run(); err == nil {
+		t.Errorf("unexpected success of write to closed stdout")
+	} else if ee, ok := err.(*osexec.ExitError); !ok {
+		t.Errorf("unexpected exec error type %T: %v", err, err)
+	} else if ws, ok := ee.Sys().(syscall.WaitStatus); !ok {
+		t.Errorf("unexpected wait status type %T: %v", ee.Sys(), ee.Sys())
+	} else if !ws.Signaled() || ws.Signal() != syscall.SIGPIPE {
+		t.Errorf("unexpected exit status %v for write to closed stdout", err)
+	}
+	if output := stderr.Bytes(); len(output) > 0 {
+		t.Errorf("unexpected output on stderr: %s", output)
+	}
 }
 
 // This is a helper for TestStdPipe. It's not a test in itself.
@@ -131,17 +150,12 @@ func TestStdPipeHelper(t *testing.T) {
 }
 
 func testClosedPipeRace(t *testing.T, read bool) {
-	switch runtime.GOOS {
-	case "freebsd":
-		t.Skip("FreeBSD does not use the poller; issue 19093")
-	}
-
 	limit := 1
 	if !read {
 		// Get the amount we have to write to overload a pipe
 		// with no reader.
 		limit = 131073
-		if b, err := ioutil.ReadFile("/proc/sys/fs/pipe-max-size"); err == nil {
+		if b, err := os.ReadFile("/proc/sys/fs/pipe-max-size"); err == nil {
 			if i, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
 				limit = i + 1
 			}
@@ -183,10 +197,10 @@ func testClosedPipeRace(t *testing.T, read bool) {
 	}
 	if err == nil {
 		t.Error("I/O on closed pipe unexpectedly succeeded")
-	} else if pe, ok := err.(*os.PathError); !ok {
-		t.Errorf("I/O on closed pipe returned unexpected error type %T; expected os.PathError", pe)
-	} else if pe.Err != os.ErrClosed {
-		t.Errorf("got error %q but expected %q", pe.Err, os.ErrClosed)
+	} else if pe, ok := err.(*fs.PathError); !ok {
+		t.Errorf("I/O on closed pipe returned unexpected error type %T; expected fs.PathError", pe)
+	} else if pe.Err != fs.ErrClosed {
+		t.Errorf("got error %q but expected %q", pe.Err, fs.ErrClosed)
 	} else {
 		t.Logf("I/O returned expected error %q", err)
 	}
@@ -214,7 +228,7 @@ func TestReadNonblockingFd(t *testing.T) {
 		defer syscall.SetNonblock(fd, false)
 		_, err := os.Stdin.Read(make([]byte, 1))
 		if err != nil {
-			if perr, ok := err.(*os.PathError); !ok || perr.Err != syscall.EAGAIN {
+			if perr, ok := err.(*fs.PathError); !ok || perr.Err != syscall.EAGAIN {
 				t.Fatalf("read on nonblocking stdin got %q, should have gotten EAGAIN", err)
 			}
 		}
@@ -289,10 +303,10 @@ func testCloseWithBlockingRead(t *testing.T, r, w *os.File) {
 		if err == nil {
 			t.Error("I/O on closed pipe unexpectedly succeeded")
 		}
-		if pe, ok := err.(*os.PathError); ok {
+		if pe, ok := err.(*fs.PathError); ok {
 			err = pe.Err
 		}
-		if err != io.EOF && err != os.ErrClosed {
+		if err != io.EOF && err != fs.ErrClosed {
 			t.Errorf("got %v, expected EOF or closed", err)
 		}
 	}(c2)
@@ -422,12 +436,14 @@ func TestFdReadRace(t *testing.T) {
 	defer r.Close()
 	defer w.Close()
 
-	c := make(chan bool)
+	const count = 10
+
+	c := make(chan bool, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		var buf [10]byte
+		var buf [count]byte
 		r.SetReadDeadline(time.Now().Add(time.Minute))
 		c <- true
 		if _, err := r.Read(buf[:]); os.IsTimeout(err) {
@@ -446,8 +462,9 @@ func TestFdReadRace(t *testing.T) {
 		r.Fd()
 
 		// The bug was that Fd would hang until Read timed out.
-		// If the bug is fixed, then closing r here will cause
-		// the Read to exit before the timeout expires.
+		// If the bug is fixed, then writing to w and closing r here
+		// will cause the Read to exit before the timeout expires.
+		w.Write(make([]byte, count))
 		r.Close()
 	}()
 

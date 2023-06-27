@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build plan9
+//go:build plan9
 
 package runtime
 
@@ -49,6 +49,9 @@ func netpoll(delay int64) gList {
 
 		notetsleep(&netpollNote, delay)
 		unlock(&netpollStubLock)
+		// Guard against starvation in case the lock is contended
+		// (eg when running TestNetpollBreak).
+		osyield()
 	}
 	return gList{}
 }

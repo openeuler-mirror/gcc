@@ -8,9 +8,7 @@ enum X {
 };
 #endif
 
-#if __has_attribute(__objc_root_class__)
 __attribute__((__objc_root_class__))
-#endif
 @interface A
 - (id) :(id)arg0 :(id)arg1;
 - (id) m:(id)arg0 :(id)arg1 :(id)arg2 :(id)arg3;

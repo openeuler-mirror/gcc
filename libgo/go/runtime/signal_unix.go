@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build aix darwin dragonfly freebsd hurd linux netbsd openbsd solaris
+//go:build aix || darwin || dragonfly || freebsd || hurd || linux || netbsd || openbsd || solaris
 
 package runtime
 
 import (
+	"internal/abi"
 	"runtime/internal/atomic"
+	"runtime/internal/sys"
 	"unsafe"
 )
 
@@ -174,8 +176,8 @@ func sigInstallGoHandler(sig uint32) bool {
 	}
 
 	// When built using c-archive or c-shared, only install signal
-	// handlers for synchronous signals, SIGPIPE, and SIGURG.
-	if (isarchive || islibrary) && t.flags&_SigPanic == 0 && sig != _SIGPIPE && sig != _SIGURG {
+	// handlers for synchronous signals and SIGPIPE and sigPreempt.
+	if (isarchive || islibrary) && t.flags&_SigPanic == 0 && sig != _SIGPIPE && sig != sigPreempt {
 		return false
 	}
 
@@ -270,58 +272,62 @@ func clearSignalHandlers() {
 	}
 }
 
-// setProcessCPUProfiler is called when the profiling timer changes.
-// It is called with prof.lock held. hz is the new timer, and is 0 if
+// setProcessCPUProfilerTimer is called when the profiling timer changes.
+// It is called with prof.signalLock held. hz is the new timer, and is 0 if
 // profiling is being disabled. Enable or disable the signal as
 // required for -buildmode=c-archive.
-func setProcessCPUProfiler(hz int32) {
+func setProcessCPUProfilerTimer(hz int32) {
 	if hz != 0 {
 		// Enable the Go signal handler if not enabled.
 		if atomic.Cas(&handlingSig[_SIGPROF], 0, 1) {
-			atomic.Storeuintptr(&fwdSig[_SIGPROF], getsig(_SIGPROF))
+			h := getsig(_SIGPROF)
+			// If no signal handler was installed before, then we record
+			// _SIG_IGN here. When we turn off profiling (below) we'll start
+			// ignoring SIGPROF signals. We do this, rather than change
+			// to SIG_DFL, because there may be a pending SIGPROF
+			// signal that has not yet been delivered to some other thread.
+			// If we change to SIG_DFL when turning off profiling, the
+			// program will crash when that SIGPROF is delivered. We assume
+			// that programs that use profiling don't want to crash on a
+			// stray SIGPROF. See issue 19320.
+			// We do the change here instead of when turning off profiling,
+			// because there we may race with a signal handler running
+			// concurrently, in particular, sigfwdgo may observe _SIG_DFL and
+			// die. See issue 43828.
+			if h == _SIG_DFL {
+				h = _SIG_IGN
+			}
+			atomic.Storeuintptr(&fwdSig[_SIGPROF], h)
 			setsig(_SIGPROF, getSigtramp())
 		}
+
+		var it _itimerval
+		it.it_interval.tv_sec = 0
+		it.it_interval.set_usec(1000000 / hz)
+		it.it_value = it.it_interval
+		setitimer(_ITIMER_PROF, &it, nil)
 	} else {
+		setitimer(_ITIMER_PROF, &_itimerval{}, nil)
+
 		// If the Go signal handler should be disabled by default,
 		// switch back to the signal handler that was installed
 		// when we enabled profiling. We don't try to handle the case
 		// of a program that changes the SIGPROF handler while Go
 		// profiling is enabled.
-		//
-		// If no signal handler was installed before, then start
-		// ignoring SIGPROF signals. We do this, rather than change
-		// to SIG_DFL, because there may be a pending SIGPROF
-		// signal that has not yet been delivered to some other thread.
-		// If we change to SIG_DFL here, the program will crash
-		// when that SIGPROF is delivered. We assume that programs
-		// that use profiling don't want to crash on a stray SIGPROF.
-		// See issue 19320.
 		if !sigInstallGoHandler(_SIGPROF) {
 			if atomic.Cas(&handlingSig[_SIGPROF], 1, 0) {
 				h := atomic.Loaduintptr(&fwdSig[_SIGPROF])
-				if h == _SIG_DFL {
-					h = _SIG_IGN
-				}
 				setsig(_SIGPROF, h)
 			}
 		}
 	}
 }
 
-// setThreadCPUProfiler makes any thread-specific changes required to
+// setThreadCPUProfilerHz makes any thread-specific changes required to
 // implement profiling at a rate of hz.
-func setThreadCPUProfiler(hz int32) {
-	var it _itimerval
-	if hz == 0 {
-		setitimer(_ITIMER_PROF, &it, nil)
-	} else {
-		it.it_interval.tv_sec = 0
-		it.it_interval.set_usec(1000000 / hz)
-		it.it_value = it.it_interval
-		setitimer(_ITIMER_PROF, &it, nil)
-	}
-	_g_ := getg()
-	_g_.m.profilehz = hz
+// No changes required on Unix systems when using setitimer.
+func setThreadCPUProfilerHz(hz int32) {
+	getg().m.profilehz = hz
 }
 
 func sigpipe() {
@@ -335,21 +341,26 @@ func sigpipe() {
 func doSigPreempt(gp *g, ctxt *sigctxt, sigpc uintptr) {
 	// Check if this G wants to be preempted and is safe to
 	// preempt.
-	if wantAsyncPreempt(gp) && isAsyncSafePoint(gp, sigpc) {
-		// Inject a call to asyncPreempt.
-		// ctxt.pushCall(funcPC(asyncPreempt))
-		throw("pushCall not implemented")
+	if wantAsyncPreempt(gp) {
+		if ok, newpc := isAsyncSafePoint(gp, sigpc); ok {
+			// Adjust the PC and inject a call to asyncPreempt.
+			// ctxt.pushCall(abi.FuncPCABI0(asyncPreempt), newpc)
+			throw("pushCall not implemented")
+			_ = newpc
+		}
 	}
 
 	// Acknowledge the preemption.
 	atomic.Xadd(&gp.m.preemptGen, 1)
 	atomic.Store(&gp.m.signalPending, 0)
+
+	if GOOS == "darwin" || GOOS == "ios" {
+		atomic.Xadd(&pendingPreemptSignals, -1)
+	}
 }
 
-// gccgo-specific definition.
-const pushCallSupported = false
-
-const preemptMSupported = pushCallSupported
+// This is false for gccgo.
+const preemptMSupported = false
 
 // preemptM sends a preemption request to mp. This request may be
 // handled asynchronously and may be coalesced with other requests to
@@ -358,23 +369,29 @@ const preemptMSupported = pushCallSupported
 // safe-point, it will preempt the goroutine. It always atomically
 // increments mp.preemptGen after handling a preemption request.
 func preemptM(mp *m) {
-	if !pushCallSupported {
-		// This architecture doesn't support ctxt.pushCall
-		// yet, so doSigPreempt won't work.
-		return
+	// On Darwin, don't try to preempt threads during exec.
+	// Issue #41702.
+	if GOOS == "darwin" || GOOS == "ios" {
+		execLock.rlock()
 	}
-	if GOOS == "darwin" && (GOARCH == "arm" || GOARCH == "arm64") && !iscgo {
-		// On darwin, we use libc calls, and cgo is required on ARM and ARM64
-		// so we have TLS set up to save/restore G during C calls. If cgo is
-		// absent, we cannot save/restore G in TLS, and if a signal is
-		// received during C execution we cannot get the G. Therefore don't
-		// send signals.
-		// This can only happen in the go_bootstrap program (otherwise cgo is
-		// required).
-		return
+
+	if atomic.Cas(&mp.signalPending, 0, 1) {
+		if GOOS == "darwin" || GOOS == "ios" {
+			atomic.Xadd(&pendingPreemptSignals, 1)
+		}
+
+		// If multiple threads are preempting the same M, it may send many
+		// signals to the same M such that it hardly make progress, causing
+		// live-lock problem. Apparently this could happen on darwin. See
+		// issue #37741.
+		// Only send a signal if there isn't already one pending.
+		// signalM(mp, sigPreempt)
+		throw("signalM not implemented")
 	}
-	// signalM(mp, sigPreempt)
-	throw("signalM not implemented")
+
+	if GOOS == "darwin" || GOOS == "ios" {
+		execLock.runlock()
+	}
 }
 
 // sigtrampgo is called from the signal handler function, sigtramp,
@@ -396,8 +413,12 @@ func sigtrampgo(sig uint32, info *_siginfo_t, ctx unsafe.Pointer) {
 	if g == nil {
 		c := sigctxt{info, ctx}
 		if sig == _SIGPROF {
-			_, pc := getSiginfo(info, ctx)
-			sigprofNonGo(pc)
+			// Some platforms (Linux) have per-thread timers, which we use in
+			// combination with the process-wide timer. Avoid double-counting.
+			if validSIGPROF(nil, &c) {
+				_, pc := getSiginfo(info, ctx)
+				sigprofNonGoPC(pc)
+			}
 			return
 		}
 		if sig == sigPreempt && preemptMSupported && debug.asyncpreemptoff == 0 {
@@ -408,6 +429,9 @@ func sigtrampgo(sig uint32, info *_siginfo_t, ctx unsafe.Pointer) {
 			// no non-Go signal handler for sigPreempt.
 			// The default behavior for sigPreempt is to ignore
 			// the signal, so badsignal will be a no-op anyway.
+			if GOOS == "darwin" || GOOS == "ios" {
+				atomic.Xadd(&pendingPreemptSignals, -1)
+			}
 			return
 		}
 		badsignal(uintptr(sig), &c)
@@ -417,6 +441,21 @@ func sigtrampgo(sig uint32, info *_siginfo_t, ctx unsafe.Pointer) {
 	setg(g.m.gsignal)
 	sighandler(sig, info, ctx, g)
 	setg(g)
+}
+
+// sigprofNonGoPC is called when a profiling signal arrived on a
+// non-Go thread and we have a single PC value, not a stack trace.
+// g is nil, and what we can do is very limited.
+//go:nosplit
+//go:nowritebarrierrec
+func sigprofNonGoPC(pc uintptr) {
+	if prof.hz != 0 {
+		stk := []uintptr{
+			pc,
+			abi.FuncPCABIInternal(_ExternalCode) + sys.PCQuantum,
+		}
+		cpuprof.addNonGo(stk)
+	}
 }
 
 // crashing is the number of m's we have waited for when implementing
@@ -468,7 +507,11 @@ func sighandler(sig uint32, info *_siginfo_t, ctxt unsafe.Pointer, gp *g) {
 	}
 
 	if sig == _SIGPROF {
-		sigprof(sigpc, gp, _g_.m)
+		// Some platforms (Linux) have per-thread timers, which we use in
+		// combination with the process-wide timer. Avoid double-counting.
+		if validSIGPROF(_g_.m, c) {
+			sigprof(sigpc, gp, _g_.m)
+		}
 		return
 	}
 
@@ -480,7 +523,7 @@ func sighandler(sig uint32, info *_siginfo_t, ctxt unsafe.Pointer, gp *g) {
 		return
 	}
 
-	if sig == sigPreempt {
+	if sig == sigPreempt && debug.asyncpreemptoff == 0 {
 		// Might be a preemption signal.
 		doSigPreempt(gp, c, sigpc)
 		// Even if this was definitely a preemption signal, it
@@ -492,10 +535,10 @@ func sighandler(sig uint32, info *_siginfo_t, ctxt unsafe.Pointer, gp *g) {
 	if sig < uint32(len(sigtable)) {
 		flags = sigtable[sig].flags
 	}
-	if flags&_SigPanic != 0 && gp.throwsplit {
+	if c.sigcode() != _SI_USER && flags&_SigPanic != 0 && gp.throwsplit {
 		// We can't safely sigpanic because it may grow the
 		// stack. Abort in the signal handler instead.
-		flags = (flags &^ _SigPanic) | _SigThrow
+		flags = _SigThrow
 	}
 	if isAbortPC(sigpc) {
 		// On many architectures, the abort function just
@@ -536,7 +579,11 @@ func sighandler(sig uint32, info *_siginfo_t, ctxt unsafe.Pointer, gp *g) {
 		dieFromSignal(sig)
 	}
 
-	if flags&_SigThrow == 0 {
+	// _SigThrow means that we should exit now.
+	// If we get here with _SigPanic, it means that the signal
+	// was sent to us by a program (c.sigcode() == _SI_USER);
+	// in that case, if we didn't handle it in sigsend, we exit now.
+	if flags&(_SigThrow|_SigPanic) == 0 {
 		return
 	}
 
@@ -554,9 +601,35 @@ func sighandler(sig uint32, info *_siginfo_t, ctxt unsafe.Pointer, gp *g) {
 	}
 
 	print("PC=", hex(sigpc), " m=", _g_.m.id, " sigcode=", c.sigcode(), "\n")
-	if _g_.m.lockedg != 0 && _g_.m.ncgo > 0 && gp == _g_.m.g0 {
+	if _g_.m.incgo && gp == _g_.m.g0 && _g_.m.curg != nil {
 		print("signal arrived during cgo execution\n")
-		gp = _g_.m.lockedg.ptr()
+		// Switch to curg so that we get a traceback of the Go code
+		// leading up to the cgocall, which switched from curg to g0.
+		gp = _g_.m.curg
+	}
+	if sig == _SIGILL || sig == _SIGFPE {
+		// It would be nice to know how long the instruction is.
+		// Unfortunately, that's complicated to do in general (mostly for x86
+		// and s930x, but other archs have non-standard instruction lengths also).
+		// Opt to print 16 bytes, which covers most instructions.
+		const maxN = 16
+		n := uintptr(maxN)
+		// We have to be careful, though. If we're near the end of
+		// a page and the following page isn't mapped, we could
+		// segfault. So make sure we don't straddle a page (even though
+		// that could lead to printing an incomplete instruction).
+		// We're assuming here we can read at least the page containing the PC.
+		// I suppose it is possible that the page is mapped executable but not readable?
+		pc := sigpc
+		if n > physPageSize-pc%physPageSize {
+			n = physPageSize - pc%physPageSize
+		}
+		print("instruction bytes:")
+		b := (*[maxN]byte)(unsafe.Pointer(pc))
+		for i := uintptr(0); i < n; i++ {
+			print(" ", hex(b[i]))
+		}
+		println()
 	}
 	print("\n")
 
@@ -625,7 +698,7 @@ func sigpanic() {
 		}
 		// Support runtime/debug.SetPanicOnFault.
 		if g.paniconfault {
-			panicmem()
+			panicmemAddr(g.sigcode1)
 		}
 		print("unexpected fault address ", hex(g.sigcode1), "\n")
 		throw("fault")
@@ -635,7 +708,7 @@ func sigpanic() {
 		}
 		// Support runtime/debug.SetPanicOnFault.
 		if g.paniconfault {
-			panicmem()
+			panicmemAddr(g.sigcode1)
 		}
 		print("unexpected fault address ", hex(g.sigcode1), "\n")
 		throw("fault")
@@ -848,7 +921,7 @@ func badsignal(sig uintptr, c *sigctxt) {
 		exit(2)
 		*(*uintptr)(unsafe.Pointer(uintptr(123))) = 2
 	}
-	needm(0)
+	needm()
 	if !sigsend(uint32(sig)) {
 		// A foreign thread received the signal sig, and the
 		// Go code does not want to handle it.
@@ -891,7 +964,7 @@ func sigfwdgo(sig uint32, info *_siginfo_t, ctx unsafe.Pointer) bool {
 	// This function and its caller sigtrampgo assumes SIGPIPE is delivered on the
 	// originating thread. This property does not hold on macOS (golang.org/issue/33384),
 	// so we have no choice but to ignore SIGPIPE.
-	if GOOS == "darwin" && sig == _SIGPIPE {
+	if (GOOS == "darwin" || GOOS == "ios") && sig == _SIGPIPE {
 		return true
 	}
 
@@ -925,15 +998,15 @@ func sigfwdgo(sig uint32, info *_siginfo_t, ctx unsafe.Pointer) bool {
 	return true
 }
 
-// msigsave saves the current thread's signal mask into mp.sigmask.
+// sigsave saves the current thread's signal mask into *p.
 // This is used to preserve the non-Go signal mask when a non-Go
 // thread calls a Go function.
 // This is nosplit and nowritebarrierrec because it is called by needm
 // which may be called on a non-Go thread with no g available.
 //go:nosplit
 //go:nowritebarrierrec
-func msigsave(mp *m) {
-	sigprocmask(_SIG_SETMASK, nil, &mp.sigmask)
+func sigsave(p *sigset) {
+	sigprocmask(_SIG_SETMASK, nil, p)
 }
 
 // msigrestore sets the current thread's signal mask to sigmask.
@@ -947,15 +1020,16 @@ func msigrestore(sigmask sigset) {
 	sigprocmask(_SIG_SETMASK, &sigmask, nil)
 }
 
-// sigblock blocks all signals in the current thread's signal mask.
+// sigblock blocks signals in the current thread's signal mask.
 // This is used to block signals while setting up and tearing down g
-// when a non-Go thread calls a Go function.
-// The OS-specific code is expected to define sigset_all.
+// when a non-Go thread calls a Go function. When a thread is exiting
+// we use the sigsetAllExiting value, otherwise the OS specific
+// definition of sigset_all is used.
 // This is nosplit and nowritebarrierrec because it is called by needm
 // which may be called on a non-Go thread with no g available.
 //go:nosplit
 //go:nowritebarrierrec
-func sigblock() {
+func sigblock(exiting bool) {
 	var set sigset
 	sigfillset(&set)
 	sigprocmask(_SIG_SETMASK, &set, nil)
@@ -1007,7 +1081,7 @@ func minitSignalStack() {
 // thread's signal mask. When this is called all signals have been
 // blocked for the thread.  This starts with m.sigmask, which was set
 // either from initSigmask for a newly created thread or by calling
-// msigsave if this is a non-Go thread calling a Go function. It
+// sigsave if this is a non-Go thread calling a Go function. It
 // removes all essential signals from the mask, thus causing those
 // signals to not be blocked. Then it sets the thread's signal mask.
 // After this is called the thread can receive signals.

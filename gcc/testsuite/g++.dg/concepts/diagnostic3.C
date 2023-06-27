@@ -7,23 +7,23 @@ template<typename T>
   concept foo = (bool)(foo_v<T> | foo_v<T&>);
 
 template<typename... Ts>
-requires (foo<Ts> && ...)
+requires (foo<Ts> && ...) // { dg-message "with Ts = .int, char... evaluated to .false." }
 void
-bar() // { dg-message "with Ts = .int, char... evaluated to .false." }
+bar()
 { }
 
 template<int>
 struct S { };
 
 template<int... Is>
-requires (foo<S<Is>> && ...)
+requires (foo<S<Is>> && ...) // { dg-message "with Is = .2, 3, 4... evaluated to .false." }
 void
-baz() // { dg-message "with Is = .2, 3, 4... evaluated to .false." }
+baz()
 { }
 
 void
 baz()
 {
-  bar<int, char>(); // { dg-error "unsatisfied constraints" }
-  baz<2,3,4>(); // { dg-error "unsatisfied constraints" }
+  bar<int, char>(); // { dg-error "no match" }
+  baz<2,3,4>(); // { dg-error "no match" }
 }

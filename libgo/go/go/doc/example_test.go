@@ -307,6 +307,9 @@ func (X) TestBlah() {
 func (X) BenchmarkFoo() {
 }
 
+func (X) FuzzFoo() {
+}
+
 func Example() {
 	fmt.Println("Hello, world!")
 	// Output: Hello, world!
@@ -324,6 +327,9 @@ func (X) TestBlah() {
 }
 
 func (X) BenchmarkFoo() {
+}
+
+func (X) FuzzFoo() {
 }
 
 func main() {
@@ -352,6 +358,25 @@ func main() {
 }
 `
 
+const exampleWholeFileExternalFunction = `package foo_test
+
+func foo(int)
+
+func Example() {
+	foo(42)
+	// Output:
+}
+`
+
+const exampleWholeFileExternalFunctionOutput = `package main
+
+func foo(int)
+
+func main() {
+	foo(42)
+}
+`
+
 var exampleWholeFileTestCases = []struct {
 	Title, Source, Play, Output string
 }{
@@ -366,6 +391,12 @@ var exampleWholeFileTestCases = []struct {
 		exampleWholeFileFunction,
 		exampleWholeFileFunctionOutput,
 		"Hello, world!\n",
+	},
+	{
+		"ExternalFunction",
+		exampleWholeFileExternalFunction,
+		exampleWholeFileExternalFunctionOutput,
+		"",
 	},
 }
 
@@ -563,6 +594,7 @@ type (
 	type2     int
 
 	Embed struct { Type1 }
+	Uembed struct { type2 }
 )
 
 func Func1()     {}
@@ -574,6 +606,8 @@ func (Type1) Func1() {}
 func (Type1) Func1_Foo() {}
 func (Type1) Func1_foo() {}
 func (Type1) func2() {}
+
+func (type2) Func1() {}
 
 type (
 	Conflict          int
@@ -633,7 +667,9 @@ func ExampleType1_Func1_foo_suffix()    {}
 func ExampleType1_Func1_foo_Suffix()    {} // matches Type1.Func1, instead of Type1.Func1_foo
 func ExampleType1_func2()               {} // matches Type1, instead of Type1.func2
 
-func ExampleEmbed_Func1() {} // invalid - no support for forwarded methods from embedding
+func ExampleEmbed_Func1()         {} // invalid - no support for forwarded methods from embedding exported type
+func ExampleUembed_Func1()        {} // methods from embedding unexported types are OK
+func ExampleUembed_Func1_suffix() {}
 
 func ExampleConflict_Conflict()        {} // ambiguous with either Conflict or Conflict_Conflict type
 func ExampleConflict_conflict()        {} // ambiguous with either Conflict or Conflict_conflict type
@@ -682,6 +718,8 @@ func ExampleConflict_conflict_suffix() {} // ambiguous with either Conflict or C
 		"Type1.Func1":     {"", "foo_Suffix", "suffix"},
 		"Type1.Func1_Foo": {"", "suffix"},
 		"Type1.Func1_foo": {"", "suffix"},
+
+		"Uembed.Func1": {"", "suffix"},
 
 		// These are implementation dependent due to the ambiguous parsing.
 		"Conflict_Conflict": {"", "suffix"},

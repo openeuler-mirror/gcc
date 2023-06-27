@@ -1,4 +1,9 @@
-#include <stdio.h>
+typedef struct FILE   FILE;
+
+FILE* fopen (const char*, const char*);
+int   fclose (FILE*);
+#define SEEK_SET        0
+int fseek (FILE *, long int, int);
 
 void
 test_1 (const char *path)
@@ -12,6 +17,9 @@ test_1 (const char *path)
   fclose (f); /* { dg-warning "double 'fclose' of FILE 'f'" "warning" } */ 
   /* { dg-message "second 'fclose' here; first 'fclose' was at \\(5\\)" "second fclose" { target *-*-* } .-1 } */
 }
+
+/* Swallow -Wuse-after-free issued for the same problem
+   { dg-prune-output "-Wuse-after-free" } */
 
 void
 test_2 (const char *src, const char *dst)
@@ -45,5 +53,12 @@ test_4 (const char *path)
      file (e.g. "fseek").  */
   fseek (f, 1024, SEEK_SET);
 
+  return; /* { dg-warning "leak of FILE 'f'" } */ 
+}
+
+void
+test_5 (const char *path)
+{
+  FILE *f = fopen (path, "r"); /* { dg-message "opened here" } */
   return; /* { dg-warning "leak of FILE 'f'" } */ 
 }

@@ -19,7 +19,7 @@ import (
 
 type URLTest struct {
 	in        string
-	out       *URL   // expected parse; RawPath="" means same as Path
+	out       *URL   // expected parse
 	roundtrip string // expected result of reserializing the URL; empty means same as "in".
 }
 
@@ -51,6 +51,18 @@ var urltests = []URLTest{
 			Host:    "www.google.com",
 			Path:    "/file one&two",
 			RawPath: "/file%20one%26two",
+		},
+		"",
+	},
+	// fragment with hex escaping
+	{
+		"http://www.google.com/#file%20one%26two",
+		&URL{
+			Scheme:      "http",
+			Host:        "www.google.com",
+			Path:        "/",
+			Fragment:    "file one&two",
+			RawFragment: "file%20one%26two",
 		},
 		"",
 	},
@@ -261,7 +273,7 @@ var urltests = []URLTest{
 		"",
 	},
 	{
-		"http://www.google.com/?q=go+language#foo%26bar",
+		"http://www.google.com/?q=go+language#foo&bar",
 		&URL{
 			Scheme:   "http",
 			Host:     "www.google.com",
@@ -270,6 +282,18 @@ var urltests = []URLTest{
 			Fragment: "foo&bar",
 		},
 		"http://www.google.com/?q=go+language#foo&bar",
+	},
+	{
+		"http://www.google.com/?q=go+language#foo%26bar",
+		&URL{
+			Scheme:      "http",
+			Host:        "www.google.com",
+			Path:        "/",
+			RawQuery:    "q=go+language",
+			Fragment:    "foo&bar",
+			RawFragment: "foo%26bar",
+		},
+		"http://www.google.com/?q=go+language#foo%26bar",
 	},
 	{
 		"file:///home/adg/rabbits",
@@ -594,15 +618,15 @@ var urltests = []URLTest{
 
 // more useful string for debugging than fmt's struct printer
 func ufmt(u *URL) string {
-	var user, pass interface{}
+	var user, pass any
 	if u.User != nil {
 		user = u.User.Username()
 		if p, ok := u.User.Password(); ok {
 			pass = p
 		}
 	}
-	return fmt.Sprintf("opaque=%q, scheme=%q, user=%#v, pass=%#v, host=%q, path=%q, rawpath=%q, rawq=%q, frag=%q, forcequery=%v",
-		u.Opaque, u.Scheme, user, pass, u.Host, u.Path, u.RawPath, u.RawQuery, u.Fragment, u.ForceQuery)
+	return fmt.Sprintf("opaque=%q, scheme=%q, user=%#v, pass=%#v, host=%q, path=%q, rawpath=%q, rawq=%q, frag=%q, rawfrag=%q, forcequery=%v",
+		u.Opaque, u.Scheme, user, pass, u.Host, u.Path, u.RawPath, u.RawQuery, u.Fragment, u.RawFragment, u.ForceQuery)
 }
 
 func BenchmarkString(b *testing.B) {
@@ -762,6 +786,73 @@ func TestURLString(t *testing.T) {
 		if got := tt.url.String(); got != tt.want {
 			t.Errorf("%+v.String() = %q; want %q", tt.url, got, tt.want)
 		}
+	}
+}
+
+func TestURLRedacted(t *testing.T) {
+	cases := []struct {
+		name string
+		url  *URL
+		want string
+	}{
+		{
+			name: "non-blank Password",
+			url: &URL{
+				Scheme: "http",
+				Host:   "host.tld",
+				Path:   "this:that",
+				User:   UserPassword("user", "password"),
+			},
+			want: "http://user:xxxxx@host.tld/this:that",
+		},
+		{
+			name: "blank Password",
+			url: &URL{
+				Scheme: "http",
+				Host:   "host.tld",
+				Path:   "this:that",
+				User:   User("user"),
+			},
+			want: "http://user@host.tld/this:that",
+		},
+		{
+			name: "nil User",
+			url: &URL{
+				Scheme: "http",
+				Host:   "host.tld",
+				Path:   "this:that",
+				User:   UserPassword("", "password"),
+			},
+			want: "http://:xxxxx@host.tld/this:that",
+		},
+		{
+			name: "blank Username, blank Password",
+			url: &URL{
+				Scheme: "http",
+				Host:   "host.tld",
+				Path:   "this:that",
+			},
+			want: "http://host.tld/this:that",
+		},
+		{
+			name: "empty URL",
+			url:  &URL{},
+			want: "",
+		},
+		{
+			name: "nil URL",
+			url:  nil,
+			want: "",
+		},
+	}
+
+	for _, tt := range cases {
+		t := t
+		t.Run(tt.name, func(t *testing.T) {
+			if g, w := tt.url.Redacted(), tt.want; g != w {
+				t.Fatalf("got: %q\nwant: %q", g, w)
+			}
+		})
 	}
 }
 
@@ -1023,6 +1114,14 @@ func TestResolvePath(t *testing.T) {
 	}
 }
 
+func BenchmarkResolvePath(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		resolvePath("a/b/c", ".././d")
+	}
+}
+
 var resolveReferenceTests = []struct {
 	base, rel, expected string
 }{
@@ -1073,7 +1172,7 @@ var resolveReferenceTests = []struct {
 	{"http://foo.com/bar/baz", "quux/./dotdot/../dotdot/../dot/./tail/..", "http://foo.com/bar/quux/dot/"},
 
 	// Remove any dot-segments prior to forming the target URI.
-	// http://tools.ietf.org/html/rfc3986#section-5.2.4
+	// https://datatracker.ietf.org/doc/html/rfc3986#section-5.2.4
 	{"http://foo.com/dot/./dotdot/../foo/bar", "../baz", "http://foo.com/dot/baz"},
 
 	// Triple dot isn't special
@@ -1093,7 +1192,7 @@ var resolveReferenceTests = []struct {
 	{"http://foo.com/foo%2dbar/", "./baz-quux", "http://foo.com/foo%2dbar/baz-quux"},
 
 	// RFC 3986: Normal Examples
-	// http://tools.ietf.org/html/rfc3986#section-5.4.1
+	// https://datatracker.ietf.org/doc/html/rfc3986#section-5.4.1
 	{"http://a/b/c/d;p?q", "g:h", "g:h"},
 	{"http://a/b/c/d;p?q", "g", "http://a/b/c/g"},
 	{"http://a/b/c/d;p?q", "./g", "http://a/b/c/g"},
@@ -1119,7 +1218,7 @@ var resolveReferenceTests = []struct {
 	{"http://a/b/c/d;p?q", "../../g", "http://a/g"},
 
 	// RFC 3986: Abnormal Examples
-	// http://tools.ietf.org/html/rfc3986#section-5.4.2
+	// https://datatracker.ietf.org/doc/html/rfc3986#section-5.4.2
 	{"http://a/b/c/d;p?q", "../../../g", "http://a/g"},
 	{"http://a/b/c/d;p?q", "../../../../g", "http://a/g"},
 	{"http://a/b/c/d;p?q", "/./g", "http://a/g"},
@@ -1145,6 +1244,9 @@ var resolveReferenceTests = []struct {
 	{"https://a/b/c/d;p?q", "//g/d/e/f?y#s", "https://g/d/e/f?y#s"},
 	{"https://a/b/c/d;p#s", "?y", "https://a/b/c/d;p?y"},
 	{"https://a/b/c/d;p?q#s", "?y", "https://a/b/c/d;p?y"},
+
+	// Empty path and query but with ForceQuery (issue 46033).
+	{"https://a/b/c/d;p?q#s", "?", "https://a/b/c/d;p?"},
 }
 
 func TestResolveReference(t *testing.T) {
@@ -1196,10 +1298,10 @@ func TestResolveReference(t *testing.T) {
 }
 
 func TestQueryValues(t *testing.T) {
-	u, _ := Parse("http://x.com?foo=bar&bar=1&bar=2")
+	u, _ := Parse("http://x.com?foo=bar&bar=1&bar=2&baz")
 	v := u.Query()
-	if len(v) != 2 {
-		t.Errorf("got %d keys in Query values, want 2", len(v))
+	if len(v) != 3 {
+		t.Errorf("got %d keys in Query values, want 3", len(v))
 	}
 	if g, e := v.Get("foo"), "bar"; g != e {
 		t.Errorf("Get(foo) = %q, want %q", g, e)
@@ -1214,6 +1316,18 @@ func TestQueryValues(t *testing.T) {
 	if g, e := v.Get("baz"), ""; g != e {
 		t.Errorf("Get(baz) = %q, want %q", g, e)
 	}
+	if h, e := v.Has("foo"), true; h != e {
+		t.Errorf("Has(foo) = %t, want %t", h, e)
+	}
+	if h, e := v.Has("bar"), true; h != e {
+		t.Errorf("Has(bar) = %t, want %t", h, e)
+	}
+	if h, e := v.Has("baz"), true; h != e {
+		t.Errorf("Has(baz) = %t, want %t", h, e)
+	}
+	if h, e := v.Has("noexist"), false; h != e {
+		t.Errorf("Has(noexist) = %t, want %t", h, e)
+	}
 	v.Del("bar")
 	if g, e := v.Get("bar"), ""; g != e {
 		t.Errorf("second Get(bar) = %q, want %q", g, e)
@@ -1223,57 +1337,125 @@ func TestQueryValues(t *testing.T) {
 type parseTest struct {
 	query string
 	out   Values
+	ok    bool
 }
 
 var parseTests = []parseTest{
 	{
+		query: "a=1",
+		out:   Values{"a": []string{"1"}},
+		ok:    true,
+	},
+	{
 		query: "a=1&b=2",
 		out:   Values{"a": []string{"1"}, "b": []string{"2"}},
+		ok:    true,
 	},
 	{
 		query: "a=1&a=2&a=banana",
 		out:   Values{"a": []string{"1", "2", "banana"}},
+		ok:    true,
 	},
 	{
 		query: "ascii=%3Ckey%3A+0x90%3E",
 		out:   Values{"ascii": []string{"<key: 0x90>"}},
+		ok:    true,
+	}, {
+		query: "a=1;b=2",
+		out:   Values{},
+		ok:    false,
+	}, {
+		query: "a;b=1",
+		out:   Values{},
+		ok:    false,
+	}, {
+		query: "a=%3B", // hex encoding for semicolon
+		out:   Values{"a": []string{";"}},
+		ok:    true,
 	},
 	{
-		query: "a=1;b=2",
-		out:   Values{"a": []string{"1"}, "b": []string{"2"}},
+		query: "a%3Bb=1",
+		out:   Values{"a;b": []string{"1"}},
+		ok:    true,
 	},
 	{
 		query: "a=1&a=2;a=banana",
-		out:   Values{"a": []string{"1", "2", "banana"}},
+		out:   Values{"a": []string{"1"}},
+		ok:    false,
+	},
+	{
+		query: "a;b&c=1",
+		out:   Values{"c": []string{"1"}},
+		ok:    false,
+	},
+	{
+		query: "a=1&b=2;a=3&c=4",
+		out:   Values{"a": []string{"1"}, "c": []string{"4"}},
+		ok:    false,
+	},
+	{
+		query: "a=1&b=2;c=3",
+		out:   Values{"a": []string{"1"}},
+		ok:    false,
+	},
+	{
+		query: ";",
+		out:   Values{},
+		ok:    false,
+	},
+	{
+		query: "a=1;",
+		out:   Values{},
+		ok:    false,
+	},
+	{
+		query: "a=1&;",
+		out:   Values{"a": []string{"1"}},
+		ok:    false,
+	},
+	{
+		query: ";a=1&b=2",
+		out:   Values{"b": []string{"2"}},
+		ok:    false,
+	},
+	{
+		query: "a=1&b=2;",
+		out:   Values{"a": []string{"1"}},
+		ok:    false,
 	},
 }
 
 func TestParseQuery(t *testing.T) {
-	for i, test := range parseTests {
-		form, err := ParseQuery(test.query)
-		if err != nil {
-			t.Errorf("test %d: Unexpected error: %v", i, err)
-			continue
-		}
-		if len(form) != len(test.out) {
-			t.Errorf("test %d: len(form) = %d, want %d", i, len(form), len(test.out))
-		}
-		for k, evs := range test.out {
-			vs, ok := form[k]
-			if !ok {
-				t.Errorf("test %d: Missing key %q", i, k)
-				continue
+	for _, test := range parseTests {
+		t.Run(test.query, func(t *testing.T) {
+			form, err := ParseQuery(test.query)
+			if test.ok != (err == nil) {
+				want := "<error>"
+				if test.ok {
+					want = "<nil>"
+				}
+				t.Errorf("Unexpected error: %v, want %v", err, want)
 			}
-			if len(vs) != len(evs) {
-				t.Errorf("test %d: len(form[%q]) = %d, want %d", i, k, len(vs), len(evs))
-				continue
+			if len(form) != len(test.out) {
+				t.Errorf("len(form) = %d, want %d", len(form), len(test.out))
 			}
-			for j, ev := range evs {
-				if v := vs[j]; v != ev {
-					t.Errorf("test %d: form[%q][%d] = %q, want %q", i, k, j, v, ev)
+			for k, evs := range test.out {
+				vs, ok := form[k]
+				if !ok {
+					t.Errorf("Missing key %q", k)
+					continue
+				}
+				if len(vs) != len(evs) {
+					t.Errorf("len(form[%q]) = %d, want %d", k, len(vs), len(evs))
+					continue
+				}
+				for j, ev := range evs {
+					if v := vs[j]; v != ev {
+						t.Errorf("form[%q][%d] = %q, want %q", k, j, v, ev)
+					}
 				}
 			}
-		}
+		})
 	}
 }
 
@@ -1878,14 +2060,5 @@ func BenchmarkPathUnescape(b *testing.B) {
 			}
 
 		})
-	}
-}
-
-var sink string
-
-func BenchmarkSplit(b *testing.B) {
-	url := "http://www.google.com/?q=go+language#foo%26bar"
-	for i := 0; i < b.N; i++ {
-		sink, sink = split(url, '#', true)
 	}
 }

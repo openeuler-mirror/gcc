@@ -6,7 +6,7 @@
 --                                                                          --
 --                                 B o d y                                  --
 --                                                                          --
---          Copyright (C) 1992-2019, Free Software Foundation, Inc.         --
+--          Copyright (C) 1992-2022, Free Software Foundation, Inc.         --
 --                                                                          --
 -- GNAT is free software;  you can  redistribute it  and/or modify it under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -1056,6 +1056,8 @@ package body Binde is
       --  becomes zero, then add to no-predecessor list.
 
       S := UNR.Table (Chosen).Successors;
+      pragma Annotate (CodePeer, Modified, S);
+
       while S /= No_Successor loop
          U := Succ.Table (S).After;
          UNR.Table (U).Num_Pred := UNR.Table (U).Num_Pred - 1;
@@ -2325,7 +2327,7 @@ package body Binde is
       --  subsumed by their parent units, but we need to list them for other
       --  tools. For now they are listed after other files, rather than right
       --  after their parent, since there is no easy link between the
-      --  elaboration table and the ALIs table ??? As subunits may appear
+      --  elaboration table and the ALIs table. As subunits may appear
       --  repeatedly in the list, if the parent unit appears in the context of
       --  several units in the closure, duplicates are suppressed.
 
@@ -2390,6 +2392,8 @@ package body Binde is
    begin
       if ST.Reason in Elab_All .. Elab_All_Desirable then
          L := ST.Elab_All_Link;
+         pragma Annotate (CodePeer, Modified, L);
+
          while L /= No_Elab_All_Link loop
             Nam := Elab_All_Entries.Table (L).Needed_By;
             Error_Msg_Unit_1 := Nam;
@@ -2807,7 +2811,7 @@ package body Binde is
                        or else Withs.Table (W).Elab_All_Desirable
                      then
                         if SCC (U) = SCC (Withed_Unit) then
-                           Elab_Cycle_Found := True; -- ???
+                           Elab_Cycle_Found := True;
 
                            --  We could probably give better error messages
                            --  than Elab_Old here, but for now, to avoid
@@ -2869,10 +2873,10 @@ package body Binde is
             end if;
 
             --  If there are no nodes with predecessors, then either we are
-            --  done, as indicated by Num_Left being set to zero, or we have
-            --  a circularity. In the latter case, diagnose the circularity,
-            --  removing it from the graph and continue.
-            --  ????But Diagnose_Elaboration_Problem always raises an
+            --  done, as indicated by Num_Left being set to zero, or we have a
+            --  circularity. In the latter case, diagnose the circularity,
+            --  removing it from the graph and
+            --  continue. Diagnose_Elaboration_Problem always raises an
             --  exception, so the loop never goes around more than once.
 
             Get_No_Pred : while No_Pred = No_Unit_Id loop
@@ -3082,11 +3086,11 @@ package body Binde is
          Outer : loop
 
             --  If there are no nodes with predecessors, then either we are
-            --  done, as indicated by Num_Left being set to zero, or we have
-            --  a circularity. In the latter case, diagnose the circularity,
+            --  done, as indicated by Num_Left being set to zero, or we have a
+            --  circularity. In the latter case, diagnose the circularity,
             --  removing it from the graph and continue.
-            --  ????But Diagnose_Elaboration_Problem always raises an
-            --  exception, so the loop never goes around more than once.
+            --  Diagnose_Elaboration_Problem always raises an exception, so the
+            --  loop never goes around more than once.
 
             Get_No_Pred : while No_Pred = No_Unit_Id loop
                exit Outer when Num_Left < 1;

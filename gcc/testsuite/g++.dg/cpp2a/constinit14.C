@@ -1,8 +1,8 @@
 // PR c++/92134 - constinit malfunction in static data member.
-// { dg-do compile { target c++2a } }
+// { dg-do compile { target c++20 } }
 
 struct Value {
-  Value() : v{new int{42}} {}
+  Value() : v{new int{42}} {}	// { dg-error "result of 'operator new'" "" { target implicit_constexpr } }
   int* v;
 };
 

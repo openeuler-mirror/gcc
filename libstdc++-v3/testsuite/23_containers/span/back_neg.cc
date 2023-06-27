@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2020 Free Software Foundation, Inc.
+// Copyright (C) 2019-2022 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -18,8 +18,6 @@
 // { dg-options "-std=gnu++2a" }
 // { dg-do compile { target c++2a } }
 
-#undef _GLIBCXX_ASSERTIONS
-#define _GLIBCXX_ASSERTIONS
 #include <span>
 
 constexpr bool
@@ -33,5 +31,5 @@ test01(bool b)
 
 static_assert(test01(false));
 static_assert(test01(true)); // { dg-error "non-constant" }
-// { dg-error "assert" "" { target *-*-* } 0 }
+// { dg-error "unreachable" "" { target *-*-* } 0 }
 // { dg-prune-output "in 'constexpr' expansion" }

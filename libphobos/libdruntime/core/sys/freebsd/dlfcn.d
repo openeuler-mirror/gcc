@@ -17,18 +17,6 @@ nothrow:
 enum __BSD_VISIBLE = true;
 
 /*
- * Modes and flags for dlopen().
- */
-static assert(RTLD_LAZY   == 1);
-static assert(RTLD_NOW    == 2);
-enum RTLD_MODEMASK        =  0x3;
-static assert(RTLD_GLOBAL == 0x100);
-static assert(RTLD_LOCAL  == 0);
-enum RTLD_TRACE           =  0x200;
-enum RTLD_NODELETE        =  0x01000;
-enum RTLD_NOLOAD          =  0x02000;
-
-/*
  * Request arguments for dlinfo().
  */
 enum RTLD_DI_LINKMAP     = 2;    /* Obtain link map. */
@@ -46,16 +34,6 @@ enum RTLD_SELF    = cast(void *)-3;    /* Search the caller itself. */
 
 static if (__BSD_VISIBLE)
 {
-    /*
-     * Structure filled in by dladdr().
-     */
-    struct Dl_info {
-        const(char)     *dli_fname;     /* Pathname of shared object. */
-        void            *dli_fbase;     /* Base address of shared object. */
-        const(char)     *dli_sname;     /* Name of nearest symbol. */
-        void            *dli_saddr;     /* Address of nearest symbol. */
-    };
-
     /*-
      * The actual type declared by this typedef is immaterial, provided that
      * it is a function pointer.  Its purpose is to provide a return type for
@@ -67,7 +45,7 @@ static if (__BSD_VISIBLE)
      */
     struct __dlfunc_arg {
         int     __dlfunc_dummy;
-    };
+    }
 
     alias dlfunc_t = void function(__dlfunc_arg);
 
@@ -77,27 +55,26 @@ static if (__BSD_VISIBLE)
     struct Dl_serpath {
         char *          dls_name;       /* single search path entry */
         uint            dls_flags;      /* path information */
-    };
+    }
 
     struct Dl_serinfo {
         size_t          dls_size;       /* total buffer size */
         uint            dls_cnt;        /* number of path entries */
         Dl_serpath[1]   dls_serpath;    /* there may be more than one */
-    };
+    }
 }
 
 /* XSI functions first. */
 extern(C) {
     static assert(is(typeof(&dlclose) == int function(void*)));
     static assert(is(typeof(&dlerror) == char* function()));
-    static assert(is(typeof(&dlopen)  == void* function(in char*, int)));
-    static assert(is(typeof(&dlsym)   == void* function(void*, in char*)));
+    static assert(is(typeof(&dlopen)  == void* function(const scope char*, int)));
+    static assert(is(typeof(&dlsym)   == void* function(void*, const scope char*)));
 }
 
 static if (__BSD_VISIBLE)
 {
     void*    fdlopen(int, int);
-    int      dladdr(const(void)*, Dl_info*);
     dlfunc_t dlfunc(void*, const(char)*);
     int      dlinfo(void*, int, void*);
     void     dllockinit(void* _context,

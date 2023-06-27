@@ -1,4 +1,4 @@
-/* Copyright (C) 2011-2020 Free Software Foundation, Inc.
+/* Copyright (C) 2011-2022 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GCC.
@@ -66,10 +66,6 @@ enum aarch64_code_model {
   /* -fpic for small memory model.
      GOT size to 28KiB (4K*8-4K) or 3580 entries.  */
   AARCH64_CMODEL_SMALL_SPIC,
-  /* Using movk insn sequence to do 64bit PC relative relocation.  */
-  AARCH64_CMODEL_MEDIUM,
-  /* Using movk insn sequence to do 64bit PC relative got relocation.  */
-  AARCH64_CMODEL_MEDIUM_PIC,
   /* No assumptions about addresses of code and data.
      The PIC variant is not yet implemented.  */
   AARCH64_CMODEL_LARGE

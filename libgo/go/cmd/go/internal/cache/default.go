@@ -6,7 +6,6 @@ package cache
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -31,6 +30,7 @@ var (
 // README as a courtesy to explain where it came from.
 const cacheREADME = `This directory holds cached build artifacts from the Go build system.
 Run "go clean -cache" if the directory is getting too large.
+Run "go clean -fuzzcache" to delete the fuzz cache.
 See golang.org to learn more about Go.
 `
 
@@ -49,7 +49,7 @@ func initDefaultCache() {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "README")); err != nil {
 		// Best effort.
-		ioutil.WriteFile(filepath.Join(dir, "README"), []byte(cacheREADME), 0666)
+		os.WriteFile(filepath.Join(dir, "README"), []byte(cacheREADME), 0666)
 	}
 
 	c, err := Open(dir)

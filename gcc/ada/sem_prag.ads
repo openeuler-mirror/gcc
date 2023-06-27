@@ -6,7 +6,7 @@
 --                                                                          --
 --                                 S p e c                                  --
 --                                                                          --
---          Copyright (C) 1992-2019, Free Software Foundation, Inc.         --
+--          Copyright (C) 1992-2022, Free Software Foundation, Inc.         --
 --                                                                          --
 -- GNAT is free software;  you can  redistribute it  and/or modify it under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
@@ -49,6 +49,8 @@ package Sem_Prag is
       Pragma_Contract_Cases               => True,
       Pragma_Convention                   => True,
       Pragma_CPU                          => True,
+      Pragma_CUDA_Device                  => True,
+      Pragma_CUDA_Global                  => True,
       Pragma_Default_Initial_Condition    => True,
       Pragma_Default_Storage_Pool         => True,
       Pragma_Depends                      => True,
@@ -62,6 +64,7 @@ package Sem_Prag is
       Pragma_Favor_Top_Level              => True,
       Pragma_Ghost                        => True,
       Pragma_Global                       => True,
+      Pragma_GNAT_Annotate                => True,
       Pragma_Import                       => True,
       Pragma_Independent                  => True,
       Pragma_Independent_Components       => True,
@@ -114,7 +117,6 @@ package Sem_Prag is
       Pragma_Type_Invariant               => True,
       Pragma_Unchecked_Union              => True,
       Pragma_Universal_Aliasing           => True,
-      Pragma_Universal_Data               => True,
       Pragma_Unmodified                   => True,
       Pragma_Unreferenced                 => True,
       Pragma_Unreferenced_Objects         => True,
@@ -264,6 +266,13 @@ package Sem_Prag is
    --  the entity of [generic] package body or [generic] subprogram body which
    --  caused "freezing" of the related contract where the pragma resides.
 
+   procedure Analyze_Subprogram_Variant_In_Decl_Part
+     (N         : Node_Id;
+      Freeze_Id : Entity_Id := Empty);
+   --  Perform full analysis of delayed pragma Subprogram_Variant. Freeze_Id is
+   --  the entity of [generic] package body or [generic] subprogram body which
+   --  caused "freezing" of the related contract where the pragma resides.
+
    procedure Analyze_Test_Case_In_Decl_Part (N : Node_Id);
    --  Perform preanalysis of pragma Test_Case
 
@@ -352,9 +361,9 @@ package Sem_Prag is
       Subp_Outputs : in out Elist_Id;
       Global_Seen  : out Boolean);
    --  Subsidiary to the analysis of pragmas Depends, Global, Refined_Depends
-   --  and Refined_Global. The routine is also used by GNATprove. Collect all
-   --  inputs and outputs of subprogram Subp_Id in lists Subp_Inputs (inputs)
-   --  and Subp_Outputs (outputs). The inputs and outputs are gathered from:
+   --  and Refined_Global. Collect all inputs and outputs of subprogram Subp_Id
+   --  in lists Subp_Inputs (inputs) and Subp_Outputs (outputs). The inputs and
+   --  outputs are gathered from:
    --    1) The formal parameters of the subprogram
    --    2) The generic formal parameters of the generic subprogram
    --    3) The current instance of a concurrent type
@@ -421,12 +430,12 @@ package Sem_Prag is
 
    function Get_Argument
      (Prag       : Node_Id;
-      Context_Id : Node_Id := Empty) return Node_Id;
+      Context_Id : Entity_Id := Empty) return Node_Id;
    --  Obtain the argument of pragma Prag depending on context and the nature
    --  of the pragma. The argument is extracted in the following manner:
    --
    --    When the pragma is generated from an aspect, return the corresponding
-   --    aspect for ASIS or when Context_Id denotes a generic unit.
+   --    aspect when Context_Id denotes a generic unit.
    --
    --    Otherwise return the first argument of Prag
    --
@@ -529,6 +538,11 @@ package Sem_Prag is
    --  S contains a name that is a valid C identifier, then S is simply set as
    --  the value of the Interface_Name. Otherwise it is encoded as needed by
    --  particular operating systems. See the body for details of the encoding.
+
+   procedure Set_Overflow_Mode (N : Node_Id);
+   --  Sets Sem.Scope_Suppress according to the overflow modes specified in
+   --  the pragma Overflow_Mode passed in argument. This should only be called
+   --  after N has been successfully analyzed.
 
    function Test_Case_Arg
      (Prag        : Node_Id;

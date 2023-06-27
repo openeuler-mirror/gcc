@@ -643,6 +643,7 @@ ARCH_AARCH64_LINUX_FALSE
 ARCH_AARCH64_LINUX_TRUE
 HAVE_IFUNC_FALSE
 HAVE_IFUNC_TRUE
+tmake_file
 SIZES
 XLDFLAGS
 XCFLAGS
@@ -804,6 +805,7 @@ with_gnu_ld
 enable_libtool_lock
 enable_maintainer_mode
 enable_symvers
+enable_werror
 enable_cet
 with_gcc_major_version_only
 '
@@ -1455,7 +1457,8 @@ Optional Features:
                           sometimes confusing) to the casual installer
   --enable-symvers=STYLE  enables symbol versioning of the shared library
                           [default=yes]
-  --enable-cet            enable Intel CET in target libraries [default=no]
+  --disable-werror        disable building with -Werror
+  --enable-cet            enable Intel CET in target libraries [default=auto]
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -9673,7 +9676,7 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
       if test "$GCC" = yes && test "$with_gnu_ld" = no; then
 	case $host_cpu in
 	hppa*64*)
-	  archive_cmds='$CC -shared ${wl}+h ${wl}$soname -o $lib $libobjs $deplibs $compiler_flags'
+	  archive_cmds='$CC -shared ${wl}+h ${wl}$soname ${wl}+nodefaultrpath -o $lib $libobjs $deplibs $compiler_flags'
 	  ;;
 	ia64*)
 	  archive_cmds='$CC -shared -fPIC ${wl}+h ${wl}$soname ${wl}+nodefaultrpath -o $lib $libobjs $deplibs $compiler_flags'
@@ -9685,7 +9688,7 @@ if test -z "$aix_libpath"; then aix_libpath="/usr/lib:/lib"; fi
       else
 	case $host_cpu in
 	hppa*64*)
-	  archive_cmds='$CC -b ${wl}+h ${wl}$soname -o $lib $libobjs $deplibs $compiler_flags'
+	  archive_cmds='$CC -b ${wl}+h ${wl}$soname ${wl}+nodefaultrpath -o $lib $libobjs $deplibs $compiler_flags'
 	  ;;
 	ia64*)
 	  archive_cmds='$CC -b ${wl}+h ${wl}$soname ${wl}+nodefaultrpath -o $lib $libobjs $deplibs $compiler_flags'
@@ -10569,16 +10572,6 @@ freebsd* | dragonfly*)
   esac
   ;;
 
-gnu*)
-  version_type=linux
-  need_lib_prefix=no
-  need_version=no
-  library_names_spec='${libname}${release}${shared_ext}$versuffix ${libname}${release}${shared_ext}${major} ${libname}${shared_ext}'
-  soname_spec='${libname}${release}${shared_ext}$major'
-  shlibpath_var=LD_LIBRARY_PATH
-  hardcode_into_libs=yes
-  ;;
-
 haiku*)
   version_type=linux
   need_lib_prefix=no
@@ -10700,7 +10693,7 @@ linux*oldld* | linux*aout* | linux*coff*)
 # project, but have not yet been accepted: they are GCC-local changes
 # for the time being.  (See
 # https://lists.gnu.org/archive/html/libtool-patches/2018-05/msg00000.html)
-linux* | k*bsd*-gnu | kopensolaris*-gnu | uclinuxfdpiceabi)
+linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | uclinuxfdpiceabi)
   version_type=linux
   need_lib_prefix=no
   need_version=no
@@ -11389,7 +11382,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 11392 "configure"
+#line 11385 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -11495,7 +11488,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 11498 "configure"
+#line 11491 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -15206,8 +15199,11 @@ with_gnu_ld=$lt_cv_prog_gnu_ld
   # Start by getting the version number.  I think the libtool test already
   # does some of this, but throws away the result.
   libat_ld_is_gold=no
+  libat_ld_is_mold=no
   if $LD --version 2>/dev/null | grep 'GNU gold'> /dev/null 2>&1; then
     libat_ld_is_gold=yes
+  elif $LD --version 2>/dev/null | grep 'mold' >/dev/null 2>&1; then
+    libat_ld_is_mold=yes
   fi
 
   ldver=`$LD --version 2>/dev/null |
@@ -15410,6 +15406,8 @@ if test $enable_symvers != no && test $libat_shared_libgcc = yes; then
       enable_symvers=gnu
     elif test $libat_ld_is_gold = yes ; then
       enable_symvers=gnu
+    elif test $libat_ld_is_mold = yes ; then
+      enable_symvers=gnu
     else
       # The right tools, the right setup, but too old.  Fallbacks?
       { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: === Linker version $libat_gnu_ld_version is too old for" >&5
@@ -15569,9 +15567,17 @@ $as_echo "$as_me: not updating unwritable cache $cache_file" >&6;}
 fi
 rm -f confcache
 
+# Check whether --enable-werror was given.
+if test "${enable_werror+set}" = set; then :
+  enableval=$enable_werror;
+fi
+
 # Add -Wall -Werror if we are using GCC.
-if test "x$GCC" = "xyes"; then
-  XCFLAGS="$XCFLAGS -Wall -Werror"
+if test "x$GCC" = "xyes"; then :
+  XCFLAGS="$XCFLAGS -Wall"
+fi
+if test "x$enable_werror" != "xno" && test "x$GCC" = "xyes"; then :
+  XCFLAGS="$XCFLAGS -Werror"
 fi
 
 # Add CET specific flags if CET is enabled
@@ -15584,19 +15590,22 @@ if test "${enable_cet+set}" = set; then :
                           esac
 
 else
-  enable_cet=no
+  enable_cet=auto
 fi
 
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for CET support" >&5
 $as_echo_n "checking for CET support... " >&6; }
 
+# NB: Avoid nested save_CFLAGS and save_LDFLAGS.
 case "$host" in
   i[34567]86-*-linux* | x86_64-*-linux*)
     case "$enable_cet" in
       auto)
 	# Check if target supports multi-byte NOPs
-	# and if assembler supports CET insn.
+	# and if compiler and assembler support CET insn.
+	cet_save_CFLAGS="$CFLAGS"
+	CFLAGS="$CFLAGS -fcf-protection"
 	cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -15620,6 +15629,7 @@ else
   enable_cet=no
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+	CFLAGS="$cet_save_CFLAGS"
 	;;
       yes)
 	# Check if assembler supports CET.
@@ -15663,6 +15673,19 @@ XCFLAGS="$XCFLAGS $XPCFLAGS"
 
 
 
+
+
+
+# Conditionalize the makefile for this target machine.
+tmake_file_=
+for f in ${tmake_file}
+do
+	if test -f ${srcdir}/config/$f
+	then
+		tmake_file_="${tmake_file_} \$(srcdir)/config/$f"
+	fi
+done
+tmake_file="${tmake_file_}"
 
 
 

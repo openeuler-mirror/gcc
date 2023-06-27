@@ -1,5 +1,5 @@
 // PR c++/99362
-// { dg-do compile { target c++2a } }
+// { dg-do compile { target c++20 } }
 
 struct S {
   [[nodiscard]] S() {}

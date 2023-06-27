@@ -6,7 +6,7 @@ void
 bar (T *)
 {
   T s[0/0];
-  #pragma omp teams distribute parallel for reduction(+:s)
+  #pragma omp teams distribute parallel for reduction(+:s) allocate(s)
   for (int i = 0; i < 8; i++)
     ;
 }

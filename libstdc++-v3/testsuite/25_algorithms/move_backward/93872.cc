@@ -1,4 +1,4 @@
-// Copyright (C) 2020 Free Software Foundation, Inc.
+// Copyright (C) 2020-2022 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -19,6 +19,7 @@
 // { dg-do compile { target c++2a } }
 
 #include <algorithm>
+#include <iterator>
 
 struct X
 {
@@ -35,5 +36,5 @@ void
 test01()
 {
   X a[2], b[2];
-  std::move_backward(std::begin(a), std::end(a), std::begin(b));
+  std::move_backward(std::begin(a), std::end(a), std::end(b));
 }

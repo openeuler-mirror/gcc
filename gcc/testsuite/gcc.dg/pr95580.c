@@ -1,6 +1,6 @@
 /* PR c/95580 */
 /* { dg-do compile } */
-/* { dg-options "-O1 -W -fno-tree-dce" } */
+/* { dg-options "-O1 -W -fno-tree-dce -fno-tree-dse" } */
 
 void bar (void);
 
@@ -10,7 +10,7 @@ foo (int x)
   if (x == 0)
     {
       void *p = __builtin_malloc (4);
-      ((char *)p)[1] ^= 1;	/* { dg-warning "may be used uninitialized" "" { xfail *-*-* } } */
+      ((char *)p)[1] ^= 1;	/* { dg-warning "may be used uninitialized" } */
     }
   bar ();
 }

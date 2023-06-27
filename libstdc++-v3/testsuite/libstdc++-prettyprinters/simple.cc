@@ -3,7 +3,7 @@
 // { dg-do run }
 // { dg-options "-g -O0 -std=gnu++98" }
 
-// Copyright (C) 2011-2020 Free Software Foundation, Inc.
+// Copyright (C) 2011-2022 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -19,9 +19,6 @@
 // You should have received a copy of the GNU General Public License along
 // with this library; see the file COPYING3.  If not see
 // <http://www.gnu.org/licenses/>.
-
-// Type printers only recognize the old std::string for now.
-#define _GLIBCXX_USE_CXX11_ABI 0
 
 #include <string>
 #include <deque>
@@ -64,7 +61,7 @@ main()
   std::list<std::string> lst;
   lst.push_back("one");
   lst.push_back("two");
-// { dg-final { regexp-test lst {std::(__debug::)?list = {\[0\] = "one", \[1\] = "two"}} } }
+// { dg-final { regexp-test lst {std::(__cxx11::)?(__debug::)?list = {\[0\] = "one", \[1\] = "two"}} } }
 
   std::list<int>::iterator lstiter0;
 // { dg-final { note-test lstiter0 {non-dereferenceable iterator for std::list} } }
@@ -126,6 +123,37 @@ main()
   vb.push_back(true);
   vb.erase(vb.begin());
 // { dg-final { regexp-test vb {std::(__debug::)?vector<bool> of length 5, capacity 128 = \\{true, true, false, false, true\\}} } }
+
+  std::vector<bool>::iterator vbIt = vb.begin();
+// { dg-final { note-test vbIt {true} } }
+  std::vector<bool>::iterator vbIt2 = ++vbIt;
+// { dg-final { note-test vbIt2 {true} } }
+  std::vector<bool>::iterator vbIt3 = ++vbIt;
+// { dg-final { note-test vbIt3 {false} } }
+  std::vector<bool>::iterator vbIt4 = ++vbIt;
+// { dg-final { note-test vbIt4 {false} } }
+  std::vector<bool>::iterator vbIt5 = ++vbIt;
+// { dg-final { note-test vbIt5 {true} } }
+
+  std::vector<bool>::const_iterator vbcIt = vb.begin();
+// { dg-final { note-test vbcIt {true} } }
+
+  std::vector<bool>::iterator vbIt0;
+// { dg-final { note-test vbIt0 {non-dereferenceable iterator for std::vector<bool>} } }
+
+  std::vector<bool>::reference br = *vb.begin();
+// { dg-final { note-test br {true} } }
+  std::vector<bool>::reference br2 = *vbIt2;
+// { dg-final { note-test br2 {true} } }
+  std::vector<bool>::reference br3 = *vbIt3;
+// { dg-final { note-test br3 {false} } }
+  std::vector<bool>::reference br4 = *vbIt4;
+// { dg-final { note-test br4 {false} } }
+  std::vector<bool>::reference br5 = *vbIt5;
+// { dg-final { note-test br5 {true} } }
+
+ std::vector<bool>::reference br0;
+// { dg-final { note-test br0 {invalid std::vector<bool>::reference} } }
 
   __gnu_cxx::slist<int> sll;
   sll.push_front(23);

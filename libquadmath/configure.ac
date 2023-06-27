@@ -218,11 +218,6 @@ AM_CONDITIONAL(LIBQUAD_USE_SYMVER_SUN, [test "x$quadmath_use_symver" = xsun])
 
 AC_CACHE_CHECK([whether __float128 is supported], [libquad_cv_have_float128],
   [GCC_TRY_COMPILE_OR_LINK([
-    #if defined(__aarch64__)
-    typedef long double __float128;
-    #define __builtin_huge_valq() (__extension__ 0x1.0p32767Q)
-    #endif
-
     #if (!defined(_ARCH_PPC)) || defined(__LONG_DOUBLE_IEEE128__)
     typedef _Complex float __attribute__((mode(TC))) __complex128;
     #else
@@ -357,6 +352,19 @@ fi
 # Add CET specific flags if CET is enabled
 GCC_CET_FLAGS(CET_FLAGS)
 XCFLAGS="$XCFLAGS $CET_FLAGS"
+
+case x$target in
+  xpowerpc64le*-linux*)
+    AC_PREPROC_IFELSE(
+      [AC_LANG_PROGRAM([[#if __SIZEOF_LONG_DOUBLE__ != 16
+                         #error long double is double
+                         #endif]],
+                       [[(void) 0;]])],
+      [XCFLAGS="$XCFLAGS -mno-gnu-attribute"])
+    ;;
+  *)
+    ;;
+esac
 AC_SUBST(XCFLAGS)
 
 AC_CACHE_SAVE
@@ -385,8 +393,6 @@ AS_HELP_STRING([--enable-generated-files-in-srcdir],
 [enable_generated_files_in_srcdir=no])
 AC_MSG_RESULT($enable_generated_files_in_srcdir)
 AM_CONDITIONAL(GENINSRC, test "$enable_generated_files_in_srcdir" = yes)
-AM_CONDITIONAL(ARCH_AARCH64,
-               [expr "$target_cpu" : "aarch64.*" > /dev/null])
 
 # Determine what GCC version number to use in filesystem paths.
 GCC_BASE_VER

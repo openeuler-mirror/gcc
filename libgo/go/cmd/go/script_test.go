@@ -10,10 +10,12 @@ package main_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"go/build"
 	"internal/testenv"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,16 +31,44 @@ import (
 	"cmd/go/internal/imports"
 	"cmd/go/internal/par"
 	"cmd/go/internal/robustio"
-	"cmd/go/internal/txtar"
 	"cmd/go/internal/work"
 	"cmd/internal/sys"
+
+	"golang.org/x/tools/txtar"
 )
+
+var testSum = flag.String("testsum", "", `may be tidy, listm, or listall. If set, TestScript generates a go.sum file at the beginning of each test and updates test files if they pass.`)
 
 // TestScript runs the tests in testdata/script/*.txt.
 func TestScript(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
-	if skipExternal {
-		t.Skipf("skipping external tests on %s/%s", runtime.GOOS, runtime.GOARCH)
+	testenv.SkipIfShortAndSlow(t)
+
+	var (
+		ctx         = context.Background()
+		gracePeriod = 100 * time.Millisecond
+	)
+	if deadline, ok := t.Deadline(); ok {
+		timeout := time.Until(deadline)
+
+		// If time allows, increase the termination grace period to 5% of the
+		// remaining time.
+		if gp := timeout / 20; gp > gracePeriod {
+			gracePeriod = gp
+		}
+
+		// When we run commands that execute subprocesses, we want to reserve two
+		// grace periods to clean up. We will send the first termination signal when
+		// the context expires, then wait one grace period for the process to
+		// produce whatever useful output it can (such as a stack trace). After the
+		// first grace period expires, we'll escalate to os.Kill, leaving the second
+		// grace period for the test function to record its output before the test
+		// process itself terminates.
+		timeout -= 2 * gracePeriod
+
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		t.Cleanup(cancel)
 	}
 
 	files, err := filepath.Glob("testdata/script/*.txt")
@@ -49,46 +80,70 @@ func TestScript(t *testing.T) {
 		name := strings.TrimSuffix(filepath.Base(file), ".txt")
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			ts := &testScript{t: t, name: name, file: file}
+			ctx, cancel := context.WithCancel(ctx)
+			ts := &testScript{
+				t:           t,
+				ctx:         ctx,
+				cancel:      cancel,
+				gracePeriod: gracePeriod,
+				name:        name,
+				file:        file,
+			}
 			ts.setup()
 			if !*testWork {
 				defer removeAll(ts.workdir)
 			}
 			ts.run()
+			cancel()
 		})
 	}
 }
 
 // A testScript holds execution state for a single test script.
 type testScript struct {
-	t          *testing.T
-	workdir    string            // temporary work dir ($WORK)
-	log        bytes.Buffer      // test execution log (printed at end of test)
-	mark       int               // offset of next log truncation
-	cd         string            // current directory during test execution; initially $WORK/gopath/src
-	name       string            // short name of test ("foo")
-	file       string            // full file name ("testdata/script/foo.txt")
-	lineno     int               // line number currently executing
-	line       string            // line currently executing
-	env        []string          // environment list (for os/exec)
-	envMap     map[string]string // environment mapping (matches env)
-	stdout     string            // standard output from last 'go' command; for 'stdout' command
-	stderr     string            // standard error from last 'go' command; for 'stderr' command
-	stopped    bool              // test wants to stop early
-	start      time.Time         // time phase started
-	background []backgroundCmd   // backgrounded 'exec' and 'go' commands
+	t           *testing.T
+	ctx         context.Context
+	cancel      context.CancelFunc
+	gracePeriod time.Duration
+	workdir     string            // temporary work dir ($WORK)
+	log         bytes.Buffer      // test execution log (printed at end of test)
+	mark        int               // offset of next log truncation
+	cd          string            // current directory during test execution; initially $WORK/gopath/src
+	name        string            // short name of test ("foo")
+	file        string            // full file name ("testdata/script/foo.txt")
+	lineno      int               // line number currently executing
+	line        string            // line currently executing
+	env         []string          // environment list (for os/exec)
+	envMap      map[string]string // environment mapping (matches env)
+	stdout      string            // standard output from last 'go' command; for 'stdout' command
+	stderr      string            // standard error from last 'go' command; for 'stderr' command
+	stopped     bool              // test wants to stop early
+	start       time.Time         // time phase started
+	background  []*backgroundCmd  // backgrounded 'exec' and 'go' commands
 }
 
 type backgroundCmd struct {
-	cmd  *exec.Cmd
-	wait <-chan struct{}
-	neg  bool // if true, cmd should fail
+	want           simpleStatus
+	args           []string
+	done           <-chan struct{}
+	err            error
+	stdout, stderr strings.Builder
 }
+
+type simpleStatus string
+
+const (
+	success          simpleStatus = ""
+	failure          simpleStatus = "!"
+	successOrFailure simpleStatus = "?"
+)
 
 var extraEnvKeys = []string{
 	"SYSTEMROOT",         // must be preserved on Windows to find DLLs; golang.org/issue/25210
 	"WINDIR",             // must be preserved on Windows to be able to run PowerShell command; golang.org/issue/30711
 	"LD_LIBRARY_PATH",    // must be preserved on Unix systems to find shared libraries
+	"LIBRARY_PATH",       // allow override of non-standard static library paths
+	"C_INCLUDE_PATH",     // allow override non-standard include paths
 	"CC",                 // don't lose user settings when invoking cgo
 	"GO_TESTING_GOTOOLS", // for gccgo testing
 	"GCCGO",              // for gccgo testing
@@ -97,6 +152,10 @@ var extraEnvKeys = []string{
 
 // setup sets up the test execution temporary directory and environment.
 func (ts *testScript) setup() {
+	if err := ts.ctx.Err(); err != nil {
+		ts.t.Fatalf("test interrupted during setup: %v", err)
+	}
+
 	StartProxy()
 	ts.workdir = filepath.Join(testTmpDir, "script-"+ts.name)
 	ts.check(os.MkdirAll(filepath.Join(ts.workdir, "tmp"), 0777))
@@ -109,20 +168,29 @@ func (ts *testScript) setup() {
 		"CCACHE_DISABLE=1", // ccache breaks with non-existent HOME
 		"GOARCH=" + runtime.GOARCH,
 		"GOCACHE=" + testGOCACHE,
+		"GODEBUG=" + os.Getenv("GODEBUG"),
 		"GOEXE=" + cfg.ExeSuffix,
 		"GOOS=" + runtime.GOOS,
 		"GOPATH=" + filepath.Join(ts.workdir, "gopath"),
 		"GOPROXY=" + proxyURL,
 		"GOPRIVATE=",
 		"GOROOT=" + testGOROOT,
+		"GOROOT_FINAL=" + os.Getenv("GOROOT_FINAL"), // causes spurious rebuilds and breaks the "stale" built-in if not propagated
+		"GOTRACEBACK=system",
+		"TESTGO_GOROOT=" + testGOROOT,
 		"GOSUMDB=" + testSumDBVerifierKey,
 		"GONOPROXY=",
 		"GONOSUMDB=",
+		"GOVCS=*:all",
 		"PWD=" + ts.cd,
 		tempEnvName() + "=" + filepath.Join(ts.workdir, "tmp"),
 		"devnull=" + os.DevNull,
 		"goversion=" + goVersion(ts),
 		":=" + string(os.PathListSeparator),
+		"/=" + string(os.PathSeparator),
+	}
+	if !testenv.HasExternalNetwork() {
+		ts.env = append(ts.env, "TESTGONETWORK=panic", "TESTGOVCS=panic")
 	}
 
 	if runtime.GOOS == "plan9" {
@@ -180,11 +248,9 @@ func (ts *testScript) run() {
 		// On a normal exit from the test loop, background processes are cleaned up
 		// before we print PASS. If we return early (e.g., due to a test failure),
 		// don't print anything about the processes that were still running.
+		ts.cancel()
 		for _, bg := range ts.background {
-			interruptProcess(bg.cmd.Process)
-		}
-		for _, bg := range ts.background {
-			<-bg.wait
+			<-bg.done
 		}
 		ts.background = nil
 
@@ -199,15 +265,31 @@ func (ts *testScript) run() {
 	for _, f := range a.Files {
 		name := ts.mkabs(ts.expand(f.Name, false))
 		ts.check(os.MkdirAll(filepath.Dir(name), 0777))
-		ts.check(ioutil.WriteFile(name, f.Data, 0666))
+		ts.check(os.WriteFile(name, f.Data, 0666))
 	}
 
 	// With -v or -testwork, start log with full environment.
 	if *testWork || testing.Verbose() {
 		// Display environment.
-		ts.cmdEnv(false, nil)
+		ts.cmdEnv(success, nil)
 		fmt.Fprintf(&ts.log, "\n")
 		ts.mark = ts.log.Len()
+	}
+
+	// With -testsum, if a go.mod file is present in the test's initial
+	// working directory, run 'go mod tidy'.
+	if *testSum != "" {
+		if ts.updateSum(a) {
+			defer func() {
+				if ts.t.Failed() {
+					return
+				}
+				data := txtar.Format(a)
+				if err := os.WriteFile(ts.file, data, 0666); err != nil {
+					ts.t.Errorf("rewriting test file: %v", err)
+				}
+			}()
+		}
 	}
 
 	// Run script.
@@ -245,7 +327,7 @@ Script:
 		// Parse input line. Ignore blanks entirely.
 		parsed := ts.parse(line)
 		if parsed.name == "" {
-			if parsed.neg || len(parsed.conds) > 0 {
+			if parsed.want != "" || len(parsed.conds) > 0 {
 				ts.fatalf("missing command")
 			}
 			continue
@@ -255,6 +337,10 @@ Script:
 		fmt.Fprintf(&ts.log, "> %s\n", line)
 
 		for _, cond := range parsed.conds {
+			if err := ts.ctx.Err(); err != nil {
+				ts.fatalf("test interrupted: %v", err)
+			}
+
 			// Known conds are: $GOOS, $GOARCH, runtime.Compiler, and 'short' (for testing.Short).
 			//
 			// NOTE: If you make changes here, update testdata/script/README too!
@@ -269,8 +355,14 @@ Script:
 				ok = canCgo
 			case "msan":
 				ok = canMSan
+			case "asan":
+				ok = canASan
 			case "race":
 				ok = canRace
+			case "fuzz":
+				ok = canFuzz
+			case "fuzz-instrumented":
+				ok = fuzzInstrumented
 			case "net":
 				ok = testenv.HasExternalNetwork()
 			case "link":
@@ -279,10 +371,12 @@ Script:
 				ok = os.Geteuid() == 0
 			case "symlink":
 				ok = testenv.HasSymlink()
+			case "case-sensitive":
+				ok = isCaseSensitive(ts.t)
 			default:
 				if strings.HasPrefix(cond.tag, "exec:") {
 					prog := cond.tag[len("exec:"):]
-					ok = execCache.Do(prog, func() interface{} {
+					ok = execCache.Do(prog, func() any {
 						if runtime.GOOS == "plan9" && prog == "git" {
 							// The Git command is usually not the real Git on Plan 9.
 							// See https://golang.org/issues/29640.
@@ -324,7 +418,7 @@ Script:
 		if cmd == nil {
 			ts.fatalf("unknown command %q", parsed.name)
 		}
-		cmd(ts, parsed.neg, parsed.args)
+		cmd(ts, parsed.want, parsed.args)
 
 		// Command can ask script to stop early.
 		if ts.stopped {
@@ -334,10 +428,8 @@ Script:
 		}
 	}
 
-	for _, bg := range ts.background {
-		interruptProcess(bg.cmd.Process)
-	}
-	ts.cmdWait(false, nil)
+	ts.cancel()
+	ts.cmdWait(success, nil)
 
 	// Final phase ended.
 	rewind()
@@ -347,12 +439,47 @@ Script:
 	}
 }
 
+var (
+	onceCaseSensitive sync.Once
+	caseSensitive     bool
+)
+
+func isCaseSensitive(t *testing.T) bool {
+	onceCaseSensitive.Do(func() {
+		tmpdir, err := os.MkdirTemp("", "case-sensitive")
+		if err != nil {
+			t.Fatal("failed to create directory to determine case-sensitivity:", err)
+		}
+		defer os.RemoveAll(tmpdir)
+
+		fcap := filepath.Join(tmpdir, "FILE")
+		if err := os.WriteFile(fcap, []byte{}, 0644); err != nil {
+			t.Fatal("error writing file to determine case-sensitivity:", err)
+		}
+
+		flow := filepath.Join(tmpdir, "file")
+		_, err = os.ReadFile(flow)
+		switch {
+		case err == nil:
+			caseSensitive = false
+			return
+		case os.IsNotExist(err):
+			caseSensitive = true
+			return
+		default:
+			t.Fatal("unexpected error reading file when determining case-sensitivity:", err)
+		}
+	})
+
+	return caseSensitive
+}
+
 // scriptCmds are the script command implementations.
 // Keep list and the implementations below sorted by name.
 //
 // NOTE: If you make changes here, update testdata/script/README too!
 //
-var scriptCmds = map[string]func(*testScript, bool, []string){
+var scriptCmds = map[string]func(*testScript, simpleStatus, []string){
 	"addcrlf": (*testScript).cmdAddcrlf,
 	"cc":      (*testScript).cmdCc,
 	"cd":      (*testScript).cmdCd,
@@ -366,6 +493,7 @@ var scriptCmds = map[string]func(*testScript, bool, []string){
 	"go":      (*testScript).cmdGo,
 	"grep":    (*testScript).cmdGrep,
 	"mkdir":   (*testScript).cmdMkdir,
+	"mv":      (*testScript).cmdMv,
 	"rm":      (*testScript).cmdRm,
 	"skip":    (*testScript).cmdSkip,
 	"stale":   (*testScript).cmdStale,
@@ -385,41 +513,41 @@ var regexpCmd = map[string]bool{
 }
 
 // addcrlf adds CRLF line endings to the named files.
-func (ts *testScript) cmdAddcrlf(neg bool, args []string) {
+func (ts *testScript) cmdAddcrlf(want simpleStatus, args []string) {
 	if len(args) == 0 {
 		ts.fatalf("usage: addcrlf file...")
 	}
 
 	for _, file := range args {
 		file = ts.mkabs(file)
-		data, err := ioutil.ReadFile(file)
+		data, err := os.ReadFile(file)
 		ts.check(err)
-		ts.check(ioutil.WriteFile(file, bytes.ReplaceAll(data, []byte("\n"), []byte("\r\n")), 0666))
+		ts.check(os.WriteFile(file, bytes.ReplaceAll(data, []byte("\n"), []byte("\r\n")), 0666))
 	}
 }
 
 // cc runs the C compiler along with platform specific options.
-func (ts *testScript) cmdCc(neg bool, args []string) {
+func (ts *testScript) cmdCc(want simpleStatus, args []string) {
 	if len(args) < 1 || (len(args) == 1 && args[0] == "&") {
 		ts.fatalf("usage: cc args... [&]")
 	}
 
 	var b work.Builder
 	b.Init()
-	ts.cmdExec(neg, append(b.GccCmd(".", ""), args...))
+	ts.cmdExec(want, append(b.GccCmd(".", ""), args...))
 	robustio.RemoveAll(b.WorkDir)
 }
 
 // cd changes to a different directory.
-func (ts *testScript) cmdCd(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! cd")
+func (ts *testScript) cmdCd(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v cd", want)
 	}
 	if len(args) != 1 {
 		ts.fatalf("usage: cd dir")
 	}
 
-	dir := args[0]
+	dir := filepath.FromSlash(args[0])
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(ts.cd, dir)
 	}
@@ -437,15 +565,15 @@ func (ts *testScript) cmdCd(neg bool, args []string) {
 }
 
 // chmod changes permissions for a file or directory.
-func (ts *testScript) cmdChmod(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! chmod")
+func (ts *testScript) cmdChmod(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v chmod", want)
 	}
 	if len(args) < 2 {
 		ts.fatalf("usage: chmod perm paths...")
 	}
 	perm, err := strconv.ParseUint(args[0], 0, 32)
-	if err != nil || perm&uint64(os.ModePerm) != perm {
+	if err != nil || perm&uint64(fs.ModePerm) != perm {
 		ts.fatalf("invalid mode: %s", args[0])
 	}
 	for _, arg := range args[1:] {
@@ -453,17 +581,13 @@ func (ts *testScript) cmdChmod(neg bool, args []string) {
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(ts.cd, arg)
 		}
-		err := os.Chmod(path, os.FileMode(perm))
+		err := os.Chmod(path, fs.FileMode(perm))
 		ts.check(err)
 	}
 }
 
 // cmp compares two files.
-func (ts *testScript) cmdCmp(neg bool, args []string) {
-	if neg {
-		// It would be strange to say "this file can have any content except this precise byte sequence".
-		ts.fatalf("unsupported: ! cmp")
-	}
+func (ts *testScript) cmdCmp(want simpleStatus, args []string) {
 	quiet := false
 	if len(args) > 0 && args[0] == "-q" {
 		quiet = true
@@ -472,14 +596,11 @@ func (ts *testScript) cmdCmp(neg bool, args []string) {
 	if len(args) != 2 {
 		ts.fatalf("usage: cmp file1 file2")
 	}
-	ts.doCmdCmp(args, false, quiet)
+	ts.doCmdCmp(want, args, false, quiet)
 }
 
 // cmpenv compares two files with environment variable substitution.
-func (ts *testScript) cmdCmpenv(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! cmpenv")
-	}
+func (ts *testScript) cmdCmpenv(want simpleStatus, args []string) {
 	quiet := false
 	if len(args) > 0 && args[0] == "-q" {
 		quiet = true
@@ -488,23 +609,24 @@ func (ts *testScript) cmdCmpenv(neg bool, args []string) {
 	if len(args) != 2 {
 		ts.fatalf("usage: cmpenv file1 file2")
 	}
-	ts.doCmdCmp(args, true, quiet)
+	ts.doCmdCmp(want, args, true, quiet)
 }
 
-func (ts *testScript) doCmdCmp(args []string, env, quiet bool) {
+func (ts *testScript) doCmdCmp(want simpleStatus, args []string, env, quiet bool) {
 	name1, name2 := args[0], args[1]
 	var text1, text2 string
-	if name1 == "stdout" {
+	switch name1 {
+	case "stdout":
 		text1 = ts.stdout
-	} else if name1 == "stderr" {
+	case "stderr":
 		text1 = ts.stderr
-	} else {
-		data, err := ioutil.ReadFile(ts.mkabs(name1))
+	default:
+		data, err := os.ReadFile(ts.mkabs(name1))
 		ts.check(err)
 		text1 = string(data)
 	}
 
-	data, err := ioutil.ReadFile(ts.mkabs(name2))
+	data, err := os.ReadFile(ts.mkabs(name2))
 	ts.check(err)
 	text2 = string(data)
 
@@ -513,18 +635,32 @@ func (ts *testScript) doCmdCmp(args []string, env, quiet bool) {
 		text2 = ts.expand(text2, false)
 	}
 
-	if text1 == text2 {
-		return
-	}
-
-	if !quiet {
+	eq := text1 == text2
+	if !eq && !quiet && want != failure {
 		fmt.Fprintf(&ts.log, "[diff -%s +%s]\n%s\n", name1, name2, diff(text1, text2))
 	}
-	ts.fatalf("%s and %s differ", name1, name2)
+	switch want {
+	case failure:
+		if eq {
+			ts.fatalf("%s and %s do not differ", name1, name2)
+		}
+	case success:
+		if !eq {
+			ts.fatalf("%s and %s differ", name1, name2)
+		}
+	case successOrFailure:
+		if eq {
+			fmt.Fprintf(&ts.log, "%s and %s do not differ\n", name1, name2)
+		} else {
+			fmt.Fprintf(&ts.log, "%s and %s differ\n", name1, name2)
+		}
+	default:
+		ts.fatalf("unsupported: %v cmp", want)
+	}
 }
 
 // cp copies files, maybe eventually directories.
-func (ts *testScript) cmdCp(neg bool, args []string) {
+func (ts *testScript) cmdCp(want simpleStatus, args []string) {
 	if len(args) < 2 {
 		ts.fatalf("usage: cp src... dst")
 	}
@@ -540,7 +676,7 @@ func (ts *testScript) cmdCp(neg bool, args []string) {
 		var (
 			src  string
 			data []byte
-			mode os.FileMode
+			mode fs.FileMode
 		)
 		switch arg {
 		case "stdout":
@@ -556,28 +692,29 @@ func (ts *testScript) cmdCp(neg bool, args []string) {
 			info, err := os.Stat(src)
 			ts.check(err)
 			mode = info.Mode() & 0777
-			data, err = ioutil.ReadFile(src)
+			data, err = os.ReadFile(src)
 			ts.check(err)
 		}
 		targ := dst
 		if dstDir {
 			targ = filepath.Join(dst, filepath.Base(src))
 		}
-		err := ioutil.WriteFile(targ, data, mode)
-		if neg {
+		err := os.WriteFile(targ, data, mode)
+		switch want {
+		case failure:
 			if err == nil {
 				ts.fatalf("unexpected command success")
 			}
-		} else {
+		case success:
 			ts.check(err)
 		}
 	}
 }
 
 // env displays or adds to the environment.
-func (ts *testScript) cmdEnv(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! env")
+func (ts *testScript) cmdEnv(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v env", want)
 	}
 
 	conv := func(s string) string { return s }
@@ -615,86 +752,96 @@ func (ts *testScript) cmdEnv(neg bool, args []string) {
 }
 
 // exec runs the given command.
-func (ts *testScript) cmdExec(neg bool, args []string) {
+func (ts *testScript) cmdExec(want simpleStatus, args []string) {
 	if len(args) < 1 || (len(args) == 1 && args[0] == "&") {
 		ts.fatalf("usage: exec program [args...] [&]")
 	}
 
-	var err error
+	background := false
 	if len(args) > 0 && args[len(args)-1] == "&" {
-		var cmd *exec.Cmd
-		cmd, err = ts.execBackground(args[0], args[1:len(args)-1]...)
-		if err == nil {
-			wait := make(chan struct{})
-			go func() {
-				ctxWait(testCtx, cmd)
-				close(wait)
-			}()
-			ts.background = append(ts.background, backgroundCmd{cmd, wait, neg})
-		}
-		ts.stdout, ts.stderr = "", ""
-	} else {
-		ts.stdout, ts.stderr, err = ts.exec(args[0], args[1:]...)
-		if ts.stdout != "" {
-			fmt.Fprintf(&ts.log, "[stdout]\n%s", ts.stdout)
-		}
-		if ts.stderr != "" {
-			fmt.Fprintf(&ts.log, "[stderr]\n%s", ts.stderr)
-		}
-		if err == nil && neg {
-			ts.fatalf("unexpected command success")
-		}
+		background = true
+		args = args[:len(args)-1]
 	}
 
+	bg, err := ts.startBackground(want, args[0], args[1:]...)
 	if err != nil {
-		fmt.Fprintf(&ts.log, "[%v]\n", err)
-		if testCtx.Err() != nil {
-			ts.fatalf("test timed out while running command")
-		} else if !neg {
-			ts.fatalf("unexpected command failure")
-		}
+		ts.fatalf("unexpected error starting command: %v", err)
 	}
+	if background {
+		ts.stdout, ts.stderr = "", ""
+		ts.background = append(ts.background, bg)
+		return
+	}
+
+	<-bg.done
+	ts.stdout = bg.stdout.String()
+	ts.stderr = bg.stderr.String()
+	if ts.stdout != "" {
+		fmt.Fprintf(&ts.log, "[stdout]\n%s", ts.stdout)
+	}
+	if ts.stderr != "" {
+		fmt.Fprintf(&ts.log, "[stderr]\n%s", ts.stderr)
+	}
+	if bg.err != nil {
+		fmt.Fprintf(&ts.log, "[%v]\n", bg.err)
+	}
+	ts.checkCmd(bg)
 }
 
 // exists checks that the list of files exists.
-func (ts *testScript) cmdExists(neg bool, args []string) {
-	var readonly bool
-	if len(args) > 0 && args[0] == "-readonly" {
-		readonly = true
-		args = args[1:]
+func (ts *testScript) cmdExists(want simpleStatus, args []string) {
+	if want == successOrFailure {
+		ts.fatalf("unsupported: %v exists", want)
+	}
+	var readonly, exec bool
+loop:
+	for len(args) > 0 {
+		switch args[0] {
+		case "-readonly":
+			readonly = true
+			args = args[1:]
+		case "-exec":
+			exec = true
+			args = args[1:]
+		default:
+			break loop
+		}
 	}
 	if len(args) == 0 {
-		ts.fatalf("usage: exists [-readonly] file...")
+		ts.fatalf("usage: exists [-readonly] [-exec] file...")
 	}
 
 	for _, file := range args {
 		file = ts.mkabs(file)
 		info, err := os.Stat(file)
-		if err == nil && neg {
+		if err == nil && want == failure {
 			what := "file"
 			if info.IsDir() {
 				what = "directory"
 			}
 			ts.fatalf("%s %s unexpectedly exists", what, file)
 		}
-		if err != nil && !neg {
+		if err != nil && want == success {
 			ts.fatalf("%s does not exist", file)
 		}
-		if err == nil && !neg && readonly && info.Mode()&0222 != 0 {
+		if err == nil && want == success && readonly && info.Mode()&0222 != 0 {
 			ts.fatalf("%s exists but is writable", file)
+		}
+		if err == nil && want == success && exec && runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
+			ts.fatalf("%s exists but is not executable", file)
 		}
 	}
 }
 
 // go runs the go command.
-func (ts *testScript) cmdGo(neg bool, args []string) {
-	ts.cmdExec(neg, append([]string{testGo}, args...))
+func (ts *testScript) cmdGo(want simpleStatus, args []string) {
+	ts.cmdExec(want, append([]string{testGo}, args...))
 }
 
 // mkdir creates directories.
-func (ts *testScript) cmdMkdir(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! mkdir")
+func (ts *testScript) cmdMkdir(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v mkdir", want)
 	}
 	if len(args) < 1 {
 		ts.fatalf("usage: mkdir dir...")
@@ -704,10 +851,20 @@ func (ts *testScript) cmdMkdir(neg bool, args []string) {
 	}
 }
 
+func (ts *testScript) cmdMv(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v mv", want)
+	}
+	if len(args) != 2 {
+		ts.fatalf("usage: mv old new")
+	}
+	ts.check(os.Rename(ts.mkabs(args[0]), ts.mkabs(args[1])))
+}
+
 // rm removes files or directories.
-func (ts *testScript) cmdRm(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! rm")
+func (ts *testScript) cmdRm(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v rm", want)
 	}
 	if len(args) < 1 {
 		ts.fatalf("usage: rm file...")
@@ -720,20 +877,18 @@ func (ts *testScript) cmdRm(neg bool, args []string) {
 }
 
 // skip marks the test skipped.
-func (ts *testScript) cmdSkip(neg bool, args []string) {
+func (ts *testScript) cmdSkip(want simpleStatus, args []string) {
 	if len(args) > 1 {
 		ts.fatalf("usage: skip [msg]")
 	}
-	if neg {
-		ts.fatalf("unsupported: ! skip")
+	if want != success {
+		ts.fatalf("unsupported: %v skip", want)
 	}
 
 	// Before we mark the test as skipped, shut down any background processes and
 	// make sure they have returned the correct status.
-	for _, bg := range ts.background {
-		interruptProcess(bg.cmd.Process)
-	}
-	ts.cmdWait(false, nil)
+	ts.cancel()
+	ts.cmdWait(success, nil)
 
 	if len(args) == 1 {
 		ts.t.Skip(args[0])
@@ -742,15 +897,18 @@ func (ts *testScript) cmdSkip(neg bool, args []string) {
 }
 
 // stale checks that the named build targets are stale.
-func (ts *testScript) cmdStale(neg bool, args []string) {
+func (ts *testScript) cmdStale(want simpleStatus, args []string) {
 	if len(args) == 0 {
 		ts.fatalf("usage: stale target...")
 	}
-	tmpl := "{{if .Error}}{{.ImportPath}}: {{.Error.Err}}{else}}"
-	if neg {
-		tmpl += "{{if .Stale}}{{.ImportPath}} is unexpectedly stale{{end}}"
-	} else {
+	tmpl := "{{if .Error}}{{.ImportPath}}: {{.Error.Err}}{{else}}"
+	switch want {
+	case failure:
+		tmpl += "{{if .Stale}}{{.ImportPath}} is unexpectedly stale: {{.StaleReason}}{{end}}"
+	case success:
 		tmpl += "{{if not .Stale}}{{.ImportPath}} is unexpectedly NOT stale{{end}}"
+	default:
+		ts.fatalf("unsupported: %v stale", want)
 	}
 	tmpl += "{{end}}"
 	goArgs := append([]string{"list", "-e", "-f=" + tmpl}, args...)
@@ -764,26 +922,30 @@ func (ts *testScript) cmdStale(neg bool, args []string) {
 }
 
 // stdout checks that the last go command standard output matches a regexp.
-func (ts *testScript) cmdStdout(neg bool, args []string) {
-	scriptMatch(ts, neg, args, ts.stdout, "stdout")
+func (ts *testScript) cmdStdout(want simpleStatus, args []string) {
+	scriptMatch(ts, want, args, ts.stdout, "stdout")
 }
 
 // stderr checks that the last go command standard output matches a regexp.
-func (ts *testScript) cmdStderr(neg bool, args []string) {
-	scriptMatch(ts, neg, args, ts.stderr, "stderr")
+func (ts *testScript) cmdStderr(want simpleStatus, args []string) {
+	scriptMatch(ts, want, args, ts.stderr, "stderr")
 }
 
 // grep checks that file content matches a regexp.
 // Like stdout/stderr and unlike Unix grep, it accepts Go regexp syntax.
-func (ts *testScript) cmdGrep(neg bool, args []string) {
-	scriptMatch(ts, neg, args, "", "grep")
+func (ts *testScript) cmdGrep(want simpleStatus, args []string) {
+	scriptMatch(ts, want, args, "", "grep")
 }
 
 // scriptMatch implements both stdout and stderr.
-func scriptMatch(ts *testScript, neg bool, args []string, text, name string) {
+func scriptMatch(ts *testScript, want simpleStatus, args []string, text, name string) {
+	if want == successOrFailure {
+		ts.fatalf("unsupported: %v %s", want, name)
+	}
+
 	n := 0
 	if len(args) >= 1 && strings.HasPrefix(args[0], "-count=") {
-		if neg {
+		if want == failure {
 			ts.fatalf("cannot use -count= with negated match")
 		}
 		var err error
@@ -803,12 +965,12 @@ func scriptMatch(ts *testScript, neg bool, args []string, text, name string) {
 	}
 
 	extraUsage := ""
-	want := 1
+	wantArgs := 1
 	if name == "grep" {
 		extraUsage = " file"
-		want = 2
+		wantArgs = 2
 	}
-	if len(args) != want {
+	if len(args) != wantArgs {
 		ts.fatalf("usage: %s [-count=N] 'pattern'%s", name, extraUsage)
 	}
 
@@ -821,7 +983,7 @@ func scriptMatch(ts *testScript, neg bool, args []string, text, name string) {
 	isGrep := name == "grep"
 	if isGrep {
 		name = args[1] // for error messages
-		data, err := ioutil.ReadFile(ts.mkabs(args[1]))
+		data, err := os.ReadFile(ts.mkabs(args[1]))
 		ts.check(err)
 		text = string(data)
 	}
@@ -829,14 +991,16 @@ func scriptMatch(ts *testScript, neg bool, args []string, text, name string) {
 	// Matching against workdir would be misleading.
 	text = strings.ReplaceAll(text, ts.workdir, "$WORK")
 
-	if neg {
+	switch want {
+	case failure:
 		if re.MatchString(text) {
 			if isGrep && !quiet {
 				fmt.Fprintf(&ts.log, "[%s]\n%s\n", name, text)
 			}
 			ts.fatalf("unexpected match for %#q found in %s: %s", pattern, name, re.FindString(text))
 		}
-	} else {
+
+	case success:
 		if !re.MatchString(text) {
 			if isGrep && !quiet {
 				fmt.Fprintf(&ts.log, "[%s]\n%s\n", name, text)
@@ -856,9 +1020,9 @@ func scriptMatch(ts *testScript, neg bool, args []string, text, name string) {
 }
 
 // stop stops execution of the test (marking it passed).
-func (ts *testScript) cmdStop(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! stop")
+func (ts *testScript) cmdStop(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v stop", want)
 	}
 	if len(args) > 1 {
 		ts.fatalf("usage: stop [msg]")
@@ -872,9 +1036,9 @@ func (ts *testScript) cmdStop(neg bool, args []string) {
 }
 
 // symlink creates a symbolic link.
-func (ts *testScript) cmdSymlink(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! symlink")
+func (ts *testScript) cmdSymlink(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v symlink", want)
 	}
 	if len(args) != 3 || args[1] != "->" {
 		ts.fatalf("usage: symlink file -> target")
@@ -885,9 +1049,9 @@ func (ts *testScript) cmdSymlink(neg bool, args []string) {
 }
 
 // wait waits for background commands to exit, setting stderr and stdout to their result.
-func (ts *testScript) cmdWait(neg bool, args []string) {
-	if neg {
-		ts.fatalf("unsupported: ! wait")
+func (ts *testScript) cmdWait(want simpleStatus, args []string) {
+	if want != success {
+		ts.fatalf("unsupported: %v wait", want)
 	}
 	if len(args) > 0 {
 		ts.fatalf("usage: wait")
@@ -895,34 +1059,24 @@ func (ts *testScript) cmdWait(neg bool, args []string) {
 
 	var stdouts, stderrs []string
 	for _, bg := range ts.background {
-		<-bg.wait
+		<-bg.done
 
-		args := append([]string{filepath.Base(bg.cmd.Args[0])}, bg.cmd.Args[1:]...)
-		fmt.Fprintf(&ts.log, "[background] %s: %v\n", strings.Join(args, " "), bg.cmd.ProcessState)
+		args := append([]string{filepath.Base(bg.args[0])}, bg.args[1:]...)
+		fmt.Fprintf(&ts.log, "[background] %s: %v\n", strings.Join(args, " "), bg.err)
 
-		cmdStdout := bg.cmd.Stdout.(*strings.Builder).String()
+		cmdStdout := bg.stdout.String()
 		if cmdStdout != "" {
 			fmt.Fprintf(&ts.log, "[stdout]\n%s", cmdStdout)
 			stdouts = append(stdouts, cmdStdout)
 		}
 
-		cmdStderr := bg.cmd.Stderr.(*strings.Builder).String()
+		cmdStderr := bg.stderr.String()
 		if cmdStderr != "" {
 			fmt.Fprintf(&ts.log, "[stderr]\n%s", cmdStderr)
 			stderrs = append(stderrs, cmdStderr)
 		}
 
-		if bg.cmd.ProcessState.Success() {
-			if bg.neg {
-				ts.fatalf("unexpected command success")
-			}
-		} else {
-			if testCtx.Err() != nil {
-				ts.fatalf("test timed out while running command")
-			} else if !bg.neg {
-				ts.fatalf("unexpected command failure")
-			}
-		}
+		ts.checkCmd(bg)
 	}
 
 	ts.stdout = strings.Join(stdouts, "")
@@ -950,58 +1104,212 @@ func (ts *testScript) check(err error) {
 	}
 }
 
+func (ts *testScript) checkCmd(bg *backgroundCmd) {
+	select {
+	case <-bg.done:
+	default:
+		panic("checkCmd called when not done")
+	}
+
+	if bg.err == nil {
+		if bg.want == failure {
+			ts.fatalf("unexpected command success")
+		}
+		return
+	}
+
+	if errors.Is(bg.err, context.DeadlineExceeded) {
+		ts.fatalf("test timed out while running command")
+	}
+
+	if errors.Is(bg.err, context.Canceled) {
+		// The process was still running at the end of the test.
+		// The test must not depend on its exit status.
+		if bg.want != successOrFailure {
+			ts.fatalf("unexpected background command remaining at test end")
+		}
+		return
+	}
+
+	if bg.want == success {
+		ts.fatalf("unexpected command failure")
+	}
+}
+
 // exec runs the given command line (an actual subprocess, not simulated)
 // in ts.cd with environment ts.env and then returns collected standard output and standard error.
 func (ts *testScript) exec(command string, args ...string) (stdout, stderr string, err error) {
-	cmd := exec.Command(command, args...)
-	cmd.Dir = ts.cd
-	cmd.Env = append(ts.env, "PWD="+ts.cd)
-	var stdoutBuf, stderrBuf strings.Builder
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-	if err = cmd.Start(); err == nil {
-		err = ctxWait(testCtx, cmd)
+	bg, err := ts.startBackground(success, command, args...)
+	if err != nil {
+		return "", "", err
 	}
-	return stdoutBuf.String(), stderrBuf.String(), err
+	<-bg.done
+	return bg.stdout.String(), bg.stderr.String(), bg.err
 }
 
-// execBackground starts the given command line (an actual subprocess, not simulated)
+// startBackground starts the given command line (an actual subprocess, not simulated)
 // in ts.cd with environment ts.env.
-func (ts *testScript) execBackground(command string, args ...string) (*exec.Cmd, error) {
+func (ts *testScript) startBackground(want simpleStatus, command string, args ...string) (*backgroundCmd, error) {
+	done := make(chan struct{})
+	bg := &backgroundCmd{
+		want: want,
+		args: append([]string{command}, args...),
+		done: done,
+	}
+
+	// Use the script's PATH to look up the command if it contains a separator
+	// instead of the test process's PATH (see lookPath).
+	// Don't use filepath.Clean, since that changes "./foo" to "foo".
+	command = filepath.FromSlash(command)
+	if !strings.Contains(command, string(filepath.Separator)) {
+		var err error
+		command, err = ts.lookPath(command)
+		if err != nil {
+			return nil, err
+		}
+	}
 	cmd := exec.Command(command, args...)
 	cmd.Dir = ts.cd
 	cmd.Env = append(ts.env, "PWD="+ts.cd)
-	var stdoutBuf, stderrBuf strings.Builder
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-	return cmd, cmd.Start()
+	cmd.Stdout = &bg.stdout
+	cmd.Stderr = &bg.stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	go func() {
+		bg.err = waitOrStop(ts.ctx, cmd, quitSignal(), ts.gracePeriod)
+		close(done)
+	}()
+	return bg, nil
 }
 
-// ctxWait is like cmd.Wait, but terminates cmd with os.Interrupt if ctx becomes done.
+// lookPath is (roughly) like exec.LookPath, but it uses the test script's PATH
+// instead of the test process's PATH to find the executable. We don't change
+// the test process's PATH since it may run scripts in parallel.
+func (ts *testScript) lookPath(command string) (string, error) {
+	var strEqual func(string, string) bool
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		// Using GOOS as a proxy for case-insensitive file system.
+		strEqual = strings.EqualFold
+	} else {
+		strEqual = func(a, b string) bool { return a == b }
+	}
+
+	var pathExt []string
+	var searchExt bool
+	var isExecutable func(os.FileInfo) bool
+	if runtime.GOOS == "windows" {
+		// Use the test process's PathExt instead of the script's.
+		// If PathExt is set in the command's environment, cmd.Start fails with
+		// "parameter is invalid". Not sure why.
+		// If the command already has an extension in PathExt (like "cmd.exe")
+		// don't search for other extensions (not "cmd.bat.exe").
+		pathExt = strings.Split(os.Getenv("PathExt"), string(filepath.ListSeparator))
+		searchExt = true
+		cmdExt := filepath.Ext(command)
+		for _, ext := range pathExt {
+			if strEqual(cmdExt, ext) {
+				searchExt = false
+				break
+			}
+		}
+		isExecutable = func(fi os.FileInfo) bool {
+			return fi.Mode().IsRegular()
+		}
+	} else {
+		isExecutable = func(fi os.FileInfo) bool {
+			return fi.Mode().IsRegular() && fi.Mode().Perm()&0111 != 0
+		}
+	}
+
+	pathName := "PATH"
+	if runtime.GOOS == "plan9" {
+		pathName = "path"
+	}
+
+	for _, dir := range strings.Split(ts.envMap[pathName], string(filepath.ListSeparator)) {
+		if searchExt {
+			ents, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, ent := range ents {
+				for _, ext := range pathExt {
+					if !ent.IsDir() && strEqual(ent.Name(), command+ext) {
+						return dir + string(filepath.Separator) + ent.Name(), nil
+					}
+				}
+			}
+		} else {
+			path := dir + string(filepath.Separator) + command
+			if fi, err := os.Stat(path); err == nil && isExecutable(fi) {
+				return path, nil
+			}
+		}
+	}
+	return "", &exec.Error{Name: command, Err: exec.ErrNotFound}
+}
+
+// waitOrStop waits for the already-started command cmd by calling its Wait method.
 //
-// This differs from exec.CommandContext in that it prefers os.Interrupt over os.Kill.
-// (See https://golang.org/issue/21135.)
-func ctxWait(ctx context.Context, cmd *exec.Cmd) error {
-	errc := make(chan error, 1)
-	go func() { errc <- cmd.Wait() }()
-
-	select {
-	case err := <-errc:
-		return err
-	case <-ctx.Done():
-		interruptProcess(cmd.Process)
-		return <-errc
+// If cmd does not return before ctx is done, waitOrStop sends it the given interrupt signal.
+// If killDelay is positive, waitOrStop waits that additional period for Wait to return before sending os.Kill.
+//
+// This function is copied from the one added to x/playground/internal in
+// http://golang.org/cl/228438.
+func waitOrStop(ctx context.Context, cmd *exec.Cmd, interrupt os.Signal, killDelay time.Duration) error {
+	if cmd.Process == nil {
+		panic("waitOrStop called with a nil cmd.Process — missing Start call?")
 	}
-}
-
-// interruptProcess sends os.Interrupt to p if supported, or os.Kill otherwise.
-func interruptProcess(p *os.Process) {
-	if err := p.Signal(os.Interrupt); err != nil {
-		// Per https://golang.org/pkg/os/#Signal, “Interrupt is not implemented on
-		// Windows; using it with os.Process.Signal will return an error.”
-		// Fall back to Kill instead.
-		p.Kill()
+	if interrupt == nil {
+		panic("waitOrStop requires a non-nil interrupt signal")
 	}
+
+	errc := make(chan error)
+	go func() {
+		select {
+		case errc <- nil:
+			return
+		case <-ctx.Done():
+		}
+
+		err := cmd.Process.Signal(interrupt)
+		if err == nil {
+			err = ctx.Err() // Report ctx.Err() as the reason we interrupted.
+		} else if err == os.ErrProcessDone {
+			errc <- nil
+			return
+		}
+
+		if killDelay > 0 {
+			timer := time.NewTimer(killDelay)
+			select {
+			// Report ctx.Err() as the reason we interrupted the process...
+			case errc <- ctx.Err():
+				timer.Stop()
+				return
+			// ...but after killDelay has elapsed, fall back to a stronger signal.
+			case <-timer.C:
+			}
+
+			// Wait still hasn't returned.
+			// Kill the process harder to make sure that it exits.
+			//
+			// Ignore any error: if cmd.Process has already terminated, we still
+			// want to send ctx.Err() (or the error from the Interrupt call)
+			// to properly attribute the signal that may have terminated it.
+			_ = cmd.Process.Kill()
+		}
+
+		errc <- err
+	}()
+
+	waitErr := cmd.Wait()
+	if interruptErr := <-errc; interruptErr != nil {
+		return interruptErr
+	}
+	return waitErr
 }
 
 // expand applies environment variable expansion to the string s.
@@ -1022,7 +1330,7 @@ func (ts *testScript) expand(s string, inRegexp bool) string {
 }
 
 // fatalf aborts the test with the given failure message.
-func (ts *testScript) fatalf(format string, args ...interface{}) {
+func (ts *testScript) fatalf(format string, args ...any) {
 	fmt.Fprintf(&ts.log, "FAIL: %s:%d: %s\n", ts.file, ts.lineno, fmt.Sprintf(format, args...))
 	ts.t.FailNow()
 }
@@ -1044,7 +1352,7 @@ type condition struct {
 
 // A command is a complete command parsed from a script.
 type command struct {
-	neg   bool        // if true, expect the command to fail
+	want  simpleStatus
 	conds []condition // all must be satisfied
 	name  string      // the name of the command; must be non-empty
 	args  []string    // shell-expanded arguments following name
@@ -1073,17 +1381,24 @@ func (ts *testScript) parse(line string) command {
 
 		if cmd.name != "" {
 			cmd.args = append(cmd.args, arg)
-			isRegexp = false // Commands take only one regexp argument, so no subsequent args are regexps.
+			// Commands take only one regexp argument (after the optional flags),
+			// so no subsequent args are regexps. Liberally assume an argument that
+			// starts with a '-' is a flag.
+			if len(arg) == 0 || arg[0] != '-' {
+				isRegexp = false
+			}
 			return
 		}
 
 		// Command prefix ! means negate the expectations about this command:
 		// go command should fail, match should not be found, etc.
-		if arg == "!" {
-			if cmd.neg {
-				ts.fatalf("duplicated '!' token")
+		// Prefix ? means allow either success or failure.
+		switch want := simpleStatus(arg); want {
+		case failure, successOrFailure:
+			if cmd.want != "" {
+				ts.fatalf("duplicated '!' or '?' token")
 			}
-			cmd.neg = true
+			cmd.want = want
 			return
 		}
 
@@ -1150,6 +1465,68 @@ func (ts *testScript) parse(line string) command {
 		}
 	}
 	return cmd
+}
+
+// updateSum runs 'go mod tidy', 'go list -mod=mod -m all', or
+// 'go list -mod=mod all' in the test's current directory if a file named
+// "go.mod" is present after the archive has been extracted. updateSum modifies
+// archive and returns true if go.mod or go.sum were changed.
+func (ts *testScript) updateSum(archive *txtar.Archive) (rewrite bool) {
+	gomodIdx, gosumIdx := -1, -1
+	for i := range archive.Files {
+		switch archive.Files[i].Name {
+		case "go.mod":
+			gomodIdx = i
+		case "go.sum":
+			gosumIdx = i
+		}
+	}
+	if gomodIdx < 0 {
+		return false
+	}
+
+	switch *testSum {
+	case "tidy":
+		ts.cmdGo(success, []string{"mod", "tidy"})
+	case "listm":
+		ts.cmdGo(success, []string{"list", "-m", "-mod=mod", "all"})
+	case "listall":
+		ts.cmdGo(success, []string{"list", "-mod=mod", "all"})
+	default:
+		ts.t.Fatalf(`unknown value for -testsum %q; may be "tidy", "listm", or "listall"`, *testSum)
+	}
+
+	newGomodData, err := os.ReadFile(filepath.Join(ts.cd, "go.mod"))
+	if err != nil {
+		ts.t.Fatalf("reading go.mod after -testsum: %v", err)
+	}
+	if !bytes.Equal(newGomodData, archive.Files[gomodIdx].Data) {
+		archive.Files[gomodIdx].Data = newGomodData
+		rewrite = true
+	}
+
+	newGosumData, err := os.ReadFile(filepath.Join(ts.cd, "go.sum"))
+	if err != nil && !os.IsNotExist(err) {
+		ts.t.Fatalf("reading go.sum after -testsum: %v", err)
+	}
+	switch {
+	case os.IsNotExist(err) && gosumIdx >= 0:
+		// go.sum was deleted.
+		rewrite = true
+		archive.Files = append(archive.Files[:gosumIdx], archive.Files[gosumIdx+1:]...)
+	case err == nil && gosumIdx < 0:
+		// go.sum was created.
+		rewrite = true
+		gosumIdx = gomodIdx + 1
+		archive.Files = append(archive.Files, txtar.File{})
+		copy(archive.Files[gosumIdx+1:], archive.Files[gosumIdx:])
+		archive.Files[gosumIdx] = txtar.File{Name: "go.sum", Data: newGosumData}
+	case err == nil && gosumIdx >= 0 && !bytes.Equal(newGosumData, archive.Files[gosumIdx].Data):
+		// go.sum was changed.
+		rewrite = true
+		archive.Files[gosumIdx].Data = newGosumData
+	}
+	return rewrite
 }
 
 // diff returns a formatted diff of the two texts,
@@ -1234,6 +1611,8 @@ var diffTests = []struct {
 }
 
 func TestDiff(t *testing.T) {
+	t.Parallel()
+
 	for _, tt := range diffTests {
 		// Turn spaces into \n.
 		text1 := strings.ReplaceAll(tt.text1, " ", "\n")

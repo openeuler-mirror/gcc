@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build js,wasm
+//go:build js && wasm
 
 package http
 
@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strconv"
 	"syscall/js"
 )
@@ -41,11 +40,19 @@ const jsFetchCreds = "js.fetch:credentials"
 // Reference: https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/fetch#Parameters
 const jsFetchRedirect = "js.fetch:redirect"
 
-var useFakeNetwork = js.Global().Get("fetch").IsUndefined()
+// jsFetchMissing will be true if the Fetch API is not present in
+// the browser globals.
+var jsFetchMissing = js.Global().Get("fetch").IsUndefined()
 
 // RoundTrip implements the RoundTripper interface using the WHATWG Fetch API.
 func (t *Transport) RoundTrip(req *Request) (*Response, error) {
-	if useFakeNetwork {
+	// The Transport has a documented contract that states that if the DialContext or
+	// DialTLSContext functions are set, they will be used to set up the connections.
+	// If they aren't set then the documented contract is to use Dial or DialTLS, even
+	// though they are deprecated. Therefore, if any of these are set, we should obey
+	// the contract and dial using the regular round-trip instead. Otherwise, we'll try
+	// to fall back on the Fetch API, unless it's not available.
+	if t.Dial != nil || t.DialContext != nil || t.DialTLS != nil || t.DialTLSContext != nil || jsFetchMissing {
 		return t.roundTrip(req)
 	}
 
@@ -92,22 +99,29 @@ func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 		// See https://github.com/web-platform-tests/wpt/issues/7693 for WHATWG tests issue.
 		// See https://developer.mozilla.org/en-US/docs/Web/API/Streams_API for more details on the Streams API
 		// and browser support.
-		body, err := ioutil.ReadAll(req.Body)
+		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			req.Body.Close() // RoundTrip must always close the body, including on errors.
 			return nil, err
 		}
 		req.Body.Close()
-		buf := uint8Array.New(len(body))
-		js.CopyBytesToJS(buf, body)
-		opt.Set("body", buf)
+		if len(body) != 0 {
+			buf := uint8Array.New(len(body))
+			js.CopyBytesToJS(buf, body)
+			opt.Set("body", buf)
+		}
 	}
-	respPromise := js.Global().Call("fetch", req.URL.String(), opt)
+
+	fetchPromise := js.Global().Call("fetch", req.URL.String(), opt)
 	var (
-		respCh = make(chan *Response, 1)
-		errCh  = make(chan error, 1)
+		respCh           = make(chan *Response, 1)
+		errCh            = make(chan error, 1)
+		success, failure js.Func
 	)
-	success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+	success = js.FuncOf(func(this js.Value, args []js.Value) any {
+		success.Release()
+		failure.Release()
+
 		result := args[0]
 		header := Header{}
 		// https://developer.mozilla.org/en-US/docs/Web/API/Headers/entries
@@ -124,8 +138,24 @@ func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 		}
 
 		contentLength := int64(0)
-		if cl, err := strconv.ParseInt(header.Get("Content-Length"), 10, 64); err == nil {
+		clHeader := header.Get("Content-Length")
+		switch {
+		case clHeader != "":
+			cl, err := strconv.ParseInt(clHeader, 10, 64)
+			if err != nil {
+				errCh <- fmt.Errorf("net/http: ill-formed Content-Length header: %v", err)
+				return nil
+			}
+			if cl < 0 {
+				// Content-Length values less than 0 are invalid.
+				// See: https://datatracker.ietf.org/doc/html/rfc2616/#section-14.13
+				errCh <- fmt.Errorf("net/http: invalid Content-Length header: %q", clHeader)
+				return nil
+			}
 			contentLength = cl
+		default:
+			// If the response length is not declared, set it to -1.
+			contentLength = -1
 		}
 
 		b := result.Get("body")
@@ -141,35 +171,29 @@ func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 		}
 
 		code := result.Get("status").Int()
-		select {
-		case respCh <- &Response{
+		respCh <- &Response{
 			Status:        fmt.Sprintf("%d %s", code, StatusText(code)),
 			StatusCode:    code,
 			Header:        header,
 			ContentLength: contentLength,
 			Body:          body,
 			Request:       req,
-		}:
-		case <-req.Context().Done():
 		}
 
 		return nil
 	})
-	defer success.Release()
-	failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
-		err := fmt.Errorf("net/http: fetch() failed: %s", args[0].String())
-		select {
-		case errCh <- err:
-		case <-req.Context().Done():
-		}
+	failure = js.FuncOf(func(this js.Value, args []js.Value) any {
+		success.Release()
+		failure.Release()
+		errCh <- fmt.Errorf("net/http: fetch() failed: %s", args[0].Get("message").String())
 		return nil
 	})
-	defer failure.Release()
-	respPromise.Call("then", success, failure)
+
+	fetchPromise.Call("then", success, failure)
 	select {
 	case <-req.Context().Done():
 		if !ac.IsUndefined() {
-			// Abort the Fetch request
+			// Abort the Fetch request.
 			ac.Call("abort")
 		}
 		return nil, req.Context().Err()
@@ -199,7 +223,7 @@ func (r *streamReader) Read(p []byte) (n int, err error) {
 			bCh   = make(chan []byte, 1)
 			errCh = make(chan error, 1)
 		)
-		success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		success := js.FuncOf(func(this js.Value, args []js.Value) any {
 			result := args[0]
 			if result.Get("done").Bool() {
 				errCh <- io.EOF
@@ -211,7 +235,7 @@ func (r *streamReader) Read(p []byte) (n int, err error) {
 			return nil
 		})
 		defer success.Release()
-		failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		failure := js.FuncOf(func(this js.Value, args []js.Value) any {
 			// Assumes it's a TypeError. See
 			// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError
 			// for more information on this type. See
@@ -265,7 +289,7 @@ func (r *arrayReader) Read(p []byte) (n int, err error) {
 			bCh   = make(chan []byte, 1)
 			errCh = make(chan error, 1)
 		)
-		success := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		success := js.FuncOf(func(this js.Value, args []js.Value) any {
 			// Wrap the input ArrayBuffer with a Uint8Array
 			uint8arrayWrapper := uint8Array.New(args[0])
 			value := make([]byte, uint8arrayWrapper.Get("byteLength").Int())
@@ -274,7 +298,7 @@ func (r *arrayReader) Read(p []byte) (n int, err error) {
 			return nil
 		})
 		defer success.Release()
-		failure := js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		failure := js.FuncOf(func(this js.Value, args []js.Value) any {
 			// Assumes it's a TypeError. See
 			// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError
 			// for more information on this type.

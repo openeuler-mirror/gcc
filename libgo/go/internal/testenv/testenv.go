@@ -11,6 +11,7 @@
 package testenv
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"internal/cfg"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // testingGotools reports whether we are testing the gotools directory
@@ -50,12 +52,8 @@ func HasGoBuild() bool {
 		return false
 	}
 	switch runtime.GOOS {
-	case "android", "js":
+	case "android", "js", "ios":
 		return false
-	case "darwin":
-		if strings.HasPrefix(runtime.GOARCH, "arm") {
-			return false
-		}
 	}
 	// gccgo tests can not run "go build".
 	return testingGotools()
@@ -136,12 +134,8 @@ func GoTool() (string, error) {
 // using os.StartProcess or (more commonly) exec.Command.
 func HasExec() bool {
 	switch runtime.GOOS {
-	case "js":
+	case "js", "ios":
 		return false
-	case "darwin":
-		if strings.HasPrefix(runtime.GOARCH, "arm") {
-			return false
-		}
 	}
 	return true
 }
@@ -149,10 +143,8 @@ func HasExec() bool {
 // HasSrc reports whether the entire source tree is available under GOROOT.
 func HasSrc() bool {
 	switch runtime.GOOS {
-	case "darwin":
-		if strings.HasPrefix(runtime.GOARCH, "arm") {
-			return false
-		}
+	case "ios":
+		return false
 	}
 	if runtime.Compiler == "gccgo" {
 		return false
@@ -216,6 +208,32 @@ func HasCGO() bool {
 func MustHaveCGO(t testing.TB) {
 	if !haveCGO {
 		t.Skipf("skipping test: no cgo")
+	}
+}
+
+// CanInternalLink reports whether the current system can link programs with
+// internal linking.
+// (This is the opposite of cmd/internal/sys.MustLinkExternal. Keep them in sync.)
+func CanInternalLink() bool {
+	switch runtime.GOOS {
+	case "android":
+		if runtime.GOARCH != "arm64" {
+			return false
+		}
+	case "ios":
+		if runtime.GOARCH == "arm64" {
+			return false
+		}
+	}
+	return true
+}
+
+// MustInternalLink checks that the current system can link programs with internal
+// linking.
+// If not, MustInternalLink calls t.Skip with an explanation.
+func MustInternalLink(t testing.TB) {
+	if !CanInternalLink() {
+		t.Skipf("skipping test: internal linking on %s/%s is not supported", runtime.GOOS, runtime.GOARCH)
 	}
 }
 
@@ -286,4 +304,80 @@ func CleanCmdEnv(cmd *exec.Cmd) *exec.Cmd {
 		cmd.Env = append(cmd.Env, env)
 	}
 	return cmd
+}
+
+// CPUIsSlow reports whether the CPU running the test is suspected to be slow.
+func CPUIsSlow() bool {
+	switch runtime.GOARCH {
+	case "arm", "mips", "mipsle", "mips64", "mips64le":
+		return true
+	}
+	return false
+}
+
+// SkipIfShortAndSlow skips t if -short is set and the CPU running the test is
+// suspected to be slow.
+//
+// (This is useful for CPU-intensive tests that otherwise complete quickly.)
+func SkipIfShortAndSlow(t testing.TB) {
+	if testing.Short() && CPUIsSlow() {
+		t.Helper()
+		t.Skipf("skipping test in -short mode on %s", runtime.GOARCH)
+	}
+}
+
+// RunWithTimeout runs cmd and returns its combined output. If the
+// subprocess exits with a non-zero status, it will log that status
+// and return a non-nil error, but this is not considered fatal.
+func RunWithTimeout(t testing.TB, cmd *exec.Cmd) ([]byte, error) {
+	args := cmd.Args
+	if args == nil {
+		args = []string{cmd.Path}
+	}
+
+	var b bytes.Buffer
+	cmd.Stdout = &b
+	cmd.Stderr = &b
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting %s: %v", args, err)
+	}
+
+	// If the process doesn't complete within 1 minute,
+	// assume it is hanging and kill it to get a stack trace.
+	p := cmd.Process
+	done := make(chan bool)
+	go func() {
+		scale := 1
+		// This GOARCH/GOOS test is copied from cmd/dist/test.go.
+		// TODO(iant): Have cmd/dist update the environment variable.
+		if runtime.GOARCH == "arm" || runtime.GOOS == "windows" {
+			scale = 2
+		}
+		if s := os.Getenv("GO_TEST_TIMEOUT_SCALE"); s != "" {
+			if sc, err := strconv.Atoi(s); err == nil {
+				scale = sc
+			}
+		}
+
+		select {
+		case <-done:
+		case <-time.After(time.Duration(scale) * time.Minute):
+			p.Signal(Sigquit)
+			// If SIGQUIT doesn't do it after a little
+			// while, kill the process.
+			select {
+			case <-done:
+			case <-time.After(time.Duration(scale) * 30 * time.Second):
+				p.Signal(os.Kill)
+			}
+		}
+	}()
+
+	err := cmd.Wait()
+	if err != nil {
+		t.Logf("%s exit status: %v", args, err)
+	}
+	close(done)
+
+	return b.Bytes(), err
 }

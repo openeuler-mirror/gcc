@@ -1,7 +1,5 @@
 # GCC for openEuler
 
-## GCC for openEuler 10.3.1
-
 The GCC for openEuler compiler is a high-performance compiler based on the open source GCC. GCC for openEuler works with Kunpeng chip to fully utilize the performance of the chip through compiler technology and improve the performance experience of the workload on the Kunpeng hardware platform. In addition to supporting open source GCC general functions, GCC for openEuler mainly enhances the following three aspects.
 
 - Richer compilation algorithms: Provide a wealth of optimization algorithms, such as memory layout optimization, structure split optimization, automatic vectorization, etc., which greatly improve the throughput of instructions and data.

@@ -93,7 +93,7 @@ Use "go help{{with .LongName}} {{.}}{{end}} <command>" for more information abou
 {{if eq (.UsageLine) "go"}}
 Additional help topics:
 {{range .Commands}}{{if and (not .Runnable) (not .Commands)}}
-	{{.Name | printf "%-11s"}} {{.Short}}{{end}}{{end}}
+	{{.Name | printf "%-15s"}} {{.Short}}{{end}}{{end}}
 
 Use "go help{{with .LongName}} {{.}}{{end}} <topic>" for more information about that topic.
 {{end}}
@@ -162,7 +162,7 @@ func (w *errWriter) Write(b []byte) (int, error) {
 }
 
 // tmpl executes the given template text on data, writing the result to w.
-func tmpl(w io.Writer, text string, data interface{}) {
+func tmpl(w io.Writer, text string, data any) {
 	t := template.New("top")
 	t.Funcs(template.FuncMap{"trim": strings.TrimSpace, "capitalize": capitalize})
 	template.Must(t.Parse(text))

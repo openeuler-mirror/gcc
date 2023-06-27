@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O1 -ftree-fold-phiopt -fdump-tree-optimized" } */
+/* { dg-options "-O1 -fdump-tree-optimized" } */
 
 int g(int,int);
 int f(int t, int c)
@@ -18,5 +18,5 @@ int f(int t, int c)
 /* There should be one ifs as one of them should be changed into
    a conditional and the other should be there still.  */
 /* { dg-final { scan-tree-dump-times "if" 1 "optimized" }  }*/
-/* { dg-final { scan-tree-dump-times "\[^\r\n\]*_. = c_\[0-9\]*.D. != 0" 1 "optimized"  } } */
+/* { dg-final { scan-tree-dump-times "\[^\r\n\]*_\[0-9\]* = c_\[0-9\]*.D. != 0" 1 "optimized"  } } */
 

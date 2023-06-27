@@ -10,10 +10,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	exec "internal/execabs"
 	"io"
-	"io/ioutil"
+	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -55,21 +55,6 @@ type Repo interface {
 	// os.IsNotExist(err) returns true.
 	ReadFile(rev, file string, maxSize int64) (data []byte, err error)
 
-	// ReadFileRevs reads a single file at multiple versions.
-	// It should refuse to read more than maxSize bytes.
-	// The result is a map from each requested rev strings
-	// to the associated FileRev. The map must have a non-nil
-	// entry for every requested rev (unless ReadFileRevs returned an error).
-	// A file simply being missing or even corrupted in revs[i]
-	// should be reported only in files[revs[i]].Err, not in the error result
-	// from ReadFileRevs.
-	// The overall call should return an error (and no map) only
-	// in the case of a problem with obtaining the data, such as
-	// a network failure.
-	// Implementations may assume that revs only contain tags,
-	// not direct commit hashes.
-	ReadFileRevs(revs []string, file string, maxSize int64) (files map[string]*FileRev, err error)
-
 	// ReadZip downloads a zip file for the subdir subdirectory
 	// of the given revision to a new file in a given temporary directory.
 	// It should refuse to read more than maxSize bytes.
@@ -79,9 +64,8 @@ type Repo interface {
 	ReadZip(rev, subdir string, maxSize int64) (zip io.ReadCloser, err error)
 
 	// RecentTag returns the most recent tag on rev or one of its predecessors
-	// with the given prefix and major version.
-	// An empty major string matches any major version.
-	RecentTag(rev, prefix, major string) (tag string, err error)
+	// with the given prefix. allowed may be used to filter out unwanted versions.
+	RecentTag(rev, prefix string, allowed func(string) bool) (tag string, err error)
 
 	// DescendsFrom reports whether rev or any of its ancestors has the given tag.
 	//
@@ -106,7 +90,7 @@ type FileRev struct {
 	Err  error  // error if any; os.IsNotExist(Err)==true if rev exists but file does not exist in that rev
 }
 
-// UnknownRevisionError is an error equivalent to os.ErrNotExist, but for a
+// UnknownRevisionError is an error equivalent to fs.ErrNotExist, but for a
 // revision rather than a file.
 type UnknownRevisionError struct {
 	Rev string
@@ -116,10 +100,10 @@ func (e *UnknownRevisionError) Error() string {
 	return "unknown revision " + e.Rev
 }
 func (UnknownRevisionError) Is(err error) bool {
-	return err == os.ErrNotExist
+	return err == fs.ErrNotExist
 }
 
-// ErrNoCommits is an error equivalent to os.ErrNotExist indicating that a given
+// ErrNoCommits is an error equivalent to fs.ErrNotExist indicating that a given
 // repository or module contains no commits.
 var ErrNoCommits error = noCommitsError{}
 
@@ -129,7 +113,7 @@ func (noCommitsError) Error() string {
 	return "no commits"
 }
 func (noCommitsError) Is(err error) bool {
-	return err == os.ErrNotExist
+	return err == fs.ErrNotExist
 }
 
 // AllHex reports whether the revision rev is entirely lower-case hexadecimal digits.
@@ -153,15 +137,11 @@ func ShortenSHA1(rev string) string {
 	return rev
 }
 
-// WorkRoot is the root of the cached work directory.
-// It is set by cmd/go/internal/modload.InitMod.
-var WorkRoot string
-
 // WorkDir returns the name of the cached work directory to use for the
 // given repository type and name.
 func WorkDir(typ, name string) (dir, lockfile string, err error) {
-	if WorkRoot == "" {
-		return "", "", fmt.Errorf("codehost.WorkRoot not set")
+	if cfg.GOMODCACHE == "" {
+		return "", "", fmt.Errorf("neither GOPATH nor GOMODCACHE are set")
 	}
 
 	// We name the work directory for the SHA256 hash of the type and name.
@@ -173,7 +153,7 @@ func WorkDir(typ, name string) (dir, lockfile string, err error) {
 		return "", "", fmt.Errorf("codehost.WorkDir: type cannot contain colon")
 	}
 	key := typ + ":" + name
-	dir = filepath.Join(WorkRoot, fmt.Sprintf("%x", sha256.Sum256([]byte(key))))
+	dir = filepath.Join(cfg.GOMODCACHE, "cache/vcs", fmt.Sprintf("%x", sha256.Sum256([]byte(key))))
 
 	if cfg.BuildX {
 		fmt.Fprintf(os.Stderr, "mkdir -p %s # %s %s\n", filepath.Dir(dir), typ, name)
@@ -193,7 +173,7 @@ func WorkDir(typ, name string) (dir, lockfile string, err error) {
 	}
 	defer unlock()
 
-	data, err := ioutil.ReadFile(dir + ".info")
+	data, err := os.ReadFile(dir + ".info")
 	info, err2 := os.Stat(dir)
 	if err == nil && err2 == nil && info.IsDir() {
 		// Info file and directory both already exist: reuse.
@@ -215,7 +195,7 @@ func WorkDir(typ, name string) (dir, lockfile string, err error) {
 	if err := os.MkdirAll(dir, 0777); err != nil {
 		return "", "", err
 	}
-	if err := ioutil.WriteFile(dir+".info", []byte(key), 0666); err != nil {
+	if err := os.WriteFile(dir+".info", []byte(key), 0666); err != nil {
 		os.RemoveAll(dir)
 		return "", "", err
 	}
@@ -248,7 +228,7 @@ var dirLock sync.Map
 // It returns the standard output and, for a non-zero exit,
 // a *RunError indicating the command, exit status, and standard error.
 // Standard error is unavailable for commands that exit successfully.
-func Run(dir string, cmdline ...interface{}) ([]byte, error) {
+func Run(dir string, cmdline ...any) ([]byte, error) {
 	return RunWithStdin(dir, nil, cmdline...)
 }
 
@@ -256,7 +236,7 @@ func Run(dir string, cmdline ...interface{}) ([]byte, error) {
 // See https://www.gnu.org/software/bash/manual/html_node/Double-Quotes.html.
 var bashQuoter = strings.NewReplacer(`"`, `\"`, `$`, `\$`, "`", "\\`", `\`, `\\`)
 
-func RunWithStdin(dir string, stdin io.Reader, cmdline ...interface{}) ([]byte, error) {
+func RunWithStdin(dir string, stdin io.Reader, cmdline ...any) ([]byte, error) {
 	if dir != "" {
 		muIface, ok := dirLock.Load(dir)
 		if !ok {
@@ -268,6 +248,9 @@ func RunWithStdin(dir string, stdin io.Reader, cmdline ...interface{}) ([]byte, 
 	}
 
 	cmd := str.StringList(cmdline...)
+	if os.Getenv("TESTGOVCS") == "panic" {
+		panic(fmt.Sprintf("use of vcs: %v", cmd))
+	}
 	if cfg.BuildX {
 		text := new(strings.Builder)
 		if dir != "" {

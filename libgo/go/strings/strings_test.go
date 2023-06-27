@@ -154,6 +154,7 @@ var indexAnyTests = []IndexTest{
 	{"", "abc", -1},
 	{"a", "", -1},
 	{"a", "a", 0},
+	{"\x80", "\xffb", 0},
 	{"aaa", "a", 0},
 	{"abc", "xyz", -1},
 	{"abc", "xcz", 2},
@@ -164,6 +165,7 @@ var indexAnyTests = []IndexTest{
 	{dots + dots + dots, " ", -1},
 	{"012abcba210", "\xffb", 4},
 	{"012\x80bcb\x80210", "\xffb", 3},
+	{"0123456\xcf\x80abc", "\xcfb\x80", 10},
 }
 
 var lastIndexAnyTests = []IndexTest{
@@ -172,6 +174,7 @@ var lastIndexAnyTests = []IndexTest{
 	{"", "abc", -1},
 	{"a", "", -1},
 	{"a", "a", 0},
+	{"\x80", "\xffb", 0},
 	{"aaa", "a", 2},
 	{"abc", "xyz", -1},
 	{"abc", "ab", 1},
@@ -182,6 +185,7 @@ var lastIndexAnyTests = []IndexTest{
 	{dots + dots + dots, " ", -1},
 	{"012abcba210", "\xffb", 6},
 	{"012\x80bcb\x80210", "\xffb", 7},
+	{"0123456\xcf\x80abc", "\xcfb\x80", 10},
 }
 
 // Execute f on each test case.  funcName should be the name of f; it's used
@@ -682,8 +686,8 @@ func TestMap(t *testing.T) {
 		}
 		return r
 	}
-	s := string(utf8.RuneSelf) + string(utf8.MaxRune)
-	r := string(utf8.MaxRune) + string(utf8.RuneSelf) // reverse of s
+	s := string(rune(utf8.RuneSelf)) + string(utf8.MaxRune)
+	r := string(utf8.MaxRune) + string(rune(utf8.RuneSelf)) // reverse of s
 	m = Map(encode, s)
 	if m != r {
 		t.Errorf("encoding not handled correctly: expected %q got %q", r, m)
@@ -808,7 +812,9 @@ var trimTests = []struct {
 	{"TrimLeft", "abba", "ab", ""},
 	{"TrimRight", "abba", "ab", ""},
 	{"TrimLeft", "abba", "a", "bba"},
+	{"TrimLeft", "abba", "b", "abba"},
 	{"TrimRight", "abba", "a", "abb"},
+	{"TrimRight", "abba", "b", "abba"},
 	{"Trim", "<tag>", "<>", "tag"},
 	{"Trim", "* listitem", " *", "listitem"},
 	{"Trim", `"quote"`, `"`, "quote"},
@@ -1577,7 +1583,30 @@ var CountTests = []struct {
 func TestCount(t *testing.T) {
 	for _, tt := range CountTests {
 		if num := Count(tt.s, tt.sep); num != tt.num {
-			t.Errorf("Count(\"%s\", \"%s\") = %d, want %d", tt.s, tt.sep, num, tt.num)
+			t.Errorf("Count(%q, %q) = %d, want %d", tt.s, tt.sep, num, tt.num)
+		}
+	}
+}
+
+var cutTests = []struct {
+	s, sep        string
+	before, after string
+	found         bool
+}{
+	{"abc", "b", "a", "c", true},
+	{"abc", "a", "", "bc", true},
+	{"abc", "c", "ab", "", true},
+	{"abc", "abc", "", "", true},
+	{"abc", "", "", "abc", true},
+	{"abc", "d", "abc", "", false},
+	{"", "d", "", "", false},
+	{"", "", "", "", true},
+}
+
+func TestCut(t *testing.T) {
+	for _, tt := range cutTests {
+		if before, after, found := Cut(tt.s, tt.sep); before != tt.before || after != tt.after || found != tt.found {
+			t.Errorf("Cut(%q, %q) = %q, %q, %v, want %q, %q, %v", tt.s, tt.sep, before, after, found, tt.before, tt.after, tt.found)
 		}
 	}
 }
@@ -1791,13 +1820,55 @@ func BenchmarkRepeat(b *testing.B) {
 }
 
 func BenchmarkIndexAnyASCII(b *testing.B) {
-	x := Repeat("#", 4096) // Never matches set
-	cs := "0123456789abcdef"
-	for k := 1; k <= 4096; k <<= 4 {
-		for j := 1; j <= 16; j <<= 1 {
+	x := Repeat("#", 2048) // Never matches set
+	cs := "0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz"
+	for k := 1; k <= 2048; k <<= 4 {
+		for j := 1; j <= 64; j <<= 1 {
 			b.Run(fmt.Sprintf("%d:%d", k, j), func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					IndexAny(x[:k], cs[:j])
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkIndexAnyUTF8(b *testing.B) {
+	x := Repeat("#", 2048) // Never matches set
+	cs := "你好世界, hello world. 你好世界, hello world. 你好世界, hello world."
+	for k := 1; k <= 2048; k <<= 4 {
+		for j := 1; j <= 64; j <<= 1 {
+			b.Run(fmt.Sprintf("%d:%d", k, j), func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					IndexAny(x[:k], cs[:j])
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkLastIndexAnyASCII(b *testing.B) {
+	x := Repeat("#", 2048) // Never matches set
+	cs := "0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz"
+	for k := 1; k <= 2048; k <<= 4 {
+		for j := 1; j <= 64; j <<= 1 {
+			b.Run(fmt.Sprintf("%d:%d", k, j), func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					LastIndexAny(x[:k], cs[:j])
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkLastIndexAnyUTF8(b *testing.B) {
+	x := Repeat("#", 2048) // Never matches set
+	cs := "你好世界, hello world. 你好世界, hello world. 你好世界, hello world."
+	for k := 1; k <= 2048; k <<= 4 {
+		for j := 1; j <= 64; j <<= 1 {
+			b.Run(fmt.Sprintf("%d:%d", k, j), func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					LastIndexAny(x[:k], cs[:j])
 				}
 			})
 		}
@@ -1815,6 +1886,13 @@ func BenchmarkTrimASCII(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func BenchmarkTrimByte(b *testing.B) {
+	x := "  the quick brown fox   "
+	for i := 0; i < b.N; i++ {
+		Trim(x, " ")
 	}
 }
 
@@ -1856,5 +1934,14 @@ func BenchmarkTrimSpace(b *testing.B) {
 				TrimSpace(test.input)
 			}
 		})
+	}
+}
+
+var stringSink string
+
+func BenchmarkReplaceAll(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		stringSink = ReplaceAll("banana", "a", "<>")
 	}
 }

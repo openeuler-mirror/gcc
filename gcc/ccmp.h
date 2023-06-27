@@ -1,5 +1,5 @@
 /* Conditional comapre related functions.
-   Copyright (C) 2014-2020 Free Software Foundation, Inc.
+   Copyright (C) 2014-2022 Free Software Foundation, Inc.
 
 This file is part of GCC.
 
@@ -21,6 +21,5 @@ along with GCC; see the file COPYING3.  If not see
 #define GCC_CCMP_H
 
 extern rtx expand_ccmp_expr (gimple *, machine_mode);
-extern bool check_ccmp_candidate (basic_block bb);
 
 #endif  /* GCC_CCMP_H  */

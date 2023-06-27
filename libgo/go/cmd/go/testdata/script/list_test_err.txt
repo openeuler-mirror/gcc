@@ -22,6 +22,9 @@ go list -e -test -deps -f '{{.ImportPath}} {{.Error | printf "%q"}}' syntaxerr
 stdout 'pkgdep <nil>'
 stdout 'testdep_a <nil>'
 stdout 'testdep_b <nil>'
+stdout 'syntaxerr <nil>'
+stdout 'syntaxerr \[syntaxerr.test\] <nil>'
+stdout 'syntaxerr_test \[syntaxerr.test\] <nil>'
 stdout 'syntaxerr\.test "[^"]*expected declaration'
 ! stderr 'expected declaration'
 
@@ -40,6 +43,10 @@ stdout 'testdep_a <nil>'
 stdout 'testdep_b <nil>'
 stdout 'nameerr\.test "[^"]*wrong signature for TestBad'
 ! stderr 'wrong signature for TestBad'
+
+# go list prints a useful error for generic test functions
+! go list -test -deps genericerr
+stderr 'wrong signature for TestGeneric, test functions cannot have type parameters'
 
 # go list prints partial information with error if test has cyclic import
 ! go list -test -deps cycleerr
@@ -102,6 +109,16 @@ import (
 )
 
 func TestBad(t *testing.B) {}
+
+-- genericerr/genericerr.go --
+package genericerr
+
+-- genericerr/genericerr_test.go --
+package genericerr
+
+import "testing"
+
+func TestGeneric[T any](t *testing.T) {}
 
 -- cycleerr/cycleerr_test.go --
 package cycleerr

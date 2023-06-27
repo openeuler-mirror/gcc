@@ -1,6 +1,6 @@
 // The template and inlines for the -*- C++ -*- mask_array class.
 
-// Copyright (C) 1997-2020 Free Software Foundation, Inc.
+// Copyright (C) 1997-2022 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -174,6 +174,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       mask_array<_Tp>::operator=(const _Expr<_Ex, _Tp>& __e) const
       { std::__valarray_copy(__e, __e.size(), _M_array, _M_mask); }
 
+  /// @cond undocumented
 #undef _DEFINE_VALARRAY_OPERATOR
 #define _DEFINE_VALARRAY_OPERATOR(_Op, _Name)				\
   template<typename _Tp>						\
@@ -204,8 +205,9 @@ _DEFINE_VALARRAY_OPERATOR(<<, __shift_left)
 _DEFINE_VALARRAY_OPERATOR(>>, __shift_right)
 
 #undef _DEFINE_VALARRAY_OPERATOR
+  /// @endcond
 
-  // @} group numeric_arrays
+  /// @} group numeric_arrays
 
 _GLIBCXX_END_NAMESPACE_VERSION
 } // namespace

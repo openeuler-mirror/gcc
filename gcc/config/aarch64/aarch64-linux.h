@@ -1,5 +1,5 @@
 /* Machine description for AArch64 architecture.
-   Copyright (C) 2009-2020 Free Software Foundation, Inc.
+   Copyright (C) 2009-2022 Free Software Foundation, Inc.
    Contributed by ARM Ltd.
 
    This file is part of GCC.
@@ -50,8 +50,7 @@
 #define LINK_SPEC LINUX_TARGET_LINK_SPEC AARCH64_ERRATA_LINK_SPEC
 
 #define GNU_USER_TARGET_MATHFILE_SPEC \
-  "%{Ofast|ffast-math|funsafe-math-optimizations|fp-model=fast|fftz:\
-  %{!fno-ftz:crtfastmath.o%s}}"
+  "%{Ofast|ffast-math|funsafe-math-optimizations:crtfastmath.o%s}"
 
 #undef ENDFILE_SPEC
 #define ENDFILE_SPEC   \
@@ -64,8 +63,6 @@
 	GNU_USER_TARGET_OS_CPP_BUILTINS();	\
     }						\
   while (0)
-
-#define GNU_USER_TARGET_D_CRITSEC_SIZE 48
 
 #define TARGET_ASM_FILE_END aarch64_file_end_indicate_exec_stack
 

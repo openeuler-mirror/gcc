@@ -1,7 +1,5 @@
 # GCC for openEuler
 
-## GCC for openEuler 10.3.1
-
 GCC for openEuler 编译器是基于开源 GCC 的高性能编译器，GCC for openEuler 与鲲鹏芯片协同，通过编译器技术充分发挥芯片的性能，提升鲲鹏硬件平台上业务的性能体验。除支持开源 GCC 通用功能之外，GCC for openEuler 主要对以下三个方面进行了增强。
 
 - 更丰富的编译算法：提供丰富的优化算法，如内存布局优化、结构体拆分优化、自动矢量化等，大幅提升指令和数据的吞吐量。

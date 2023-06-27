@@ -1,5 +1,5 @@
 /* ACLE support for AArch64 SVE
-   Copyright (C) 2018-2020 Free Software Foundation, Inc.
+   Copyright (C) 2018-2022 Free Software Foundation, Inc.
 
    This file is part of GCC.
 
@@ -530,7 +530,8 @@ static CONSTEXPR const function_group_info function_groups[] = {
 };
 
 /* The scalar type associated with each vector type.  */
-GTY(()) tree scalar_types[NUM_VECTOR_TYPES];
+extern GTY(()) tree scalar_types[NUM_VECTOR_TYPES];
+tree scalar_types[NUM_VECTOR_TYPES];
 
 /* The single-predicate and single-vector types, with their built-in
    "__SV..._t" name.  Allow an index of NUM_VECTOR_TYPES, which always
@@ -538,13 +539,16 @@ GTY(()) tree scalar_types[NUM_VECTOR_TYPES];
 static GTY(()) tree abi_vector_types[NUM_VECTOR_TYPES + 1];
 
 /* Same, but with the arm_sve.h "sv..._t" name.  */
-GTY(()) tree acle_vector_types[MAX_TUPLE_SIZE][NUM_VECTOR_TYPES + 1];
+extern GTY(()) tree acle_vector_types[MAX_TUPLE_SIZE][NUM_VECTOR_TYPES + 1];
+tree acle_vector_types[MAX_TUPLE_SIZE][NUM_VECTOR_TYPES + 1];
 
 /* The svpattern enum type.  */
-GTY(()) tree acle_svpattern;
+extern GTY(()) tree acle_svpattern;
+tree acle_svpattern;
 
 /* The svprfop enum type.  */
-GTY(()) tree acle_svprfop;
+extern GTY(()) tree acle_svprfop;
+tree acle_svprfop;
 
 /* The list of all registered function decls, indexed by code.  */
 static GTY(()) vec<registered_function *, va_gc> *registered_functions;
@@ -871,16 +875,13 @@ registered_function_hasher::equal (value_type value, const compare_type &key)
 }
 
 sve_switcher::sve_switcher ()
-  : m_old_isa_flags (aarch64_isa_flags)
+  : aarch64_simd_switcher (AARCH64_FL_F16 | AARCH64_FL_SVE)
 {
   /* Changing the ISA flags and have_regs_of_mode should be enough here.
      We shouldn't need to pay the compile-time cost of a full target
      switch.  */
-  aarch64_isa_flags = (AARCH64_FL_FP | AARCH64_FL_SIMD | AARCH64_FL_F16
-		       | AARCH64_FL_SVE);
-
-  m_old_general_regs_only = TARGET_GENERAL_REGS_ONLY;
-  global_options.x_target_flags &= ~MASK_GENERAL_REGS_ONLY;
+  m_old_maximum_field_alignment = maximum_field_alignment;
+  maximum_field_alignment = 0;
 
   memcpy (m_old_have_regs_of_mode, have_regs_of_mode,
 	  sizeof (have_regs_of_mode));
@@ -893,9 +894,7 @@ sve_switcher::~sve_switcher ()
 {
   memcpy (have_regs_of_mode, m_old_have_regs_of_mode,
 	  sizeof (have_regs_of_mode));
-  if (m_old_general_regs_only)
-    global_options.x_target_flags |= MASK_GENERAL_REGS_ONLY;
-  aarch64_isa_flags = m_old_isa_flags;
+  maximum_field_alignment = m_old_maximum_field_alignment;
 }
 
 function_builder::function_builder ()
@@ -995,12 +994,29 @@ registered_function &
 function_builder::add_function (const function_instance &instance,
 				const char *name, tree fntype, tree attrs,
 				uint64_t required_extensions,
-				bool overloaded_p)
+				bool overloaded_p,
+				bool placeholder_p)
 {
   unsigned int code = vec_safe_length (registered_functions);
   code = (code << AARCH64_BUILTIN_SHIFT) | AARCH64_BUILTIN_SVE;
-  tree decl = simulate_builtin_function_decl (input_location, name, fntype,
-					      code, NULL, attrs);
+
+  /* We need to be able to generate placeholders to enusre that we have a
+     consistent numbering scheme for function codes between the C and C++
+     frontends, so that everything ties up in LTO.
+
+     Currently, tree-streamer-in.cc:unpack_ts_function_decl_value_fields
+     validates that tree nodes returned by TARGET_BUILTIN_DECL are non-NULL and
+     some node other than error_mark_node. This is a holdover from when builtin
+     decls were streamed by code rather than by value.
+
+     Ultimately, we should be able to remove this validation of BUILT_IN_MD
+     nodes and remove the target hook. For now, however, we need to appease the
+     validation and return a non-NULL, non-error_mark_node node, so we
+     arbitrarily choose integer_zero_node.  */
+  tree decl = placeholder_p
+    ? integer_zero_node
+    : simulate_builtin_function_decl (input_location, name, fntype,
+				      code, NULL, attrs);
 
   registered_function &rfn = *ggc_alloc <registered_function> ();
   rfn.instance = instance;
@@ -1032,7 +1048,7 @@ function_builder::add_unique_function (const function_instance &instance,
 					   argument_types.address ());
   tree attrs = get_attributes (instance);
   registered_function &rfn = add_function (instance, name, fntype, attrs,
-					   required_extensions, false);
+					   required_extensions, false, false);
 
   /* Enter the function into the hash table.  */
   hashval_t hash = instance.hash ();
@@ -1043,16 +1059,14 @@ function_builder::add_unique_function (const function_instance &instance,
 
   /* Also add the function under its overloaded alias, if we want
      a separate decl for each instance of an overloaded function.  */
-  if (m_direct_overloads || force_direct_overloads)
+  char *overload_name = get_name (instance, true);
+  if (strcmp (name, overload_name) != 0)
     {
-      char *overload_name = get_name (instance, true);
-      if (strcmp (name, overload_name) != 0)
-	{
-	  /* Attribute lists shouldn't be shared.  */
-	  tree attrs = get_attributes (instance);
-	  add_function (instance, overload_name, fntype, attrs,
-			required_extensions, false);
-	}
+      /* Attribute lists shouldn't be shared.  */
+      tree attrs = get_attributes (instance);
+      bool placeholder_p = !(m_direct_overloads || force_direct_overloads);
+      add_function (instance, overload_name, fntype, attrs,
+		    required_extensions, false, placeholder_p);
     }
 
   obstack_free (&m_string_obstack, name);
@@ -1073,18 +1087,19 @@ function_builder::add_overloaded_function (const function_instance &instance,
 {
   char *name = get_name (instance, true);
   if (registered_function **map_value = m_overload_names.get (name))
-    gcc_assert ((*map_value)->instance == instance
-		&& ((*map_value)->required_extensions
-		    & ~required_extensions) == 0);
+    {
+      gcc_assert ((*map_value)->instance == instance
+		  && ((*map_value)->required_extensions
+		      & ~required_extensions) == 0);
+      obstack_free (&m_string_obstack, name);
+    }
   else
     {
       registered_function &rfn
 	= add_function (instance, name, m_overload_type, NULL_TREE,
-			required_extensions, true);
-      const char *permanent_name = IDENTIFIER_POINTER (DECL_NAME (rfn.decl));
-      m_overload_names.put (permanent_name, &rfn);
+			required_extensions, true, m_direct_overloads);
+      m_overload_names.put (name, &rfn);
     }
-  obstack_free (&m_string_obstack, name);
 }
 
 /* If we are using manual overload resolution, add one function decl
@@ -1094,9 +1109,6 @@ void
 function_builder::add_overloaded_functions (const function_group_info &group,
 					    mode_suffix_index mode)
 {
-  if (m_direct_overloads)
-    return;
-
   unsigned int explicit_type0 = (*group.shape)->explicit_type_suffix_p (0);
   unsigned int explicit_type1 = (*group.shape)->explicit_type_suffix_p (1);
   for (unsigned int pi = 0; group.preds[pi] != NUM_PREDS; ++pi)
@@ -1335,13 +1347,17 @@ function_resolver::infer_vector_or_tuple_type (unsigned int argno,
 			" expects a single SVE vector rather than a tuple",
 			actual, argno + 1, fndecl);
 	    else if (size_i == 0 && type_i != VECTOR_TYPE_svbool_t)
-	      error_at (location, "passing single vector %qT to argument %d"
-			" of %qE, which expects a tuple of %d vectors",
-			actual, argno + 1, fndecl, num_vectors);
+	      /* num_vectors is always != 1, so the singular isn't needed.  */
+	      error_n (location, num_vectors, "%qT%d%qE%d",
+		       "passing single vector %qT to argument %d"
+		       " of %qE, which expects a tuple of %d vectors",
+		       actual, argno + 1, fndecl, num_vectors);
 	    else
-	      error_at (location, "passing %qT to argument %d of %qE, which"
-			" expects a tuple of %d vectors", actual, argno + 1,
-			fndecl, num_vectors);
+	      /* num_vectors is always != 1, so the singular isn't needed.  */
+	      error_n (location, num_vectors, "%qT%d%qE%d",
+		       "passing %qT to argument %d of %qE, which"
+		       " expects a tuple of %d vectors", actual, argno + 1,
+		       fndecl, num_vectors);
 	    return NUM_TYPE_SUFFIXES;
 	  }
       }
@@ -2792,7 +2808,7 @@ function_expander::add_output_operand (insn_code icode)
 {
   unsigned int opno = m_ops.length ();
   machine_mode mode = insn_data[icode].operand[opno].mode;
-  m_ops.safe_grow (opno + 1);
+  m_ops.safe_grow (opno + 1, true);
   create_output_operand (&m_ops.last (), possible_target, mode);
 }
 
@@ -2829,7 +2845,7 @@ function_expander::add_input_operand (insn_code icode, rtx x)
       gcc_assert (GET_MODE (x) == VNx16BImode);
       x = gen_lowpart (mode, x);
     }
-  m_ops.safe_grow (m_ops.length () + 1);
+  m_ops.safe_grow (m_ops.length () + 1, true);
   create_input_operand (&m_ops.last (), x, mode);
 }
 
@@ -2837,7 +2853,7 @@ function_expander::add_input_operand (insn_code icode, rtx x)
 void
 function_expander::add_integer_operand (HOST_WIDE_INT x)
 {
-  m_ops.safe_grow (m_ops.length () + 1);
+  m_ops.safe_grow (m_ops.length () + 1, true);
   create_integer_operand (&m_ops.last (), x);
 }
 
@@ -2861,7 +2877,7 @@ function_expander::add_mem_operand (machine_mode mode, rtx addr)
 void
 function_expander::add_address_operand (rtx x)
 {
-  m_ops.safe_grow (m_ops.length () + 1);
+  m_ops.safe_grow (m_ops.length () + 1, true);
   create_address_operand (&m_ops.last (), x);
 }
 
@@ -2870,7 +2886,7 @@ function_expander::add_address_operand (rtx x)
 void
 function_expander::add_fixed_operand (rtx x)
 {
-  m_ops.safe_grow (m_ops.length () + 1);
+  m_ops.safe_grow (m_ops.length () + 1, true);
   create_fixed_operand (&m_ops.last (), x);
 }
 
@@ -3399,6 +3415,7 @@ register_vector_type (vector_type_index type)
      installing an incorrect type.  */
   if (decl
       && TREE_CODE (decl) == TYPE_DECL
+      && TREE_TYPE (decl) != error_mark_node
       && TYPE_MAIN_VARIANT (TREE_TYPE (decl)) == vectype)
     vectype = TREE_TYPE (decl);
   acle_vector_types[0][type] = vectype;
@@ -3482,7 +3499,7 @@ register_svpattern ()
 #undef PUSH
 
   acle_svpattern = lang_hooks.types.simulate_enum_decl (input_location,
-							"svpattern", values);
+							"svpattern", &values);
 }
 
 /* Register the svprfop enum.  */
@@ -3496,7 +3513,7 @@ register_svprfop ()
 #undef PUSH
 
   acle_svprfop = lang_hooks.types.simulate_enum_decl (input_location,
-						      "svprfop", values);
+						      "svprfop", &values);
 }
 
 /* Implement #pragma GCC aarch64 "arm_sve.h".  */
@@ -3895,7 +3912,7 @@ gt_pch_nx (function_instance *)
 }
 
 inline void
-gt_pch_nx (function_instance *, void (*) (void *, void *), void *)
+gt_pch_nx (function_instance *, gt_pointer_operator, void *)
 {
 }
 

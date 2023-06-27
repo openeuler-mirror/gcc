@@ -1,4 +1,4 @@
-//  { dg-additional-options "-Wall -Wno-maybe-uninitialized" }
+//  { dg-additional-options "-Wall" }
 
 #include <coroutine>
 

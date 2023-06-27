@@ -1,4 +1,4 @@
-//  { dg-additional-options  "-Wall -O -fconcepts-ts" }
+//  { dg-additional-options  "-Wall -O" }
 
 // This should complete without any diagnostic.
 

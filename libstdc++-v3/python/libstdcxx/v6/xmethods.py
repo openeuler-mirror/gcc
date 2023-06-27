@@ -1,6 +1,6 @@
 # Xmethods for libstdc++.
 
-# Copyright (C) 2014-2020 Free Software Foundation, Inc.
+# Copyright (C) 2014-2022 Free Software Foundation, Inc.
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -597,7 +597,7 @@ class UniquePtrGetWorker(gdb.xmethod.XMethodWorker):
         tuple_head_type = tuple_impl_type.fields()[1].type   # _Head_base
         head_field = tuple_head_type.fields()[0]
         if head_field.name == '_M_head_impl':
-            return tuple_member['_M_head_impl']
+            return tuple_member.cast(tuple_head_type)['_M_head_impl']
         elif head_field.is_base_class:
             return tuple_member.cast(head_field.type)
         else:
@@ -730,13 +730,16 @@ class SharedPtrUseCountWorker(gdb.xmethod.XMethodWorker):
     "Implements std::shared_ptr<T>::use_count()"
 
     def __init__(self, elem_type):
-        SharedPtrUseCountWorker.__init__(self, elem_type)
+        pass
 
     def get_arg_types(self):
         return None
 
     def get_result_type(self, obj):
         return gdb.lookup_type('long')
+
+    def _supports(self, method_name):
+        return True
 
     def __call__(self, obj):
         refcounts = obj['_M_refcount']['_M_pi']

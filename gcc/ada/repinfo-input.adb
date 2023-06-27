@@ -6,23 +6,17 @@
 --                                                                          --
 --                                 B o d y                                  --
 --                                                                          --
---          Copyright (C) 2018-2019, Free Software Foundation, Inc.         --
+--          Copyright (C) 2018-2022, Free Software Foundation, Inc.         --
 --                                                                          --
 -- GNAT is free software;  you can  redistribute it  and/or modify it under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
 -- ware  Foundation;  either version 3,  or (at your option) any later ver- --
 -- sion.  GNAT is distributed in the hope that it will be useful, but WITH- --
 -- OUT ANY WARRANTY;  without even the  implied warranty of MERCHANTABILITY --
--- or FITNESS FOR A PARTICULAR PURPOSE.                                     --
---                                                                          --
--- As a special exception under Section 7 of GPL version 3, you are granted --
--- additional permissions described in the GCC Runtime Library Exception,   --
--- version 3.1, as published by the Free Software Foundation.               --
---                                                                          --
--- You should have received a copy of the GNU General Public License and    --
--- a copy of the GCC Runtime Library Exception along with this program;     --
--- see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see    --
--- <http://www.gnu.org/licenses/>.                                          --
+-- or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License --
+-- for  more details.  You should have  received  a copy of the GNU General --
+-- Public License  distributed with GNAT; see file COPYING3.  If not, go to --
+-- http://www.gnu.org/licenses for a complete copy of the license.          --
 --                                                                          --
 -- GNAT was originally developed  by the GNAT team at  New York University. --
 -- Extensive contributions were provided by Ada Core Technologies Inc.      --
@@ -36,16 +30,15 @@ with Namet;    use Namet;
 with Output;   use Output;
 with Snames;   use Snames;
 with Table;
+with Ttypes;
 
 package body Repinfo.Input is
 
-   SSU : constant := 8;
-   --  Value for Storage_Unit, we do not want to get this from TTypes, since
-   --  this introduces problematic dependencies in ASIS, and in any case this
-   --  value is assumed to be 8 for the implementation of the DDA.
+   SSU : Pos renames Ttypes.System_Storage_Unit;
+   --  Value for Storage_Unit
 
    type JSON_Entity_Kind is (JE_Record_Type, JE_Array_Type, JE_Other);
-   --  Kind of an entiy
+   --  Kind of an entity
 
    type JSON_Entity_Node (Kind : JSON_Entity_Kind := JE_Other) is record
       Esize   : Node_Ref_Or_Val;
@@ -222,7 +215,7 @@ package body Repinfo.Input is
          J_COMMA,
          J_COLON,
          J_EOF);
-      --  JSON Token kind. Note that in ECMA 404 there is no notion of integer.
+      --  JSON token kind. Note that in ECMA 404 there is no notion of integer.
       --  Only numbers are supported. In our implementation we return J_INTEGER
       --  if there is no decimal part in the number. The semantic is that this
       --  is a J_NUMBER token that might be represented as an integer. Special
@@ -295,7 +288,7 @@ package body Repinfo.Input is
       ----------------------
 
       function Decode_Integer (Lo, Hi : Text_Ptr) return Uint is
-         Len  : constant Nat := Int (Hi) - Int (Lo) + 1;
+         Len : constant Nat := Int (Hi) - Int (Lo) + 1;
 
       begin
          --  Decode up to 9 characters manually, otherwise call into Uint
@@ -783,7 +776,7 @@ package body Repinfo.Input is
             --  Compute Component_Bit_Offset from Position and First_Bit,
             --  either symbolically or literally depending on Position.
 
-            if Position = No_Uint or else First_Bit = No_Uint then
+            if No (Position) or else No (First_Bit) then
                Error ("bit offset expected");
             end if;
 
@@ -1226,7 +1219,7 @@ package body Repinfo.Input is
          Var         : JSON_Variant_Node;
 
       begin
-         --  Read a non-empty array of components
+         --  Read a nonempty array of components
 
          Read_Token_And_Error (J_ARRAY, Token_Start, Token_End);
 

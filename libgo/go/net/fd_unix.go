@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build aix darwin dragonfly freebsd hurd linux netbsd openbsd solaris
+//go:build aix || darwin || dragonfly || freebsd || hurd || linux || netbsd || openbsd || solaris
 
 package net
 
@@ -12,21 +12,16 @@ import (
 	"os"
 	"runtime"
 	"syscall"
-	"time"
 )
 
-// Network file descriptor.
-type netFD struct {
-	pfd poll.FD
-
-	// immutable until Close
-	family      int
-	sotype      int
-	isConnected bool // handshake completed or use of association with peer
-	net         string
-	laddr       Addr
-	raddr       Addr
-}
+const (
+	readSyscallName     = "read"
+	readFromSyscallName = "recvfrom"
+	readMsgSyscallName  = "recvmsg"
+	writeSyscallName    = "write"
+	writeToSyscallName  = "sendto"
+	writeMsgSyscallName = "sendmsg"
+)
 
 func newFD(sysfd, family, sotype int, net string) (*netFD, error) {
 	ret := &netFD{
@@ -44,12 +39,6 @@ func newFD(sysfd, family, sotype int, net string) (*netFD, error) {
 
 func (fd *netFD) init() error {
 	return fd.pfd.Init(fd.net, true)
-}
-
-func (fd *netFD) setAddr(laddr, raddr Addr) {
-	fd.laddr = laddr
-	fd.raddr = raddr
-	runtime.SetFinalizer(fd, (*netFD).Close)
 }
 
 func (fd *netFD) name() string {
@@ -102,12 +91,12 @@ func (fd *netFD) connect(ctx context.Context, la, ra syscall.Sockaddr) (rsa sysc
 	}
 
 	// Start the "interrupter" goroutine, if this context might be canceled.
-	// (The background context cannot)
 	//
 	// The interrupter goroutine waits for the context to be done and
 	// interrupts the dial (by altering the fd's write deadline, which
 	// wakes up waitWrite).
-	if ctx != context.Background() {
+	ctxDone := ctx.Done()
+	if ctxDone != nil {
 		// Wait for the interrupter goroutine to exit before returning
 		// from connect.
 		done := make(chan struct{})
@@ -127,7 +116,7 @@ func (fd *netFD) connect(ctx context.Context, la, ra syscall.Sockaddr) (rsa sysc
 		}()
 		go func() {
 			select {
-			case <-ctx.Done():
+			case <-ctxDone:
 				// Force the runtime's poller to immediately give up
 				// waiting for writability, unblocking waitWrite
 				// below.
@@ -151,7 +140,7 @@ func (fd *netFD) connect(ctx context.Context, la, ra syscall.Sockaddr) (rsa sysc
 		// details.
 		if err := fd.pfd.WaitWrite(); err != nil {
 			select {
-			case <-ctx.Done():
+			case <-ctxDone:
 				return nil, mapErr(ctx.Err())
 			default:
 			}
@@ -177,61 +166,6 @@ func (fd *netFD) connect(ctx context.Context, la, ra syscall.Sockaddr) (rsa sysc
 		}
 		runtime.KeepAlive(fd)
 	}
-}
-
-func (fd *netFD) Close() error {
-	runtime.SetFinalizer(fd, nil)
-	return fd.pfd.Close()
-}
-
-func (fd *netFD) shutdown(how int) error {
-	err := fd.pfd.Shutdown(how)
-	runtime.KeepAlive(fd)
-	return wrapSyscallError("shutdown", err)
-}
-
-func (fd *netFD) closeRead() error {
-	return fd.shutdown(syscall.SHUT_RD)
-}
-
-func (fd *netFD) closeWrite() error {
-	return fd.shutdown(syscall.SHUT_WR)
-}
-
-func (fd *netFD) Read(p []byte) (n int, err error) {
-	n, err = fd.pfd.Read(p)
-	runtime.KeepAlive(fd)
-	return n, wrapSyscallError("read", err)
-}
-
-func (fd *netFD) readFrom(p []byte) (n int, sa syscall.Sockaddr, err error) {
-	n, sa, err = fd.pfd.ReadFrom(p)
-	runtime.KeepAlive(fd)
-	return n, sa, wrapSyscallError("recvfrom", err)
-}
-
-func (fd *netFD) readMsg(p []byte, oob []byte) (n, oobn, flags int, sa syscall.Sockaddr, err error) {
-	n, oobn, flags, sa, err = fd.pfd.ReadMsg(p, oob)
-	runtime.KeepAlive(fd)
-	return n, oobn, flags, sa, wrapSyscallError("recvmsg", err)
-}
-
-func (fd *netFD) Write(p []byte) (nn int, err error) {
-	nn, err = fd.pfd.Write(p)
-	runtime.KeepAlive(fd)
-	return nn, wrapSyscallError("write", err)
-}
-
-func (fd *netFD) writeTo(p []byte, sa syscall.Sockaddr) (n int, err error) {
-	n, err = fd.pfd.WriteTo(p, sa)
-	runtime.KeepAlive(fd)
-	return n, wrapSyscallError("sendto", err)
-}
-
-func (fd *netFD) writeMsg(p []byte, oob []byte, sa syscall.Sockaddr) (n int, oobn int, err error) {
-	n, oobn, err = fd.pfd.WriteMsg(p, oob, sa)
-	runtime.KeepAlive(fd)
-	return n, oobn, wrapSyscallError("sendmsg", err)
 }
 
 func (fd *netFD) accept() (netfd *netFD, err error) {
@@ -266,16 +200,4 @@ func (fd *netFD) dup() (f *os.File, err error) {
 	}
 
 	return os.NewFile(uintptr(ns), fd.name()), nil
-}
-
-func (fd *netFD) SetDeadline(t time.Time) error {
-	return fd.pfd.SetDeadline(t)
-}
-
-func (fd *netFD) SetReadDeadline(t time.Time) error {
-	return fd.pfd.SetReadDeadline(t)
-}
-
-func (fd *netFD) SetWriteDeadline(t time.Time) error {
-	return fd.pfd.SetWriteDeadline(t)
 }

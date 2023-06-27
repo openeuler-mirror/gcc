@@ -1,4 +1,4 @@
-// Copyright (C) 2020 Free Software Foundation, Inc.
+// Copyright (C) 2020-2022 Free Software Foundation, Inc.
 //
 // This file is part of the GNU ISO C++ Library.  This library is free
 // software; you can redistribute it and/or modify it under the
@@ -19,7 +19,9 @@
 // { dg-do run { target c++2a } }
 
 #include <algorithm>
+#include <array>
 #include <ranges>
+#include <vector>
 #include <testsuite_hooks.h>
 #include <testsuite_iterators.h>
 
@@ -103,6 +105,12 @@ static_assert(std::is_empty_v<decltype(views::common
 				       | views::common
 				       | views::keys
 				       | views::reverse)>);
+#if 0
+// Adding empty range adaptor closure objects to a pipeline used to not
+// increase the size of the pipeline, but now that our range adaptor closure
+// objects derive from a common empty base class, [[no_unique_address]] can no
+// longer make two empty adjacent range adaptor closure objects occupy the same
+// data member address.
 static_assert(sizeof(decltype(views::take(5) | views::drop(5)))
 	      == sizeof(decltype(views::take(5)
 				 | views::join
@@ -111,6 +119,85 @@ static_assert(sizeof(decltype(views::take(5) | views::drop(5)))
 				 | views::keys
 				 | views::drop(5)
 				 | views::reverse)));
+#endif
+
+template<auto all = views::all>
+void
+test05()
+{
+  // Verify SFINAE behavior.
+  static_assert(!requires { all(); });
+  static_assert(!requires { all(0, 0); });
+  static_assert(!requires { all(0); });
+  static_assert(!requires { 0 | all; });
+}
+
+void
+test06()
+{
+  int x[] { 1, 2, 3 };
+
+  // Using ref_view:
+  static_assert(noexcept(views::all(x)));
+
+  // Using owning_view:
+  static_assert(noexcept(views::all(std::array<int, 3>{})));
+  struct A { A(); A(const A&); };
+  static_assert(!std::is_nothrow_move_constructible_v<std::array<A, 3>>);
+  static_assert(!noexcept(views::all(std::array<A, 3>{})));
+}
+
+void
+test07()
+{
+  // LWG 3481
+  struct view_t : ranges::empty_view<int> { // move-only view
+    view_t(const view_t&) = delete;
+    view_t(view_t&&) = default;
+    view_t& operator=(const view_t&) = delete;
+    view_t& operator=(view_t&&) = default;
+  };
+  static_assert(std::movable<view_t> && !std::copyable<view_t>);
+  static_assert(!ranges::viewable_range<view_t&>);
+}
+
+constexpr bool
+test08()
+{
+#ifdef _GLIBCXX_DEBUG
+  using std::_GLIBCXX_STD_C::vector;
+#else
+  using std::vector;
+#endif
+
+  // Verify P2415R2 "What is a view?" changes.
+  // In particular, rvalue non-view non-borrowed ranges are now viewable.
+  static_assert(ranges::viewable_range<vector<int>&&>);
+  static_assert(!ranges::viewable_range<const vector<int>&&>);
+
+  static_assert(ranges::viewable_range<std::initializer_list<int>&>);
+  static_assert(ranges::viewable_range<const std::initializer_list<int>&>);
+  static_assert(!ranges::viewable_range<std::initializer_list<int>&&>);
+  static_assert(!ranges::viewable_range<const std::initializer_list<int>&&>);
+
+  using type = views::all_t<vector<int>&&>;
+  using type = ranges::owning_view<vector<int>>;
+
+  std::same_as<type> auto v = vector<int>{{1,2,3}} | views::all;
+
+  VERIFY( ranges::equal(v, (int[]){1,2,3}) );
+  VERIFY( ranges::size(v) == 3 );
+  VERIFY( !ranges::empty(v) );
+  VERIFY( ranges::data(v) == &v[0] );
+
+  const auto w = std::move(v);
+  VERIFY( ranges::equal(w, (int[]){1,2,3}) );
+  VERIFY( ranges::size(w) == 3 );
+  VERIFY( !ranges::empty(w) );
+  VERIFY( ranges::data(w) == &w[0] );
+
+  return true;
+}
 
 int
 main()
@@ -119,4 +206,8 @@ main()
   test02();
   static_assert(test03());
   static_assert(test04());
+  test05();
+  test06();
+  test07();
+  static_assert(test08());
 }

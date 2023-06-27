@@ -45,7 +45,7 @@ foo ()
   C<int> c;
   dynamic_cast<auto> (c);			// { dg-error "auto" }
   reinterpret_cast<auto> (c);			// { dg-error "auto" }
-  int i = auto (0);				// { dg-error "auto" }
+  int i = auto (0);				// { dg-error "auto" "" { target c++20_down } }
   auto p1 = new (auto);				// { dg-error "auto" }
   auto p2 = new (auto) (42);			// { dg-error "invalid use of|deduce" }
   offsetof (auto, fld);				// { dg-error "auto" }
@@ -114,7 +114,7 @@ badthrow2 () throw (auto &)			// { dg-error "invalid use of|expected" }
 template <auto V = 4> struct G {};		// { dg-error "11:parameter" "" { target { ! c++17 } } }
 
 template <typename T> struct H { H (); ~H (); };
-H<auto> h;					// { dg-error "invalid|initializer" }
+H<auto> h;					// { dg-error "invalid|initializer|not permitted in template argument" }
 
 void qq (auto);		       // { dg-error "auto" "" { target { ! concepts } } }
 void qr (auto*);	       // { dg-error "auto" "" { target { ! concepts } } }

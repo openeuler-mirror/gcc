@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O3 -ftree-fold-phiopt -fno-inline" } */
+/* { dg-options "-O3 -fno-inline" } */
 
 /* Scan-assembler test, so, incorporate as little other code as possible.  */
 

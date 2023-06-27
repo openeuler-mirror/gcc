@@ -16,6 +16,11 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
+// incomparable is a zero-width, non-comparable type. Adding it to a struct
+// makes that struct also non-comparable, and generally doesn't add
+// any size (as long as it's first).
+type incomparable [0]func()
+
 // maxInt64 is the effective "infinite" value for the Server and
 // Transport's byte-limiting readers.
 const maxInt64 = 1<<63 - 1
@@ -55,15 +60,6 @@ func removeEmptyPort(host string) string {
 
 func isNotToken(r rune) bool {
 	return !httpguts.IsTokenRune(r)
-}
-
-func isASCII(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= utf8.RuneSelf {
-			return false
-		}
-	}
-	return true
 }
 
 // stringContainsCTLByte reports whether s contains any ASCII control character.

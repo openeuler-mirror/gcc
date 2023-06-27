@@ -6,23 +6,17 @@
 --                                                                          --
 --                                 S p e c                                  --
 --                                                                          --
---          Copyright (C) 1992-2019, Free Software Foundation, Inc.         --
+--          Copyright (C) 1992-2022, Free Software Foundation, Inc.         --
 --                                                                          --
 -- GNAT is free software;  you can  redistribute it  and/or modify it under --
 -- terms of the  GNU General Public License as published  by the Free Soft- --
 -- ware  Foundation;  either version 3,  or (at your option) any later ver- --
 -- sion.  GNAT is distributed in the hope that it will be useful, but WITH- --
 -- OUT ANY WARRANTY;  without even the  implied warranty of MERCHANTABILITY --
--- or FITNESS FOR A PARTICULAR PURPOSE.                                     --
---                                                                          --
--- As a special exception under Section 7 of GPL version 3, you are granted --
--- additional permissions described in the GCC Runtime Library Exception,   --
--- version 3.1, as published by the Free Software Foundation.               --
---                                                                          --
--- You should have received a copy of the GNU General Public License and    --
--- a copy of the GCC Runtime Library Exception along with this program;     --
--- see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see    --
--- <http://www.gnu.org/licenses/>.                                          --
+-- or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License --
+-- for  more details.  You should have  received  a copy of the GNU General --
+-- Public License  distributed with GNAT; see file COPYING3.  If not, go to --
+-- http://www.gnu.org/licenses for a complete copy of the license.          --
 --                                                                          --
 -- GNAT was originally developed  by the GNAT team at  New York University. --
 -- Extensive contributions were provided by Ada Core Technologies Inc.      --
@@ -418,10 +412,10 @@ package Sinput is
    --  Initialized so that some tools (such as gprbuild) can be built with
    --  -gnatVa and pragma Initialize_Scalars without problems.
 
-   Current_Source_Unit : Unit_Number_Type;
-   --  Unit number of source file currently being scanned. The special value
-   --  of No_Unit indicates that the configuration pragma file is currently
-   --  being scanned (this has no entry in the unit table).
+   Current_Source_Unit : Unit_Number_Type := No_Unit;
+   --  Unit number of source file currently being scanned. Initialized to
+   --  No_Unit for pre-processing and the configuration pragma file scanning,
+   --  since both stages have no corresponding entry in the unit table.
 
    Source_gnat_adc : Source_File_Index := No_Source_File;
    --  This is set if a gnat.adc file is present to reference this file
@@ -714,14 +708,6 @@ package Sinput is
 
    procedure Write_Time_Stamp (S : Source_File_Index);
    --  Writes time stamp of specified file in YY-MM-DD HH:MM.SS format
-
-   procedure Tree_Read;
-   --  Initializes internal tables from current tree file using the relevant
-   --  Table.Tree_Read routines.
-
-   procedure Tree_Write;
-   --  Writes out internal tables to current tree file using the relevant
-   --  Table.Tree_Write routines.
 
    procedure Clear_Source_File_Table;
    --  This procedure frees memory allocated in the Source_File table (in the

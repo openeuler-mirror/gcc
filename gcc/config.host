@@ -1,5 +1,5 @@
 # GCC host-specific configuration file.
-# Copyright (C) 1997-2020 Free Software Foundation, Inc.
+# Copyright (C) 1997-2022 Free Software Foundation, Inc.
 
 #This file is part of GCC.
 
@@ -59,11 +59,7 @@
 #  host_lto_plugin_soname Set this to the name to which the LTO linker
 #			plugin gets compiled on this host, if it is
 #			different from the default "liblto_plugin.so".
-#
-#  host_bolt_plugin_soname Set this to the name to which the BOLT
-#			plugin gets compiled on this host, if it is
-#			different from the default "libbolt_plugin.so".
-#
+
 # When setting any of these variables, check to see if a corresponding
 # variable is present in config.build; if so, you will likely want to 
 # set it in both places.
@@ -79,7 +75,6 @@ out_host_hook_obj=host-default.o
 host_can_use_collect2=yes
 use_long_long_for_widest_fast_int=no
 host_lto_plugin_soname=liblto_plugin.so
-host_bolt_plugin_soname=libbolt_plugin.so
 
 # Unsupported hosts list.  Generally, only include hosts known to fail here,
 # since we allow hosts not listed to be supported generically.
@@ -104,7 +99,8 @@ case ${host} in
 esac
 
 case ${host} in
-  aarch64*-*-freebsd* | aarch64*-*-linux* | aarch64*-*-fuchsia*)
+  aarch64*-*-freebsd* | aarch64*-*-linux* | aarch64*-*-fuchsia* |\
+  aarch64*-*-darwin*)
     case ${target} in
       aarch64*-*-*)
 	host_extra_gcc_objs="driver-aarch64.o"
@@ -237,7 +233,7 @@ case ${host} in
     out_host_hook_obj=host-cygwin.o
     host_xmake_file="${host_xmake_file} i386/x-cygwin"
     host_exeext=.exe
-    host_lto_plugin_soname=cyglto_plugin-0.dll
+    host_lto_plugin_soname=cyglto_plugin.dll
     ;;
   i[34567]86-*-mingw32*)
     host_xm_file=i386/xm-mingw32.h
@@ -245,7 +241,7 @@ case ${host} in
     host_exeext=.exe
     out_host_hook_obj=host-mingw32.o
     host_extra_gcc_objs="${host_extra_gcc_objs} driver-mingw32.o"
-    host_lto_plugin_soname=liblto_plugin-0.dll
+    host_lto_plugin_soname=liblto_plugin.dll
     ;;
   x86_64-*-mingw*)
     use_long_long_for_widest_fast_int=yes
@@ -254,7 +250,11 @@ case ${host} in
     host_exeext=.exe
     out_host_hook_obj=host-mingw32.o
     host_extra_gcc_objs="${host_extra_gcc_objs} driver-mingw32.o"
-    host_lto_plugin_soname=liblto_plugin-0.dll
+    host_lto_plugin_soname=liblto_plugin.dll
+    ;;
+  aarch64*-*-darwin*)
+    out_host_hook_obj="${out_host_hook_obj} host-aarch64-darwin.o"
+    host_xmake_file="${host_xmake_file} aarch64/x-darwin"
     ;;
   i[34567]86-*-darwin* | x86_64-*-darwin*)
     out_host_hook_obj="${out_host_hook_obj} host-i386-darwin.o"

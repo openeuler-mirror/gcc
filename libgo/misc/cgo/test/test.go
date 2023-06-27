@@ -319,6 +319,7 @@ typedef enum {
 
 // issue 4339
 // We've historically permitted #include <>, so test it here.  Issue 29333.
+// Also see issue 41059.
 #include <issue4339.h>
 
 // issue 4417
@@ -366,6 +367,11 @@ void init() {
 // Cgo incorrectly computed the alignment of structs
 // with no Go accessible fields as 0, and then panicked on
 // modulo-by-zero computations.
+
+// issue 50987
+// disable arm64 GCC warnings
+#cgo CFLAGS: -Wno-psabi -Wno-unknown-warning-option
+
 typedef struct {
 } foo;
 
@@ -897,6 +903,28 @@ static uint16_t issue31093F(uint16_t v) { return v; }
 
 // issue 32579
 typedef struct S32579 { unsigned char data[1]; } S32579;
+
+// issue 37033, cgo.Handle
+extern void GoFunc37033(uintptr_t handle);
+void cFunc37033(uintptr_t handle) { GoFunc37033(handle); }
+
+// issue 38649
+// Test that #define'd type aliases work.
+#define netbsd_gid unsigned int
+
+// issue 40494
+// Inconsistent handling of tagged enum and union types.
+enum Enum40494 { X_40494 };
+union Union40494 { int x; };
+void issue40494(enum Enum40494 e, union Union40494* up) {}
+
+// Issue 45451, bad handling of go:notinheap types.
+typedef struct issue45451Undefined issue45451;
+
+// Issue 49633, example of cgo.Handle with void*.
+extern void GoFunc49633(void*);
+void cfunc49633(void *context) { GoFunc49633(context); }
+
 */
 import "C"
 
@@ -909,6 +937,7 @@ import (
 	"os/signal"
 	"reflect"
 	"runtime"
+	"runtime/cgo"
 	"sync"
 	"syscall"
 	"testing"
@@ -986,6 +1015,32 @@ func testConst(t *testing.T) {
 func testEnum(t *testing.T) {
 	if C.Enum1 != 1 || C.Enum2 != 2 {
 		t.Error("bad enum", C.Enum1, C.Enum2)
+	}
+}
+
+func testNamedEnum(t *testing.T) {
+	e := new(C.enum_E)
+
+	*e = C.Enum1
+	if *e != 1 {
+		t.Error("bad enum", C.Enum1)
+	}
+
+	*e = C.Enum2
+	if *e != 2 {
+		t.Error("bad enum", C.Enum2)
+	}
+}
+
+func testCastToEnum(t *testing.T) {
+	e := C.enum_E(C.Enum1)
+	if e != 1 {
+		t.Error("bad enum", C.Enum1)
+	}
+
+	e = C.enum_E(C.Enum2)
+	if e != 2 {
+		t.Error("bad enum", C.Enum2)
 	}
 }
 
@@ -1765,7 +1820,7 @@ func test14838(t *testing.T) {
 var sink C.int
 
 func test17065(t *testing.T) {
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "ios" {
 		t.Skip("broken on darwin; issue 17065")
 	}
 	for i := range C.ii {
@@ -2191,4 +2246,52 @@ func test32579(t *testing.T) {
 	if s[0].data[0] != 1 {
 		t.Errorf("&s[0].data[0] failed: got %d, want %d", s[0].data[0], 1)
 	}
+}
+
+// issue 37033, check if cgo.Handle works properly
+
+func testHandle(t *testing.T) {
+	ch := make(chan int)
+
+	for i := 0; i < 42; i++ {
+		h := cgo.NewHandle(ch)
+		go func() {
+			C.cFunc37033(C.uintptr_t(h))
+		}()
+		if v := <-ch; issue37033 != v {
+			t.Fatalf("unexpected receiving value: got %d, want %d", v, issue37033)
+		}
+		h.Delete()
+	}
+}
+
+// issue 38649
+
+var issue38649 C.netbsd_gid = 42
+
+// issue 39877
+
+var issue39877 *C.void = nil
+
+// issue 40494
+// No runtime test; just make sure it compiles.
+
+func Issue40494() {
+	C.issue40494(C.enum_Enum40494(C.X_40494), (*C.union_Union40494)(nil))
+}
+
+// Issue 45451.
+func test45451(t *testing.T) {
+	var u *C.issue45451
+	typ := reflect.ValueOf(u).Type().Elem()
+
+	// The type is undefined in C so allocating it should panic.
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic")
+		}
+	}()
+
+	_ = reflect.New(typ)
+	t.Errorf("reflect.New(%v) should have panicked", typ)
 }

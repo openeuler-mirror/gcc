@@ -29,7 +29,7 @@ since C++11 and the implementation is complete.
 </para>
 
 <para>
-This section describes the C++14 and library TS support in mainline GCC,
+This section describes the C++14 and library TS support in the GCC 12 release series,
 not in any particular release.
 </para>
 
@@ -1145,7 +1145,6 @@ not in any particular release.
       <entry>Class template <code>regex_traits</code></entry>
       <entry>Partial</entry>
       <entry><code>transform_primary</code> is not correctly implemented</entry>
-      <entry/>
     </row>
     <row>
       <entry>28.8</entry>
@@ -1391,9 +1390,10 @@ not in any particular release.
       <entry>30.4.4.2</entry>
       <entry>Function <code>call_once</code></entry>
       <entry>Broken</entry>
-      <entry>See <link xmlns:xlink="http://www.w3.org/1999/xlink"
+      <entry>Exception support is broken on non-Linux targets.
+	See <link xmlns:xlink="http://www.w3.org/1999/xlink"
 	xlink:href="https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66146">PR
-	66146</link>
+	66146</link>.
       </entry>
     </row>
     <row>
