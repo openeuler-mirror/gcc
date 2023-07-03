@@ -576,8 +576,11 @@ const char *host_detect_local_cpu (int argc, const char **argv)
 	      /* This is unknown family 0x6 CPU.  */
 	      if (has_feature (FEATURE_AVX))
 		{
+		  /* Assume Granite Rapids D.  */
+		  if (has_feature (FEATURE_AMX_COMPLEX))
+		    cpu = "graniterapids-d";
 		  /* Assume Granite Rapids.  */
-		  if (has_feature (FEATURE_AMX_FP16))
+		  else if (has_feature (FEATURE_AMX_FP16))
 		    cpu = "graniterapids";
 		  /* Assume Tiger Lake */
 		  else if (has_feature (FEATURE_AVX512VP2INTERSECT))
