@@ -1,0 +1,17 @@
+# For self-developed patch
+[Component] <------ 50 characters summary ------->
+
+<-------- Detailed description of the patch, 72 characters wide. ------>
+
+
+### You should choose the template above or below.
+
+
+# For back-ported patch
+[Backport] <--- Summary from original commit ---->
+
+Reference: <-- gcc.git URL -->
+
+<------------ Description from the original commit message. ----------->
+
+<------ Additional notes, e.g. conflict resolution, bug fix, etc. ----->
