@@ -2193,6 +2193,14 @@ pass_waccess::set_pass_param (unsigned int n, bool early)
 bool
 pass_waccess::gate (function *)
 {
+  /* FIXME: In structure optimizations, some statements will be
+     rewritten and removed from the BB, leaving some unused SSA.
+     In pass waccess, it will traverse all SSA and cause ICE
+     when handling these unused SSA.  So temporarily disable
+     pass waccess when enable structure optimizations.  */
+  if (flag_ipa_struct_reorg)
+    return false;
+
   return (warn_free_nonheap_object
 	  || warn_mismatched_alloc
 	  || warn_mismatched_new_delete);
