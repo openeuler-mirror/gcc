@@ -105,6 +105,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "ipa-param-manipulation.h"
 #include "gimplify-me.h"
 #include "cfgloop.h"
+#include "langhooks.h"
 
 namespace {
 
@@ -194,6 +195,39 @@ gimplify_build1 (gimple_stmt_iterator *gsi, enum tree_code code, tree type,
   ret = fold_build1_loc (gimple_location (gsi_stmt (*gsi)), code, type, a);
   return force_gimple_operand_gsi (gsi, ret, true, NULL, true,
 				   GSI_SAME_STMT);
+}
+
+/* Check whether in C language or LTO with only C language.  */
+
+static bool
+lang_c_p (void)
+{
+  const char *language_string = lang_hooks.name;
+
+  if (!language_string)
+    return false;
+
+  if (strcmp (language_string, "GNU GIMPLE") == 0)
+    {
+      unsigned i = 0;
+      tree t = NULL;
+      const char *unit_string = NULL;
+
+      FOR_EACH_VEC_SAFE_ELT (all_translation_units, i, t)
+	{
+	  unit_string = TRANSLATION_UNIT_LANGUAGE (t);
+	  if (!unit_string
+	      || (strncmp (unit_string, "GNU C", 5) != 0)
+	      || (!ISDIGIT (unit_string[5])))
+	    return false;
+	}
+      return true;
+    }
+  else if (strncmp (language_string, "GNU C", 5) == 0
+	   && ISDIGIT (language_string[5]))
+    return true;
+
+  return false;
 }
 
 enum srmode
@@ -1018,7 +1052,6 @@ public:
   void analyze_types (void);
   void clear_visited (void);
   bool create_new_types (void);
-  void restore_field_type (void);
   void create_new_decls (void);
   srdecl *find_decl (tree);
   void create_new_functions (void);
@@ -2107,7 +2140,12 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	      srtype *t = find_type (inner_type (TREE_TYPE (rhs)));
 	      srdecl *d = find_decl (lhs);
 	      if (!d && t)
-		current_function->record_decl (t, lhs, -1);
+		{
+		  current_function->record_decl (t, lhs, -1);
+		  tree var = SSA_NAME_VAR (lhs);
+		  if (var && VOID_POINTER_P (TREE_TYPE (var)))
+		    current_function->record_decl (t, var, -1);
+		}
 	    }
 	  if (TREE_CODE (rhs) == SSA_NAME
 	      && VOID_POINTER_P (TREE_TYPE (rhs))
@@ -2116,7 +2154,12 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	      srtype *t = find_type (inner_type (TREE_TYPE (lhs)));
 	      srdecl *d = find_decl (rhs);
 	      if (!d && t)
-		current_function->record_decl (t, rhs, -1);
+		{
+		  current_function->record_decl (t, rhs, -1);
+		  tree var = SSA_NAME_VAR (rhs);
+		  if (var && VOID_POINTER_P (TREE_TYPE (var)))
+		    current_function->record_decl (t, var, -1);
+		}
 	    }
 	}
       else
@@ -2796,8 +2839,14 @@ ipa_struct_reorg::maybe_record_call (cgraph_node *node, gcall *stmt)
   if (escapes != does_not_escape)
     {
       for (unsigned i = 0; i < gimple_call_num_args (stmt); i++)
-	mark_type_as_escape (TREE_TYPE (gimple_call_arg (stmt, i)),
-			     escapes);
+	{
+	  mark_type_as_escape (TREE_TYPE (gimple_call_arg (stmt, i)),
+			       escapes);
+	  srdecl *d = current_function->find_decl (
+					  gimple_call_arg (stmt, i));
+	  if (d)
+	    d->type->mark_escape (escapes, stmt);
+	}
       return;
     }
 
@@ -3731,42 +3780,6 @@ ipa_struct_reorg::analyze_types (void)
     }
 }
 
-/* When struct A has a struct B member, B's type info
-   is not stored in
-     TYPE_FIELDS (TREE_TYPE (TYPE_FIELDS (typeA)))
-   Try to restore B's type information.  */
-
-void
-ipa_struct_reorg::restore_field_type (void)
-{
-  for (unsigned i = 0; i < types.length (); i++)
-    {
-      for (unsigned j = 0; j < types[i]->fields.length (); j++)
-	{
-	  srfield *field = types[i]->fields[j];
-	  if (TREE_CODE (inner_type (field->fieldtype)) == RECORD_TYPE)
-	    {
-	      /* If field type has TYPE_FIELDS information,
-		 we do not need to do this.  */
-	      if (TYPE_FIELDS (field->type->type) != NULL)
-		continue;
-	      for (unsigned k = 0; k < types.length (); k++)
-		{
-		  if (i == k)
-		    continue;
-		  const char *type1 = get_type_name (field->type->type);
-		  const char *type2 = get_type_name (types[k]->type);
-		  if (type1 == NULL || type2 == NULL)
-		    continue;
-		  if (type1 == type2
-		      && TYPE_FIELDS (types[k]->type))
-		    field->type = types[k];
-		}
-	    }
-	}
-    }
-}
-
 /* Create all new types we want to create.  */
 
 bool
@@ -4647,7 +4660,6 @@ ipa_struct_reorg::rewrite_functions (void)
 {
   unsigned retval = 0;
 
-  restore_field_type ();
   /* Create new types, if we did not create any new types,
      then don't rewrite any accesses.  */
   if (!create_new_types ())
@@ -4866,7 +4878,10 @@ pass_ipa_struct_reorg::gate (function *)
 	  && flag_ipa_struct_reorg
 	  /* Don't bother doing anything if the program has errors.  */
 	  && !seen_error ()
-	  && flag_lto_partition == LTO_PARTITION_ONE);
+	  && flag_lto_partition == LTO_PARTITION_ONE
+	  /* Only enable struct optimizations in C since other
+	     languages' grammar forbid.  */
+	  && lang_c_p ());
 }
 
 } // anon namespace

@@ -102,6 +102,12 @@ fld_worklist_push (tree t, class free_lang_data_d *fld)
 static tree
 fld_simplified_type_name (tree type)
 {
+  /* Simplify type will cause that struct A and struct A within
+     struct B are different type pointers, so skip it in structure
+     optimizations.  */
+  if (flag_ipa_struct_reorg)
+    return TYPE_NAME (type);
+
   if (!TYPE_NAME (type) || TREE_CODE (TYPE_NAME (type)) != TYPE_DECL)
     return TYPE_NAME (type);
   /* Drop TYPE_DECLs in TYPE_NAME in favor of the identifier in the
@@ -339,6 +345,11 @@ static tree
 fld_simplified_type (tree t, class free_lang_data_d *fld)
 {
   if (!t)
+    return t;
+  /* Simplify type will cause that struct A and struct A within
+     struct B are different type pointers, so skip it in structure
+     optimizations.  */
+  if (flag_ipa_struct_reorg)
     return t;
   if (POINTER_TYPE_P (t))
     return fld_incomplete_type_of (t, fld);
