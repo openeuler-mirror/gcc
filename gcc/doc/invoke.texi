@@ -507,7 +507,7 @@ Objective-C and Objective-C++ Dialects}.
 -falign-loops[=@var{n}[:@var{m}:[@var{n2}[:@var{m2}]]]] @gol
 -fno-allocation-dce -fallow-store-data-races @gol
 -fassociative-math  -fauto-profile  -fauto-profile[=@var{path}] @gol
--fauto-inc-dec  -fbranch-probabilities @gol
+-farray-widen-compare -fauto-inc-dec  -fbranch-probabilities @gol
 -fcaller-saves @gol
 -fcombine-stack-adjustments  -fconserve-stack @gol
 -fcompare-elim  -fcprop-registers  -fcrossjumping @gol
@@ -11386,6 +11386,17 @@ Combine increments or decrements of addresses with memory accesses.
 This pass is always skipped on architectures that do not have
 instructions to support this.  Enabled by default at @option{-O1} and
 higher on architectures that support this.
+
+@item -farray-widen-compare
+@opindex farray-widen-compare
+In the narrow-byte array comparison scenario, the types of pointers
+pointing to array are extended so that elements of multiple bytes can
+be loaded at a time when a wide type is used to dereference an array,
+thereby improving the performance of this comparison scenario.  In some
+extreme situations this may result in unsafe behavior.
+
+This option may generate better or worse code; results are highly dependent
+on the structure of loops within the source code.
 
 @item -fdce
 @opindex fdce
