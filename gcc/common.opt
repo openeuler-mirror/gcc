@@ -1954,6 +1954,10 @@ fipa-matrix-reorg
 Common Ignore
 Does nothing. Preserved for backward compatibility.
 
+fipa-reorder-fields
+Common Var(flag_ipa_reorder_fields) Init(0) Optimization
+Perform structure fields reorder optimizations.
+
 fipa-struct-reorg
 Common Var(flag_ipa_struct_reorg) Init(0) Optimization
 Perform structure layout optimizations.

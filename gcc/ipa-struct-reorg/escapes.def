@@ -58,5 +58,8 @@ DEF_ESCAPE (escape_ptr_ptr, "Type is used in a pointer to a pointer [not handled
 DEF_ESCAPE (escape_return, "Type escapes via a return [not handled yet]")
 DEF_ESCAPE (escape_separate_instance, "Type escapes via a separate instance")
 DEF_ESCAPE (escape_unhandled_rewrite, "Type escapes via a unhandled rewrite stmt")
+DEF_ESCAPE (escape_via_orig_escape, "Type escapes via a original escape type")
+DEF_ESCAPE (escape_instance_field, "Type escapes via a field of instance")
+DEF_ESCAPE (escape_via_empty_no_orig, "Type escapes via empty and no original")
 
 #undef DEF_ESCAPE

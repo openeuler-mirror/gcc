@@ -105,7 +105,7 @@ fld_simplified_type_name (tree type)
   /* Simplify type will cause that struct A and struct A within
      struct B are different type pointers, so skip it in structure
      optimizations.  */
-  if (flag_ipa_struct_reorg)
+  if (flag_ipa_struct_reorg || flag_ipa_reorder_fields)
     return TYPE_NAME (type);
 
   if (!TYPE_NAME (type) || TREE_CODE (TYPE_NAME (type)) != TYPE_DECL)
@@ -349,7 +349,7 @@ fld_simplified_type (tree t, class free_lang_data_d *fld)
   /* Simplify type will cause that struct A and struct A within
      struct B are different type pointers, so skip it in structure
      optimizations.  */
-  if (flag_ipa_struct_reorg)
+  if (flag_ipa_struct_reorg || flag_ipa_reorder_fields)
     return t;
   if (POINTER_TYPE_P (t))
     return fld_incomplete_type_of (t, fld);
