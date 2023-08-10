@@ -1222,3 +1222,7 @@ Instructions number above which STFL stall penalty can be compensated.
 munroll-only-small-loops
 Target Var(ix86_unroll_only_small_loops) Init(0) Save
 Enable conservative small loop unrolling.
+
+mscatter
+Target Alias(mtune-ctrl=, use_scatter, ^use_scatter)
+Enable vectorization for scatter instruction.
