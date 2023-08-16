@@ -23570,6 +23570,16 @@ ix86_loop_unroll_adjust (unsigned nunroll, class loop *loop)
   unsigned i;
   unsigned mem_count = 0;
 
+  /* Unroll small size loop when unroll factor is not explicitly
+     specified.  */
+  if (ix86_unroll_only_small_loops && !loop->unroll)
+    {
+      if (loop->ninsns <= ix86_cost->small_unroll_ninsns)
+	return MIN (nunroll, ix86_cost->small_unroll_factor);
+      else
+	return 1;
+    }
+
   if (!TARGET_ADJUST_UNROLL)
      return nunroll;
 
