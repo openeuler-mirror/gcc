@@ -2678,6 +2678,16 @@ modes and they have different conditional execution capability, such as ARM.",
  default_have_conditional_execution)
 
 DEFHOOK
+(is_ldp_insn,
+  "Return true if icode is corresponding to any of the LDP instruction types.",
+  bool, (int icode), NULL)
+
+DEFHOOK
+(is_stp_insn,
+  "Return true if icode is corresponding to any of the STP instruction types.",
+  bool, (int icode), NULL)
+
+DEFHOOK
 (gen_ccmp_first,
  "This function prepares to emit a comparison insn for the first compare in a\n\
  sequence of conditional comparisions.  It returns an appropriate comparison\n\

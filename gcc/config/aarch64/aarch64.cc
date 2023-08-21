@@ -27492,6 +27492,48 @@ aarch64_run_selftests (void)
 
 #endif /* #if CHECKING_P */
 
+/* TODO: refuse to use ranges intead of full list of an instruction codes.  */
+
+bool
+is_aarch64_ldp_insn (int icode)
+{
+  if ((icode >= CODE_FOR_load_pair_sw_sisi
+	  && icode <= CODE_FOR_load_pair_dw_tftf)
+      || (icode >= CODE_FOR_loadwb_pairsi_si
+	     && icode <= CODE_FOR_loadwb_pairtf_di)
+      || (icode >= CODE_FOR_load_pairv8qiv8qi
+	     && icode <= CODE_FOR_load_pairdfdf)
+      || (icode >= CODE_FOR_load_pairv16qiv16qi
+	     && icode <= CODE_FOR_load_pairv8bfv2df)
+      || (icode >= CODE_FOR_load_pair_lanesv8qi
+	     && icode <= CODE_FOR_load_pair_lanesdf))
+    return true;
+  return false;
+}
+
+bool
+is_aarch64_stp_insn (int icode)
+{
+  if ((icode >= CODE_FOR_store_pair_sw_sisi
+	  && icode <= CODE_FOR_store_pair_dw_tftf)
+      || (icode >= CODE_FOR_storewb_pairsi_si
+	     && icode <= CODE_FOR_storewb_pairtf_di)
+      || (icode >= CODE_FOR_vec_store_pairv8qiv8qi
+	     && icode <= CODE_FOR_vec_store_pairdfdf)
+      || (icode >= CODE_FOR_vec_store_pairv16qiv16qi
+	     && icode <= CODE_FOR_vec_store_pairv8bfv2df)
+      || (icode >= CODE_FOR_store_pair_lanesv8qi
+	     && icode <= CODE_FOR_store_pair_lanesdf))
+    return true;
+  return false;
+}
+
+#undef TARGET_IS_LDP_INSN
+#define TARGET_IS_LDP_INSN is_aarch64_ldp_insn
+
+#undef TARGET_IS_STP_INSN
+#define TARGET_IS_STP_INSN is_aarch64_stp_insn
+
 #undef TARGET_STACK_PROTECT_GUARD
 #define TARGET_STACK_PROTECT_GUARD aarch64_stack_protect_guard
 

@@ -44,6 +44,8 @@ along with GCC; see the file COPYING3.  If not see
    are actually scheduled.  */
 
 #include "config.h"
+#define INCLUDE_SET
+#define INCLUDE_VECTOR
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -65,6 +67,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "dbgcnt.h"
 #include "pretty-print.h"
 #include "print-rtl.h"
+#include "cfgrtl.h"
 
 /* Disable warnings about quoting issues in the pp_xxx calls below
    that (intentionally) don't follow GCC diagnostic conventions.  */
@@ -3949,6 +3952,705 @@ rtl_opt_pass *
 make_pass_sched_fusion (gcc::context *ctxt)
 {
   return new pass_sched_fusion (ctxt);
+}
+
+namespace {
+
+/* Def-use analisys special functions implementation.  */
+
+static struct df_link *
+get_defs (rtx_insn *insn, rtx reg)
+{
+  df_ref use;
+  struct df_link *ref_chain, *ref_link;
+
+  FOR_EACH_INSN_USE (use, insn)
+    {
+      if (GET_CODE (DF_REF_REG (use)) == SUBREG)
+	return NULL;
+      if (REGNO (DF_REF_REG (use)) == REGNO (reg))
+	break;
+    }
+
+  gcc_assert (use != NULL);
+
+  ref_chain = DF_REF_CHAIN (use);
+
+  for (ref_link = ref_chain; ref_link; ref_link = ref_link->next)
+    {
+      /* Problem getting some definition for this instruction.  */
+      if (ref_link->ref == NULL)
+	return NULL;
+      if (DF_REF_INSN_INFO (ref_link->ref) == NULL)
+	return NULL;
+      /* As global regs are assumed to be defined at each function call
+	  dataflow can report a call_insn as being a definition of REG.
+	  But we can't do anything with that in this pass so proceed only
+	  if the instruction really sets REG in a way that can be deduced
+	  from the RTL structure.  */
+      if (global_regs[REGNO (reg)]
+	  && !set_of (reg, DF_REF_INSN (ref_link->ref)))
+	return NULL;
+    }
+
+  return ref_chain;
+}
+
+static struct df_link *
+get_uses (rtx_insn *insn, rtx reg)
+{
+  df_ref def;
+  struct df_link *ref_chain, *ref_link;
+
+  FOR_EACH_INSN_DEF (def, insn)
+    if (REGNO (DF_REF_REG (def)) == REGNO (reg))
+      break;
+
+  gcc_assert (def != NULL && "Broken def-use analisys chain.");
+
+  ref_chain = DF_REF_CHAIN (def);
+
+  for (ref_link = ref_chain; ref_link; ref_link = ref_link->next)
+    {
+      /* Problem getting some use for this instruction.  */
+      if (ref_link->ref == NULL)
+	return NULL;
+    }
+
+  return ref_chain;
+}
+
+const pass_data pass_data_split_complex_instructions = {
+  RTL_PASS,			     /* Type.  */
+  "split_complex_instructions",	     /* Name.  */
+  OPTGROUP_NONE,		     /* Optinfo_flags.  */
+  TV_SPLIT_CMP_INS,		     /* Tv_id.  */
+  0,				     /* Properties_required.  */
+  0,				     /* Properties_provided.  */
+  0,				     /* Properties_destroyed.  */
+  0,				     /* Todo_flags_start.  */
+  (TODO_df_verify | TODO_df_finish), /* Todo_flags_finish.  */
+};
+
+class pass_split_complex_instructions : public rtl_opt_pass
+{
+private:
+  enum complex_instructions_t
+  {
+    UNDEFINED,
+    LDP,
+    LDP_TI,
+    STP,
+    STR
+  };
+
+  void split_complex_insn (rtx_insn *insn);
+  void split_ldp_ti (rtx_insn *insn);
+  void split_ldp_with_offset (rtx_insn *ldp_insn);
+  void split_simple_ldp (rtx_insn *ldp_insn);
+  void split_ldp_stp (rtx_insn *insn);
+  complex_instructions_t get_insn_type (rtx_insn *insn);
+
+  basic_block bb;
+  rtx_insn *insn;
+  std::set<rtx_insn *> dependent_stores_candidates;
+  std::set<rtx_insn *> ldp_to_split_list;
+
+  complex_instructions_t complex_insn_type = UNDEFINED;
+  bool is_store_insn (rtx_insn *insn);
+  bool is_ldp_dependent_on_store (rtx_insn *ldp_insn, basic_block bb);
+  bool bfs_for_reg_dependent_store (rtx_insn *ldp_insn, basic_block search_bb,
+				    rtx_insn *search_insn,
+				    int search_range
+				    = param_ldp_dependency_search_range);
+  bool is_store_reg_dependent (rtx_insn *ldp_insn, rtx_insn *str_insn);
+  void init_df ();
+  void find_dependent_stores_candidates (rtx_insn *ldp_insn);
+  int get_insn_offset (rtx_insn *insn, complex_instructions_t insn_type,
+		       int *arith_operation_ptr = NULL);
+
+public:
+  pass_split_complex_instructions (gcc::context *ctxt)
+      : rtl_opt_pass (pass_data_split_complex_instructions, ctxt)
+  {
+  }
+  /* opt_pass methods: */
+  virtual bool gate (function *);
+
+  virtual unsigned int
+  execute (function *)
+  {
+    enum rtx_code ldp_memref_code;
+    init_df ();
+    ldp_to_split_list.clear ();
+    FOR_EACH_BB_FN (bb, cfun)
+      {
+	FOR_BB_INSNS (bb, insn)
+	  {
+	    complex_instructions_t insn_type = get_insn_type (insn);
+	    /* TODO: Add splitting of STP instructions.  */
+	    if (insn_type != LDP && insn_type != LDP_TI)
+	      continue;
+	    /* TODO: Currently support only ldp_ti and ldp with REG or
+	       PLUS/MINUS offset expression.  */
+	    if (insn_type == LDP_TI)
+	      {
+		ldp_memref_code = GET_CODE (XEXP (XEXP (PATTERN (insn), 1),
+						  0));
+		if (ldp_memref_code != REG && ldp_memref_code != PLUS
+		    && ldp_memref_code != MINUS)
+		  continue;
+	      }
+	    if (is_ldp_dependent_on_store (insn, bb))
+	      {
+		ldp_to_split_list.insert (insn);
+	      }
+	  }
+      }
+
+    for (std::set<rtx_insn *>::iterator i = ldp_to_split_list.begin ();
+	 i != ldp_to_split_list.end (); ++i)
+      split_complex_insn (*i);
+
+    return 0;
+  }
+}; // class pass_split_complex_instructions
+
+bool
+pass_split_complex_instructions::is_ldp_dependent_on_store (rtx_insn *ldp_insn,
+							    basic_block bb)
+{
+  find_dependent_stores_candidates (ldp_insn);
+  return bfs_for_reg_dependent_store (ldp_insn, bb, ldp_insn);
+}
+
+bool
+pass_split_complex_instructions::bfs_for_reg_dependent_store (
+    rtx_insn *ldp_insn, basic_block search_bb, rtx_insn *search_insn,
+    int search_range)
+{
+  rtx_insn *current_search_insn = search_insn;
+
+  for (int i = search_range; i > 0; --i)
+    {
+      if (!current_search_insn)
+	return false;
+      bool checking_result
+	  = is_store_reg_dependent (ldp_insn, current_search_insn);
+      if (checking_result)
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, "LDP to split:\n");
+	      print_rtl_single (dump_file, ldp_insn);
+	      fprintf (dump_file, "Found STR:\n");
+	      print_rtl_single (dump_file, current_search_insn);
+	    }
+	  return true;
+	}
+      if (current_search_insn == BB_HEAD (search_bb))
+	{
+	  /* Search in all parent BBs for the reg_dependent store.  */
+	  edge_iterator ei;
+	  edge e;
+
+	  FOR_EACH_EDGE (e, ei, search_bb->preds)
+	    if (e->src->index != 0
+		&& bfs_for_reg_dependent_store (ldp_insn, e->src,
+						BB_END (e->src), i - 1))
+	      return true;
+	  return false;
+	}
+      else
+	{
+	  if (!active_insn_p (current_search_insn))
+	    i++;
+	  current_search_insn = PREV_INSN (current_search_insn);
+	}
+    }
+  return false;
+}
+
+void
+pass_split_complex_instructions::init_df ()
+{
+  df_set_flags (DF_RD_PRUNE_DEAD_DEFS);
+  df_chain_add_problem (DF_UD_CHAIN + DF_DU_CHAIN);
+  df_mir_add_problem ();
+  df_live_add_problem ();
+  df_live_set_all_dirty ();
+  df_analyze ();
+  df_set_flags (DF_DEFER_INSN_RESCAN);
+}
+
+void
+pass_split_complex_instructions::find_dependent_stores_candidates (
+    rtx_insn *ldp_insn)
+{
+  dependent_stores_candidates.clear ();
+  df_ref use;
+
+  FOR_EACH_INSN_USE (use, ldp_insn)
+    {
+      df_link *defs = get_defs (ldp_insn, DF_REF_REG (use));
+      if (!defs)
+	return;
+
+      for (df_link *def = defs; def; def = def->next)
+	{
+	  df_link *uses
+	      = get_uses (DF_REF_INSN (def->ref), DF_REF_REG (def->ref));
+	  if (!uses)
+	    continue;
+
+	  for (df_link *use = uses; use; use = use->next)
+	    {
+	      if (DF_REF_CLASS (use->ref) == DF_REF_REGULAR
+		  && is_store_insn (DF_REF_INSN (use->ref)))
+		dependent_stores_candidates.insert (DF_REF_INSN (use->ref));
+	    }
+	}
+    }
+}
+
+bool
+pass_split_complex_instructions::is_store_reg_dependent (rtx_insn *ldp_insn,
+							 rtx_insn *str_insn)
+{
+  if (!is_store_insn (str_insn)
+      || dependent_stores_candidates.find (str_insn)
+	     == dependent_stores_candidates.end ())
+    return false;
+
+  int ldp_offset_sign = UNDEFINED;
+  int ldp_offset
+      = get_insn_offset (ldp_insn, get_insn_type (ldp_insn), &ldp_offset_sign);
+  if (ldp_offset_sign == MINUS)
+    ldp_offset = -ldp_offset;
+
+  int str_offset_sign = UNDEFINED;
+  int str_offset = get_insn_offset (str_insn, STR, &str_offset_sign);
+  if (str_offset_sign == MINUS)
+    str_offset = -str_offset;
+
+  if (str_offset == ldp_offset || str_offset == ldp_offset + 8)
+    return true;
+
+  return false;
+}
+
+bool
+pass_split_complex_instructions::is_store_insn (rtx_insn *insn)
+{
+  if (!insn)
+    return false;
+  rtx sset_b = single_set (insn);
+  /* TODO: The condition below allow to take only store instructions in which
+     the memory location's operand is either a register (base) or an plus/minus
+     operation (base + #imm). So it might make sense to add support for other
+     cases (e.g. multiply and shift).  */
+  if (sset_b && MEM_P (SET_DEST (sset_b))
+      && GET_MODE (XEXP (sset_b, 0)) != BLKmode
+      && (GET_CODE (XEXP (XEXP (sset_b, 0), 0)) == REG
+	  || (GET_CODE (XEXP (XEXP (sset_b, 0), 0)) == PLUS
+	      || GET_CODE (XEXP (XEXP (sset_b, 0), 0)) == MINUS)
+	  && (GET_CODE (XEXP (XEXP (XEXP (sset_b, 0), 0), 1)) == CONST_INT)))
+    return true;
+
+  return false;
+}
+
+int
+pass_split_complex_instructions::get_insn_offset (
+    rtx_insn *insn, complex_instructions_t insn_type, int *arith_operation_ptr)
+{
+  rtx insn_pat = PATTERN (insn);
+  int returned_offset = 0;
+
+  rtx offset_expr = NULL;
+  rtx offset_value_expr = NULL;
+
+  switch (insn_type)
+    {
+    case LDP:
+      {
+	int number_of_sub_insns = XVECLEN (insn_pat, 0);
+
+	/* Calculate it's own ofsset of first load insn.  */
+	rtx_insn *first_load_insn = NULL;
+	if (number_of_sub_insns == 2)
+	  {
+	    first_load_insn
+		= make_insn_raw (copy_rtx (XVECEXP (insn_pat, 0, 0)));
+	    arith_operation_ptr = NULL;
+
+	    offset_expr = XEXP (XEXP (PATTERN (first_load_insn), 1), 0);
+	    if (GET_CODE (offset_expr) == PLUS
+		|| GET_CODE (offset_expr) == MINUS)
+	      offset_value_expr
+		  = XEXP (XEXP (XEXP (PATTERN (first_load_insn), 1), 0), 1);
+	    else
+	      offset_expr = NULL;
+	  }
+	else if (number_of_sub_insns == 3)
+	  {
+	    rtx_insn *offset_sub_insn
+		= make_insn_raw (copy_rtx (XVECEXP (insn_pat, 0, 0)));
+
+	    offset_expr = XEXP (PATTERN (offset_sub_insn), 1);
+	    offset_value_expr = XEXP (XEXP (PATTERN (offset_sub_insn), 1), 1);
+	  }
+	else
+	  {
+	    gcc_assert (false
+			&& "Wrong number of elements in the ldp_insn vector");
+	  }
+	break;
+      }
+    case LDP_TI:
+      {
+	offset_expr = XEXP (XEXP (insn_pat, 1), 0);
+	if (GET_CODE (offset_expr) != PLUS && GET_CODE (offset_expr) != MINUS)
+	  return 0;
+	offset_value_expr = XEXP (XEXP (XEXP (insn_pat, 1), 0), 1);
+	break;
+      }
+    case STR:
+      {
+	offset_expr = XEXP (XEXP (insn_pat, 0), 0);
+	/* If memory location is specified by single base register then the
+	   offset is zero.  */
+	if (GET_CODE (offset_expr) == REG)
+	  return 0;
+	offset_value_expr = XEXP (XEXP (XEXP (insn_pat, 0), 0), 1);
+	break;
+      }
+    default:
+      {
+	if (dumps_are_enabled && dump_file)
+	  {
+	    fprintf (dump_file, "Instruction that was tried to split:\n");
+	    print_rtl_single (dump_file, insn);
+	  }
+	gcc_assert (false && "Unsupported instruction type");
+	break;
+      }
+    }
+
+  if (offset_expr != NULL && offset_value_expr
+      && GET_CODE (offset_value_expr) == CONST_INT)
+    returned_offset = XINT (offset_value_expr, 0);
+
+  if (arith_operation_ptr != NULL)
+    {
+      *arith_operation_ptr = GET_CODE (offset_expr);
+      gcc_assert ((*arith_operation_ptr == MINUS
+		   || *arith_operation_ptr == PLUS)
+		  && "Unexpected arithmetic operation in the offset expr");
+    }
+
+  return returned_offset;
+}
+
+void
+pass_split_complex_instructions::split_simple_ldp (rtx_insn *ldp_insn)
+{
+  rtx pat = PATTERN (ldp_insn);
+
+  rtx_insn *mem_insn_1 = make_insn_raw (copy_rtx (XVECEXP (pat, 0, 0)));
+  rtx_insn *mem_insn_2 = make_insn_raw (copy_rtx (XVECEXP (pat, 0, 1)));
+
+  int dest_regno = REGNO (SET_DEST (PATTERN (mem_insn_1)));
+  int src_regno;
+
+  rtx srs_reg_insn = XEXP (SET_SRC (PATTERN (mem_insn_1)), 0);
+
+  if (GET_CODE (srs_reg_insn) == REG)
+    src_regno = REGNO (srs_reg_insn);
+  else
+    src_regno = REGNO (XEXP (srs_reg_insn, 0));
+
+  rtx_insn *emited_insn_1, *emited_insn_2;
+
+  /* in cases like ldp r1,r2,[r1] we emit ldr r2,[r1] first.  */
+  if (src_regno == dest_regno)
+    std::swap (mem_insn_1, mem_insn_2);
+
+  emited_insn_1 = emit_insn (PATTERN (mem_insn_1));
+  emited_insn_2 = emit_insn (PATTERN (mem_insn_2));
+
+  int sub_insn_1_code = recog (PATTERN (mem_insn_1), mem_insn_1, 0);
+  int sub_insn_2_code = recog (PATTERN (mem_insn_2), mem_insn_2, 0);
+
+  INSN_CODE (emited_insn_1) = sub_insn_1_code;
+  INSN_CODE (emited_insn_2) = sub_insn_2_code;
+}
+
+void
+pass_split_complex_instructions::split_ldp_with_offset (rtx_insn *ldp_insn)
+{
+  rtx pat = PATTERN (ldp_insn);
+  bool post_index = true;
+
+  rtx_insn offset_insn;
+  rtx_insn mem_insn_1;
+  rtx_insn mem_insn_2;
+
+  int offset_insn_code;
+  int mem_insn_1_code = -1;
+  int mem_insn_2_code = -1;
+
+  int offset = 0;
+  int arith_operation = UNDEFINED;
+
+  for (int i = 0; i < 3; i++)
+    {
+      rtx sub_insn = XVECEXP (pat, 0, i);
+      rtx_insn *copy_of_sub_insn = make_insn_raw (copy_rtx (sub_insn));
+      int sub_insn_code
+	  = recog (PATTERN (copy_of_sub_insn), copy_of_sub_insn, 0);
+
+      /* If sub_insn is offset related.  */
+      if (GET_RTX_CLASS (sub_insn_code) == RTX_UNARY)
+	{
+	  offset_insn = *copy_of_sub_insn;
+	  offset_insn_code = sub_insn_code;
+	  gcc_assert (i == 0
+		      && "Offset related insn must be the first "
+			 "element of a parallel insn vector");
+
+	  offset = get_insn_offset (ldp_insn, LDP, &arith_operation);
+	}
+      else
+	{
+	  if (GET_CODE (XEXP (PATTERN (copy_of_sub_insn), 0)) != REG)
+	    {
+	      rtx &offset_expr
+		  = XEXP (XEXP (XEXP (PATTERN (copy_of_sub_insn), 0), 0), 1);
+	      if (GET_CODE (offset_expr) == CONST_INT)
+		{
+		  int local_offset = XINT (offset_expr, 0);
+		  offset = (arith_operation == PLUS ? offset : -offset);
+
+		  offset_expr = GEN_INT (local_offset + offset);
+
+		  gcc_assert (
+		      (arith_operation == MINUS || arith_operation == PLUS)
+		      && "Unexpected arithmetic operation in offset related "
+			 "sub_insn");
+
+		  if (i == 1)
+		    post_index = false;
+		}
+	      else
+		{
+		  post_index = true;
+		}
+	    }
+	}
+      if (i == 1)
+	{
+	  mem_insn_1 = *copy_of_sub_insn;
+	  mem_insn_1_code = sub_insn_code;
+	}
+      if (i == 2)
+	{
+	  mem_insn_2 = *copy_of_sub_insn;
+	  mem_insn_2_code = sub_insn_code;
+	}
+    }
+  gcc_assert (mem_insn_1_code != -1 && mem_insn_2_code != -1
+	      && "Uninitialized memory insns");
+
+  int dest_regno = REGNO (SET_DEST (PATTERN (&mem_insn_1)));
+  int src_regno;
+
+  rtx srs_reg_insn = XEXP (SET_SRC (PATTERN (&mem_insn_1)), 0);
+
+  if (GET_CODE (srs_reg_insn) == REG)
+    src_regno = REGNO (srs_reg_insn);
+  else
+    src_regno = REGNO (XEXP (srs_reg_insn, 0));
+
+  /* Don't split such weird LDP.  */
+  if (src_regno == dest_regno)
+    return;
+
+  rtx_insn *emited_offset_insn;
+  if (!post_index)
+    {
+      emited_offset_insn = emit_insn (PATTERN (&offset_insn));
+      INSN_CODE (emited_offset_insn) = offset_insn_code;
+    }
+
+  rtx_insn *emited_insn_1 = emit_insn (PATTERN (&mem_insn_1));
+  rtx_insn *emited_insn_2 = emit_insn (PATTERN (&mem_insn_2));
+
+
+  INSN_CODE (emited_insn_1) = mem_insn_1_code;
+  INSN_CODE (emited_insn_2) = mem_insn_2_code;
+
+  if (post_index)
+    {
+      emited_offset_insn = emit_insn (PATTERN (&offset_insn));
+      INSN_CODE (emited_offset_insn) = offset_insn_code;
+    }
+}
+
+void
+pass_split_complex_instructions::split_ldp_stp (rtx_insn *insn)
+{
+  rtx_insn *prev_insn = PREV_INSN (insn);
+  int number_of_sub_insns = XVECLEN (PATTERN (insn), 0);
+
+  start_sequence ();
+
+  if (number_of_sub_insns == 2)
+    split_simple_ldp (insn);
+  else if (number_of_sub_insns == 3)
+    split_ldp_with_offset (insn);
+  else
+    gcc_assert (false && "Broken complex insn vector");
+
+  rtx_insn *seq = get_insns ();
+  unshare_all_rtl_in_chain (seq);
+  end_sequence ();
+
+  emit_insn_after_setloc (seq, prev_insn, INSN_LOCATION (insn));
+  delete_insn_and_edges (insn);
+}
+
+void
+pass_split_complex_instructions::split_ldp_ti (rtx_insn *insn)
+{
+  rtx_insn *prev_insn = PREV_INSN (insn);
+  rtx_insn *load_insn_1 = make_insn_raw (copy_rtx (PATTERN (insn)));
+  rtx_insn *load_insn_2 = make_insn_raw (copy_rtx (PATTERN (insn)));
+
+  rtx reg_insn_1 = XEXP (PATTERN (load_insn_1), 0);
+  rtx mem_insn_1 = XEXP (PATTERN (load_insn_1), 1);
+  rtx mem_insn_2 = XEXP (PATTERN (load_insn_2), 1);
+
+  PUT_MODE (mem_insn_1, DImode);
+  PUT_MODE (mem_insn_2, DImode);
+
+  int reg_no_1 = REGNO (reg_insn_1);
+
+  XEXP (PATTERN (load_insn_1), 0) = gen_rtx_REG (DImode, reg_no_1);
+  XEXP (PATTERN (load_insn_2), 0) = gen_rtx_REG (DImode, reg_no_1 + 1);
+
+  rtx load_insn_2_plus_expr = XEXP (XEXP (PATTERN (load_insn_2), 1), 0);
+  if (GET_CODE (load_insn_2_plus_expr) == REG)
+    {
+	XEXP (XEXP (PATTERN (load_insn_2), 1), 0)
+	  = gen_rtx_PLUS (DImode,
+			  gen_rtx_REG (DImode, REGNO (load_insn_2_plus_expr)),
+			  GEN_INT (GET_MODE_SIZE (DImode)));
+    }
+  else
+    {
+      rtx load_insn_2_offset_expr
+      = XEXP (XEXP (XEXP (PATTERN (load_insn_2), 1), 0), 1);
+
+      if (load_insn_2_offset_expr == NULL)
+	return;
+
+      if (GET_CODE (load_insn_2_offset_expr) == CONST_INT)
+	{
+	  int load_insn_2_offset = XINT (load_insn_2_offset_expr, 0);
+	  XEXP (XEXP (XEXP (PATTERN (load_insn_2), 1), 0), 1)
+	    = GEN_INT (load_insn_2_offset + GET_MODE_SIZE (DImode));
+	}
+    }
+
+  start_sequence ();
+
+  int src_regno;
+  rtx srs_reg_insn = XEXP (XEXP (PATTERN (load_insn_1), 1), 0);
+
+  if (GET_CODE (srs_reg_insn) == REG)
+    src_regno = REGNO (srs_reg_insn);
+  else
+    src_regno = REGNO (XEXP (srs_reg_insn, 0));
+
+  /* in cases like ldp r1,r2,[r1] we emit ldr r2,[r1] first.  */
+  if (src_regno == reg_no_1)
+    std::swap (load_insn_1, load_insn_2);
+
+  rtx_insn *emited_load_insn_1 = emit_insn (PATTERN (load_insn_1));
+  rtx_insn *emited_load_insn_2 = emit_insn (PATTERN (load_insn_2));
+
+  INSN_CODE (emited_load_insn_1)
+      = recog (PATTERN (emited_load_insn_1), emited_load_insn_1, 0);
+  INSN_CODE (emited_load_insn_2)
+      = recog (PATTERN (emited_load_insn_2), emited_load_insn_2, 0);
+
+  rtx_insn *seq = get_insns ();
+  unshare_all_rtl_in_chain (seq);
+  end_sequence ();
+
+  emit_insn_after_setloc (seq, prev_insn, INSN_LOCATION (insn));
+  delete_insn_and_edges (insn);
+}
+
+void
+pass_split_complex_instructions::split_complex_insn (rtx_insn *insn)
+{
+  complex_instructions_t insn_type = get_insn_type (insn);
+  /* TODO: Add splitting of STP instructions.  */
+  if (insn_type == LDP || insn_type == STP)
+    split_ldp_stp (insn);
+  else if (insn_type == LDP_TI)
+    split_ldp_ti (insn);
+  else
+    gcc_assert (false && "Unsupported type of insn to split");
+}
+
+pass_split_complex_instructions::complex_instructions_t
+pass_split_complex_instructions::get_insn_type (rtx_insn *insn)
+{
+  if (!INSN_P (insn))
+    return UNDEFINED;
+
+  rtx pat = PATTERN (insn);
+  int icode = recog (PATTERN (insn), insn, NULL);
+
+  if (GET_CODE (pat) == PARALLEL)
+    {
+      if (targetm.is_ldp_insn (icode))
+	{
+	  return LDP;
+	}
+      if (targetm.is_stp_insn (icode))
+	{
+	  return STP;
+	}
+      else
+	{
+	  return UNDEFINED;
+	}
+    }
+  rtx set_insn = single_set (insn);
+  if (set_insn && GET_CODE (XEXP (set_insn, 1)) == MEM
+      && GET_MODE (XEXP (set_insn, 1)) == E_TImode)
+    return LDP_TI;
+
+  return UNDEFINED;
+}
+
+bool
+pass_split_complex_instructions::gate (function *)
+{
+  return targetm.is_ldp_insn && targetm.is_stp_insn && optimize > 0
+	 && flag_split_ldp_stp > 0;
+}
+
+} // anon namespace
+
+rtl_opt_pass *
+make_pass_split_complex_instructions (gcc::context *ctxt)
+{
+  return new pass_split_complex_instructions (ctxt);
 }
 
 #if __GNUC__ >= 10
