@@ -47,6 +47,31 @@
   return CONST_INT_P (op) && IN_RANGE (INTVAL (op), 1, 3);
 })
 
+(define_predicate "half_size_minus_one_operand"
+  (match_code "const_vector")
+{
+  op = unwrap_const_vec_duplicate (op);
+  unsigned int size = GET_MODE_UNIT_BITSIZE (mode) / 2;
+  return CONST_INT_P (op) && (UINTVAL (op) == size - 1);
+})
+
+(define_predicate "half_size_operand"
+  (match_code "const_vector")
+{
+  op = unwrap_const_vec_duplicate (op);
+  unsigned int size = GET_MODE_UNIT_BITSIZE (mode) / 2;
+  return CONST_INT_P (op) && (UINTVAL (op) == size);
+})
+
+(define_predicate "cmlt_arith_mask_operand"
+  (match_code "const_vector")
+{
+  op = unwrap_const_vec_duplicate (op);
+  unsigned int size = GET_MODE_UNIT_BITSIZE (mode) / 2;
+  unsigned long long mask = ((unsigned long long) 1 << size) | 1;
+  return CONST_INT_P (op) && (UINTVAL (op) == mask);
+})
+
 (define_predicate "subreg_lowpart_operator"
   (ior (match_code "truncate")
        (and (match_code "subreg")
