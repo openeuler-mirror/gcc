@@ -1652,6 +1652,7 @@ OBJS = \
 	tree-ssa-loop-ivopts.o \
 	tree-ssa-loop-manip.o \
 	tree-ssa-loop-niter.o \
+	tree-ssa-loop-array-widen-compare.o \
 	tree-ssa-loop-prefetch.o \
 	tree-ssa-loop-split.o \
 	tree-ssa-loop-unswitch.o \
