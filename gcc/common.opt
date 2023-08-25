@@ -1955,8 +1955,8 @@ Common Ignore
 Does nothing. Preserved for backward compatibility.
 
 fipa-struct-reorg
-Common Ignore
-Does nothing. Preserved for backward compatibility.
+Common Var(flag_ipa_struct_reorg) Init(0) Optimization
+Perform structure layout optimizations.
 
 fipa-vrp
 Common Var(flag_ipa_vrp) Optimization

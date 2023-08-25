@@ -1450,6 +1450,7 @@ OBJS = \
 	incpath.o \
 	init-regs.o \
 	internal-fn.o \
+	ipa-struct-reorg/ipa-struct-reorg.o \
 	ipa-cp.o \
 	ipa-sra.o \
 	ipa-devirt.o \
