@@ -104,10 +104,12 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-ssa-live.h"  /* For remove_unused_locals.  */
 #include "ipa-param-manipulation.h"
 #include "gimplify-me.h"
+#include "cfgloop.h"
 
 namespace {
 
 using namespace struct_reorg;
+using namespace struct_relayout;
 
 #define VOID_POINTER_P(type) \
   (POINTER_TYPE_P (type) && VOID_TYPE_P (TREE_TYPE (type)))
@@ -193,6 +195,14 @@ gimplify_build1 (gimple_stmt_iterator *gsi, enum tree_code code, tree type,
   return force_gimple_operand_gsi (gsi, ret, true, NULL, true,
 				   GSI_SAME_STMT);
 }
+
+enum srmode
+{
+  NORMAL = 0,
+  COMPLETE_STRUCT_RELAYOUT
+};
+
+static bool is_result_of_mult (tree, tree *, tree);
 
 } // anon namespace
 
@@ -283,7 +293,8 @@ srtype::srtype (tree type)
   : type (type),
     chain_type (false),
     escapes (does_not_escape),
-    visited (false)
+    visited (false),
+    has_alloc_array (0)
 {
   for (int i = 0; i < max_split; i++)
     newtype[i] = NULL_TREE;
@@ -483,13 +494,6 @@ srtype::dump (FILE *f)
       fn->simple_dump (f);
     }
   fprintf (f, "\n }\n");
-  fprintf (f, "\n field_sites = {");
-  FOR_EACH_VEC_ELT (field_sites, i, field)
-    {
-      fprintf (f, "  \n");
-      field->simple_dump (f);
-    }
-  fprintf (f, "\n }\n");
   fprintf (f, "}\n");
 }
 
@@ -631,15 +635,7 @@ srtype::create_new_type (void)
 
   maxclusters++;
 
-  const char *tname = NULL;
-
-  if (TYPE_NAME (type) != NULL)
-    {
-      if (TREE_CODE (TYPE_NAME (type)) == IDENTIFIER_NODE)
-	tname = IDENTIFIER_POINTER (TYPE_NAME (type));
-      else if (DECL_NAME (TYPE_NAME (type)) != NULL)
-	tname = IDENTIFIER_POINTER (DECL_NAME (TYPE_NAME (type)));
-    }
+  const char *tname = get_type_name (type);
 
   for (unsigned i = 0; i < maxclusters; i++)
     {
@@ -653,7 +649,10 @@ srtype::create_new_type (void)
       if (tname)
 	{
 	  name = concat (tname, ".reorg.", id, NULL);
-	  TYPE_NAME (newtype[i]) = get_identifier (name);
+	  TYPE_NAME (newtype[i]) = build_decl (UNKNOWN_LOCATION,
+					       TYPE_DECL,
+					       get_identifier (name),
+					       newtype[i]);
 	  free (name);
 	}
     }
@@ -673,6 +672,8 @@ srtype::create_new_type (void)
     {
       TYPE_FIELDS (newtype[i]) = newfields[i];
       layout_type (newtype[i]);
+      if (TYPE_NAME (newtype[i]) != NULL)
+	layout_decl (TYPE_NAME (newtype[i]), 0);
     }
 
   warn_padded = save_warn_padded;
@@ -841,12 +842,6 @@ srfield::dump (FILE *f)
   fprintf (f, ", offset = " HOST_WIDE_INT_PRINT_DEC, offset);
   fprintf (f, ", type = ");
   print_generic_expr (f, fieldtype);
-  if (type)
-    {
-      fprintf (f, "( srtype = ");
-      type->simple_dump (f);
-      fprintf (f, ")");
-    }
   fprintf (f, "\n}\n");
 }
 
@@ -855,7 +850,8 @@ srfield::dump (FILE *f)
 void
 srfield::simple_dump (FILE *f)
 {
-  fprintf (f, "field (%d)", DECL_UID (fielddecl));
+  if (fielddecl)
+    fprintf (f, "field (%d)", DECL_UID (fielddecl));
 }
 
 /* Dump out the access structure to FILE.  */
@@ -899,6 +895,92 @@ srdecl::dump (FILE *file)
 } // namespace struct_reorg
 
 
+namespace struct_relayout {
+
+/* Complete Structure Relayout Optimization.
+   It reorganizes all structure members, and puts same member together.
+   struct s {
+     long a;
+     int b;
+     struct s *c;
+   };
+   Array looks like
+     abcabcabcabc...
+   will be transformed to
+     aaaa...bbbb...cccc...
+*/
+
+#define GPTR_SIZE(i) \
+  TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (gptr[i])))
+
+unsigned transformed = 0;
+
+unsigned
+csrtype::calculate_field_num (tree field_offset)
+{
+  if (field_offset == NULL)
+    return 0;
+
+  HOST_WIDE_INT off = int_byte_position (field_offset);
+  unsigned i = 1;
+  for (tree field = TYPE_FIELDS (type); field; field = DECL_CHAIN (field))
+    {
+      if (off == int_byte_position (field))
+	return i;
+      i++;
+    }
+  return 0;
+}
+
+void
+csrtype::init_type_info (void)
+{
+  if (!type)
+    return;
+  new_size = old_size = tree_to_uhwi (TYPE_SIZE_UNIT (type));
+
+  /* Close enough to pad to improve performance.
+     33~63 should pad to 64 but 33~48 (first half) are too far away, and
+     65~127 should pad to 128 but 65~96 (first half) are too far away.  */
+  if (old_size > 48 && old_size < 64)
+    new_size = 64;
+  if (old_size > 96 && old_size < 128)
+    new_size = 128;
+
+  /* For performance reasons, only allow structure size
+     that is a power of 2 and not too big.  */
+  if (new_size != 1 && new_size != 2
+      && new_size != 4 && new_size != 8
+      && new_size != 16 && new_size != 32
+      && new_size != 64 && new_size != 128)
+    {
+      new_size = 0;
+      field_count = 0;
+      return;
+    }
+
+  unsigned i = 0;
+  for (tree field = TYPE_FIELDS (type); field; field = DECL_CHAIN (field))
+    if (TREE_CODE (field) == FIELD_DECL)
+      i++;
+  field_count = i;
+
+  struct_size = build_int_cstu (TREE_TYPE (TYPE_SIZE_UNIT (type)),
+				new_size);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Type: ");
+      print_generic_expr (dump_file, type);
+      fprintf (dump_file, " has %d members.\n", field_count);
+      fprintf (dump_file, "Modify struct size from %ld to %ld.\n",
+			  old_size, new_size);
+    }
+}
+
+} // namespace struct_relayout
+
+
 namespace {
 
 struct ipa_struct_reorg
@@ -907,13 +989,10 @@ public:
   // Constructors
   ipa_struct_reorg (void)
     : current_function (NULL),
-      done_recording (false)
+      done_recording (false),
+      current_mode (NORMAL)
   {}
 
-  // Public methods
-  unsigned execute (void);
-  void mark_type_as_escape (tree type, escape_type, gimple *stmt = NULL);
-private:
   // Fields
   auto_vec_del<srtype> types;
   auto_vec_del<srfunction> functions;
@@ -921,8 +1000,13 @@ private:
   srfunction *current_function;
 
   bool done_recording;
+  srmode current_mode;
 
-  // Private methods
+  // Methods
+  unsigned execute (enum srmode mode);
+  void mark_type_as_escape (tree type, escape_type escapes,
+			    gimple *stmt = NULL);
+
   void dump_types (FILE *f);
   void dump_types_escaped (FILE *f);
   void dump_functions (FILE *f);
@@ -954,6 +1038,7 @@ private:
   void maybe_record_allocation_site (cgraph_node *, gimple *);
   void record_stmt_expr (tree expr, cgraph_node *node, gimple *stmt);
   void mark_expr_escape (tree, escape_type, gimple *stmt);
+  bool handled_allocation_stmt (gimple *stmt);
   tree allocate_size (srtype *t, gimple *stmt);
 
   void mark_decls_in_as_not_needed (tree fn);
@@ -976,6 +1061,7 @@ private:
 		       bool can_escape = false);
   bool wholeaccess (tree expr, tree base, tree accesstype, srtype *t);
 
+  void check_alloc_num (gimple *stmt, srtype *type);
   void check_definition (srdecl *decl, vec<srdecl *> &);
   void check_uses (srdecl *decl, vec<srdecl *> &);
   void check_use (srdecl *decl, gimple *stmt, vec<srdecl *> &);
@@ -990,7 +1076,590 @@ private:
 
   bool has_rewritten_type (srfunction *);
   void maybe_mark_or_record_other_side (tree side, tree other, gimple *stmt);
+
+  unsigned execute_struct_relayout (void);
 };
+
+struct ipa_struct_relayout
+{
+public:
+  // Fields
+  tree gptr[max_relayout_split + 1];
+  csrtype ctype;
+  ipa_struct_reorg *sr;
+  cgraph_node *current_node;
+
+  // Constructors
+  ipa_struct_relayout (tree type, ipa_struct_reorg *sr_)
+  {
+    ctype.type = type;
+    sr = sr_;
+    current_node = NULL;
+    for (int i = 0; i < max_relayout_split + 1; i++)
+      gptr[i] = NULL;
+  }
+
+  // Methods
+  tree create_new_vars (tree type, const char *name);
+  void create_global_ptrs (void);
+  unsigned int rewrite (void);
+  void rewrite_stmt_in_function (void);
+  bool rewrite_debug (gimple *stmt, gimple_stmt_iterator *gsi);
+  bool rewrite_stmt (gimple *stmt, gimple_stmt_iterator *gsi);
+  bool handled_allocation_stmt (gcall *stmt);
+  void init_global_ptrs (gcall *stmt, gimple_stmt_iterator *gsi);
+  bool check_call_uses (gcall *stmt);
+  bool rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi);
+  tree create_ssa (tree node, gimple_stmt_iterator *gsi);
+  bool is_candidate (tree xhs);
+  tree rewrite_address (tree xhs, gimple_stmt_iterator *gsi);
+  tree rewrite_offset (tree offset, HOST_WIDE_INT num);
+  bool rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi);
+  bool maybe_rewrite_cst (tree cst, gimple_stmt_iterator *gsi,
+			  HOST_WIDE_INT &times);
+  unsigned int execute (void);
+};
+
+} // anon namespace
+
+namespace {
+
+/* Methods for ipa_struct_relayout.  */
+
+static void
+set_var_attributes (tree var)
+{
+  if (!var)
+    return;
+  gcc_assert (TREE_CODE (var) == VAR_DECL);
+
+  DECL_ARTIFICIAL (var) = 1;
+  DECL_EXTERNAL (var) = 0;
+  TREE_STATIC (var) = 1;
+  TREE_PUBLIC (var) = 0;
+  TREE_USED (var) = 1;
+  DECL_CONTEXT (var) = NULL;
+  TREE_THIS_VOLATILE (var) = 0;
+  TREE_ADDRESSABLE (var) = 0;
+  TREE_READONLY (var) = 0;
+  if (is_global_var (var))
+    set_decl_tls_model (var, TLS_MODEL_NONE);
+}
+
+tree
+ipa_struct_relayout::create_new_vars (tree type, const char *name)
+{
+  gcc_assert (type);
+  tree new_type = build_pointer_type (type);
+
+  tree new_name = NULL;
+  if (name)
+    new_name = get_identifier (name);
+
+  tree new_var = build_decl (UNKNOWN_LOCATION, VAR_DECL, new_name, new_type);
+
+  /* Set new_var's attributes.  */
+  set_var_attributes (new_var);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Created new var: ");
+      print_generic_expr (dump_file, new_var);
+      fprintf (dump_file, "\n");
+    }
+  return new_var;
+}
+
+void
+ipa_struct_relayout::create_global_ptrs (void)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Create global gptrs: {\n");
+
+  char *gptr0_name = NULL;
+  const char *type_name = get_type_name (ctype.type);
+
+  if (type_name)
+    gptr0_name = concat (type_name, "_gptr0", NULL);
+  tree var_gptr0 = create_new_vars (ctype.type, gptr0_name);
+  gptr[0] = var_gptr0;
+  varpool_node::add (var_gptr0);
+
+  unsigned i = 1;
+  for (tree field = TYPE_FIELDS (ctype.type); field;
+       field = DECL_CHAIN (field))
+    {
+      if (TREE_CODE (field) == FIELD_DECL)
+	{
+	  tree type = TREE_TYPE (field);
+
+	  char *name = NULL;
+	  char id[10] = {0};
+	  sprintf (id, "%d", i);
+	  const char *decl_name = IDENTIFIER_POINTER (DECL_NAME (field));
+
+	  if (type_name && decl_name)
+	    name = concat (type_name, "_", decl_name, "_gptr", id, NULL);
+	  tree var = create_new_vars (type, name);
+
+	  gptr[i] = var;
+	  varpool_node::add (var);
+	  i++;
+	}
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nTotally create %d gptrs. }\n\n", i);
+  gcc_assert (ctype.field_count == i - 1);
+}
+
+void
+ipa_struct_relayout::rewrite_stmt_in_function (void)
+{
+  gcc_assert (cfun);
+
+  basic_block bb = NULL;
+  gimple_stmt_iterator si;
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      for (si = gsi_start_bb (bb); !gsi_end_p (si);)
+	{
+	  gimple *stmt = gsi_stmt (si);
+	  if (rewrite_stmt (stmt, &si))
+	    gsi_remove (&si, true);
+	  else
+	    gsi_next (&si);
+	}
+    }
+
+  /* Debug statements need to happen after all other statements
+     have changed.  */
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      for (si = gsi_start_bb (bb); !gsi_end_p (si);)
+	{
+	  gimple *stmt = gsi_stmt (si);
+	  if (gimple_code (stmt) == GIMPLE_DEBUG
+	      && rewrite_debug (stmt, &si))
+	    gsi_remove (&si, true);
+	  else
+	    gsi_next (&si);
+	}
+    }
+}
+
+unsigned int
+ipa_struct_relayout::rewrite (void)
+{
+  cgraph_node *cnode = NULL;
+  function *fn = NULL;
+  FOR_EACH_FUNCTION (cnode)
+    {
+      if (!cnode->real_symbol_p () || !cnode->has_gimple_body_p ())
+	continue;
+      if (cnode->definition)
+	{
+	  fn = DECL_STRUCT_FUNCTION (cnode->decl);
+	  if (fn == NULL)
+	    continue;
+
+	  current_node = cnode;
+	  push_cfun (fn);
+
+	  rewrite_stmt_in_function ();
+
+	  update_ssa (TODO_update_ssa_only_virtuals);
+
+	  if (flag_tree_pta)
+	    compute_may_aliases ();
+
+	  remove_unused_locals ();
+
+	  cgraph_edge::rebuild_edges ();
+
+	  free_dominance_info (CDI_DOMINATORS);
+
+	  pop_cfun ();
+	  current_node = NULL;
+	}
+    }
+  return TODO_verify_all;
+}
+
+bool
+ipa_struct_relayout::rewrite_debug (gimple *stmt ATTRIBUTE_UNUSED,
+				    gimple_stmt_iterator *gsi ATTRIBUTE_UNUSED)
+{
+  /* Delete debug gimple now.  */
+  return true;
+}
+
+bool
+ipa_struct_relayout::rewrite_stmt (gimple *stmt, gimple_stmt_iterator *gsi)
+{
+  switch (gimple_code (stmt))
+    {
+      case GIMPLE_ASSIGN:
+	return rewrite_assign (as_a <gassign *> (stmt), gsi);
+      case GIMPLE_CALL:
+	return rewrite_call (as_a <gcall *> (stmt), gsi);
+      default:
+	break;
+    }
+  return false;
+}
+
+bool
+ipa_struct_relayout::handled_allocation_stmt (gcall *stmt)
+{
+  if (gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
+    return true;
+  return false;
+}
+
+void
+ipa_struct_relayout::init_global_ptrs (gcall *stmt, gimple_stmt_iterator *gsi)
+{
+  gcc_assert (handled_allocation_stmt (stmt));
+
+  tree lhs = gimple_call_lhs (stmt);
+
+  /* Case that gimple is at the end of bb.  */
+  if (gsi_one_before_end_p (*gsi))
+    {
+      gassign *gptr0 = gimple_build_assign (gptr[0], lhs);
+      gsi_insert_after (gsi, gptr0, GSI_SAME_STMT);
+    }
+  gsi_next (gsi);
+
+  /* Emit gimple gptr0 = _X and gptr1 = _X.  */
+  gassign *gptr0 = gimple_build_assign (gptr[0], lhs);
+  gsi_insert_before (gsi, gptr0, GSI_SAME_STMT);
+  gassign *gptr1 = gimple_build_assign (gptr[1], lhs);
+  gsi_insert_before (gsi, gptr1, GSI_SAME_STMT);
+
+  /* Emit gimple gptr_[i] = gptr_[i-1] + _Y[gap].  */
+  for (unsigned i = 2; i <= ctype.field_count; i++)
+    {
+      gimple *new_stmt = NULL;
+      tree gptr_i_prev_ssa = create_ssa (gptr[i-1], gsi);
+      tree gptr_i_ssa = make_ssa_name (TREE_TYPE (gptr[i-1]));
+
+      /* Emit gimple _Y[gap] = N * sizeof (member).  */
+      tree member_gap = gimplify_build2 (gsi, MULT_EXPR,
+					 long_unsigned_type_node,
+					 gimple_call_arg (stmt, 0),
+					 GPTR_SIZE (i-1));
+
+      new_stmt = gimple_build_assign (gptr_i_ssa, POINTER_PLUS_EXPR,
+				      gptr_i_prev_ssa, member_gap);
+      gsi_insert_before (gsi, new_stmt, GSI_SAME_STMT);
+
+      gassign *gptr_i = gimple_build_assign (gptr[i], gptr_i_ssa);
+      gsi_insert_before (gsi, gptr_i, GSI_SAME_STMT);
+    }
+  gsi_prev (gsi);
+}
+
+bool
+ipa_struct_relayout::check_call_uses (gcall *stmt)
+{
+  gcc_assert (current_node);
+  srfunction *fn = sr->find_function (current_node);
+  tree lhs = gimple_call_lhs (stmt);
+
+  if (fn == NULL)
+    return false;
+
+  srdecl *d = fn->find_decl (lhs);
+  if (d == NULL)
+    return false;
+  if (types_compatible_p (d->type->type, ctype.type))
+    return true;
+
+  return false;
+}
+
+bool
+ipa_struct_relayout::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
+{
+  if (handled_allocation_stmt (stmt))
+    {
+      /* Rewrite stmt _X = calloc (N, sizeof (struct)).  */
+      tree size = gimple_call_arg (stmt, 1);
+      if (TREE_CODE (size) != INTEGER_CST)
+	return false;
+      if (tree_to_uhwi (size) != ctype.old_size)
+	return false;
+      if (!check_call_uses (stmt))
+	return false;
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "Rewrite allocation call:\n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	  fprintf (dump_file, "to\n");
+	}
+
+      /* Modify sizeof (struct).  */
+      gimple_call_set_arg (stmt, 1, ctype.struct_size);
+      update_stmt (stmt);
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  print_gimple_stmt (dump_file, stmt, 0);
+	  fprintf (dump_file, "\n");
+	}
+
+      init_global_ptrs (stmt, gsi);
+    }
+  return false;
+}
+
+tree
+ipa_struct_relayout::create_ssa (tree node, gimple_stmt_iterator *gsi)
+{
+  gcc_assert (TREE_CODE (node) == VAR_DECL);
+  tree node_ssa = make_ssa_name (TREE_TYPE (node));
+  gassign *stmt = gimple_build_assign (node_ssa, node);
+  gsi_insert_before (gsi, stmt, GSI_SAME_STMT);
+  return node_ssa;
+}
+
+bool
+ipa_struct_relayout::is_candidate (tree xhs)
+{
+  if (TREE_CODE (xhs) != COMPONENT_REF)
+    return false;
+  tree mem = TREE_OPERAND (xhs, 0);
+  if (TREE_CODE (mem) == MEM_REF)
+    {
+      tree type = TREE_TYPE (mem);
+      if (types_compatible_p (type, ctype.type))
+	return true;
+    }
+  return false;
+}
+
+tree
+ipa_struct_relayout::rewrite_address (tree xhs, gimple_stmt_iterator *gsi)
+{
+  tree mem_ref = TREE_OPERAND (xhs, 0);
+  tree pointer = TREE_OPERAND (mem_ref, 0);
+  tree pointer_offset = TREE_OPERAND (mem_ref, 1);
+  tree field = TREE_OPERAND (xhs, 1);
+
+  tree pointer_ssa = fold_convert (long_unsigned_type_node, pointer);
+  tree gptr0_ssa = fold_convert (long_unsigned_type_node, gptr[0]);
+
+  /* Emit gimple _X1 = ptr - gptr0.  */
+  tree step1 = gimplify_build2 (gsi, MINUS_EXPR, long_unsigned_type_node,
+				pointer_ssa, gptr0_ssa);
+
+  /* Emit gimple _X2 = _X1 / sizeof (struct).  */
+  tree step2 = gimplify_build2 (gsi, TRUNC_DIV_EXPR, long_unsigned_type_node,
+				step1, ctype.struct_size);
+
+  unsigned field_num = ctype.calculate_field_num (field);
+  gcc_assert (field_num > 0 && field_num <= ctype.field_count);
+
+  /* Emit gimple _X3 = _X2 * sizeof (member).  */
+  tree step3 = gimplify_build2 (gsi, MULT_EXPR, long_unsigned_type_node,
+				step2, GPTR_SIZE (field_num));
+
+  /* Emit gimple _X4 = gptr[I].  */
+  tree gptr_field_ssa = create_ssa (gptr[field_num], gsi);
+  tree new_address = make_ssa_name (TREE_TYPE (gptr[field_num]));
+  gassign *new_stmt = gimple_build_assign (new_address, POINTER_PLUS_EXPR,
+					   gptr_field_ssa, step3);
+  gsi_insert_before (gsi, new_stmt, GSI_SAME_STMT);
+
+  /* MEM_REF with nonzero offset like
+       MEM[ptr + sizeof (struct)] = 0B
+     should be transformed to
+       MEM[gptr + sizeof (member)] = 0B
+  */
+  HOST_WIDE_INT size
+    = tree_to_shwi (TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (new_address))));
+  tree new_size = rewrite_offset (pointer_offset, size);
+  if (new_size)
+    TREE_OPERAND (mem_ref, 1) = new_size;
+
+  /* Update mem_ref pointer.  */
+  TREE_OPERAND (mem_ref, 0) = new_address;
+
+  /* Update mem_ref TREE_TYPE.  */
+  TREE_TYPE (mem_ref) = TREE_TYPE (TREE_TYPE (new_address));
+
+  return mem_ref;
+}
+
+tree
+ipa_struct_relayout::rewrite_offset (tree offset, HOST_WIDE_INT num)
+{
+  if (TREE_CODE (offset) == INTEGER_CST)
+    {
+      bool sign = false;
+      HOST_WIDE_INT off = TREE_INT_CST_LOW (offset);
+      if (off == 0)
+	return NULL;
+      if (off < 0)
+	{
+	  off = -off;
+	  sign = true;
+	}
+      if (off % ctype.old_size == 0)
+	{
+	  HOST_WIDE_INT times = off / ctype.old_size;
+	  times = sign ? -times : times;
+	  return build_int_cst (TREE_TYPE (offset), num * times);
+	}
+    }
+  return NULL;
+}
+
+#define REWRITE_ASSIGN_TREE_IN_STMT(node)		\
+do							\
+{							\
+  tree node = gimple_assign_##node (stmt);		\
+  if (node && is_candidate (node))			\
+    {							\
+      tree mem_ref = rewrite_address (node, gsi);	\
+      gimple_assign_set_##node (stmt, mem_ref);		\
+      update_stmt (stmt);				\
+    }							\
+} while (0)
+
+/*       COMPONENT_REF  = exp  =>     MEM_REF = exp
+	  /       \		      /     \
+       MEM_REF   field		    gptr   offset
+       /    \
+   pointer offset
+*/
+bool
+ipa_struct_relayout::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Maybe rewrite assign:\n");
+      print_gimple_stmt (dump_file, stmt, 0);
+      fprintf (dump_file, "to\n");
+    }
+
+  switch (gimple_num_ops (stmt))
+    {
+      case 4: REWRITE_ASSIGN_TREE_IN_STMT (rhs3);  // FALLTHRU
+      case 3:
+	{
+	  REWRITE_ASSIGN_TREE_IN_STMT (rhs2);
+	  tree rhs2 = gimple_assign_rhs2 (stmt);
+	  if (rhs2 && TREE_CODE (rhs2) == INTEGER_CST)
+	    {
+	      /* Handle pointer++ and pointer-- or
+		 factor is euqal to struct size.  */
+	      HOST_WIDE_INT times = 1;
+	      if (maybe_rewrite_cst (rhs2, gsi, times))
+		{
+		  tree tmp = build_int_cst (
+				TREE_TYPE (TYPE_SIZE_UNIT (ctype.type)),
+				ctype.new_size * times);
+		  gimple_assign_set_rhs2 (stmt, tmp);
+		  update_stmt (stmt);
+		}
+	    }
+	}  // FALLTHRU
+      case 2: REWRITE_ASSIGN_TREE_IN_STMT (rhs1);  // FALLTHRU
+      case 1: REWRITE_ASSIGN_TREE_IN_STMT (lhs);   // FALLTHRU
+      case 0: break;
+      default: gcc_unreachable ();
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      print_gimple_stmt (dump_file, stmt, 0);
+      fprintf (dump_file, "\n");
+    }
+  return false;
+}
+
+bool
+ipa_struct_relayout::maybe_rewrite_cst (tree cst, gimple_stmt_iterator *gsi,
+					HOST_WIDE_INT &times)
+{
+  bool ret = false;
+  gcc_assert (TREE_CODE (cst) == INTEGER_CST);
+
+  gimple *stmt = gsi_stmt (*gsi);
+  if (gimple_assign_rhs_code (stmt) == POINTER_PLUS_EXPR)
+    {
+      tree lhs = gimple_assign_lhs (stmt);
+      tree rhs1 = gimple_assign_rhs1 (stmt);
+      if (types_compatible_p (inner_type (TREE_TYPE (rhs1)), ctype.type)
+	  || types_compatible_p (inner_type (TREE_TYPE (lhs)), ctype.type))
+	{
+	  tree num = NULL;
+	  if (is_result_of_mult (cst, &num, TYPE_SIZE_UNIT (ctype.type)))
+	    {
+	      times = TREE_INT_CST_LOW (num);
+	      return true;
+	    }
+	}
+    }
+
+  if (gimple_assign_rhs_code (stmt) == MULT_EXPR)
+    {
+      if (gsi_one_before_end_p (*gsi))
+	return false;
+      gsi_next (gsi);
+      gimple *stmt2 = gsi_stmt (*gsi);
+
+      if (gimple_code (stmt2) == GIMPLE_ASSIGN
+	  && gimple_assign_rhs_code (stmt2) == POINTER_PLUS_EXPR)
+	{
+	  tree lhs = gimple_assign_lhs (stmt2);
+	  tree rhs1 = gimple_assign_rhs1 (stmt2);
+	  if (types_compatible_p (inner_type (TREE_TYPE (rhs1)), ctype.type)
+	      || types_compatible_p (inner_type (TREE_TYPE (lhs)), ctype.type))
+	    {
+	      tree num = NULL;
+	      if (is_result_of_mult (cst, &num, TYPE_SIZE_UNIT (ctype.type)))
+		{
+		  times = TREE_INT_CST_LOW (num);
+		  ret = true;
+		}
+	    }
+	}
+      gsi_prev (gsi);
+      return ret;
+    }
+  return false;
+}
+
+unsigned int
+ipa_struct_relayout::execute (void)
+{
+  ctype.init_type_info ();
+  if (ctype.field_count < min_relayout_split
+      || ctype.field_count > max_relayout_split)
+    return 0;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Complete Struct Relayout Type: ");
+      print_generic_expr (dump_file, ctype.type);
+      fprintf (dump_file, "\n");
+    }
+  transformed++;
+
+  create_global_ptrs ();
+  return rewrite ();
+}
+
+} // anon namespace
+
+
+namespace {
+
+/* Methods for ipa_struct_reorg.  */
 
 /* Dump all of the recorded types to file F.  */
 
@@ -1189,7 +1858,7 @@ ipa_struct_reorg::record_type (tree type)
 		  f->type = t1;
 		  t1->add_field_site (f);
 		}
-	      if (t1 == type1)
+	      if (t1 == type1 && current_mode != COMPLETE_STRUCT_RELAYOUT)
 		type1->mark_escape (escape_rescusive_type, NULL);
 	    }
 	}
@@ -1331,6 +2000,12 @@ ipa_struct_reorg::record_var (tree decl, escape_type escapes, int arg)
       else
 	e = escape_type_volatile_array_or_ptrptr (TREE_TYPE (decl));
 
+      /* Separate instance is hard to trace in complete struct
+	 relayout optimization.  */
+      if (current_mode == COMPLETE_STRUCT_RELAYOUT
+	  && TREE_CODE (TREE_TYPE (decl)) == RECORD_TYPE)
+	e = escape_separate_instance;
+
       if (e != does_not_escape)
 	type->mark_escape (e, NULL);
     }
@@ -1369,6 +2044,7 @@ ipa_struct_reorg::find_var (tree expr, gimple *stmt)
       || TREE_CODE (expr) == VIEW_CONVERT_EXPR)
     {
       tree r = TREE_OPERAND (expr, 0);
+      tree orig_type = TREE_TYPE (expr);
       if (handled_component_p (r)
 	  || TREE_CODE (r) == MEM_REF)
 	{
@@ -1382,8 +2058,18 @@ ipa_struct_reorg::find_var (tree expr, gimple *stmt)
 				       escape_vce, stmt);
 		}
 	      if (TREE_CODE (r) == MEM_REF)
-		mark_type_as_escape (TREE_TYPE (TREE_OPERAND (r, 1)),
-				     escape_addr, stmt);
+		{
+		  mark_type_as_escape (TREE_TYPE (TREE_OPERAND (r, 1)),
+				       escape_addr, stmt);
+		  tree inner_type = TREE_TYPE (TREE_OPERAND (r, 0));
+		  if (orig_type != inner_type)
+		    {
+		      mark_type_as_escape (orig_type,
+					   escape_cast_another_ptr, stmt);
+		      mark_type_as_escape (inner_type,
+					   escape_cast_another_ptr, stmt);
+		    }
+		}
 	      r = TREE_OPERAND (r, 0);
 	    }
 	  mark_expr_escape (r, escape_addr, stmt);
@@ -1407,7 +2093,8 @@ ipa_struct_reorg::find_vars (gimple *stmt)
     {
     case GIMPLE_ASSIGN:
       if (gimple_assign_rhs_class (stmt) == GIMPLE_SINGLE_RHS
-	  || gimple_assign_rhs_code (stmt) == POINTER_PLUS_EXPR)
+	  || gimple_assign_rhs_code (stmt) == POINTER_PLUS_EXPR
+	  || gimple_assign_rhs_code (stmt) == NOP_EXPR)
 	{
 	  tree lhs = gimple_assign_lhs (stmt);
 	  tree rhs = gimple_assign_rhs1 (stmt);
@@ -1430,6 +2117,32 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	      srdecl *d = find_decl (rhs);
 	      if (!d && t)
 		current_function->record_decl (t, rhs, -1);
+	    }
+	}
+      else
+	{
+	  /* Because we won't handle these stmts in rewrite phase,
+	     just mark these types as escaped.  */
+	  switch (gimple_num_ops (stmt))
+	    {
+	      case 4: mark_type_as_escape (
+			TREE_TYPE (gimple_assign_rhs3 (stmt)),
+			escape_unhandled_rewrite, stmt);
+			// FALLTHRU
+	      case 3: mark_type_as_escape (
+			TREE_TYPE (gimple_assign_rhs2 (stmt)),
+			escape_unhandled_rewrite, stmt);
+			// FALLTHRU
+	      case 2: mark_type_as_escape (
+			TREE_TYPE (gimple_assign_rhs1 (stmt)),
+			escape_unhandled_rewrite, stmt);
+			// FALLTHRU
+	      case 1: mark_type_as_escape (
+			TREE_TYPE (gimple_assign_lhs (stmt)),
+			escape_unhandled_rewrite, stmt);
+			// FALLTHRU
+	      case 0: break;
+	      default: gcc_unreachable ();
 	    }
 	}
       break;
@@ -1514,9 +2227,21 @@ is_result_of_mult (tree arg, tree *num, tree struct_size)
   /* If we have a integer, just check if it is a multiply of STRUCT_SIZE.  */
   if (TREE_CODE (arg) == INTEGER_CST)
     {
-      if (integer_zerop (size_binop (FLOOR_MOD_EXPR, arg, struct_size)))
+      bool sign = false;
+      HOST_WIDE_INT size = TREE_INT_CST_LOW (arg);
+      if (size < 0)
 	{
-	  *num = size_binop (FLOOR_DIV_EXPR, arg, struct_size);
+	  size = -size;
+	  sign = true;
+	}
+      tree arg2 = build_int_cst (TREE_TYPE (arg), size);
+      if (integer_zerop (size_binop (FLOOR_MOD_EXPR, arg2, struct_size)))
+	{
+	  tree number = size_binop (FLOOR_DIV_EXPR, arg2, struct_size);
+	  if (sign)
+	    number = build_int_cst (TREE_TYPE (number),
+				    -tree_to_shwi (number));
+	  *num = number;
 	  return true;
 	}
       return false;
@@ -1586,16 +2311,21 @@ is_result_of_mult (tree arg, tree *num, tree struct_size)
 
 /* Return TRUE if STMT is an allocation statement that is handled.  */
 
-static bool
-handled_allocation_stmt (gimple *stmt)
+bool
+ipa_struct_reorg::handled_allocation_stmt (gimple *stmt)
 {
-  if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
-      || gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
-      || gimple_call_builtin_p (stmt, BUILT_IN_CALLOC)
-      || gimple_call_builtin_p (stmt, BUILT_IN_ALIGNED_ALLOC)
-      || gimple_call_builtin_p (stmt, BUILT_IN_ALLOCA)
-      || gimple_call_builtin_p (stmt, BUILT_IN_ALLOCA_WITH_ALIGN))
+  if (current_mode == COMPLETE_STRUCT_RELAYOUT
+      && gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
     return true;
+
+  if (current_mode != COMPLETE_STRUCT_RELAYOUT)
+    if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
+	|| gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
+	|| gimple_call_builtin_p (stmt, BUILT_IN_CALLOC)
+	|| gimple_call_builtin_p (stmt, BUILT_IN_ALIGNED_ALLOC)
+	|| gimple_call_builtin_p (stmt, BUILT_IN_ALLOCA)
+	|| gimple_call_builtin_p (stmt, BUILT_IN_ALLOCA_WITH_ALIGN))
+      return true;
   return false;
 }
 
@@ -1636,7 +2366,7 @@ ipa_struct_reorg::allocate_size (srtype *type, gimple *stmt)
 	 the size of structure.  */
       if (operand_equal_p (arg1, struct_size, 0))
 	return size;
-      /* Check that first argument is a constant equal to
+      /* ??? Check that first argument is a constant equal to
 	 the size of structure.  */
       if (operand_equal_p (size, struct_size, 0))
 	return arg1;
@@ -1751,6 +2481,25 @@ ipa_struct_reorg::maybe_record_assign (cgraph_node *node, gassign *stmt)
     }
 }
 
+static bool
+check_mem_ref_offset (tree expr)
+{
+  tree num = NULL;
+  bool ret = false;
+
+  if (TREE_CODE (expr) != MEM_REF)
+    return false;
+
+  /* Try to find the structure size.  */
+  tree field_off = TREE_OPERAND (expr, 1);
+  tree tmp = TREE_OPERAND (expr, 0);
+  if (TREE_CODE (tmp) == ADDR_EXPR)
+    tmp = TREE_OPERAND (tmp, 0);
+  tree size = TYPE_SIZE_UNIT (inner_type (TREE_TYPE (tmp)));
+  ret = is_result_of_mult (field_off, &num, size);
+  return ret;
+}
+
 static tree
 get_ref_base_and_offset (tree &e, HOST_WIDE_INT &offset,
 			 bool &realpart, bool &imagpart,
@@ -1792,7 +2541,8 @@ get_ref_base_and_offset (tree &e, HOST_WIDE_INT &offset,
 	    gcc_assert (TREE_CODE (field_off) == INTEGER_CST);
 	    /* So we can mark the types as escaping if different.  */
 	    accesstype = TREE_TYPE (field_off);
-	    offset += tree_to_uhwi (field_off);
+	    if (!check_mem_ref_offset (expr))
+	      offset += tree_to_uhwi (field_off);
 	    return TREE_OPERAND (expr, 0);
 	  }
 	  default:
@@ -2176,6 +2926,31 @@ ipa_struct_reorg::check_type_and_push (tree newdecl, srtype *type,
   type1->mark_escape (escape_cast_another_ptr, stmt);
 }
 
+void
+ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type)
+{
+  if (current_mode == COMPLETE_STRUCT_RELAYOUT
+      && handled_allocation_stmt (stmt))
+    {
+      tree arg0 = gimple_call_arg (stmt, 0);
+      basic_block bb = gimple_bb (stmt);
+      cgraph_node *node = current_function->node;
+      if (integer_onep (arg0))
+	/* Actually NOT an array, but may ruin other array.  */
+	type->has_alloc_array = -1;
+      else if (bb->loop_father != NULL
+	       && loop_outer (bb->loop_father) != NULL)
+	/* The allocation is in a loop.  */
+	type->has_alloc_array = -2;
+      else if (node->callers != NULL)
+	type->has_alloc_array = -3;
+      else
+	type->has_alloc_array = type->has_alloc_array < 0
+				  ? type->has_alloc_array
+				  : type->has_alloc_array + 1;
+    }
+}
+
 /*
   2) Check SSA_NAMEs for non type usages (source or use) (worlist of srdecl)
      a) if the SSA_NAME is sourced from a pointer plus, record the pointer and
@@ -2223,6 +2998,7 @@ ipa_struct_reorg::check_definition (srdecl *decl, vec<srdecl *> &worklist)
       if (!handled_allocation_stmt (stmt)
 	  || !allocate_size (type, stmt))
 	type->mark_escape (escape_return, stmt);
+      check_alloc_num (stmt, type);
       return;
     }
   /* If the SSA_NAME is sourced from an inline-asm,
@@ -2261,6 +3037,20 @@ ipa_struct_reorg::check_definition (srdecl *decl, vec<srdecl *> &worklist)
 
       if (TREE_CODE (rhs) == SSA_NAME)
 	check_type_and_push (rhs, type, worklist, stmt);
+      return;
+    }
+
+  if (gimple_assign_rhs_code (stmt) == MAX_EXPR
+      || gimple_assign_rhs_code (stmt) == MIN_EXPR
+      || gimple_assign_rhs_code (stmt) == BIT_IOR_EXPR
+      || gimple_assign_rhs_code (stmt) == BIT_XOR_EXPR
+      || gimple_assign_rhs_code (stmt) == BIT_AND_EXPR)
+    {
+      tree rhs2 = gimple_assign_rhs2 (stmt);
+      if (TREE_CODE (rhs) == SSA_NAME)
+	check_type_and_push (rhs, type, worklist, stmt);
+      if (TREE_CODE (rhs2) == SSA_NAME)
+	check_type_and_push (rhs2, type, worklist, stmt);
       return;
     }
 
@@ -2328,6 +3118,11 @@ ipa_struct_reorg::check_other_side (srdecl *decl, tree other, gimple *stmt,
   srtype *t1 = find_type (inner_type (t));
   if (t1 == type)
     {
+      /* In Complete Struct Relayout, if lhs type is the same
+	 as rhs type, we could return without any harm.  */
+      if (current_mode == COMPLETE_STRUCT_RELAYOUT)
+	return;
+
       tree base;
       bool indirect;
       srtype *type1;
@@ -2376,8 +3171,11 @@ ipa_struct_reorg::check_use (srdecl *decl, gimple *stmt,
       tree rhs1 = gimple_cond_lhs (stmt);
       tree rhs2 = gimple_cond_rhs (stmt);
       tree orhs = rhs1;
-      if (gimple_cond_code (stmt) != EQ_EXPR
-	  && gimple_cond_code (stmt) != NE_EXPR)
+      enum tree_code code = gimple_cond_code (stmt);
+      if (code != EQ_EXPR && code != NE_EXPR
+	  && (current_mode != COMPLETE_STRUCT_RELAYOUT
+	      || (code != LT_EXPR && code != LE_EXPR
+		  && code != GT_EXPR && code != GE_EXPR)))
 	{
 	  mark_expr_escape (rhs1, escape_non_eq, stmt);
 	  mark_expr_escape (rhs2, escape_non_eq, stmt);
@@ -2406,8 +3204,11 @@ ipa_struct_reorg::check_use (srdecl *decl, gimple *stmt,
       tree rhs1 = gimple_assign_rhs1 (stmt);
       tree rhs2 = gimple_assign_rhs2 (stmt);
       tree orhs = rhs1;
-      if (gimple_assign_rhs_code (stmt) != EQ_EXPR
-	  && gimple_assign_rhs_code (stmt) != NE_EXPR)
+      enum tree_code code = gimple_assign_rhs_code (stmt);
+      if (code != EQ_EXPR && code != NE_EXPR
+	  && (current_mode != COMPLETE_STRUCT_RELAYOUT
+	      || (code != LT_EXPR && code != LE_EXPR
+		  && code != GT_EXPR && code != GE_EXPR)))
 	{
 	  mark_expr_escape (rhs1, escape_non_eq, stmt);
 	  mark_expr_escape (rhs2, escape_non_eq, stmt);
@@ -2692,6 +3493,12 @@ ipa_struct_reorg::record_accesses (void)
       /* Record accesses inside a function.  */
       if (cnode->definition)
 	record_function (cnode);
+      else
+	{
+	  tree return_type = TREE_TYPE (TREE_TYPE (cnode->decl));
+	  mark_type_as_escape (return_type, escape_return, NULL);
+	}
+
     }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -2807,8 +3614,11 @@ ipa_struct_reorg::propagate_escape (void)
 void
 ipa_struct_reorg::prune_escaped_types (void)
 {
-  detect_cycles ();
-  propagate_escape ();
+  if (current_mode != COMPLETE_STRUCT_RELAYOUT)
+    {
+      detect_cycles ();
+      propagate_escape ();
+    }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
@@ -3954,17 +4764,66 @@ ipa_struct_reorg::rewrite_functions (void)
 }
 
 unsigned int
-ipa_struct_reorg::execute (void)
+ipa_struct_reorg::execute_struct_relayout (void)
 {
-  /* FIXME: If there is a top-level inline-asm,
-     the pass immediately returns.  */
-  if (symtab->first_asm_symbol ())
-    return 0;
-  record_accesses ();
-  prune_escaped_types ();
-  analyze_types ();
+  unsigned retval = 0;
+  for (unsigned i = 0; i < types.length (); i++)
+    {
+      tree type = types[i]->type;
+      if (TYPE_FIELDS (type) == NULL)
+	continue;
+      if (types[i]->has_alloc_array != 1)
+	continue;
+      if (types[i]->chain_type)
+	continue;
+      retval |= ipa_struct_relayout (type, this).execute ();
+    }
 
-  return rewrite_functions ();
+  if (dump_file)
+    {
+      if (transformed)
+	fprintf (dump_file, "\nNumber of structures to transform in "
+		 "Complete Structure Relayout is %d\n", transformed);
+      else
+	fprintf (dump_file, "\nNo structures to transform in "
+		 "Complete Structure Relayout.\n");
+    }
+
+  return retval;
+}
+
+unsigned int
+ipa_struct_reorg::execute (enum srmode mode)
+{
+  unsigned int ret = 0;
+
+  if (mode == NORMAL)
+    {
+      current_mode = NORMAL;
+      /* FIXME: If there is a top-level inline-asm,
+	 the pass immediately returns.  */
+      if (symtab->first_asm_symbol ())
+	return 0;
+      record_accesses ();
+      prune_escaped_types ();
+      analyze_types ();
+
+      ret = rewrite_functions ();
+    }
+  else if (mode == COMPLETE_STRUCT_RELAYOUT)
+    {
+      if (dump_file)
+	fprintf (dump_file, "\n\nTry Complete Struct Relayout:\n");
+      current_mode = COMPLETE_STRUCT_RELAYOUT;
+      if (symtab->first_asm_symbol ())
+	return 0;
+      record_accesses ();
+      prune_escaped_types ();
+
+      ret = execute_struct_relayout ();
+    }
+
+  return ret;
 }
 
 const pass_data pass_data_ipa_struct_reorg =
@@ -3991,7 +4850,11 @@ public:
   virtual bool gate (function *);
   virtual unsigned int execute (function *)
   {
-    return ipa_struct_reorg ().execute ();
+    unsigned int ret = 0;
+    ret = ipa_struct_reorg ().execute (NORMAL);
+    if (!ret)
+      ret = ipa_struct_reorg ().execute (COMPLETE_STRUCT_RELAYOUT);
+    return ret;
   }
 
 }; // class pass_ipa_struct_reorg
@@ -3999,10 +4862,11 @@ public:
 bool
 pass_ipa_struct_reorg::gate (function *)
 {
-  return (optimize
+  return (optimize >= 3
 	  && flag_ipa_struct_reorg
 	  /* Don't bother doing anything if the program has errors.  */
-	  && !seen_error ());
+	  && !seen_error ()
+	  && flag_lto_partition == LTO_PARTITION_ONE);
 }
 
 } // anon namespace
