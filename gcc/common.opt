@@ -2125,6 +2125,10 @@ fmath-errno
 Common Var(flag_errno_math) Init(1) Optimization SetByCombined
 Set errno after built-in math functions.
 
+fsimdmath
+Common Var(flag_simdmath) Init(0) Optimization
+Enable auto-vectorize math functions for mathlib.  This option will turn on -fno-math-errno and -fopenmp-simd.
+
 fmax-errors=
 Common Joined RejectNegative UInteger Var(flag_max_errors)
 -fmax-errors=<number>	Maximum number of errors to report.

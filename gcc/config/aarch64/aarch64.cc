@@ -26904,8 +26904,13 @@ aarch64_simd_clone_compute_vecsize_and_simdlen (struct cgraph_node *node,
   elt_bits = GET_MODE_BITSIZE (SCALAR_TYPE_MODE (base_type));
   if (known_eq (clonei->simdlen, 0U))
     {
-      count = 2;
-      vec_bits = (num == 0 ? 64 : 128);
+      /* Currently mathlib or sleef hasn't provide function for V2SF mode
+      simdclone of single precision functions. (e.g._ZCVnN2v_expf)
+      Therefore this mode is disabled by default to avoid link error.
+      Use -msimdmath-64 option to enable this mode.  */
+      count = flag_simdmath_64 ? 2 : 1;
+      vec_bits = ((num == 0 && flag_simdmath_64) ? 64 : 128);
+
       clonei->simdlen = exact_div (vec_bits, elt_bits);
     }
   else

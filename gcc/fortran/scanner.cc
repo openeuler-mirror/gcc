@@ -2769,6 +2769,9 @@ gfc_new_file (void)
   if (flag_pre_include != NULL)
     load_file (flag_pre_include, NULL, false);
 
+  if (flag_simdmath)
+    load_file ("simdmath_f.h", NULL, false);
+
   if (gfc_cpp_enabled ())
     {
       gfc_cpp_preprocess (gfc_source_file);

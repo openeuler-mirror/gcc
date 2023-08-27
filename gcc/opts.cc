@@ -322,6 +322,7 @@ static const char undocumented_msg[] = N_("This option lacks documentation.");
 static const char use_diagnosed_msg[] = N_("Uses of this option are diagnosed.");
 
 typedef char *char_p; /* For DEF_VEC_P.  */
+static void set_simdmath_flags (struct gcc_options *opts, int set);
 
 static void set_debug_level (uint32_t dinfo, int extended,
 			     const char *arg, struct gcc_options *opts,
@@ -2850,6 +2851,10 @@ common_handle_option (struct gcc_options *opts,
       dc->min_margin_width = value;
       break;
 
+    case OPT_fsimdmath:
+      set_simdmath_flags (opts, value);
+      break;
+
     case OPT_fdump_:
       /* Deferred.  */
       break;
@@ -3225,6 +3230,18 @@ common_handle_option (struct gcc_options *opts,
   common_handle_option_auto (opts, opts_set, decoded, lang_mask, kind,
                              loc, handlers, dc);
   return true;
+}
+
+/* The following routines are used to set -fno-math-errno and -fopenmp-simd
+   to enable vector mathlib.  */
+static void
+set_simdmath_flags (struct gcc_options *opts, int set)
+{
+  if (set)
+    {
+      opts->x_flag_errno_math = 0;
+      opts->x_flag_openmp_simd = 1;
+    }
 }
 
 /* Used to set the level of strict aliasing warnings in OPTS,
