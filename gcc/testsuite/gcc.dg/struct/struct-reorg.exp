@@ -27,8 +27,21 @@ set STRUCT_REORG_TORTURE_OPTIONS [list \
 
 set-torture-options $STRUCT_REORG_TORTURE_OPTIONS {{}}
 
-gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.c]] \
+# -fipa-struct-reorg
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/wo_*.c]] \
+ 	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/w_*.c]] \
 	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/struct_reorg*.cpp]] \
+	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sr_*.c]] \
+	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/csr_*.c]] \
+	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-reorder-fields
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/rf_*.c]] \
+	"" "-fipa-reorder-fields -fdump-ipa-all -flto-partition=one -fwhole-program"
 
 # All done.
 torture-finish

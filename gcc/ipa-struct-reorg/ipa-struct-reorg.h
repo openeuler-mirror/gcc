@@ -68,11 +68,13 @@ struct srfunction
   auto_vec<srdecl *> args;
   auto_vec<srdecl *> globals;
   auto_vec_del<srdecl> decls;
-  srdecl *record_decl (srtype *, tree, int arg);
+  srdecl *record_decl (srtype *, tree, int arg, tree orig_type = NULL);
 
   srfunction *old;
   cgraph_node *newnode;
   srfunction *newf;
+
+  bool is_safe_func;
 
   // Constructors
   srfunction (cgraph_node *n);
@@ -184,6 +186,11 @@ struct srfield
   void create_new_fields (tree newtype[max_split],
 			  tree newfields[max_split],
 			  tree newlast[max_split]);
+  void reorder_fields (tree newfields[max_split], tree newlast[max_split],
+		       tree &field);
+  void create_new_reorder_fields (tree newtype[max_split],
+				  tree newfields[max_split],
+				  tree newlast[max_split]);
 };
 
 struct sraccess
@@ -221,8 +228,11 @@ struct srdecl
 
   tree newdecl[max_split];
 
+  /* Auxiliary record complete original type information of the void* type.  */
+  tree orig_type;
+
   // Constructors
-  srdecl (srtype *type, tree decl, int argumentnum = -1);
+  srdecl (srtype *type, tree decl, int argumentnum = -1, tree orgtype = NULL);
 
   // Methods
   void dump (FILE *file);
