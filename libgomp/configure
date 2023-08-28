@@ -17064,7 +17064,7 @@ fi
 
 
 
-ac_config_files="$ac_config_files omp.h omp_lib.h omp_lib.f90 libgomp_f.h"
+ac_config_files="$ac_config_files omp.h omp_lib.h simdmath.h simdmath_f.h omp_lib.f90 libgomp_f.h"
 
 ac_config_files="$ac_config_files Makefile testsuite/Makefile libgomp.spec"
 
@@ -18215,6 +18215,8 @@ do
     "libtool") CONFIG_COMMANDS="$CONFIG_COMMANDS libtool" ;;
     "omp.h") CONFIG_FILES="$CONFIG_FILES omp.h" ;;
     "omp_lib.h") CONFIG_FILES="$CONFIG_FILES omp_lib.h" ;;
+    "simdmath.h") CONFIG_FILES="$CONFIG_FILES simdmath.h" ;;
+    "simdmath_f.h") CONFIG_FILES="$CONFIG_FILES simdmath_f.h" ;;
     "omp_lib.f90") CONFIG_FILES="$CONFIG_FILES omp_lib.f90" ;;
     "libgomp_f.h") CONFIG_FILES="$CONFIG_FILES libgomp_f.h" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;

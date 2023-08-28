@@ -322,12 +322,14 @@ static const char undocumented_msg[] = N_("This option lacks documentation.");
 static const char use_diagnosed_msg[] = N_("Uses of this option are diagnosed.");
 
 typedef char *char_p; /* For DEF_VEC_P.  */
+static void set_simdmath_flags (struct gcc_options *opts, int set);
 
 static void set_debug_level (uint32_t dinfo, int extended,
 			     const char *arg, struct gcc_options *opts,
 			     struct gcc_options *opts_set,
 			     location_t loc);
 static void set_fast_math_flags (struct gcc_options *opts, int set);
+static void set_fp_model_flags (struct gcc_options *opts, int set);
 static void decode_d_option (const char *arg, struct gcc_options *opts,
 			     location_t loc, diagnostic_context *dc);
 static void set_unsafe_math_optimizations_flags (struct gcc_options *opts,
@@ -2849,12 +2851,20 @@ common_handle_option (struct gcc_options *opts,
       dc->min_margin_width = value;
       break;
 
+    case OPT_fsimdmath:
+      set_simdmath_flags (opts, value);
+      break;
+
     case OPT_fdump_:
       /* Deferred.  */
       break;
 
     case OPT_ffast_math:
       set_fast_math_flags (opts, value);
+      break;
+
+    case OPT_fp_model_:
+      set_fp_model_flags (opts, value);
       break;
 
     case OPT_funsafe_math_optimizations:
@@ -3222,6 +3232,18 @@ common_handle_option (struct gcc_options *opts,
   return true;
 }
 
+/* The following routines are used to set -fno-math-errno and -fopenmp-simd
+   to enable vector mathlib.  */
+static void
+set_simdmath_flags (struct gcc_options *opts, int set)
+{
+  if (set)
+    {
+      opts->x_flag_errno_math = 0;
+      opts->x_flag_openmp_simd = 1;
+    }
+}
+
 /* Used to set the level of strict aliasing warnings in OPTS,
    when no level is specified (i.e., when -Wstrict-aliasing, and not
    -Wstrict-aliasing=level was given).
@@ -3263,6 +3285,69 @@ set_fast_math_flags (struct gcc_options *opts, int set)
 	opts->x_flag_rounding_math = 0;
       if (!opts->frontend_set_flag_cx_limited_range)
 	opts->x_flag_cx_limited_range = 1;
+    }
+}
+
+/* Handle fp-model options.  */
+static void
+set_fp_model_flags (struct gcc_options *opts, int set)
+{
+  enum fp_model model = (enum fp_model) set;
+  switch (model)
+    {
+      case FP_MODEL_FAST:
+	/* Equivalent to open ffast-math.  */
+	set_fast_math_flags (opts, 1);
+	break;
+
+      case FP_MODEL_PRECISE:
+	/* Equivalent to close ffast-math.  */
+	set_fast_math_flags (opts, 0);
+	/* Turn on -frounding-math -fsignaling-nans.  */
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	opts->x_flag_expensive_optimizations = 0;
+	opts->x_flag_code_hoisting = 0;
+	opts->x_flag_predictive_commoning = 0;
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_EXCEPT:
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	/* Also turn on ffpe-trap in fortran.  */
+	break;
+
+      case FP_MODEL_STRICT:
+	/* Turn on both precise and except.  */
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	opts->x_flag_expensive_optimizations = 0;
+	opts->x_flag_code_hoisting = 0;
+	opts->x_flag_predictive_commoning = 0;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_NORMAL:
+	/* Do nothing.  */
+	break;
+
+      default:
+	gcc_unreachable ();
     }
 }
 

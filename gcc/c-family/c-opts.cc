@@ -801,6 +801,10 @@ c_common_post_options (const char **pfilename)
   if (cpp_opts->deps.style == DEPS_NONE)
     check_deps_environment_vars ();
 
+  if (flag_simdmath)
+    {
+      defer_opt (OPT_include, "simdmath.h");
+    }
   handle_deferred_opts ();
 
   sanitize_cpp_opts ();
