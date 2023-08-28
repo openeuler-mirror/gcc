@@ -2021,6 +2021,10 @@ fira-verbose=
 Common RejectNegative Joined UInteger Var(flag_ira_verbose) Init(5)
 -fira-verbose=<number>	Control IRA's level of diagnostic messages.
 
+fccmp2
+Common Var(flag_ccmp2) Init(0) Optimization
+Optimize potential ccmp instruction in complex scenarios.
+
 fivopts
 Common Var(flag_ivopts) Init(1) Optimization
 Optimize induction variables on trees.
