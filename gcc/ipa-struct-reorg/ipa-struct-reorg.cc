@@ -87,6 +87,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-pretty-print.h"
 #include "gimple-pretty-print.h"
 #include "gimple-iterator.h"
+#include "gimple-walk.h"
 #include "cfg.h"
 #include "ssa.h"
 #include "tree-dfa.h"
@@ -268,10 +269,43 @@ enum srmode
   STRUCT_REORDER_FIELDS
 };
 
+/* Enum the struct layout optimize level,
+   which should be the same as the option -fstruct-reorg=.  */
+
+enum struct_layout_opt_level
+{
+  NONE = 0,
+  STRUCT_REORG,
+  STRUCT_REORDER_FIELDS_SLO,
+  DEAD_FIELD_ELIMINATION
+};
+
 static bool is_result_of_mult (tree arg, tree *num, tree struct_size);
 static bool isptrptr (tree type);
+void get_base (tree &base, tree expr);
 
 srmode current_mode;
+hash_map<tree, tree> replace_type_map;
+
+/* Return true if one of these types is created by struct-reorg.  */
+
+static bool
+is_replace_type (tree type1, tree type2)
+{
+  if (replace_type_map.is_empty ())
+    return false;
+  if (type1 == NULL_TREE || type2 == NULL_TREE)
+    return false;
+  tree *type_value = replace_type_map.get (type1);
+  if (type_value)
+    if (types_compatible_p (*type_value, type2))
+      return true;
+  type_value = replace_type_map.get (type2);
+  if (type_value)
+    if (types_compatible_p (*type_value, type1))
+      return true;
+  return false;
+}
 
 } // anon namespace
 
@@ -353,7 +387,8 @@ srfield::srfield (tree field, srtype *base)
     fielddecl (field),
     base (base),
     type (NULL),
-    clusternum (0)
+    clusternum (0),
+    field_access (EMPTY_FIELD)
 {
   for (int i = 0; i < max_split; i++)
     newfield[i] = NULL_TREE;
@@ -390,6 +425,25 @@ srtype::srtype (tree type)
 	  fields.safe_push (t);
 	}
     }
+}
+
+/* Check it if all fields in the RECORD_TYPE are referenced.  */
+
+bool
+srtype::has_dead_field (void)
+{
+  bool may_dfe = false;
+  srfield *this_field;
+  unsigned i;
+  FOR_EACH_VEC_ELT (fields, i, this_field)
+    {
+      if (!(this_field->field_access & READ_FIELD))
+	{
+	  may_dfe = true;
+	  break;
+	}
+    }
+  return may_dfe;
 }
 
 /* Mark the type as escaping type E at statement STMT.  */
@@ -595,7 +649,17 @@ srtype::analyze (void)
       into 2 different structures.  In future we intend to add profile
       info and/or static heuristics to differentiate splitting process.  */
   if (fields.length () == 2)
-    fields[1]->clusternum = 1;
+    {
+      /* Currently, when the replacement structure type exists,
+	 we only split the replacement structure. */
+      for (hash_map<tree, tree>::iterator it = replace_type_map.begin ();
+	   it != replace_type_map.end (); ++it)
+	{
+	  if (types_compatible_p ((*it).second, this->type))
+	    return;
+	}
+      fields[1]->clusternum = 1;
+    }
 
   /* Otherwise we do nothing.  */
   if (fields.length () >= 3)
@@ -838,6 +902,10 @@ srtype::create_new_type (void)
   for (unsigned i = 0; i < fields.length (); i++)
     {
       srfield *f = fields[i];
+      if (current_mode == STRUCT_REORDER_FIELDS
+	  && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION
+	  && !(f->field_access & READ_FIELD))
+	continue;
       f->create_new_fields (newtype, newfields, newlast);
     }
 
@@ -856,6 +924,16 @@ srtype::create_new_type (void)
 
   warn_padded = save_warn_padded;
 
+  if (current_mode == STRUCT_REORDER_FIELDS
+      && replace_type_map.get (this->newtype[0]) == NULL)
+    replace_type_map.put (this->newtype[0], this->type);
+  if (dump_file)
+    {
+      if (current_mode == STRUCT_REORDER_FIELDS
+	  && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION
+	  && has_dead_field ())
+	fprintf (dump_file, "Dead field elimination.\n");
+    }
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "Created %d types:\n", maxclusters);
@@ -1269,6 +1347,7 @@ public:
   void maybe_mark_or_record_other_side (tree side, tree other, gimple *stmt);
 
   unsigned execute_struct_relayout (void);
+  bool remove_dead_field_stmt (tree lhs);
 };
 
 struct ipa_struct_relayout
@@ -3057,6 +3136,119 @@ ipa_struct_reorg::find_vars (gimple *stmt)
     }
 }
 
+static HOST_WIDE_INT
+get_offset (tree op, HOST_WIDE_INT offset)
+{
+  switch (TREE_CODE (op))
+    {
+      case COMPONENT_REF:
+	{
+	  return int_byte_position (TREE_OPERAND (op, 1));
+	}
+      case MEM_REF:
+	{
+	  return tree_to_uhwi (TREE_OPERAND (op, 1));
+	}
+      default:
+	return offset;
+    }
+  return offset;
+}
+
+/* Record field access.  */
+static void
+record_field_access (tree type, HOST_WIDE_INT offset,
+		     unsigned access, void *data)
+{
+  srtype *this_srtype = ((ipa_struct_reorg *)data)->find_type (type);
+  if (this_srtype == NULL)
+    return;
+  srfield *this_srfield = this_srtype->find_field (offset);
+  if (this_srfield == NULL)
+    return;
+
+  this_srfield->field_access |= access;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "record field access %d:", access);
+      print_generic_expr (dump_file, type);
+      fprintf (dump_file, "  field:");
+      print_generic_expr (dump_file, this_srfield->fielddecl);
+      fprintf (dump_file, "\n");
+    }
+  return;
+
+}
+
+/* Update field_access in srfield.  */
+
+static void
+update_field_access (tree node, tree op, unsigned access, void *data)
+{
+  HOST_WIDE_INT offset = 0;
+  offset = get_offset (op, offset);
+  tree node_type = inner_type (TREE_TYPE (node));
+  record_field_access (node_type, offset, access, data);
+  tree base = node;
+  get_base (base, node);
+  tree base_type = inner_type (TREE_TYPE (base));
+  if (!types_compatible_p (base_type, node_type))
+    {
+      record_field_access (base_type, get_offset (node, offset),
+			   access, data);
+    }
+  return;
+}
+
+/* A callback for walk_stmt_load_store_ops to visit store.  */
+
+static bool
+find_field_p_store (gimple *stmt ATTRIBUTE_UNUSED,
+		    tree node, tree op, void *data)
+{
+  update_field_access (node, op, WRITE_FIELD, data);
+
+  return false;
+}
+
+/* A callback for walk_stmt_load_store_ops to visit load.  */
+
+static bool
+find_field_p_load (gimple *stmt ATTRIBUTE_UNUSED,
+		   tree node, tree op, void *data)
+{
+  update_field_access (node, op, READ_FIELD, data);
+
+  return false;
+}
+
+/* Determine whether the stmt should be deleted.  */
+
+bool
+ipa_struct_reorg::remove_dead_field_stmt (tree lhs)
+{
+  tree base = NULL_TREE;
+  bool indirect = false;
+  srtype *t = NULL;
+  srfield *f = NULL;
+  bool realpart = false;
+  bool imagpart = false;
+  bool address = false;
+  bool escape_from_base = false;
+  if (!get_type_field (lhs, base, indirect, t, f, realpart, imagpart,
+		       address, escape_from_base))
+    return false;
+  if (t ==NULL)
+    return false;
+  if (t->newtype[0] == t->type)
+    return false;
+  if (f == NULL)
+    return false;
+  if (f->newfield[0] == NULL)
+    return true;
+  return false;
+}
+
 /* Maybe record access of statement for further analaysis.  */
 
 void
@@ -3077,6 +3269,13 @@ ipa_struct_reorg::maybe_record_stmt (cgraph_node *node, gimple *stmt)
       break;
     default:
       break;
+    }
+  if (current_mode == STRUCT_REORDER_FIELDS
+      && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION)
+    {
+      /* Look for loads and stores.  */
+      walk_stmt_load_store_ops (stmt, this, find_field_p_load,
+				find_field_p_store);
     }
 }
 
@@ -3368,8 +3567,11 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other,
     }
   else if (type != d->type)
     {
-      type->mark_escape (escape_cast_another_ptr, stmt);
-      d->type->mark_escape (escape_cast_another_ptr, stmt);
+      if (!is_replace_type (d->type->type, type->type))
+	{
+	  type->mark_escape (escape_cast_another_ptr, stmt);
+	  d->type->mark_escape (escape_cast_another_ptr, stmt);
+	}
     }
   /* x_1 = y.x_nodes; void *x;
      Directly mark the structure pointer type assigned
@@ -3949,8 +4151,9 @@ ipa_struct_reorg::check_type_and_push (tree newdecl, srdecl *decl,
 	}
       /* If we have a non void* or a decl (which is hard to track),
 	 then mark the type as escaping.  */
-      if (!VOID_POINTER_P (TREE_TYPE (newdecl))
-	  || DECL_P (newdecl))
+      if (replace_type_map.get (type->type) == NULL
+	  && (!VOID_POINTER_P (TREE_TYPE (newdecl))
+	      || DECL_P (newdecl)))
 	{
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
@@ -4216,7 +4419,9 @@ ipa_struct_reorg::check_other_side (srdecl *decl, tree other, gimple *stmt,
     }
 
   srtype *t1 = find_type (inner_type (t));
-  if (t1 == type)
+  /* In the other side check, escape mark is added
+     when the replacement struct type exists. */
+  if (t1 == type || is_replace_type (inner_type (t), type->type))
     {
       /* In Complete Struct Relayout, if lhs type is the same
 	 as rhs type, we could return without any harm.  */
@@ -5513,6 +5718,27 @@ bool
 ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 {
   bool remove = false;
+
+  if (current_mode == STRUCT_REORDER_FIELDS
+      && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION
+      && remove_dead_field_stmt (gimple_assign_lhs (stmt)))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "\n rewriting statement (remove): \n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	}
+      /* Replace the dead field in stmt by creating a dummy ssa.  */
+      tree dummy_ssa = make_ssa_name (TREE_TYPE (gimple_assign_lhs (stmt)));
+      gimple_assign_set_lhs (stmt, dummy_ssa);
+      update_stmt (stmt);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "To: \n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	}
+    }
+
   if (gimple_clobber_p (stmt))
     {
       tree lhs = gimple_assign_lhs (stmt);
