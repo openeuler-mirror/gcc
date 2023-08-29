@@ -55,4 +55,4 @@ tcp_usr_listen (struct socket *so, struct proc *p)
   COMMON_END (PRU_LISTEN);
 }
 
-/* { dg-final { scan-ipa-dump-times "Dead field elimination" 1 "reorder_fields" } } */
+/* { dg-final { scan-ipa-dump-times "Dead field elimination" 1 "struct_reorg" } } */

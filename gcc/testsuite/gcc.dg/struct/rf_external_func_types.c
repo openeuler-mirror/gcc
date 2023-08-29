@@ -66,4 +66,4 @@ test ()
   return 0;
 }
 
-/* { dg-final { scan-ipa-dump "No structures to transform." "reorder_fields" } } */
+/* { dg-final { scan-ipa-dump "No structures to transform." "struct_reorg" } } */

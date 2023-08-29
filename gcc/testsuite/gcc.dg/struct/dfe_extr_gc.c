@@ -159,4 +159,4 @@ gc_gray_mark (mrb_state *mrb, mrb_gc *gc, struct RBasic *obj)
   return children;
 }
 
-/* { dg-final { scan-ipa-dump-times "Dead field elimination" 0 "reorder_fields" } } */
+/* { dg-final { scan-ipa-dump-times "Dead field elimination" 0 "struct_reorg" } } */

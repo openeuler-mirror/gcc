@@ -58,4 +58,4 @@ UI_LoadMods ()
     }
 }
 
-/* { dg-final { scan-ipa-dump-times "Dead field elimination" 1 "reorder_fields" } } */
+/* { dg-final { scan-ipa-dump-times "Dead field elimination" 1 "struct_reorg" } } */
