@@ -2198,7 +2198,7 @@ pass_waccess::gate (function *)
      In pass waccess, it will traverse all SSA and cause ICE
      when handling these unused SSA.  So temporarily disable
      pass waccess when enable structure optimizations.  */
-  if (flag_ipa_struct_reorg || flag_ipa_reorder_fields)
+  if (flag_ipa_struct_reorg)
     return false;
 
   return (warn_free_nonheap_object

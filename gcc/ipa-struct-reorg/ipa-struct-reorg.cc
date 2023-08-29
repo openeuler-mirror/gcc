@@ -108,6 +108,37 @@ along with GCC; see the file COPYING3.  If not see
 #include "cfgloop.h"
 #include "langhooks.h"
 
+/* Check whether in C language or LTO with only C language.  */
+
+bool
+lang_c_p (void)
+{
+  const char *language_string = lang_hooks.name;
+
+  if (!language_string)
+    return false;
+
+  if (lang_GNU_C ())
+    return true;
+  else if (strcmp (language_string, "GNU GIMPLE") == 0) // for LTO check
+    {
+      unsigned i = 0;
+      tree t = NULL_TREE;
+
+      FOR_EACH_VEC_SAFE_ELT (all_translation_units, i, t)
+	{
+	  language_string = TRANSLATION_UNIT_LANGUAGE (t);
+	  if (language_string == NULL
+	      || strncmp (language_string, "GNU C", 5)
+	      || (language_string[5] != '\0'
+		  && !(ISDIGIT (language_string[5]))))
+	    return false;
+	}
+      return true;
+    }
+  return false;
+}
+
 namespace {
 
 using namespace struct_reorg;
@@ -198,37 +229,6 @@ gimplify_build1 (gimple_stmt_iterator *gsi, enum tree_code code, tree type,
 				   GSI_SAME_STMT);
 }
 
-/* Check whether in C language or LTO with only C language.  */
-
-static bool
-lang_c_p (void)
-{
-  const char *language_string = lang_hooks.name;
-
-  if (!language_string)
-    return false;
-
-  if (lang_GNU_C ())
-    return true;
-  else if (strcmp (language_string, "GNU GIMPLE") == 0) // For LTO check
-    {
-      unsigned i = 0;
-      tree t = NULL_TREE;
-
-      FOR_EACH_VEC_SAFE_ELT (all_translation_units, i, t)
-	{
-	  language_string = TRANSLATION_UNIT_LANGUAGE (t);
-	  if (language_string == NULL
-	      || strncmp (language_string, "GNU C", 5)
-	      || (language_string[5] != '\0'
-		  && !(ISDIGIT (language_string[5]))))
-	    return false;
-	}
-      return true;
-    }
-  return false;
-}
-
 /* Get the number of pointer layers.  */
 
 int
@@ -262,29 +262,23 @@ is_from_void_ptr_parm (tree ssa_name)
 	  && VOID_POINTER_P (TREE_TYPE (ssa_name)));
 }
 
-enum srmode
-{
-  NORMAL = 0,
-  COMPLETE_STRUCT_RELAYOUT,
-  STRUCT_REORDER_FIELDS
-};
-
 /* Enum the struct layout optimize level,
    which should be the same as the option -fstruct-reorg=.  */
 
 enum struct_layout_opt_level
 {
   NONE = 0,
-  STRUCT_REORG,
-  STRUCT_REORDER_FIELDS_SLO,
-  DEAD_FIELD_ELIMINATION
+  STRUCT_SPLIT = 1 << 0,
+  COMPLETE_STRUCT_RELAYOUT = 1 << 1,
+  STRUCT_REORDER_FIELDS = 1 << 2,
+  DEAD_FIELD_ELIMINATION = 1 << 3
 };
 
 static bool is_result_of_mult (tree arg, tree *num, tree struct_size);
 static bool isptrptr (tree type);
 void get_base (tree &base, tree expr);
 
-srmode current_mode;
+static unsigned int current_layout_opt_level;
 hash_map<tree, tree> replace_type_map;
 
 /* Return true if one of these types is created by struct-reorg.  */
@@ -626,7 +620,7 @@ void
 srtype::simple_dump (FILE *f)
 {
   print_generic_expr (f, type);
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     fprintf (f, "(%d)", TYPE_UID (type));
 }
 
@@ -673,7 +667,7 @@ srfield::create_new_fields (tree newtype[max_split],
 			    tree newfields[max_split],
 			    tree newlast[max_split])
 {
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
       create_new_reorder_fields (newtype, newfields, newlast);
       return;
@@ -861,7 +855,7 @@ srtype::create_new_type (void)
      we are not splitting the struct into two clusters,
      then just return false and don't change the type.  */
   if (!createnewtype && maxclusters == 0
-      && current_mode != STRUCT_REORDER_FIELDS)
+      && current_layout_opt_level < STRUCT_REORDER_FIELDS)
     {
       newtype[0] = type;
       return false;
@@ -889,8 +883,7 @@ srtype::create_new_type (void)
       sprintf (id, "%d", i);
       if (tname)
 	{
-	  name = concat (tname, current_mode == STRUCT_REORDER_FIELDS
-			 ? ".reorder." : ".reorg.", id, NULL);
+	  name = concat (tname, ".reorg.", id, NULL);
 	  TYPE_NAME (newtype[i]) = build_decl (UNKNOWN_LOCATION,
 					       TYPE_DECL,
 					       get_identifier (name),
@@ -902,8 +895,7 @@ srtype::create_new_type (void)
   for (unsigned i = 0; i < fields.length (); i++)
     {
       srfield *f = fields[i];
-      if (current_mode == STRUCT_REORDER_FIELDS
-	  && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION
+      if (current_layout_opt_level & DEAD_FIELD_ELIMINATION
 	  && !(f->field_access & READ_FIELD))
 	continue;
       f->create_new_fields (newtype, newfields, newlast);
@@ -924,13 +916,12 @@ srtype::create_new_type (void)
 
   warn_padded = save_warn_padded;
 
-  if (current_mode == STRUCT_REORDER_FIELDS
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
       && replace_type_map.get (this->newtype[0]) == NULL)
     replace_type_map.put (this->newtype[0], this->type);
   if (dump_file)
     {
-      if (current_mode == STRUCT_REORDER_FIELDS
-	  && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION
+      if (current_layout_opt_level & DEAD_FIELD_ELIMINATION
 	  && has_dead_field ())
 	fprintf (dump_file, "Dead field elimination.\n");
     }
@@ -1052,8 +1043,7 @@ srfunction::create_new_decls (void)
 	      sprintf (id, "%d", j);
 	      if (tname)
 		{
-		  name = concat (tname, current_mode == STRUCT_REORDER_FIELDS
-					? ".reorder." : ".reorg.", id, NULL);
+		  name = concat (tname, ".reorg.", id, NULL);
 		  new_name = get_identifier (name);
 		  free (name);
 		}
@@ -1264,7 +1254,7 @@ public:
   bool done_recording;
 
   // Methods
-  unsigned execute (enum srmode mode);
+  unsigned execute (unsigned int opt);
   void mark_type_as_escape (tree type, escape_type escapes,
 			    gimple *stmt = NULL);
 
@@ -2651,7 +2641,7 @@ escape_type_volatile_array_or_ptrptr (tree type)
     return escape_volatile;
   if (isarraytype (type))
     return escape_array;
-  if (isptrptr (type) && (current_mode != STRUCT_REORDER_FIELDS))
+  if (isptrptr (type) && (current_layout_opt_level < STRUCT_REORDER_FIELDS))
     return escape_ptr_ptr;
   return does_not_escape;
 }
@@ -2672,12 +2662,11 @@ ipa_struct_reorg::record_field_type (tree field, srtype *base_srtype)
       field_srfield->type = field_srtype;
       field_srtype->add_field_site (field_srfield);
     }
-  if (field_srtype == base_srtype && current_mode != COMPLETE_STRUCT_RELAYOUT
-      && current_mode != STRUCT_REORDER_FIELDS)
+  if (field_srtype == base_srtype && current_layout_opt_level == STRUCT_SPLIT)
     base_srtype->mark_escape (escape_rescusive_type, NULL);
   /* Types of non-pointer field are difficult to track the correctness
      of the rewrite when it used by the escaped type.  */
-  if (current_mode == STRUCT_REORDER_FIELDS
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
       && TREE_CODE (field_type) == RECORD_TYPE)
     field_srtype->mark_escape (escape_instance_field, NULL);
 }
@@ -2704,7 +2693,7 @@ ipa_struct_reorg::record_struct_field_types (tree base_type,
 	  base_srtype->mark_escape (e, NULL);
 	/* Types of non-pointer field are difficult to track the correctness
 	   of the rewrite when it used by the escaped type.  */
-	if (current_mode == STRUCT_REORDER_FIELDS
+	if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
 	    && TREE_CODE (field_type) == RECORD_TYPE)
 	  base_srtype->mark_escape (escape_instance_field, NULL);
 	if (handled_type (field_type))
@@ -2895,8 +2884,7 @@ ipa_struct_reorg::record_var (tree decl, escape_type escapes, int arg)
 
       /* Separate instance is hard to trace in complete struct
 	 relayout optimization.  */
-      if ((current_mode == COMPLETE_STRUCT_RELAYOUT
-	   || current_mode == STRUCT_REORDER_FIELDS)
+      if (current_layout_opt_level >= COMPLETE_STRUCT_RELAYOUT
 	  && TREE_CODE (TREE_TYPE (decl)) == RECORD_TYPE)
 	e = escape_separate_instance;
 
@@ -3000,7 +2988,7 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	  /* Add a safe func mechanism.  */
 	  bool l_find = true;
 	  bool r_find = true;
-	  if (current_mode == STRUCT_REORDER_FIELDS)
+	  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	    {
 	      l_find = !(current_function->is_safe_func
 			 && TREE_CODE (lhs) == SSA_NAME
@@ -3046,7 +3034,7 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 		}
 	    }
 	}
-      else if ((current_mode == STRUCT_REORDER_FIELDS)
+      else if ((current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	       && (gimple_assign_rhs_code (stmt) == LE_EXPR
 		   || gimple_assign_rhs_code (stmt) == LT_EXPR
 		   || gimple_assign_rhs_code (stmt) == GE_EXPR
@@ -3057,7 +3045,7 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	  find_var (gimple_assign_rhs2 (stmt), stmt);
 	}
       /* Find void ssa_name from stmt such as: _2 = _1 - old_arcs_1.  */
-      else if ((current_mode == STRUCT_REORDER_FIELDS)
+      else if ((current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	       && gimple_assign_rhs_code (stmt) == POINTER_DIFF_EXPR
 	       && types_compatible_p (
 		  TYPE_MAIN_VARIANT (TREE_TYPE (gimple_assign_rhs1 (stmt))),
@@ -3270,8 +3258,7 @@ ipa_struct_reorg::maybe_record_stmt (cgraph_node *node, gimple *stmt)
     default:
       break;
     }
-  if (current_mode == STRUCT_REORDER_FIELDS
-      && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION)
+  if (current_layout_opt_level & DEAD_FIELD_ELIMINATION)
     {
       /* Look for loads and stores.  */
       walk_stmt_load_store_ops (stmt, this, find_field_p_load,
@@ -3427,9 +3414,11 @@ is_result_of_mult (tree arg, tree *num, tree struct_size)
 	  arg = gimple_assign_rhs1 (size_def_stmt);
 	  size_def_stmt = SSA_NAME_DEF_STMT (arg);
 	}
-      else if (rhs_code == NEGATE_EXPR && current_mode == STRUCT_REORDER_FIELDS)
+      else if (rhs_code == NEGATE_EXPR
+	       && current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	return trace_calculate_negate (size_def_stmt, num, struct_size);
-      else if (rhs_code == NOP_EXPR && current_mode == STRUCT_REORDER_FIELDS)
+      else if (rhs_code == NOP_EXPR
+	       && current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	return trace_calculate_diff (size_def_stmt, num);
       else
 	{
@@ -3447,15 +3436,15 @@ is_result_of_mult (tree arg, tree *num, tree struct_size)
 bool
 ipa_struct_reorg::handled_allocation_stmt (gimple *stmt)
 {
-  if ((current_mode == STRUCT_REORDER_FIELDS)
+  if ((current_layout_opt_level >= STRUCT_REORDER_FIELDS)
       && (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_CALLOC)))
     return true;
-  if ((current_mode == COMPLETE_STRUCT_RELAYOUT)
+  if ((current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT)
       && gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
     return true;
-  if ((current_mode == NORMAL)
+  if ((current_layout_opt_level == STRUCT_SPLIT)
       && (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_CALLOC)
@@ -3576,7 +3565,7 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other,
   /* x_1 = y.x_nodes; void *x;
      Directly mark the structure pointer type assigned
      to the void* variable as escape.  */
-  else if (current_mode == STRUCT_REORDER_FIELDS
+  else if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
 	   && TREE_CODE (side) == SSA_NAME
 	   && VOID_POINTER_P (TREE_TYPE (side))
 	   && SSA_NAME_VAR (side)
@@ -3834,7 +3823,7 @@ ipa_struct_reorg::get_type_field (tree expr, tree &base, bool &indirect,
 	 and doesn't mark escape follow.). */
       /* _1 = MEM[(struct arc_t * *)a_1].
 	 then base a_1: ssa_name  - pointer_type - integer_type.  */
-      if (current_mode == STRUCT_REORDER_FIELDS)
+      if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	{
 	  bool is_int_ptr = POINTER_TYPE_P (TREE_TYPE (base))
 			    && (TREE_CODE (inner_type (TREE_TYPE (base)))
@@ -3896,7 +3885,7 @@ ipa_struct_reorg::get_type_field (tree expr, tree &base, bool &indirect,
   /* Escape the operation of fetching field with pointer offset such as:
      *(&(t->right)) = malloc (0); -> MEM[(struct node * *)_1 + 8B] = malloc (0);
   */
-  if (current_mode != NORMAL
+  if (current_layout_opt_level > STRUCT_SPLIT
       && (TREE_CODE (expr) == MEM_REF) && (offset != 0))
     {
       gcc_assert (can_escape);
@@ -4060,7 +4049,7 @@ ipa_struct_reorg::maybe_record_call (cgraph_node *node, gcall *stmt)
 	  /* callee_func (_1, _2);
 	     Check the callee func, instead of current func.  */
 	  if (!(free_or_realloc
-		|| (current_mode == STRUCT_REORDER_FIELDS
+		|| (current_layout_opt_level >= STRUCT_REORDER_FIELDS
 		    && safe_functions.contains (
 		       node->get_edge (stmt)->callee)))
 	      && VOID_POINTER_P (argtypet))
@@ -4088,12 +4077,7 @@ ipa_struct_reorg::record_stmt_expr (tree expr, cgraph_node *node, gimple *stmt)
 		       realpart, imagpart, address, escape_from_base))
     return;
 
-  if (current_mode == STRUCT_REORDER_FIELDS)
-    {
-      if (!opt_for_fn (current_function_decl, flag_ipa_reorder_fields))
-	type->mark_escape (escape_non_optimize, stmt);
-    }
-  else
+  if (current_layout_opt_level > NONE)
     {
       if (!opt_for_fn (current_function_decl, flag_ipa_struct_reorg))
 	type->mark_escape (escape_non_optimize, stmt);
@@ -4197,7 +4181,7 @@ ipa_struct_reorg::check_type_and_push (tree newdecl, srdecl *decl,
 void
 ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type)
 {
-  if (current_mode == COMPLETE_STRUCT_RELAYOUT
+  if (current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT
       && handled_allocation_stmt (stmt))
     {
       tree arg0 = gimple_call_arg (stmt, 0);
@@ -4291,7 +4275,7 @@ ipa_struct_reorg::check_definition_call (srdecl *decl, vec<srdecl *> &worklist)
   if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC))
     check_type_and_push (gimple_call_arg (stmt, 0), decl, worklist, stmt);
 
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
       if (!handled_allocation_stmt (stmt))
 	type->mark_escape (escape_return, stmt);
@@ -4341,7 +4325,8 @@ ipa_struct_reorg::check_definition (srdecl *decl, vec<srdecl *> &worklist)
 	type->mark_escape (escape_cast_void, SSA_NAME_DEF_STMT (ssa_name));
       return;
     }
-  if (current_mode == STRUCT_REORDER_FIELDS && SSA_NAME_VAR (ssa_name)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
+      && SSA_NAME_VAR (ssa_name)
       && VOID_POINTER_P (TREE_TYPE (SSA_NAME_VAR (ssa_name))))
     type->mark_escape (escape_cast_void, SSA_NAME_DEF_STMT (ssa_name));
   gimple *stmt = SSA_NAME_DEF_STMT (ssa_name);
@@ -4425,7 +4410,7 @@ ipa_struct_reorg::check_other_side (srdecl *decl, tree other, gimple *stmt,
     {
       /* In Complete Struct Relayout, if lhs type is the same
 	 as rhs type, we could return without any harm.  */
-      if (current_mode == COMPLETE_STRUCT_RELAYOUT)
+      if (current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT)
 	return;
 
       tree base;
@@ -4437,7 +4422,7 @@ ipa_struct_reorg::check_other_side (srdecl *decl, tree other, gimple *stmt,
       if (!get_type_field (other, base, indirect, type1, field,
 			   realpart, imagpart, address, escape_from_base))
 	{
-	  if (current_mode == STRUCT_REORDER_FIELDS)
+	  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	    {
 	      /* Release INTEGER_TYPE cast to struct pointer.  */
 	      bool cast_from_int_ptr = current_function->is_safe_func && base
@@ -4487,7 +4472,8 @@ get_base (tree &base, tree expr)
 void
 ipa_struct_reorg::check_ptr_layers (tree a_expr, tree b_expr, gimple *stmt)
 {
-  if (current_mode != STRUCT_REORDER_FIELDS || current_function->is_safe_func
+  if (current_layout_opt_level < STRUCT_REORDER_FIELDS
+      || current_function->is_safe_func
       || !(POINTER_TYPE_P (TREE_TYPE (a_expr)))
       || !(POINTER_TYPE_P (TREE_TYPE (b_expr)))
       || !handled_type (TREE_TYPE (a_expr))
@@ -4554,12 +4540,9 @@ ipa_struct_reorg::check_use (srdecl *decl, gimple *stmt,
       tree rhs2 = gimple_cond_rhs (stmt);
       tree orhs = rhs1;
       enum tree_code code = gimple_cond_code (stmt);
-      if ((current_mode == NORMAL && (code != EQ_EXPR && code != NE_EXPR))
-	   || (current_mode == COMPLETE_STRUCT_RELAYOUT
-	       && (code != EQ_EXPR && code != NE_EXPR
-		   && code != LT_EXPR && code != LE_EXPR
-		   && code != GT_EXPR && code != GE_EXPR))
-	   || (current_mode == STRUCT_REORDER_FIELDS
+      if ((current_layout_opt_level == STRUCT_SPLIT
+	   && (code != EQ_EXPR && code != NE_EXPR))
+	   || (current_layout_opt_level >= COMPLETE_STRUCT_RELAYOUT
 	       && (code != EQ_EXPR && code != NE_EXPR
 		   && code != LT_EXPR && code != LE_EXPR
 		   && code != GT_EXPR && code != GE_EXPR)))
@@ -4592,15 +4575,12 @@ ipa_struct_reorg::check_use (srdecl *decl, gimple *stmt,
       tree rhs2 = gimple_assign_rhs2 (stmt);
       tree orhs = rhs1;
       enum tree_code code = gimple_assign_rhs_code (stmt);
-      if ((current_mode == NORMAL && (code != EQ_EXPR && code != NE_EXPR))
-	   || (current_mode == COMPLETE_STRUCT_RELAYOUT
+      if ((current_layout_opt_level == STRUCT_SPLIT
+	   && (code != EQ_EXPR && code != NE_EXPR))
+	   || (current_layout_opt_level >= COMPLETE_STRUCT_RELAYOUT
 	       && (code != EQ_EXPR && code != NE_EXPR
 		   && code != LT_EXPR && code != LE_EXPR
-		   && code != GT_EXPR && code != GE_EXPR))
-	   || (current_mode == STRUCT_REORDER_FIELDS
-	       && (code != EQ_EXPR && code != NE_EXPR
-		   && code != LT_EXPR && code != LE_EXPR
-		  && code != GT_EXPR && code != GE_EXPR)))
+		   && code != GT_EXPR && code != GE_EXPR)))
 	{
 	  mark_expr_escape (rhs1, escape_non_eq, stmt);
 	  mark_expr_escape (rhs2, escape_non_eq, stmt);
@@ -4722,9 +4702,9 @@ ipa_struct_reorg::record_function (cgraph_node *node)
     escapes = escape_marked_as_used;
   else if (!node->local)
     {
-      if (current_mode != STRUCT_REORDER_FIELDS)
+      if (current_layout_opt_level < STRUCT_REORDER_FIELDS)
 	escapes = escape_visible_function;
-      if (current_mode == STRUCT_REORDER_FIELDS && node->externally_visible)
+      else if (node->externally_visible)
 	escapes = escape_visible_function;
     }
   else if (!node->can_change_signature)
@@ -4732,12 +4712,7 @@ ipa_struct_reorg::record_function (cgraph_node *node)
   else if (!tree_versionable_function_p (node->decl))
     escapes = escape_noclonable_function;
 
-  if (current_mode == STRUCT_REORDER_FIELDS)
-    {
-      if (!opt_for_fn (node->decl, flag_ipa_reorder_fields))
-	escapes = escape_non_optimize;
-    }
-  else if (current_mode == NORMAL || current_mode == COMPLETE_STRUCT_RELAYOUT)
+  if (current_layout_opt_level > NONE)
     {
       if (!opt_for_fn (node->decl, flag_ipa_struct_reorg))
 	escapes = escape_non_optimize;
@@ -4747,10 +4722,10 @@ ipa_struct_reorg::record_function (cgraph_node *node)
   gimple_stmt_iterator si;
 
   /* Add a safe func mechanism.  */
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
       current_function->is_safe_func = safe_functions.contains (node);
-      if (dump_file)
+      if (dump_file  && (dump_flags & TDF_DETAILS))
 	{
 	  fprintf (dump_file, "\nfunction %s/%u: is_safe_func = %d\n",
 		   node->name (), node->order,
@@ -4958,7 +4933,7 @@ ipa_struct_reorg::record_accesses (void)
     }
 
   /* Add a safe func mechanism.  */
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     record_safe_func_with_void_ptr_parm ();
 
   FOR_EACH_FUNCTION (cnode)
@@ -5174,8 +5149,7 @@ ipa_struct_reorg::propagate_escape_via_ext_func_types (void)
 void
 ipa_struct_reorg::prune_escaped_types (void)
 {
-  if (current_mode != COMPLETE_STRUCT_RELAYOUT
-      && current_mode != STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level == STRUCT_SPLIT)
     {
       /* Detect recusive types and mark them as escaping.  */
       detect_cycles ();
@@ -5183,7 +5157,7 @@ ipa_struct_reorg::prune_escaped_types (void)
 	 mark them as escaping.  */
       propagate_escape ();
     }
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
       propagate_escape_via_original ();
       propagate_escape_via_empty_with_no_original ();
@@ -5244,7 +5218,7 @@ ipa_struct_reorg::prune_escaped_types (void)
       if (function->args.is_empty ()
 	  && function->decls.is_empty ()
 	  && function->globals.is_empty ()
-	  && current_mode != STRUCT_REORDER_FIELDS)
+	  && current_layout_opt_level < STRUCT_REORDER_FIELDS)
 	{
 	  delete function;
 	  functions.ordered_remove (i);
@@ -5272,7 +5246,7 @@ ipa_struct_reorg::prune_escaped_types (void)
   /* The escape type is not deleted in STRUCT_REORDER_FIELDS,
      Then the type that contains the escaped type fields
      can find complete information.  */
-  if (current_mode != STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level < STRUCT_REORDER_FIELDS)
     {
       for (unsigned i = 0; i < types.length ();)
 	{
@@ -5320,7 +5294,7 @@ ipa_struct_reorg::create_new_types (void)
   for (unsigned i = 0; i < types.length (); i++)
     newtypes += types[i]->create_new_type ();
 
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
       for (unsigned i = 0; i < types.length (); i++)
 	{
@@ -5444,8 +5418,7 @@ ipa_struct_reorg::create_new_args (cgraph_node *new_node)
   char *name = NULL;
   if (tname)
     {
-      name = concat (tname, current_mode == STRUCT_REORDER_FIELDS
-			    ? ".reorder.0" : ".reorg.0", NULL);
+      name = concat (tname, ".reorg.0", NULL);
       new_name = get_identifier (name);
       free (name);
     }
@@ -5532,9 +5505,7 @@ ipa_struct_reorg::create_new_functions (void)
 	}
       statistics_counter_event (NULL, "Create new function", 1);
       new_node = node->create_version_clone_with_body (
-				vNULL, NULL, NULL, NULL, NULL,
-				current_mode == STRUCT_REORDER_FIELDS
-				? "struct_reorder" : "struct_reorg");
+				vNULL, NULL, NULL, NULL, NULL, "struct_reorg");
       new_node->can_change_signature = node->can_change_signature;
       new_node->make_local ();
       f->newnode = new_node;
@@ -5661,7 +5632,7 @@ ipa_struct_reorg::rewrite_expr (tree expr,
 	newbase1 = build_fold_addr_expr (newbase1);
       if (indirect)
 	{
-	  if (current_mode == STRUCT_REORDER_FIELDS)
+	  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	    {
 	      /* Supports the MEM_REF offset.
 		 _1 = MEM[(struct arc *)ap_1 + 72B].flow;
@@ -5719,8 +5690,7 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 {
   bool remove = false;
 
-  if (current_mode == STRUCT_REORDER_FIELDS
-      && struct_layout_optimize_level >= DEAD_FIELD_ELIMINATION
+  if (current_layout_opt_level & DEAD_FIELD_ELIMINATION
       && remove_dead_field_stmt (gimple_assign_lhs (stmt)))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
@@ -5756,10 +5726,10 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
       return remove;
     }
 
-  if ((current_mode != STRUCT_REORDER_FIELDS
+  if ((current_layout_opt_level < STRUCT_REORDER_FIELDS
        && (gimple_assign_rhs_code (stmt) == EQ_EXPR
 	   || gimple_assign_rhs_code (stmt) == NE_EXPR))
-      || (current_mode == STRUCT_REORDER_FIELDS
+      || (current_layout_opt_level >= STRUCT_REORDER_FIELDS
 	  && (TREE_CODE_CLASS (gimple_assign_rhs_code (stmt))
 	      == tcc_comparison)))
     {
@@ -5769,7 +5739,7 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
       tree newrhs2[max_split];
       tree_code rhs_code = gimple_assign_rhs_code (stmt);
       tree_code code = rhs_code == EQ_EXPR ? BIT_AND_EXPR : BIT_IOR_EXPR;
-      if (current_mode == STRUCT_REORDER_FIELDS
+      if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
 	  && rhs_code != EQ_EXPR && rhs_code != NE_EXPR)
 	code = rhs_code;
 
@@ -5818,8 +5788,9 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	 _6 = _4 + _5;
 	 _5 = (long unsigned int) _3;
 	 _3 = _1 - old_2.  */
-      if (current_mode != STRUCT_REORDER_FIELDS
-	  || (current_mode == STRUCT_REORDER_FIELDS && (num != NULL)))
+      if (current_layout_opt_level < STRUCT_REORDER_FIELDS
+	  || (current_layout_opt_level >= STRUCT_REORDER_FIELDS
+	      && (num != NULL)))
 	num = gimplify_build1 (gsi, NOP_EXPR, sizetype, num);
       for (unsigned i = 0; i < max_split && newlhs[i]; i++)
 	{
@@ -5843,7 +5814,7 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
     }
 
   /* Support POINTER_DIFF_EXPR rewriting.  */
-  if (current_mode == STRUCT_REORDER_FIELDS
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
       && gimple_assign_rhs_code (stmt) == POINTER_DIFF_EXPR)
     {
       tree rhs1 = gimple_assign_rhs1 (stmt);
@@ -6026,7 +5997,8 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
   srfunction *f = find_function (node);
 
   /* Add a safe func mechanism.  */
-  if (current_mode == STRUCT_REORDER_FIELDS && f && f->is_safe_func)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
+      && f && f->is_safe_func)
     {
       tree expr = gimple_call_arg (stmt, 0);
       tree newexpr[max_split];
@@ -6152,9 +6124,9 @@ ipa_struct_reorg::rewrite_cond (gcond *stmt, gimple_stmt_iterator *gsi)
   tree_code rhs_code = gimple_cond_code (stmt);
 
   /* Handle only equals or not equals conditionals.  */
-  if ((current_mode != STRUCT_REORDER_FIELDS
+  if ((current_layout_opt_level < STRUCT_REORDER_FIELDS
        && (rhs_code != EQ_EXPR && rhs_code != NE_EXPR))
-      || (current_mode == STRUCT_REORDER_FIELDS
+      || (current_layout_opt_level >= STRUCT_REORDER_FIELDS
 	  && TREE_CODE_CLASS (rhs_code) != tcc_comparison))
     return false;
   tree lhs = gimple_cond_lhs (stmt);
@@ -6208,7 +6180,7 @@ ipa_struct_reorg::rewrite_cond (gcond *stmt, gimple_stmt_iterator *gsi)
 bool
 ipa_struct_reorg::rewrite_debug (gimple *stmt, gimple_stmt_iterator *)
 {
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     /* Delete debug gimple now.  */
     return true;
   bool remove = false;
@@ -6367,7 +6339,7 @@ ipa_struct_reorg::rewrite_functions (void)
      then don't rewrite any accesses.  */
   if (!create_new_types ())
     {
-      if (current_mode == STRUCT_REORDER_FIELDS)
+      if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	{
 	  for (unsigned i = 0; i < functions.length (); i++)
 	    {
@@ -6386,7 +6358,7 @@ ipa_struct_reorg::rewrite_functions (void)
       return 0;
     }
 
-  if (current_mode == STRUCT_REORDER_FIELDS && dump_file)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS && dump_file)
     {
       fprintf (dump_file, "=========== all created newtypes: ===========\n\n");
       dump_newtypes (dump_file);
@@ -6396,13 +6368,13 @@ ipa_struct_reorg::rewrite_functions (void)
     {
       retval = TODO_remove_functions;
       create_new_functions ();
-      if (current_mode == STRUCT_REORDER_FIELDS)
+      if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
 	{
 	  prune_escaped_types ();
 	}
     }
 
-  if (current_mode == STRUCT_REORDER_FIELDS)
+  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
       for (unsigned i = 0; i < functions.length (); i++)
 	{
@@ -6559,33 +6531,33 @@ ipa_struct_reorg::execute_struct_relayout (void)
 }
 
 unsigned int
-ipa_struct_reorg::execute (enum srmode mode)
+ipa_struct_reorg::execute (unsigned int opt)
 {
   unsigned int ret = 0;
 
   if (dump_file)
     fprintf (dump_file, "\n\n====== ipa_struct_reorg level %d ======\n\n",
-	     mode);
+	     opt);
 
-  if (mode == NORMAL || mode == STRUCT_REORDER_FIELDS)
+  if (opt != COMPLETE_STRUCT_RELAYOUT)
     {
-      current_mode = mode;
+      current_layout_opt_level = opt;
       /* If there is a top-level inline-asm,
 	 the pass immediately returns.  */
       if (symtab->first_asm_symbol ())
 	return 0;
       record_accesses ();
       prune_escaped_types ();
-      if (current_mode == NORMAL)
+      if (current_layout_opt_level == STRUCT_SPLIT)
 	analyze_types ();
 
       ret = rewrite_functions ();
     }
-  else if (mode == COMPLETE_STRUCT_RELAYOUT)
+  else
     {
       if (dump_file)
 	fprintf (dump_file, "\n\nTry Complete Struct Relayout:\n");
-      current_mode = COMPLETE_STRUCT_RELAYOUT;
+      current_layout_opt_level = COMPLETE_STRUCT_RELAYOUT;
       if (symtab->first_asm_symbol ())
 	return 0;
       record_accesses ();
@@ -6622,10 +6594,37 @@ public:
   virtual unsigned int execute (function *)
   {
     unsigned int ret = 0;
-    ret = ipa_struct_reorg ().execute (NORMAL);
-    if (!ret)
-      ret = ipa_struct_reorg ().execute (COMPLETE_STRUCT_RELAYOUT);
-    return ret;
+    unsigned int ret_reorg = 0;
+    unsigned int level = 0;
+    switch (struct_layout_optimize_level)
+      {
+	case 3: level |= DEAD_FIELD_ELIMINATION;
+	// FALLTHRU
+	case 2: level |= STRUCT_REORDER_FIELDS;
+	// FALLTHRU
+	case 1:
+	  level |= COMPLETE_STRUCT_RELAYOUT;
+	  level |= STRUCT_SPLIT;
+	  break;
+	case 0: break;
+	default: gcc_unreachable ();
+      }
+    /* Preserved for backward compatibility, reorder fields needs run before
+       struct split and complete struct relayout.  */
+    if (flag_ipa_reorder_fields && level < STRUCT_REORDER_FIELDS)
+      ret = ipa_struct_reorg ().execute (STRUCT_REORDER_FIELDS);
+
+    if (level >= STRUCT_REORDER_FIELDS)
+      ret = ipa_struct_reorg ().execute (level);
+
+    if (level >= COMPLETE_STRUCT_RELAYOUT)
+      {
+	/* Preserved for backward compatibility.  */
+	ret_reorg = ipa_struct_reorg ().execute (STRUCT_SPLIT);
+	if (!ret_reorg)
+	  ret_reorg = ipa_struct_reorg ().execute (COMPLETE_STRUCT_RELAYOUT);
+      }
+    return ret | ret_reorg;
   }
 
 }; // class pass_ipa_struct_reorg
@@ -6645,52 +6644,6 @@ pass_ipa_struct_reorg::gate (function *)
 	  && (in_lto_p || flag_whole_program));
 }
 
-const pass_data pass_data_ipa_reorder_fields =
-{
-  SIMPLE_IPA_PASS,  // type
-  "reorder_fields", // name
-  OPTGROUP_NONE,    // optinfo_flags
-  TV_IPA_REORDER_FIELDS, // tv_id
-  0, // properties_required
-  0, // properties_provided
-  0, // properties_destroyed
-  0, // todo_flags_start
-  0, // todo_flags_finish
-};
-
-class pass_ipa_reorder_fields : public simple_ipa_opt_pass
-{
-public:
-  pass_ipa_reorder_fields (gcc::context *ctxt)
-    : simple_ipa_opt_pass (pass_data_ipa_reorder_fields, ctxt)
-  {}
-
-  /* opt_pass methods: */
-  virtual bool gate (function *);
-  virtual unsigned int execute (function *)
-  {
-    unsigned int ret = 0;
-    ret = ipa_struct_reorg ().execute (STRUCT_REORDER_FIELDS);
-    return ret;
-  }
-
-}; // class pass_ipa_reorder_fields
-
-bool
-pass_ipa_reorder_fields::gate (function *)
-{
-  return (optimize >= 3
-	  && flag_ipa_reorder_fields
-	  /* Don't bother doing anything if the program has errors.  */
-	  && !seen_error ()
-	  && flag_lto_partition == LTO_PARTITION_ONE
-	  /* Only enable struct optimizations in C since other
-	     languages' grammar forbid.  */
-	  && lang_c_p ()
-	  /* Only enable struct optimizations in lto or whole_program.  */
-	  && (in_lto_p || flag_whole_program));
-}
-
 } // anon namespace
 
 
@@ -6698,10 +6651,4 @@ simple_ipa_opt_pass *
 make_pass_ipa_struct_reorg (gcc::context *ctxt)
 {
   return new pass_ipa_struct_reorg (ctxt);
-}
-
-simple_ipa_opt_pass *
-make_pass_ipa_reorder_fields (gcc::context *ctxt)
-{
-  return new pass_ipa_reorder_fields (ctxt);
 }

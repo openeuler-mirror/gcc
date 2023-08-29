@@ -105,7 +105,7 @@ protected:
   {
     /* In structure optimizatons, we call new to ensure that
        the allocated memory is initialized to 0.  */
-    if (flag_ipa_struct_reorg || flag_ipa_reorder_fields)
+    if (flag_ipa_struct_reorg)
       return is_ggc () ? new (ggc_internal_alloc (sizeof (T))) T ()
 		       : new T ();
 
@@ -122,7 +122,7 @@ protected:
       ggc_delete (item);
     else
       {
-	if (flag_ipa_struct_reorg || flag_ipa_reorder_fields)
+	if (flag_ipa_struct_reorg)
 	  delete item;
 	else
 	  m_allocator.remove (item);
