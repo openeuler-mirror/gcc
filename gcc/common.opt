@@ -2410,6 +2410,10 @@ fprofile-generate=
 Common Joined RejectNegative
 Enable common options for generating profile info for profile feedback directed optimizations, and set -fprofile-dir=.
 
+fkernel-pgo
+Common Var(flag_kernel_pgo) Optimization Init(0)
+Disable TLS setting of instrumentation variables to support PGO kernel compilation in -fprofile-generate, as kernel does not support TLS.
+
 fprofile-info-section
 Common RejectNegative
 Register the profile information in the .gcov_info section instead of using a constructor/destructor.
