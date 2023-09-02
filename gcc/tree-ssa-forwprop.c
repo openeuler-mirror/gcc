@@ -2225,6 +2225,893 @@ simplify_permutation (gimple_stmt_iterator *gsi)
   return 0;
 }
 
+/* Compare the UID of two gimple stmts for sorting in ascending order.  */
+
+static int
+gimple_uid_cmp (const void *ptr0, const void *ptr1)
+{
+  const gimple *stmt0 = *(gimple * const *) ptr0;
+  const gimple *stmt1 = *(gimple * const *) ptr1;
+
+  if (gimple_uid (stmt0) < gimple_uid (stmt1))
+    return -1;
+  else if (gimple_uid (stmt0) > gimple_uid (stmt1))
+    return 1;
+  return 0;
+}
+
+/* Find a source permutation statement in backward direction through a chain of
+   unary, single or binary operations.  In the last case only one variable
+   operand is allowed.  If it's found, return true and save the statement in
+   perm_stmts, otherwise return false.  */
+
+static bool
+find_src_perm_stmt (tree op, auto_vec<gimple *> &perm_stmts)
+{
+  gimple *stmt;
+  while ((stmt = get_prop_source_stmt (op, false, NULL)))
+    {
+      if (!can_propagate_from (stmt))
+	return false;
+
+      if (gimple_assign_rhs_code (stmt) == VEC_PERM_EXPR)
+	{
+	  perm_stmts.safe_push (stmt);
+	  return true;
+	}
+
+      /* TODO: check vector length and element size.  */
+      enum tree_code code = gimple_assign_rhs_code (stmt);
+      switch (get_gimple_rhs_class (code))
+	{
+	  case GIMPLE_TERNARY_RHS:
+	    return false;
+	  case GIMPLE_BINARY_RHS:
+	    {
+	      tree op1 = gimple_assign_rhs1 (stmt);
+	      tree op2 = gimple_assign_rhs2 (stmt);
+	      bool is_cst_op1 = is_gimple_constant (op1);
+	      bool is_cst_op2 = is_gimple_constant (op2);
+	      if ((is_cst_op1 && is_cst_op2) || (!is_cst_op1 && !is_cst_op2))
+		return false;
+	      op = !is_cst_op1 && is_cst_op2 ? op1 : op2;
+	      break;
+	    }
+	  case GIMPLE_UNARY_RHS:
+	  case GIMPLE_SINGLE_RHS:
+	    op = gimple_assign_rhs1 (stmt);
+	    break;
+	  default:
+	    gcc_unreachable ();
+	}
+      if (TREE_CODE (op) != SSA_NAME)
+	return false;
+    }
+  return false;
+}
+
+/* Check the stmt is binary operation and find initial permutations for both
+   of its sources.  */
+
+static bool
+find_initial_permutations (gimple_stmt_iterator *gsi, tree &type,
+			   auto_vec<gimple *> &perm_stmts)
+{
+  gimple *stmt = gsi_stmt (*gsi);
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+
+  // TODO: support other initial binary operations.
+  gcc_checking_assert (code == PLUS_EXPR || code == MINUS_EXPR);
+
+  type = TREE_TYPE (gimple_assign_lhs (stmt));
+  if (!VECTOR_TYPE_P (type))
+    return false;
+  tree op1 = gimple_assign_rhs1 (stmt);
+  tree op2 = gimple_assign_rhs2 (stmt);
+  if (TREE_CODE (op1) != SSA_NAME || TREE_CODE (op2) != SSA_NAME
+      || TREE_TYPE (op1) != type || TREE_TYPE (op2) != type || op1 == op2)
+    return false;
+
+  if (find_src_perm_stmt (op1, perm_stmts)
+      && find_src_perm_stmt (op2, perm_stmts))
+    return true;
+  return false;
+}
+
+/* Check if the permutation statement is suitable for the transformation.  */
+
+static bool
+check_perm_stmt (gimple *stmt, tree type, vec<gimple *> *perm_stmts,
+		 vec<tree> *src_vects)
+{
+  if (!stmt || !can_propagate_from (stmt))
+    return false;
+
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+  if (code != VEC_PERM_EXPR)
+    return false;
+
+  tree op3 = gimple_assign_rhs3 (stmt);
+  tree op1 = gimple_assign_rhs1 (stmt);
+  tree op2 = gimple_assign_rhs2 (stmt);
+  if (TREE_CODE (op1) != SSA_NAME || TREE_CODE (op2) != SSA_NAME
+      || TREE_CODE (op3) != VECTOR_CST)
+    return false;
+  if (type != NULL_TREE && (TREE_TYPE (op1) != type
+			    || TREE_TYPE (op2) != type))
+    return false;
+  if (perm_stmts)
+    perm_stmts->safe_push (stmt);
+  if (src_vects)
+    {
+      src_vects->safe_push (op1);
+      src_vects->safe_push (op2);
+    }
+  return true;
+}
+
+/* Collect permutation stmts preceding the given stmt.  */
+
+static bool
+find_perm_set (gimple *stmt, tree type, vec<gimple *> &perm_stmts,
+	       vec<tree> &src_vects)
+{
+  auto_vec<tree> ops;
+  if (!check_perm_stmt (stmt, NULL, NULL, &ops))
+    return false;
+
+  unsigned i;
+  tree op;
+  bool single_use_op = false;
+  FOR_EACH_VEC_ELT (ops, i, op)
+    {
+      /* Skip if we already processed the same operand.  */
+      if (i > 0 && ops[i] == ops[i - 1])
+	continue;
+      /* Find one permutation stmt. */
+      gimple *def_stmt = get_prop_source_stmt (op, false, &single_use_op);
+      if (!check_perm_stmt (def_stmt, type, &perm_stmts, &src_vects))
+	return false;
+      if (single_use_op || src_vects.length () <= 1)
+	return false;
+      unsigned last_i = src_vects.length () - 1;
+      unsigned before_last_i = src_vects.length () - 2;
+
+      /* Find one more permutation stmt.  */
+      gimple *use_stmt;
+      imm_use_iterator iter;
+      FOR_EACH_IMM_USE_STMT (use_stmt, iter, src_vects[before_last_i])
+	if (use_stmt != def_stmt)
+	  BREAK_FROM_IMM_USE_STMT (iter);
+      if (!use_stmt || use_stmt == def_stmt
+	  || gimple_assign_rhs_code (use_stmt) != VEC_PERM_EXPR
+	  || src_vects[before_last_i] != gimple_assign_rhs1 (use_stmt)
+	  || src_vects[last_i] != gimple_assign_rhs2 (use_stmt))
+	return false;
+      perm_stmts.safe_push (use_stmt);
+    }
+  return true;
+}
+
+/* Walk permutation pattern and make a vector of permutation indices.  */
+
+static bool
+make_vec_of_indices (vec<tree> &perm_pattern, vec<unsigned> &perm_indices)
+{
+  unsigned i, j;
+  tree tree_it;
+  FOR_EACH_VEC_ELT (perm_pattern, i, tree_it)
+    {
+      unsigned HOST_WIDE_INT nelts;
+      if (!VECTOR_CST_NELTS (tree_it).is_constant (&nelts))
+	return false;
+      for (j = 0; j < nelts; j++)
+	{
+	  tree val = VECTOR_CST_ELT (tree_it, j);
+	  gcc_checking_assert (TREE_CODE (val) == INTEGER_CST);
+	  perm_indices.safe_push (TREE_INT_CST_LOW (val));
+	}
+    }
+  return true;
+}
+
+/* Check or collect a permutation pattern in the provided perm_stmts depending
+   on the passed parameters.  If collect_pattern is true, collect permutation
+   vectors to pattern.  In other case, check the pattern suits perm_stmts.  */
+
+static bool
+check_or_collect_perm_pattern (vec<gimple *> &perm_stmts, vec<tree> &pattern,
+			       bool collect_pattern)
+{
+  unsigned i, j;
+  gimple *stmt_it;
+  tree tree_it;
+  FOR_EACH_VEC_ELT (perm_stmts, i, stmt_it)
+    {
+      gcc_assert (gimple_assign_rhs_code (stmt_it) == VEC_PERM_EXPR);
+      tree perm_vec = gimple_assign_rhs3 (stmt_it);
+      bool found = false;
+      FOR_EACH_VEC_ELT (pattern, j, tree_it)
+	if (operand_equal_p (tree_it, perm_vec))
+	  {
+	    found = true;
+	    break;
+	  }
+      if (collect_pattern && !found)
+	pattern.safe_push (perm_vec);
+      else
+	gcc_assert (found);
+      if (i % pattern.length () != j)
+	return false;
+    }
+  return true;
+}
+
+/* Identify the permutation pattern and check it.  For now, we are checking
+   only transposition permutations with no more than 2 lines in their patterns.
+   Collect permutation const vectors and the second permutation stmts.  */
+
+static bool
+check_perm_pattern (vec<gimple *> &first_perm_stmts, vec<tree> &perm_pattern,
+		    vec<gimple *> &second_perm_stmts)
+{
+  unsigned i, j;
+  gimple *stmt_it;
+  if (!check_or_collect_perm_pattern (first_perm_stmts, perm_pattern, true))
+    return false;
+
+  if (perm_pattern.length () == 0 || perm_pattern.length ()  > 2)
+    return false;
+
+  /* Find the second permutation stmts.  */
+  hash_set<gimple *> visited;
+  FOR_EACH_VEC_ELT (first_perm_stmts, i, stmt_it)
+    {
+      tree dst = gimple_assign_lhs (stmt_it);
+      use_operand_p use_p;
+      imm_use_iterator iter;
+      FOR_EACH_IMM_USE_FAST (use_p, iter, dst)
+	{
+	  gimple *stmt_it2 = USE_STMT (use_p);
+	  if (visited.contains (stmt_it2))
+	    continue;
+	  second_perm_stmts.safe_push (stmt_it2);
+	  visited.add (stmt_it2);
+	}
+    }
+  second_perm_stmts.qsort (gimple_uid_cmp);
+
+  if (first_perm_stmts.length () != second_perm_stmts.length ())
+    return false;
+
+  /* Check that all second_perm_stmts are VEC_PERM_EXPR.  */
+  FOR_EACH_VEC_ELT (second_perm_stmts, i, stmt_it)
+    if (gimple_assign_rhs_code (stmt_it) != VEC_PERM_EXPR)
+      return false;
+
+  /* Check permutation pattern on the second permutation stmts.  */
+  if (!check_or_collect_perm_pattern (second_perm_stmts, perm_pattern, false))
+    return false;
+
+  /* Check values of permutation indices.  */
+  auto_vec<unsigned> perm_indices (vector_cst_encoded_nelts (perm_pattern[0])
+				   * perm_pattern.length ());
+  if (!make_vec_of_indices (perm_pattern, perm_indices))
+    return false;
+
+  unsigned val, half_len = perm_indices.length () / 2;
+  FOR_EACH_VEC_ELT (perm_indices, j, val)
+    if (val != (j % 2 ? half_len + j / 2 : j / 2))
+      return false;
+
+  /* Check the correspondence of defs in first_perm_stmts and uses in
+     second_perm_stmts.  */
+  tree type1 = TREE_TYPE (gimple_assign_lhs (first_perm_stmts[0]));
+  tree type2 = TREE_TYPE (gimple_assign_lhs (second_perm_stmts[0]));
+  if (type1 != type2)
+    return false;
+
+  unsigned HOST_WIDE_INT len = TYPE_VECTOR_SUBPARTS (type1).to_constant ();
+  FOR_EACH_VEC_ELT (second_perm_stmts, i, stmt_it)
+    {
+      /* Vectors of first/second perm stmts consist of blocks, each block
+	 transposes its own set of input vectors.  J corresponds to the number
+	 of such block in the vector.  */
+      unsigned j = (i / len) * len;
+      gimple *src_stmt1 = first_perm_stmts[j + (i - j) / 2];
+      gimple *src_stmt2 = first_perm_stmts[j + (i - j) / 2 + len / 2];
+      if (gimple_assign_rhs1 (stmt_it) != gimple_assign_lhs (src_stmt1)
+	  || gimple_assign_rhs2 (stmt_it) != gimple_assign_lhs (src_stmt2))
+	return false;
+    }
+  return true;
+}
+
+/* For the given vector of stmts find all immediate def or use stmts.
+   It uses SSA and don't go trough loads/stores.  */
+
+static bool
+find_next_stmts (auto_vec<gimple *> &stmts, auto_vec<gimple *> &next_stmts,
+		 bool is_forward, bool skip_perms)
+{
+  unsigned i;
+  gimple *stmt_it;
+  hash_set<gimple *> new_stmt_set;
+  FOR_EACH_VEC_ELT (stmts, i, stmt_it)
+    {
+      if (is_forward)
+	{
+	  tree lhs = gimple_assign_lhs (stmt_it);
+	  if (!lhs || TREE_CODE (lhs) != SSA_NAME)
+	    continue;
+	  imm_use_iterator iter;
+	  gimple *use_stmt;
+	  FOR_EACH_IMM_USE_STMT (use_stmt, iter, lhs)
+	    if (!new_stmt_set.contains (use_stmt))
+	      {
+		new_stmt_set.add (use_stmt);
+		if (!skip_perms
+		    || gimple_assign_rhs_code (use_stmt) != VEC_PERM_EXPR)
+		  next_stmts.safe_push (use_stmt);
+	      }
+	}
+      else
+	{
+	  tree rhs;
+	  auto_vec<tree> rhs_vec (3);
+	  if ((rhs = gimple_assign_rhs1 (stmt_it)))
+	    rhs_vec.quick_push (rhs);
+	  if ((rhs = gimple_assign_rhs2 (stmt_it)))
+	    rhs_vec.quick_push (rhs);
+	  if ((rhs = gimple_assign_rhs3 (stmt_it)))
+	    rhs_vec.quick_push (rhs);
+	  unsigned j;
+	  FOR_EACH_VEC_ELT (rhs_vec, j, rhs)
+	    {
+	      if (TREE_CODE (rhs) == VIEW_CONVERT_EXPR)
+		rhs = TREE_OPERAND (rhs, 0);
+	      if (TREE_CODE (rhs) != SSA_NAME)
+		continue;
+	      gimple *def_stmt = get_prop_source_stmt (rhs, false, NULL);
+	      if (!def_stmt)
+		return false;
+	      if (new_stmt_set.contains (def_stmt))
+		continue;
+	      new_stmt_set.add (def_stmt);
+	      if (!skip_perms
+		  || gimple_assign_rhs_code (def_stmt) != VEC_PERM_EXPR)
+		next_stmts.safe_push (def_stmt);
+	    }
+	}
+    }
+  return true;
+}
+
+/* Check if stmts in the vector have similar code and type.  Process only
+   assign stmts.  */
+
+static bool
+check_stmts_similarity (auto_vec<gimple *> &stmts, enum tree_code &code)
+{
+  code = NOP_EXPR;
+  tree type = NULL_TREE;
+  unsigned i;
+  gimple *stmt_it;
+  FOR_EACH_VEC_ELT (stmts, i, stmt_it)
+    {
+      if (!is_gimple_assign (stmt_it))
+	return false;
+      tree lhs = gimple_assign_lhs (stmt_it);
+      enum tree_code code2 = gimple_assign_rhs_code (stmt_it);
+      if (type != NULL_TREE)
+	{
+	  /* Unpack lo/hi are the same for the analysis.  */
+	  if (((code2 != VEC_UNPACK_LO_EXPR && code2 != VEC_UNPACK_HI_EXPR)
+	       || (code != VEC_UNPACK_LO_EXPR && code != VEC_UNPACK_HI_EXPR))
+	      && (!lhs || type != TREE_TYPE (lhs)
+		  || (code != NOP_EXPR && code != code2)))
+	    return false;
+	}
+      else if (lhs)
+	type = TREE_TYPE (lhs);
+      if (code == NOP_EXPR)
+	code = code2;
+    }
+  return true;
+}
+
+/* Check that the order of definitions of first_stmts and uses of second_stmts
+   is the same.  */
+
+static bool
+check_def_use_order (vec<gimple *> &first_stmts, vec<gimple *> &second_stmts)
+{
+  first_stmts.qsort (gimple_uid_cmp);
+  second_stmts.qsort (gimple_uid_cmp);
+  unsigned len1 = first_stmts.length ();
+  unsigned len2 = second_stmts.length ();
+
+  /* Skip if one of the blocks is empty or the second block is permutaions.  */
+  if (!len1 || !len2
+      || gimple_assign_rhs_code (second_stmts[0]) == VEC_PERM_EXPR)
+    return true;
+
+  unsigned i;
+  gimple *stmt_it;
+  FOR_EACH_VEC_ELT (first_stmts, i, stmt_it)
+    {
+      tree op = gimple_assign_lhs (stmt_it);
+      imm_use_iterator iter;
+      gimple *stmt;
+      FOR_EACH_IMM_USE_STMT (stmt, iter, op)
+	{
+	  if ((len1 == len2 && stmt != second_stmts[i])
+	      || (len1 == len2 * 2 && stmt != second_stmts[i % len2]))
+	    RETURN_FROM_IMM_USE_STMT (iter, false);
+	  enum tree_code code = gimple_assign_rhs_code (stmt);
+	  if ((len1 * 2 == len2)
+	      && ((code == VEC_UNPACK_LO_EXPR && stmt != second_stmts[2 * i])
+		  || (code == VEC_UNPACK_HI_EXPR
+		      && stmt != second_stmts[2 * i + 1])))
+	    RETURN_FROM_IMM_USE_STMT (iter, false);
+	}
+    }
+  return true;
+}
+
+/* Check similarity of stmts in the block of arithmetic operations.  */
+
+static bool
+check_arithmetic_block (vec<gimple *> &initial_perm_stmts, unsigned nstmts)
+{
+  auto_vec<gimple *> next_stmts (nstmts);
+  auto_vec<gimple *> prev_stmts (nstmts);
+
+  enum tree_code code;
+  unsigned i;
+  gimple *stmt_it;
+  FOR_EACH_VEC_ELT (initial_perm_stmts, i, stmt_it)
+    prev_stmts.quick_push (stmt_it);
+
+  do
+    {
+      next_stmts.block_remove (0, next_stmts.length ());
+      if (!find_next_stmts (prev_stmts, next_stmts, false, true))
+	return false;
+
+      /* Check that types and codes of all stmts in the list are the same.  */
+      if (!check_stmts_similarity (next_stmts, code))
+	return false;
+      /* Check that the order of all operands is the same.  */
+      if (!check_def_use_order (next_stmts, prev_stmts))
+	return false;
+      prev_stmts.block_remove (0, prev_stmts.length ());
+
+      FOR_EACH_VEC_ELT (next_stmts, i, stmt_it)
+	prev_stmts.safe_push (stmt_it);
+    }
+  while (code != NOP_EXPR);
+
+  return true;
+}
+
+/* Find two blocks of permutations on two sets of input vectors which are
+   used in the same vectorized arithmetic operations after the permutaion:
+	Va1...VaN = PERM{P1} (Sa1...SaN)
+	Vb1...VbN = PERM{P1} (Sb1...SbN)
+	Vc1...VcN = binops (Va1...VaN, Vb1...VbN)
+   The goal of the transformation is to execute the block of permutations
+   only once on the result of the arithmetic operations:
+	Va1...VaN = binops (Sa1...SaN, Sb1...SbN)
+	Vc1...VcN = PERM{P1} (Va1...VaN)
+
+   Currently the analysis looks for transposition permutations that consist
+   of two layers of statements e.g.:
+	Vt1 = PERM { 0, 4, 1, 5 } Sa1, Sa2	// the first
+	Vt2 = PERM { 2, 6, 3, 7 } Sa1, Sa2
+	Vt3 = PERM { 0, 4, 1, 5 } Sa3, Sa4
+	Vt4 = PERM { 2, 6, 3, 7 } Sa3, Sa4
+	Va1 = PERM { 0, 4, 1, 5 } Vt1, Vt3	// the second
+	Va2 = PERM { 2, 6, 3, 7 } Vt1, Vt3
+	Va3 = PERM { 0, 4, 1, 5 } Vt2, Vt4
+	Va4 = PERM { 2, 6, 3, 7 } Vt2, Vt4
+   Permutation stmts are collected in first_perm_stmts and second_perm_stmts
+   vectors correspondinglys.
+
+   Arithmetic operations may contain several stmts for one pair of input source
+   vectors e.g.:
+	Vtmp1 = unop (Va1)
+	Vtmp2 = binop (Vb1, const)
+	Vc1 = binop (Vtmp1, Vtmp2)
+   The last stmts of each sequence in the arithmetic block are collected
+   in final_arith_stmts.  */
+
+static bool
+analyze_perm_fwprop (tree type, unsigned HOST_WIDE_INT nelts,
+		     vec<gimple *> &stmts, auto_vec<tree> &src_vects,
+		     auto_vec<tree> &perm_pattern,
+		     auto_vec<gimple *> &final_arith_stmts,
+		     auto_vec<gimple *> &second_perm_stmts)
+{
+  gcc_checking_assert (stmts.length () == 2);
+  auto_vec<gimple *> first_perm_stmts (nelts * 2);
+  if (!find_perm_set (stmts[0], type, first_perm_stmts, src_vects)
+      || !find_perm_set (stmts[1], type, first_perm_stmts, src_vects))
+    return false;
+  first_perm_stmts.qsort (gimple_uid_cmp);
+
+  /* Determine permutation pattern.  */
+  if (!check_perm_pattern (first_perm_stmts, perm_pattern, second_perm_stmts))
+    return false;
+
+  /* Find all arithmetic stmts.  */
+  unsigned i;
+  gimple *stmt_it;
+  auto_vec<gimple *> all_arith_stmts (nelts * 2);
+  hash_set<gimple *> visited;
+  FOR_EACH_VEC_ELT (second_perm_stmts, i, stmt_it)
+    {
+      tree dst = gimple_assign_lhs (stmt_it);
+      use_operand_p use_p;
+      gimple *use_stmt;
+      if (!single_imm_use (dst, &use_p, &use_stmt))
+	return false;
+      all_arith_stmts.quick_push (use_stmt);
+      visited.add (use_stmt);
+    }
+
+  /* Select final arithmetic stmts.  */
+  FOR_EACH_VEC_ELT (all_arith_stmts, i, stmt_it)
+    {
+      tree dst = gimple_assign_lhs (stmt_it);
+      use_operand_p use_p;
+      imm_use_iterator iter;
+      bool use_only_outside_arith_stmts = true;
+      FOR_EACH_IMM_USE_FAST (use_p, iter, dst)
+	if (visited.contains (USE_STMT (use_p)))
+	  {
+	    use_only_outside_arith_stmts = false;
+	    break;
+	  }
+      if (use_only_outside_arith_stmts)
+	final_arith_stmts.quick_push (stmt_it);
+    }
+
+  /* Check that all results has the same arithmetic patterns.  */
+  if (!check_arithmetic_block (final_arith_stmts, nelts))
+    return false;
+
+  if (final_arith_stmts.length () < nelts)
+    return false;
+  return true;
+}
+
+/* Substitute uses of stmts' results by new_uses.  */
+
+static void
+substitute_uses (vec<gimple *> &stmts, vec<tree> &new_uses)
+{
+  gcc_checking_assert (stmts.length () == new_uses.length ());
+  unsigned i;
+  gimple *stmt_it;
+  FOR_EACH_VEC_ELT (stmts, i, stmt_it)
+    {
+      tree op = gimple_assign_lhs (stmt_it);
+      imm_use_iterator iter;
+      gimple *use_stmt;
+      FOR_EACH_IMM_USE_STMT (use_stmt, iter, op)
+	{
+	  use_operand_p use_p;
+	  FOR_EACH_IMM_USE_ON_STMT (use_p, iter)
+	    SET_USE (use_p, new_uses[i]);
+	  update_stmt (use_stmt);
+	}
+    }
+}
+
+/* Propagate permutations through the block of arithmetic operations.  */
+
+static void
+fwprop_perms (tree type, auto_vec<tree> &src_vects,
+	      auto_vec<tree> &perm_pattern,
+	      auto_vec<gimple *> &final_arith_stmts,
+	      auto_vec<gimple *> &second_perm_stmts)
+{
+  /* Build new permutation stmts after the block of arithmetic stmts.  */
+  gimple_seq new_stmts = NULL;
+  unsigned perm_block_size = final_arith_stmts.length ();
+  auto_vec<tree> new_first_perm_vals (perm_block_size);
+  hash_set<gimple *> new_stmts_set;
+  unsigned i, perm_pattern_size = perm_pattern.length ();
+  for (i = 0; i < perm_block_size; i++)
+    {
+      tree op0 = gimple_assign_lhs (final_arith_stmts[i / 2]);
+      unsigned idx = i / 2 + perm_block_size / 2;
+      tree op1 = gimple_assign_lhs (final_arith_stmts[idx]);
+      tree res = gimple_build (&new_stmts, VEC_PERM_EXPR, type, op0, op1,
+			       perm_pattern[i % perm_pattern_size]);
+      new_first_perm_vals.quick_push (res);
+      new_stmts_set.add (gimple_seq_last (new_stmts));
+    }
+  auto_vec<tree> new_second_perm_vals (perm_block_size);
+  for (i = 0; i < perm_block_size; i++)
+    {
+      tree op0 = new_first_perm_vals[i / 2];
+      tree op1 = new_first_perm_vals[i / 2 + perm_block_size/ 2];
+      tree res = gimple_build (&new_stmts, VEC_PERM_EXPR, type, op0, op1,
+			       perm_pattern[i % perm_pattern_size]);
+      new_second_perm_vals.quick_push (res);
+      new_stmts_set.add (gimple_seq_last (new_stmts));
+    }
+
+  gimple_stmt_iterator g = gsi_for_stmt (final_arith_stmts.last ());
+  gsi_insert_seq_after (&g, new_stmts, GSI_SAME_STMT);
+
+  /* Replace old uses of the arithmetic block results by destinations of
+     the new permutation block.  */
+  gimple *stmt_it;
+  FOR_EACH_VEC_ELT (final_arith_stmts, i, stmt_it)
+    {
+      tree op0 = gimple_assign_lhs (final_arith_stmts[i]);
+      imm_use_iterator iter;
+      gimple *use_stmt;
+      use_operand_p use_p;
+      FOR_EACH_IMM_USE_STMT (use_stmt, iter, op0)
+	{
+	  if (new_stmts_set.contains (use_stmt))
+	    continue;
+	  FOR_EACH_IMM_USE_ON_STMT (use_p, iter)
+	    SET_USE (use_p, new_second_perm_vals[i]);
+	  update_stmt (use_stmt);
+	}
+    }
+
+  /* Disconnect the old permutation stmts.  */
+  substitute_uses (second_perm_stmts, src_vects);
+}
+
+/* Find the permutation stmts in the forward or backward direction (in terms of
+   def/use graph) starting from the vector of initial stmts.  Count reduction
+   stmts (i.e. binary operations) if they can change the number of processed
+   elements.  */
+
+static bool
+find_perm_stmts (vec<gimple *> &initial_stmts, unsigned nstmts,
+		 vec<gimple *> &final_perm_stmts, bool is_forward,
+		 unsigned &nreduct)
+{
+  auto_vec<gimple *> next_stmts (nstmts);
+  auto_vec<gimple *> prev_stmts (nstmts);
+
+  nreduct = 0;
+  enum tree_code code;
+  unsigned i;
+  gimple *stmt_it;
+  FOR_EACH_VEC_ELT (initial_stmts, i, stmt_it)
+    prev_stmts.quick_push (stmt_it);
+
+  do
+    {
+      next_stmts.block_remove (0, next_stmts.length ());
+      if (!find_next_stmts (prev_stmts, next_stmts, is_forward, false))
+	return false;
+
+      /* Check that types and codes of all stmts in the list are the same.  */
+      if (!check_stmts_similarity (next_stmts, code))
+	return false;
+
+      /* TODO: don't take into account binary operations with constants.  */
+      if (TREE_CODE_CLASS (code) == tcc_binary)
+	nreduct += 1;
+
+      if (is_forward ? !check_def_use_order (prev_stmts, next_stmts)
+		     : !check_def_use_order (next_stmts, prev_stmts))
+	return false;
+
+      prev_stmts.block_remove (0, prev_stmts.length ());
+
+      FOR_EACH_VEC_ELT (next_stmts, i, stmt_it)
+	prev_stmts.safe_push (stmt_it);
+    }
+  while (code != NOP_EXPR && code != VEC_PERM_EXPR);
+
+  if (code != VEC_PERM_EXPR)
+    return false;
+
+  FOR_EACH_VEC_ELT (next_stmts, i, stmt_it)
+    final_perm_stmts.safe_push (stmt_it);
+  final_perm_stmts.qsort (gimple_uid_cmp);
+  return true;
+}
+
+/* Check if the initial and the final permutations can be optimized i.e.
+   the initial permutation can be removed with the modification of
+   the final one.  */
+
+static bool
+can_reduce_permutations (unsigned init_nelts, vec<tree> &perm_pattern,
+			 vec<gimple *> &init_perm_stmts)
+{
+  auto_vec<unsigned> perm_indices (init_nelts);
+  if (!make_vec_of_indices (perm_pattern, perm_indices))
+    return false;
+  unsigned i, j;
+  gimple *stmt_it;
+  unsigned perm_vec_size = perm_indices.length ();
+  FOR_EACH_VEC_ELT (init_perm_stmts, i, stmt_it)
+    {
+      gcc_assert (gimple_assign_rhs_code (stmt_it) == VEC_PERM_EXPR);
+      tree perm_vec2 = gimple_assign_rhs3 (stmt_it);
+      unsigned HOST_WIDE_INT mask_elts;
+      if (!VECTOR_CST_NELTS (perm_vec2).is_constant (&mask_elts))
+	return false;
+      for (j = 0; j < mask_elts; j++)
+	{
+	  tree val = VECTOR_CST_ELT (perm_vec2, j);
+	  gcc_assert (TREE_CODE (val) == INTEGER_CST);
+	  unsigned HOST_WIDE_INT int_val = TREE_INT_CST_LOW (val);
+	  if (int_val != perm_indices[j % perm_vec_size]
+			 + (j / perm_vec_size) * perm_vec_size)
+	    return false;
+	}
+    }
+  return true;
+}
+
+/* Find permutation blocks before and after arithmetic operations and decide
+   if the number of permutations can be reduced, e.g:
+	Va1...VaN = PERM{P1} (Sa1...SaN)
+	Vb1...VbM = some operations (Va1...VaN)
+	Vb1...VbM = PERM{P2} (Sb1...SbM)
+   can be transformed to:
+	Vb1...VbM = some operations (Va1...VaN)
+	Vb1...VbM = PERM{P3} (Sb1...SbM)
+
+   Currently it supports initial permutations like this:
+	Va1 = PERM { 0, 4, 1, 5, 2, 6, 3, 7, 8, 12, 9, 13, 10, 14, 11, 15} Sa1
+   and transposition permutations with two layers of permutation stmts as
+   final permutaions.
+
+   Operations between permutations can include unary and binary arithmetic,
+   element conversions and vector packing/unpacking.  */
+
+static bool
+analyze_perm_reduction (unsigned HOST_WIDE_INT nelts,
+			vec<gimple *> &perm_stmts,
+			vec<gimple *> &init_perm_stmts,
+			vec<gimple *> &second_perm_stmts)
+{
+  auto_vec<gimple *> first_perm_stmts (nelts * 2);
+  if (!check_perm_stmt (perm_stmts[0], NULL_TREE, &first_perm_stmts, NULL)
+      || !check_perm_stmt (perm_stmts[1], NULL_TREE, &first_perm_stmts, NULL))
+    return false;
+
+  unsigned nreduct;
+  auto_vec<gimple *> final_perm_stmts (nelts * 2);
+  if (!find_perm_stmts (first_perm_stmts, nelts, final_perm_stmts, true,
+			nreduct))
+    return false;
+
+  if (!find_perm_stmts (final_perm_stmts, nelts, init_perm_stmts, false,
+			nreduct))
+    return false;
+
+  /* Check number of elemetns in the inital and final data block.  */
+  tree init_elem_type = TREE_TYPE (gimple_assign_lhs (init_perm_stmts[0]));
+  unsigned init_nelts = TYPE_VECTOR_SUBPARTS (init_elem_type).to_constant ()
+			* init_perm_stmts.length ();
+  tree final_elem_type = TREE_TYPE (gimple_assign_lhs (final_perm_stmts[0]));
+  unsigned final_nelts = TYPE_VECTOR_SUBPARTS (final_elem_type).to_constant ()
+			 * final_perm_stmts.length ();
+  if (init_nelts != final_nelts * (1 + nreduct))
+    return false;
+
+  /* Check the final permutations and detect its pattern.  */
+  auto_vec<tree> perm_pattern (nelts);
+  if (!check_perm_pattern (final_perm_stmts, perm_pattern, second_perm_stmts))
+    return false;
+
+  return can_reduce_permutations (init_nelts, perm_pattern, init_perm_stmts);
+}
+
+/* Do the optimization: skip the initial permutation and change the order
+   of destinations after the second layer of permutation statements in
+   the final permutation block.  */
+
+static void
+reduce_perms (vec<gimple *> &init_perm_stmts, vec<gimple *> &second_perm_stmts)
+{
+  unsigned i;
+  gimple *stmt_it;
+  auto_vec<tree> new_srcs (init_perm_stmts.length ());
+  FOR_EACH_VEC_ELT (init_perm_stmts, i, stmt_it)
+    new_srcs.quick_push (gimple_assign_rhs1 (stmt_it));
+  substitute_uses (init_perm_stmts, new_srcs);
+
+  unsigned half = second_perm_stmts.length () / 2;
+  auto_vec<tree> new_dsts (second_perm_stmts.length ());
+  FOR_EACH_VEC_ELT (second_perm_stmts, i, stmt_it)
+    {
+      unsigned idx = i < half ? i << 1 : ((i - half) << 1) + 1;
+      new_dsts.quick_push (gimple_assign_lhs (second_perm_stmts[idx]));
+    }
+
+  FOR_EACH_VEC_ELT (second_perm_stmts, i, stmt_it)
+    {
+      gimple_assign_set_lhs (stmt_it, new_dsts[i]);
+      update_stmt (stmt_it);
+    }
+}
+
+/* Optimize permutations in the following two cases:
+   1. Recognize the same permutations of two sets of vectors with subsequent
+      binary arithmetic operations on them:
+	V1 = PERM{1} (S1);
+	V2 = PERM{1} (S2);
+	V3 = V1 binop V2;
+      then move the permutation after the operations:
+	V0 = S1 binop S2;
+	V3 = PERM{1} V0;
+   2. Detect the first permutation before some operations on a set of vectors
+      and the second one after the operations:
+	V1 = PERM{1} (S1)
+	V2 = set of operations (V1)
+	V3 = PERM{2} (V2)
+      try to reduce them:
+	V2 = set of operations (S1)
+	V3 = PERM{3} (V2)
+   Return true if the optimization is successful.  */
+
+static bool
+propagate_permutations (gimple_stmt_iterator *gsi)
+{
+  tree type;
+  auto_vec<gimple *> perm_stmts (2);
+
+  if (!find_initial_permutations (gsi, type, perm_stmts))
+    return false;
+
+  unsigned HOST_WIDE_INT nelts = TYPE_VECTOR_SUBPARTS (type).to_constant ();
+  auto_vec<gimple *> final_arith_stmts (nelts * 2);
+  auto_vec<gimple *> second_perm_stmts (nelts * 2);
+  auto_vec<tree> src_vects (nelts * 2);
+  auto_vec<tree> perm_pattern (nelts);
+  if (analyze_perm_fwprop (type, nelts, perm_stmts, src_vects, perm_pattern,
+			   final_arith_stmts, second_perm_stmts))
+    {
+      fwprop_perms (type, src_vects, perm_pattern, final_arith_stmts,
+		    second_perm_stmts);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  unsigned i;
+	  gimple *stmt_it;
+	  fprintf (dump_file, "Permutations were moved through "
+			      "binary operations:\n");
+	  FOR_EACH_VEC_ELT (second_perm_stmts, i, stmt_it)
+	    print_gimple_stmt (dump_file, stmt_it, 0);
+	}
+      return true;
+    }
+
+  auto_vec<gimple *> init_perm_stmts (nelts * 2);
+  auto_vec<gimple *> final_perm_stmts (nelts * 2);
+  if (analyze_perm_reduction (nelts, perm_stmts, init_perm_stmts,
+			      final_perm_stmts))
+    {
+      reduce_perms (init_perm_stmts, final_perm_stmts);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  unsigned i;
+	  gimple *stmt_it;
+	  fprintf (dump_file, "Initial permutations were reduced:\n");
+	  FOR_EACH_VEC_ELT (init_perm_stmts, i, stmt_it)
+	    print_gimple_stmt (dump_file, stmt_it, 0);
+	}
+      return true;
+    }
+  return false;
+}
+
 /* Get the BIT_FIELD_REF definition of VAL, if any, looking through
    conversions with code CONV_CODE or update it if still ERROR_MARK.
    Return NULL_TREE if no such matching def was found.  */
@@ -3154,6 +4041,10 @@ pass_forwprop::execute (function *fun)
 			      || code == BIT_IOR_EXPR
 			      || code == BIT_XOR_EXPR)
 			     && simplify_rotate (&gsi))
+		      changed = true;
+		    else if ((code == PLUS_EXPR || code == MINUS_EXPR)
+			     && param_tree_forwprop_perm
+			     && propagate_permutations (&gsi))
 		      changed = true;
 		    else if (code == VEC_PERM_EXPR)
 		      {
