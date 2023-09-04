@@ -1230,6 +1230,10 @@ fcompare-elim
 Common Var(flag_compare_elim_after_reload) Optimization
 Perform comparison elimination after register allocation has finished.
 
+floop-elim
+Common Var(flag_loop_elim) Init(0) Optimization
+Perform redundant loop elimination.
+
 fconserve-stack
 Common Var(flag_conserve_stack) Optimization
 Do not perform optimizations increasing noticeably stack usage.
