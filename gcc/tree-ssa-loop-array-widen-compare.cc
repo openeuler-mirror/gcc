@@ -272,12 +272,12 @@ record_origin_loop_exit_info (class loop *loop)
       || origin_loop.cond_stmt1 != NULL || origin_loop.cond_stmt2 != NULL)
     return false;
 
-  vec<edge> exit_edges = get_loop_exit_edges (loop);
+  auto_vec<edge> exit_edges = get_loop_exit_edges (loop);
   if (exit_edges == vNULL)
     return false;
 
   if (exit_edges.length () != 2)
-    goto fail;
+    return false;
 
   FOR_EACH_VEC_ELT (exit_edges, i, e)
     {
@@ -304,8 +304,6 @@ record_origin_loop_exit_info (class loop *loop)
       && origin_loop.cond_stmt1 != NULL && origin_loop.cond_stmt2 != NULL)
     found = true;
 
-fail:
-  exit_edges.release ();
   return found;
 }
 
