@@ -893,6 +893,8 @@ convert_syntax (rtx x, file_location loc)
   if (!expect_char (&templ, '['))
     fatal_at (loc, "expecing `[' to begin section list");
 
+  skip_spaces (&templ);
+
   parse_section_layout (loc, &templ, "cons:", tconvec, true);
 
   if (*templ != ']')
