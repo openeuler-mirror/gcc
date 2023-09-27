@@ -3498,6 +3498,7 @@ vect_prune_runtime_alias_test_list (loop_vec_info loop_vinfo)
     {
       poly_uint64 lower_bound;
       tree segment_length_a, segment_length_b;
+      tree segment_length2_a, segment_length2_b;
       unsigned HOST_WIDE_INT access_size_a, access_size_b;
       unsigned int align_a, align_b;
 
@@ -3598,6 +3599,8 @@ vect_prune_runtime_alias_test_list (loop_vec_info loop_vinfo)
 	{
 	  segment_length_a = size_zero_node;
 	  segment_length_b = size_zero_node;
+	  segment_length2_a = size_zero_node;
+	  segment_length2_b = size_zero_node;
 	}
       else
 	{
@@ -3606,8 +3609,15 @@ vect_prune_runtime_alias_test_list (loop_vec_info loop_vinfo)
 	    length_factor = scalar_loop_iters;
 	  else
 	    length_factor = size_int (vect_factor);
+	  /* In any case we should rememeber scalar_loop_iters
+	     this helps to create flexible aliasing check
+	     for small number of iterations.  */
 	  segment_length_a = vect_vfa_segment_size (dr_info_a, length_factor);
 	  segment_length_b = vect_vfa_segment_size (dr_info_b, length_factor);
+	  segment_length2_a
+	    = vect_vfa_segment_size (dr_info_a, scalar_loop_iters);
+	  segment_length2_b
+	    = vect_vfa_segment_size (dr_info_b, scalar_loop_iters);
 	}
       access_size_a = vect_vfa_access_size (dr_info_a);
       access_size_b = vect_vfa_access_size (dr_info_b);
@@ -3652,9 +3662,9 @@ vect_prune_runtime_alias_test_list (loop_vec_info loop_vinfo)
 	}
 
       dr_with_seg_len dr_a (dr_info_a->dr, segment_length_a,
-			    access_size_a, align_a);
+			    segment_length2_a, access_size_a, align_a);
       dr_with_seg_len dr_b (dr_info_b->dr, segment_length_b,
-			    access_size_b, align_b);
+			    segment_length2_b, access_size_b, align_b);
       /* Canonicalize the order to be the one that's needed for accurate
 	 RAW, WAR and WAW flags, in cases where the data references are
 	 well-ordered.  The order doesn't really matter otherwise,

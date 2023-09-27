@@ -2071,31 +2071,14 @@ create_intersect_range_checks_index (class loop *loop, tree *cond_expr,
    same arguments.  Try to optimize cases in which the second access
    is a write and in which some overlap is valid.  */
 
-static bool
-create_waw_or_war_checks (tree *cond_expr,
+static void
+create_waw_or_war_checks2 (tree *cond_expr, tree seg_len_a,
 			  const dr_with_seg_len_pair_t &alias_pair)
 {
   const dr_with_seg_len& dr_a = alias_pair.first;
   const dr_with_seg_len& dr_b = alias_pair.second;
 
-  /* Check for cases in which:
-
-     (a) DR_B is always a write;
-     (b) the accesses are well-ordered in both the original and new code
-	 (see the comment above the DR_ALIAS_* flags for details); and
-     (c) the DR_STEPs describe all access pairs covered by ALIAS_PAIR.  */
-  if (alias_pair.flags & ~(DR_ALIAS_WAR | DR_ALIAS_WAW))
-    return false;
-
-  /* Check for equal (but possibly variable) steps.  */
   tree step = DR_STEP (dr_a.dr);
-  if (!operand_equal_p (step, DR_STEP (dr_b.dr)))
-    return false;
-
-  /* Make sure that we can operate on sizetype without loss of precision.  */
-  tree addr_type = TREE_TYPE (DR_BASE_ADDRESS (dr_a.dr));
-  if (TYPE_PRECISION (addr_type) != TYPE_PRECISION (sizetype))
-    return false;
 
   /* All addresses involved are known to have a common alignment ALIGN.
      We can therefore subtract ALIGN from an exclusive endpoint to get
@@ -2112,9 +2095,6 @@ create_waw_or_war_checks (tree *cond_expr,
 			       fold_convert (ssizetype, indicator),
 			       ssize_int (0));
 
-  /* Get lengths in sizetype.  */
-  tree seg_len_a
-    = fold_convert (sizetype, rewrite_to_non_trapping_overflow (dr_a.seg_len));
   step = fold_convert (sizetype, rewrite_to_non_trapping_overflow (step));
 
   /* Each access has the following pattern:
@@ -2221,6 +2201,50 @@ create_waw_or_war_checks (tree *cond_expr,
   *cond_expr = fold_build2 (GT_EXPR, boolean_type_node, subject, limit);
   if (dump_enabled_p ())
     dump_printf (MSG_NOTE, "using an address-based WAR/WAW test\n");
+}
+
+/* This is a wrapper function for create_waw_or_war_checks2.  */
+static bool
+create_waw_or_war_checks (tree *cond_expr,
+			  const dr_with_seg_len_pair_t &alias_pair)
+{
+  const dr_with_seg_len& dr_a = alias_pair.first;
+  const dr_with_seg_len& dr_b = alias_pair.second;
+
+  /* Check for cases in which:
+
+     (a) DR_B is always a write;
+     (b) the accesses are well-ordered in both the original and new code
+     (see the comment above the DR_ALIAS_* flags for details); and
+     (c) the DR_STEPs describe all access pairs covered by ALIAS_PAIR.  */
+  if (alias_pair.flags & ~(DR_ALIAS_WAR | DR_ALIAS_WAW))
+    return false;
+
+  /* Check for equal (but possibly variable) steps.  */
+  tree step = DR_STEP (dr_a.dr);
+  if (!operand_equal_p (step, DR_STEP (dr_b.dr)))
+    return false;
+
+  /* Make sure that we can operate on sizetype without loss of precision.  */
+  tree addr_type = TREE_TYPE (DR_BASE_ADDRESS (dr_a.dr));
+  if (TYPE_PRECISION (addr_type) != TYPE_PRECISION (sizetype))
+    return false;
+
+  /* Get lengths in sizetype.  */
+  tree seg_len_a
+    = fold_convert (sizetype,
+		    rewrite_to_non_trapping_overflow (dr_a.seg_len));
+  create_waw_or_war_checks2 (cond_expr, seg_len_a, alias_pair);
+  if (param_flexible_seg_len && dr_a.seg_len != dr_a.seg_len2)
+    {
+      tree seg_len2_a
+	= fold_convert (sizetype,
+			rewrite_to_non_trapping_overflow (dr_a.seg_len2));
+      tree cond_expr2;
+      create_waw_or_war_checks2 (&cond_expr2, seg_len2_a, alias_pair);
+      *cond_expr =  fold_build2 (TRUTH_OR_EXPR, boolean_type_node,
+				 *cond_expr, cond_expr2);
+   }
   return true;
 }
 

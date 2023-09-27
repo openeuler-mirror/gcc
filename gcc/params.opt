@@ -964,6 +964,11 @@ Maximum number of loop peels to enhance alignment of data references in a loop.
 Common Joined UInteger Var(param_vect_max_version_for_alias_checks) Init(10) Param Optimization
 Bound on number of runtime checks inserted by the vectorizer's loop versioning for alias check.
 
+-param=vect-alias-flexible-segment-len=
+Common Joined UInteger Var(param_flexible_seg_len) Init(0) IntegerRange(0, 1) Param Optimization
+Use a minimum length of different segments. Currently the minimum between
+iteration number and vectorization length is chosen by this param.
+
 -param=vect-max-version-for-alignment-checks=
 Common Joined UInteger Var(param_vect_max_version_for_alignment_checks) Init(6) Param Optimization
 Bound on number of runtime checks inserted by the vectorizer's loop versioning for alignment check.
