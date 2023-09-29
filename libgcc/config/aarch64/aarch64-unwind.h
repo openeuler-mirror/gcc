@@ -87,4 +87,20 @@ aarch64_frob_update_context (struct _Unwind_Context *context,
   return;
 }
 
+/* SME runtime function local to libgcc, streaming compatible
+   and preserves more registers than the base PCS requires, but
+   we don't rely on that here.  */
+__attribute__ ((visibility ("hidden")))
+void __libgcc_arm_za_disable (void);
+
+/* Disable the SME ZA state in case an unwound frame used the ZA
+   lazy saving scheme.  */
+#undef _Unwind_Frames_Extra
+#define _Unwind_Frames_Extra(x)				\
+  do							\
+    {							\
+      __libgcc_arm_za_disable ();			\
+    }							\
+  while (0)
+
 #endif /* defined AARCH64_UNWIND_H && defined __ILP32__ */
