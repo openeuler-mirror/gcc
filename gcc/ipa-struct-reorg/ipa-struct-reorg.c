@@ -438,7 +438,11 @@ srtype::has_dead_field (void)
   unsigned i;
   FOR_EACH_VEC_ELT (fields, i, this_field)
     {
-      if (!(this_field->field_access & READ_FIELD))
+      /* Function pointer members are not processed, because DFE
+         does not currently support accurate analysis of function
+         pointers, and we have not identified specific use cases. */
+      if (!(this_field->field_access & READ_FIELD)
+	 && !FUNCTION_POINTER_TYPE_P (this_field->fieldtype))
 	{
 	  may_dfe = true;
 	  break;
@@ -1024,7 +1028,8 @@ srtype::create_new_type (void)
     {
       srfield *f = fields[i];
       if (current_layout_opt_level & DEAD_FIELD_ELIMINATION
-	  && !(f->field_access & READ_FIELD))
+	  && !(f->field_access & READ_FIELD)
+	  && !FUNCTION_POINTER_TYPE_P (f->fieldtype))
 	continue;
       f->create_new_fields (newtype, newfields, newlast);
     }
