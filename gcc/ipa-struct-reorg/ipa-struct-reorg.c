@@ -3991,9 +3991,17 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other, gimple
       if (VOID_POINTER_P (TREE_TYPE (side))
 	  && TREE_CODE (side) == SSA_NAME)
 	{
-	  /* The type is other, the declaration is side.  */
-	  current_function->record_decl (type, side, -1,
-		isptrptr (TREE_TYPE (other)) ? TREE_TYPE (other) : NULL);
+	  tree inner = SSA_NAME_VAR (side);
+	  if (inner)
+	    {
+	      srdecl *in = find_decl (inner);
+	      if (in && !in->type->has_escaped ())
+		{
+		  /* The type is other, the declaration is side.  */
+		  current_function->record_decl (type, side, -1,
+		    isptrptr (TREE_TYPE (other)) ? TREE_TYPE (other) : NULL);
+		}
+	     }
 	}
       else
 	{
