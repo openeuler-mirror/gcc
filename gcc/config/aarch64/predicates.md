@@ -91,6 +91,25 @@
 	     (match_test "aarch64_simd_valid_immediate (op, NULL,
 							AARCH64_CHECK_ORR)"))))
 
+(define_predicate "aarch64_bic_imm_for_maxmin"
+   (match_code "const_vector")
+{
+  if (!aarch64_simd_valid_immediate (op, NULL, AARCH64_CHECK_BIC))
+    return false;
+  op = unwrap_const_vec_duplicate (op);
+  unsigned int size = GET_MODE_UNIT_BITSIZE (mode);
+  return CONST_INT_P (op)
+	 && ((~UINTVAL (op)) < (((long unsigned int) 1 << size) - 1));
+})
+
+(define_predicate "maxmin_arith_shift_operand"
+   (match_code "const_vector")
+{
+  op = unwrap_const_vec_duplicate (op);
+  unsigned int size = GET_MODE_UNIT_BITSIZE (mode) - 1;
+  return CONST_INT_P (op) && (UINTVAL (op) == size);
+})
+
 (define_predicate "aarch64_reg_or_bic_imm"
    (ior (match_operand 0 "register_operand")
 	(and (match_code "const_vector")
