@@ -11281,12 +11281,12 @@ vectorizable_condition (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
 	    {
 	      vec_cond_rhs = vec_oprnds1[i];
 	      if (bitop1 == NOP_EXPR)
-	    {
-	      gimple_seq stmts = NULL;
-	      vec_compare = gimple_build (&stmts, cond_code, vec_cmp_type,
-					   vec_cond_lhs, vec_cond_rhs);
-	      gsi_insert_before (gsi, stmts, GSI_SAME_STMT);
-	    }
+		{
+		  gimple_seq stmts = NULL;
+		  vec_compare = gimple_build (&stmts, cond_code, vec_cmp_type,
+					       vec_cond_lhs, vec_cond_rhs);
+		  gsi_insert_before (gsi, stmts, GSI_SAME_STMT);
+		}
 	      else
 		{
 		  new_temp = make_ssa_name (vec_cmp_type);
