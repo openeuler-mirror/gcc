@@ -1208,7 +1208,7 @@ srfunction::create_new_decls (void)
       else if (TREE_CODE (decls[i]->decl) == PARM_DECL)
 	;
       else
-	internal_error ("Unhandled decl type stored");
+	internal_error ("Unhandled declaration type stored");
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
@@ -1548,7 +1548,7 @@ public:
   bool check_sr_copy (gimple *);
   void relayout_field_copy (gimple_stmt_iterator *, gimple *, tree, tree,
 			    tree&, tree &);
-  void do_semi_relayout (gimple_stmt_iterator *, gimple *, tree &, tree &);
+  bool do_semi_relayout (gimple_stmt_iterator *, gimple *, tree &, tree &);
 };
 
 struct ipa_struct_relayout
@@ -1764,7 +1764,8 @@ ipa_struct_relayout::rewrite (void)
 }
 
 bool
-ipa_struct_relayout::rewrite_debug (gimple *stmt, gimple_stmt_iterator *gsi)
+ipa_struct_relayout::rewrite_debug (gimple *stmt ATTRIBUTE_UNUSED,
+				    gimple_stmt_iterator *gsi ATTRIBUTE_UNUSED)
 {
   /* Delete debug gimple now.  */
   return true;
@@ -2084,7 +2085,6 @@ bool
 ipa_struct_relayout::maybe_rewrite_cst (tree cst, gimple_stmt_iterator *gsi,
 					HOST_WIDE_INT &times)
 {
-  bool ret = false;
   gcc_assert (TREE_CODE (cst) == INTEGER_CST);
 
   gimple *stmt = gsi_stmt (*gsi);
@@ -6494,7 +6494,10 @@ ipa_struct_reorg::pc_type_conversion_candidate_p (tree xhs)
 
   if (TREE_CODE (xhs) == COMPONENT_REF)
     {
-      srtype *base_type = find_type (TREE_TYPE (TREE_OPERAND (xhs, 0)));
+      tree mem = TREE_OPERAND (xhs, 0);
+      if (TREE_CODE (mem) != MEM_REF)
+	return false;
+      srtype *base_type = find_type (TREE_TYPE (mem));
       if (base_type != NULL && base_type->has_escaped ())
 	return pc_candidate_st_type_p (TREE_TYPE (xhs));
 
@@ -6808,7 +6811,8 @@ ipa_struct_reorg::decompress_candidate_without_check (gimple_stmt_iterator *gsi,
     {
       gsi_next (gsi);
       gimple *next_stmt = gsi_stmt (*gsi);
-      if (gimple_assign_rhs_class (next_stmt) == GIMPLE_SINGLE_RHS)
+      if (gimple_code (next_stmt) == GIMPLE_ASSIGN
+	  && gimple_assign_rhs_class (next_stmt) == GIMPLE_SINGLE_RHS)
 	{
 	  tree next_rhs = gimple_assign_rhs1 (next_stmt);
 	  /* If current lhs is used as rhs in the next stmt:
@@ -6990,14 +6994,23 @@ ipa_struct_reorg::try_rewrite_with_pointer_compression (gassign *stmt,
       if (pc_type_conversion_candidate_p (lhs))
 	{
 	  /* Transfer MEM[(struct *)_1].files = _4;
-	     to MEM[(struct *)_1].files = (struct *)_4; */
-	  new_rhs = fold_convert (TREE_TYPE (lhs), tmp_rhs);
+	     to _tmp = (struct *)_4;
+		MEM[(struct *)_1].files = _tmp; */
+	  tree tmp_reg = create_tmp_reg(TREE_TYPE(lhs));
+	  tree tmp_rhs_cvt = fold_convert (TREE_TYPE (lhs), tmp_rhs);
+	  gimple *copy_stmt = gimple_build_assign (tmp_reg, tmp_rhs_cvt);
+	  gsi_insert_before (gsi, copy_stmt, GSI_SAME_STMT);
+	  new_rhs = tmp_reg;
 	}
       else if (pc_type_conversion_candidate_p (rhs))
 	{
 	  /* Transfer _4 = MEM[(struct *)_1].nodes;
-	     to _4  = (new_struct *) MEM[(struct *)_1].nodes; */
-	  new_rhs = fold_convert (TREE_TYPE (new_lhs), tmp_rhs);
+	     to _tmp = MEM[(struct *)_1].nodes;
+		_4  = (new_struct *) _tmp; */
+	  tree tmp_reg = create_tmp_reg(TREE_TYPE(new_lhs));
+	  gimple *copy_stmt = gimple_build_assign (tmp_reg, tmp_rhs);
+	  gsi_insert_before (gsi, copy_stmt, GSI_SAME_STMT);
+	  new_rhs = fold_convert (TREE_TYPE (new_lhs), tmp_reg);
 	}
     }
   else if (l && r)
@@ -7020,46 +7033,45 @@ ipa_struct_reorg::rewrite_pointer_diff (gimple_stmt_iterator *gsi, tree ptr1,
 {
   tree shifts = build_int_cst (long_integer_type_node, semi_relayout_align);
   tree pointer_type = build_pointer_type (unsigned_char_type_node);
+  tree intptr_type = signed_type_for (pointer_type);
+
   /* addr_high_1 = (intptr_t)ptr1 >> shifts  */
-  tree ptr1_cvt = fold_convert (pointer_type, ptr1);
-  tree addr_high_1 = gimplify_build2 (gsi, RSHIFT_EXPR, pointer_type,
+  tree ptr1_cvt = fold_convert (intptr_type, ptr1);
+  tree addr_high_1 = gimplify_build2 (gsi, RSHIFT_EXPR, intptr_type,
 				      ptr1_cvt, shifts);
   /* addr_high_2 = (intptr_t)ptr2 >> shifts  */
-  tree ptr2_cvt = fold_convert (pointer_type, ptr2);
-  tree addr_high_2 = gimplify_build2 (gsi, RSHIFT_EXPR, pointer_type,
+  tree ptr2_cvt = fold_convert (intptr_type, ptr2);
+  tree addr_high_2 = gimplify_build2 (gsi, RSHIFT_EXPR, intptr_type,
 				      ptr2_cvt, shifts);
   /* off1 = (intptr_t)ptr1 - (addr_high_1 << shifts)  */
-  tree bucket_start_1 = gimplify_build2 (gsi, LSHIFT_EXPR, pointer_type,
+  tree bucket_start_1 = gimplify_build2 (gsi, LSHIFT_EXPR, intptr_type,
 					 addr_high_1, shifts);
-  tree off1 = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+  tree off1 = gimplify_build2 (gsi, MINUS_EXPR, intptr_type,
 			       ptr1_cvt, bucket_start_1);
   /* off2 = (intptr_t)ptr2 - (addr_high_2 << shifts)  */
-  tree bucket_start_2 = gimplify_build2 (gsi, LSHIFT_EXPR, pointer_type,
+  tree bucket_start_2 = gimplify_build2 (gsi, LSHIFT_EXPR, intptr_type,
 					 addr_high_2, shifts);
-  tree off2 = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+  tree off2 = gimplify_build2 (gsi, MINUS_EXPR, intptr_type,
 			       ptr2_cvt, bucket_start_2);
   /* group_diff = (addr_high_1 - addr_high_2) / bucket_parts  */
-  tree bucket_sub = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+  tree bucket_sub = gimplify_build2 (gsi, MINUS_EXPR, intptr_type,
 				     addr_high_1, addr_high_2);
-  tree bucket_parts = build_int_cst (long_integer_type_node,
-				     type->bucket_parts);
-  tree group_diff = gimplify_build2 (gsi, TRUNC_DIV_EXPR,
-				     long_integer_type_node,
+  tree bucket_parts = build_int_cst (intptr_type, type->bucket_parts);
+  tree group_diff = gimplify_build2 (gsi, TRUNC_DIV_EXPR, intptr_type,
 				     bucket_sub, bucket_parts);
   /* off_addr_diff = off1 - off2  */
-  tree off_addr_diff = gimplify_build2 (gsi, MINUS_EXPR, long_integer_type_node,
+  tree off_addr_diff = gimplify_build2 (gsi, MINUS_EXPR, intptr_type,
 					off1, off2);
   /* res = group_diff * bucket_capacity + off_diff / 8  */
+  /* TODO: add info about magic numbers relayout_part_size/8 and 8.  */
   tree capacity = build_int_cst (long_integer_type_node,
 				 relayout_part_size / 8);
   tree unit_size = build_int_cst (long_integer_type_node, 8);
-  tree bucket_index_diff = gimplify_build2 (gsi, MULT_EXPR,
-					    long_integer_type_node,
+  tree bucket_index_diff = gimplify_build2 (gsi, MULT_EXPR, intptr_type,
 					    group_diff, capacity);
-  tree off_index = gimplify_build2 (gsi, TRUNC_DIV_EXPR,
-				    long_integer_type_node,
+  tree off_index = gimplify_build2 (gsi, TRUNC_DIV_EXPR, intptr_type,
 				    off_addr_diff, unit_size);
-  tree res = gimplify_build2 (gsi, PLUS_EXPR, long_unsigned_type_node,
+  tree res = gimplify_build2 (gsi, PLUS_EXPR, intptr_type,
 			      bucket_index_diff, off_index);
   return res;
 }
@@ -7084,31 +7096,34 @@ basic_block
 create_bb_for_group_diff_ne_0 (basic_block new_bb, tree &phi, tree ptr,
 			       tree group_diff, tree off_times_8, srtype *type)
 {
-  tree shifts = build_int_cst (long_unsigned_type_node, semi_relayout_align);
+  tree intptr_type = signed_type_for (long_unsigned_type_node);
+  tree shifts = build_int_cst (intptr_type, semi_relayout_align);
   gimple_stmt_iterator gsi = gsi_last_bb (new_bb);
   gsi_insert_after (&gsi, gimple_build_nop (), GSI_NEW_STMT);
-  /* curr_group_start = (ptr >> shifts) << shifts;  */
-  tree ptr_r_1 = gimplify_build2 (&gsi, RSHIFT_EXPR, long_integer_type_node,
-				  ptr, shifts);
-  tree curr_group_start = gimplify_build2 (&gsi, LSHIFT_EXPR, long_integer_type_node,
+  tree ptr_cvt = fold_convert (intptr_type, ptr);
+  /* intptr_t curr_group_start = ((intptr_t) ptr >> shifts) << shifts;  */
+  tree ptr_r_1 = gimplify_build2 (&gsi, RSHIFT_EXPR, intptr_type,
+				  ptr_cvt, shifts);
+  tree curr_group_start = gimplify_build2 (&gsi, LSHIFT_EXPR, intptr_type,
 					   ptr_r_1, shifts);
-  /* curr_off_from_group = ptr - curr_group_start;  */
-  tree curr_off_from_group = gimplify_build2 (&gsi, MINUS_EXPR,
-					      long_integer_type_node,
-					      ptr, curr_group_start);
+  /* intptr_t curr_off_from_group = (intptr_t)ptr - curr_group_start;  */
+  tree curr_off_from_group = gimplify_build2 (&gsi, MINUS_EXPR, intptr_type,
+					      ptr_cvt, curr_group_start);
   /* res = curr_group_start + ((group_diff * parts) << shifts)
 	   + ((curr_off_from_group + off_times_8) % shifts);  */
   tree step1 = gimplify_build2 (&gsi, MULT_EXPR, long_integer_type_node,
 				group_diff, build_int_cst (
 				long_integer_type_node, type->bucket_parts));
-  tree step2 = gimplify_build2 (&gsi, LSHIFT_EXPR, long_integer_type_node,
-				step1, shifts);
-  tree step3 = gimplify_build2 (&gsi, PLUS_EXPR, long_integer_type_node,
-				curr_off_from_group, off_times_8);
-  tree step4 = gimplify_build2 (&gsi, TRUNC_MOD_EXPR, long_integer_type_node,
-				step3, build_int_cst (
-					long_integer_type_node, relayout_part_size));
-  tree step5 = gimplify_build2 (&gsi, PLUS_EXPR, long_integer_type_node,
+  tree step1_cvt = fold_convert (intptr_type, step1);
+  tree step2 = gimplify_build2 (&gsi, LSHIFT_EXPR, intptr_type,
+				step1_cvt, shifts);
+  tree off_times_8_cvt = fold_convert (intptr_type, off_times_8);
+  tree step3 = gimplify_build2 (&gsi, PLUS_EXPR, intptr_type,
+				curr_off_from_group, off_times_8_cvt);
+  tree step4 = gimplify_build2 (&gsi, TRUNC_MOD_EXPR, intptr_type,
+				step3, build_int_cst (intptr_type,
+						      relayout_part_size));
+  tree step5 = gimplify_build2 (&gsi, PLUS_EXPR, intptr_type,
 				step2, step4);
   tree res_phi1 = gimplify_build2 (&gsi, PLUS_EXPR, long_integer_type_node,
 				  curr_group_start, step5);
@@ -7164,7 +7179,7 @@ create_bb_for_group_diff_ne_0 (basic_block new_bb, tree &phi, tree ptr,
 }
 
 tree
-ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt,
+ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt ATTRIBUTE_UNUSED,
 						gimple_stmt_iterator *gsi,
 						tree ptr, tree offset,
 						srtype *type)
@@ -7346,8 +7361,9 @@ ipa_struct_reorg::check_sr_copy (gimple *stmt)
 }
 
 void
-ipa_struct_reorg::relayout_field_copy (gimple_stmt_iterator *gsi, gimple *stmt,
-				       tree lhs, tree rhs,
+ipa_struct_reorg::relayout_field_copy (gimple_stmt_iterator *gsi,
+				       gimple *stmt ATTRIBUTE_UNUSED,
+				       tree lhs, tree rhs ATTRIBUTE_UNUSED,
 				       tree &newlhs, tree &newrhs)
 {
   srtype *type = get_relayout_candidate_type (TREE_TYPE (lhs));
@@ -7363,14 +7379,22 @@ ipa_struct_reorg::relayout_field_copy (gimple_stmt_iterator *gsi, gimple *stmt,
 	continue;
       new_l_mem_ref = rewrite_address (lhs_base_pointer, field, type, gsi);
       new_r_mem_ref = rewrite_address (rhs_base_pointer, field, type, gsi);
+      if (!is_gimple_reg (new_l_mem_ref))
+	{
+	  tree tmp_reg = create_tmp_reg(TREE_TYPE(new_l_mem_ref));
+	  gimple *copy_stmt = gimple_build_assign (tmp_reg, new_r_mem_ref);
+	  gsi_insert_before (gsi, copy_stmt, GSI_SAME_STMT);
+	  new_r_mem_ref = tmp_reg;
+	}
       gimple *new_stmt = gimple_build_assign (new_l_mem_ref, new_r_mem_ref);
       gsi_insert_before (gsi, new_stmt, GSI_SAME_STMT);
     }
+  gcc_assert (new_l_mem_ref != NULL_TREE && new_r_mem_ref != NULL_TREE);
   newlhs = new_l_mem_ref;
   newrhs = new_r_mem_ref;
 }
 
-void
+bool
 ipa_struct_reorg::do_semi_relayout (gimple_stmt_iterator *gsi, gimple *stmt,
 				    tree &newlhs, tree &newrhs)
 {
@@ -7387,7 +7411,10 @@ ipa_struct_reorg::do_semi_relayout (gimple_stmt_iterator *gsi, gimple *stmt,
   if (!l && !r)
     {
       if (check_sr_copy (stmt))
-	relayout_field_copy (gsi, stmt, lhs, rhs, newlhs, newrhs);
+	{
+	  relayout_field_copy (gsi, stmt, lhs, rhs, newlhs, newrhs);
+	  return true;
+	}
     }
   else if (l)
     {
@@ -7409,6 +7436,7 @@ ipa_struct_reorg::do_semi_relayout (gimple_stmt_iterator *gsi, gimple *stmt,
 				gsi, TREE_OPERAND (newrhs, 0), type);
       newrhs = rewrite_address (pointer_base, new_field, type, gsi);
     }
+  return false;
 }
 
 bool
@@ -7641,7 +7669,7 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
-	  fprintf (dump_file, "\nrewriting stamtenet:\n");
+	  fprintf (dump_file, "\nrewriting statement:\n");
 	  print_gimple_stmt (dump_file, stmt, 0);
 	}
       tree newlhs[max_split];
@@ -7657,19 +7685,24 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	fprintf (dump_file, "replaced with:\n");
       for (unsigned i = 0; i < max_split && (newlhs[i] || newrhs[i]); i++)
 	{
+	  bool fields_copied = false;
 	  if (current_layout_opt_level & SEMI_RELAYOUT)
-	    do_semi_relayout (gsi, stmt, newlhs[i], newrhs[i]);
+	    fields_copied = do_semi_relayout (gsi, stmt, newlhs[i], newrhs[i]);
 	  if (current_layout_opt_level >= POINTER_COMPRESSION_SAFE)
 	    try_rewrite_with_pointer_compression (stmt, gsi, lhs, rhs,
 						  newlhs[i], newrhs[i]);
-	  gimple *newstmt = gimple_build_assign (newlhs[i] ? newlhs[i] : lhs, newrhs[i] ? newrhs[i] : rhs);
+	  remove = true;
+	  if (fields_copied)
+	    continue;
+	  tree lhs_expr = newlhs[i] ? newlhs[i] : lhs;
+	  tree rhs_expr = newrhs[i] ? newrhs[i] : rhs;
+	  gimple *newstmt = gimple_build_assign (lhs_expr, rhs_expr);
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
 	      print_gimple_stmt (dump_file, newstmt, 0);
 	      fprintf (dump_file, "\n");
 	    }
 	  gsi_insert_before (gsi, newstmt, GSI_SAME_STMT);
-	  remove = true;
 	}
       return remove;
     }
@@ -7705,8 +7738,6 @@ void
 ipa_struct_reorg::record_allocated_size (tree ptr, gimple_stmt_iterator *gsi,
 					 tree size)
 {
-  tree to_type = build_pointer_type (long_unsigned_type_node);
-  tree type_cast = fold_convert (to_type, ptr);
   tree lhs = fold_build2 (MEM_REF, long_unsigned_type_node, ptr,
 	build_int_cst (build_pointer_type (long_unsigned_type_node), 0));
   gimple *stmt = gimple_build_assign (lhs, size);
@@ -8065,7 +8096,8 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
    old statement is to be removed. */
 
 bool
-ipa_struct_reorg::rewrite_cond (gcond *stmt, gimple_stmt_iterator *gsi)
+ipa_struct_reorg::rewrite_cond (gcond *stmt,
+				gimple_stmt_iterator *gsi ATTRIBUTE_UNUSED)
 {
   tree_code rhs_code = gimple_cond_code (stmt);
 
@@ -8309,6 +8341,8 @@ ipa_struct_reorg::rewrite_functions (void)
 		  if (current_function_decl)
 		    dump_function_to_file (current_function_decl, dump_file,
 					   dump_flags | TDF_VOPS);
+		  else
+		    fprintf (dump_file, " no declaration\n");
 		}
 	      pop_cfun ();
 	    }
@@ -8341,11 +8375,13 @@ ipa_struct_reorg::rewrite_functions (void)
 	  push_cfun (DECL_STRUCT_FUNCTION (node->decl));
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
-	      fprintf (dump_file, "==== Before create decls: %dth_%s ====\n\n",
+	      fprintf (dump_file, "==== Before create decls: %dth %s ====\n\n",
 		       i, f->node->name ());
 	      if (current_function_decl)
 		dump_function_to_file (current_function_decl, dump_file,
 				       dump_flags | TDF_VOPS);
+	      else
+	        fprintf (dump_file, " no declaration\n");
 	    }
 	  pop_cfun ();
 	}
@@ -8377,11 +8413,13 @@ ipa_struct_reorg::rewrite_functions (void)
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
-	  fprintf (dump_file, "\nBefore rewrite: %dth_%s\n",
+	  fprintf (dump_file, "\nBefore rewrite: %dth %s\n",
 		   i, f->node->name ());
 	  if (current_function_decl)
 	    dump_function_to_file (current_function_decl, dump_file,
 				   dump_flags | TDF_VOPS);
+	  else
+	    fprintf (dump_file, " no declaration\n");
 	  fprintf (dump_file, "\n======== Start to rewrite: %dth_%s ========\n",
 		   i, f->node->name ());
 	}
@@ -8456,10 +8494,13 @@ ipa_struct_reorg::rewrite_functions (void)
 
       if (dump_file)
 	{
-	  fprintf (dump_file, "\nAfter rewrite: %dth_%s\n",
+	  fprintf (dump_file, "\nAfter rewrite: %dth %s\n",
 		   i, f->node->name ());
-	  dump_function_to_file (current_function_decl, dump_file,
-				 dump_flags | TDF_VOPS);
+	  if (current_function_decl)
+	    dump_function_to_file (current_function_decl, dump_file,
+				   dump_flags | TDF_VOPS);
+	  else
+	    fprintf (dump_file, " no declaration\n");
 	}
 
       pop_cfun ();
