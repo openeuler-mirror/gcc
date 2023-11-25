@@ -1205,4 +1205,8 @@ Enum(vrp_mode) String(vrp) Value(VRP_MODE_VRP)
 EnumValue
 Enum(vrp_mode) String(ranger) Value(VRP_MODE_RANGER)
 
+-param=compressed-pointer-size=
+Common Joined UInteger Var(param_pointer_compression_size) Init(32) IntegerRange(8, 32) Param Optimization
+Target size of compressed pointer, which should be 8, 16 or 32.
+
 ; This comment is to ensure we retain the blank line above.

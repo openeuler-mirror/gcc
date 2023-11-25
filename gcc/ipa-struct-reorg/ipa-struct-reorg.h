@@ -121,7 +121,10 @@ private:
 
 public:
   tree newtype[max_split];
+  tree pc_gptr;
   bool visited;
+  bool pc_candidate;
+  bool has_legal_alloc_num;
   /* Negative number means it has illegal allocated arrays
      that we do not optimize.  */
   int has_alloc_array;
@@ -145,6 +148,7 @@ public:
   void analyze (void);
   bool has_dead_field (void);
   void mark_escape (escape_type, gimple *stmt);
+  void create_global_ptr_for_pc ();
   bool has_escaped (void)
   {
     return escapes != does_not_escape;
