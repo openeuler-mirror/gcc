@@ -1228,7 +1228,8 @@
 			  (V2DI "2s")])
 
 ;; Register suffix narrowed modes for VQN.
-(define_mode_attr V2ntype [(V8HI "16b") (V4SI "8h")
+(define_mode_attr V2ntype [(V4HI "8b") (V2SI "4h")
+			   (V8HI "16b") (V4SI "8h")
 			   (V2DI "4s")])
 
 ;; Widened modes of vector modes.
