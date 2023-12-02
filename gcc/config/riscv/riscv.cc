@@ -336,7 +336,7 @@ static tree riscv_handle_fndecl_attribute (tree *, tree, tree, int, bool *);
 static tree riscv_handle_type_attribute (tree *, tree, tree, int, bool *);
 
 /* Defining target-specific uses of __attribute__.  */
-static const struct attribute_spec riscv_attribute_table[] =
+TARGET_GNU_ATTRIBUTES (riscv_attribute_table,
 {
   /* Syntax: { name, min_len, max_len, decl_required, type_required,
 	       function_type_required, affects_type_identity, handler,
@@ -347,11 +347,8 @@ static const struct attribute_spec riscv_attribute_table[] =
     riscv_handle_fndecl_attribute, NULL },
   /* This attribute generates prologue/epilogue for interrupt handlers.  */
   { "interrupt", 0, 1, false, true, true, false,
-    riscv_handle_type_attribute, NULL },
-
-  /* The last attribute spec is set to be NULL.  */
-  { NULL,	0,  0, false, false, false, false, NULL, NULL }
-};
+    riscv_handle_type_attribute, NULL }
+});
 
 /* Order for the CLOBBERs/USEs of gpr_save.  */
 static const unsigned gpr_save_reg_order[] = {
