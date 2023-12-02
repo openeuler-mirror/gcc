@@ -1417,7 +1417,7 @@ comp_type_attributes (const_tree type1, const_tree type2)
       const struct attribute_spec *as;
       const_tree attr;
 
-      as = lookup_attribute_spec (get_attribute_name (a));
+      as = lookup_attribute_spec (TREE_PURPOSE (a));
       if (!as || as->affects_type_identity == false)
 	continue;
 
@@ -1431,7 +1431,7 @@ comp_type_attributes (const_tree type1, const_tree type2)
 	{
 	  const struct attribute_spec *as;
 
-	  as = lookup_attribute_spec (get_attribute_name (a));
+	  as = lookup_attribute_spec (TREE_PURPOSE (a));
 	  if (!as || as->affects_type_identity == false)
 	    continue;
 
@@ -1473,8 +1473,7 @@ remove_attributes_matching (tree attrs, Predicate predicate)
   const_tree start = attrs;
   for (const_tree attr = attrs; attr; attr = TREE_CHAIN (attr))
     {
-      tree name = get_attribute_name (attr);
-      const attribute_spec *as = lookup_attribute_spec (name);
+      const attribute_spec *as = lookup_attribute_spec (TREE_PURPOSE (attr));
       const_tree end;
       if (!predicate (attr, as))
 	end = attr;
