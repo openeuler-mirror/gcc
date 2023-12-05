@@ -111,6 +111,56 @@
     ;; "FFR token": a fake register used for representing the scheduling
     ;; restrictions on FFR-related operations.
     (FFRT_REGNUM	85)
+
+    ;; ----------------------------------------------------------------
+    ;; Fake registers
+    ;; ----------------------------------------------------------------
+    ;; These registers represent abstract things, rather than real
+    ;; architected registers.
+
+    ;; Sometimes we use placeholder instructions to mark where later
+    ;; ABI-related lowering is needed.  These placeholders read and
+    ;; write this register.  Instructions that depend on the lowering
+    ;; read the register.
+    (LOWERING_REGNUM 86)
+
+    ;; Represents the contents of the current function's TPIDR2 block,
+    ;; in abstract form.
+    (TPIDR2_BLOCK_REGNUM 87)
+
+    ;; Holds the value that the current function wants PSTATE.ZA to be.
+    ;; The actual value can sometimes vary, because it does not track
+    ;; changes to PSTATE.ZA that happen during a lazy save and restore.
+    ;; Those effects are instead tracked by ZA_SAVED_REGNUM.
+    (SME_STATE_REGNUM 88)
+
+    ;; Instructions write to this register if they set TPIDR2_EL0 to a
+    ;; well-defined value.  Instructions read from the register if they
+    ;; depend on the result of such writes.
+    ;;
+    ;; The register does not model the architected TPIDR2_ELO, just the
+    ;; current function's management of it.
+    (TPIDR2_SETUP_REGNUM 89)
+
+    ;; Represents the property "has an incoming lazy save been committed?".
+    (ZA_FREE_REGNUM 90)
+
+    ;; Represents the property "are the current function's ZA contents
+    ;; stored in the lazy save buffer, rather than in ZA itself?".
+    (ZA_SAVED_REGNUM 91)
+
+    ;; Represents the contents of the current function's ZA state in
+    ;; abstract form.  At various times in the function, these contents
+    ;; might be stored in ZA itself, or in the function's lazy save buffer.
+    ;;
+    ;; The contents persist even when the architected ZA is off.  Private-ZA
+    ;; functions have no effect on its contents.
+    (ZA_REGNUM 92)
+    ;; ----------------------------------------------------------------
+    (FIRST_FAKE_REGNUM	LOWERING_REGNUM)
+    (LAST_FAKE_REGNUM	ZA_REGNUM)
+    ;; ----------------------------------------------------------------
+
     ;; The pair of scratch registers used for stack probing with -fstack-check.
     ;; Leave R9 alone as a possible choice for the static chain.
     ;; Note that the use of these registers is mutually exclusive with the use
@@ -303,7 +353,12 @@
     UNSPEC_TAG_SPACE		; Translate address to MTE tag address space.
     UNSPEC_LD1RO
     UNSPEC_SALT_ADDR
+    UNSPEC_SAVE_NZCV
+    UNSPEC_RESTORE_NZCV
     UNSPECV_PATCHABLE_AREA
+    ;; Wraps a constant integer that should be multiplied by the number
+    ;; of quadwords in an SME vector.
+    UNSPEC_SME_VQ
 ])
 
 (define_c_enum "unspecv" [
@@ -379,7 +434,7 @@
 ;; Q registers and is equivalent to "simd".
 
 (define_enum "arches" [any rcpc8_4 fp fp_q base_simd nobase_simd
-		       simd nosimd sve fp16])
+		       simd nosimd sve fp16 sme])
 
 (define_enum_attr "arch" "arches" (const_string "any"))
 
@@ -423,7 +478,10 @@
 	     (match_test "TARGET_FP_F16INST"))
 
 	(and (eq_attr "arch" "sve")
-	     (match_test "TARGET_SVE")))
+	     (match_test "TARGET_SVE"))
+
+	(and (eq_attr "arch" "sme")
+	     (match_test "TARGET_SME")))
     (const_string "yes")
     (const_string "no")))
 
@@ -928,7 +986,7 @@
    (set_attr "sls_length" "retbr")]
 )
 
-(define_insn "*cb<optab><mode>1"
+(define_insn "aarch64_cb<optab><mode>1"
   [(set (pc) (if_then_else (EQL (match_operand:GPI 0 "register_operand" "r")
 				(const_int 0))
 			   (label_ref (match_operand 1 "" ""))
@@ -1291,6 +1349,7 @@
      /* The "mov_imm" type for CNT is just a placeholder.  */
      [r  , Usv; mov_imm  , sve , 4] << aarch64_output_sve_cnt_immediate ("cnt", "%x0", operands[1]);
      [r  , Usr; mov_imm  , sve,  4] << aarch64_output_sve_rdvl (operands[1]);
+     [r  , UsR; mov_imm  , sme,  4] << aarch64_output_rdsvl (operands[1]);
      [r  , m  ; load_4   , *   , 4] ldr\t%w0, %1
      [w  , m  ; load_4   , fp  , 4] ldr\t%s0, %1
      [m  , r Z; store_4  , *   , 4] str\t%w1, %0
@@ -1326,6 +1385,7 @@
      /* The "mov_imm" type for CNT is just a placeholder.  */
      [r, Usv; mov_imm  , sve , 4] << aarch64_output_sve_cnt_immediate ("cnt", "%x0", operands[1]);
      [r, Usr; mov_imm  , sve,  4] << aarch64_output_sve_rdvl (operands[1]);
+     [r, UsR; mov_imm  , sme,  4] << aarch64_output_rdsvl (operands[1]);
      [r, m  ; load_8   , *   , 4] ldr\t%x0, %1
      [w, m  ; load_8   , fp  , 4] ldr\t%d0, %1
      [m, r Z; store_8  , *   , 4] str\t%x1, %0
@@ -7731,6 +7791,21 @@
   return "";
 }
   [(set (attr "length") (symbol_ref "INTVAL (operands[0])"))]
+)
+
+(define_insn "aarch64_save_nzcv"
+  [(set (match_operand:DI 0 "register_operand" "=r")
+	(unspec:DI [(reg:CC CC_REGNUM)] UNSPEC_SAVE_NZCV))]
+  ""
+  "mrs\t%0, nzcv"
+)
+
+(define_insn "aarch64_restore_nzcv"
+  [(set (reg:CC CC_REGNUM)
+	(unspec:CC [(match_operand:DI 0 "register_operand" "r")]
+		   UNSPEC_RESTORE_NZCV))]
+  ""
+  "msr\tnzcv, %0"
 )
 
 ;; AdvSIMD Stuff
