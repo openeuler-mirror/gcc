@@ -2147,10 +2147,10 @@
 
 (define_insn "*add<mode>3_aarch64"
   [(set
-    (match_operand:GPI 0 "register_operand" "=rk,rk,w,rk,r,r,rk")
+    (match_operand:GPI 0 "register_operand" "=rk,rk,w,rk,r,r,rk,rk")
     (plus:GPI
-     (match_operand:GPI 1 "register_operand" "%rk,rk,w,rk,rk,0,rk")
-     (match_operand:GPI 2 "aarch64_pluslong_operand" "I,r,w,J,Uaa,Uai,Uav")))]
+     (match_operand:GPI 1 "register_operand" "%rk,rk,w,rk,rk,0,rk,rk")
+     (match_operand:GPI 2 "aarch64_pluslong_operand" "I,r,w,J,Uaa,Uai,Uav,UaV")))]
   ""
   "@
   add\\t%<w>0, %<w>1, %2
@@ -2159,10 +2159,11 @@
   sub\\t%<w>0, %<w>1, #%n2
   #
   * return aarch64_output_sve_scalar_inc_dec (operands[2]);
-  * return aarch64_output_sve_addvl_addpl (operands[2]);"
+  * return aarch64_output_sve_addvl_addpl (operands[2]);
+  * return aarch64_output_addsvl_addspl (operands[2]);"
   ;; The "alu_imm" types for INC/DEC and ADDVL/ADDPL are just placeholders.
-  [(set_attr "type" "alu_imm,alu_sreg,neon_add,alu_imm,multiple,alu_imm,alu_imm")
-   (set_attr "arch" "*,*,simd,*,*,sve,sve")]
+  [(set_attr "type" "alu_imm,alu_sreg,neon_add,alu_imm,multiple,alu_imm,alu_imm,alu_imm")
+   (set_attr "arch" "*,*,simd,*,*,sve,sve,sme")]
 )
 
 ;; zero_extend version of above
