@@ -460,7 +460,7 @@ Objective-C and Objective-C++ Dialects}.
 -fno-allocation-dce -fallow-store-data-races @gol
 -fassociative-math  -fauto-profile  -fauto-profile[=@var{path}] @gol
 -farray-widen-compare -fauto-inc-dec  -fbranch-probabilities @gol
--fcaller-saves @gol
+-fcaller-saves -floop-crc @gol
 -fcombine-stack-adjustments  -fconserve-stack @gol
 -fcompare-elim  -fcprop-registers  -fcrossjumping @gol
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules @gol
@@ -9721,6 +9721,10 @@ extreme situations this may result in unsafe behavior.
 
 This option may generate better or worse code; results are highly dependent
 on the structure of loops within the source code.
+
+@item -floop-crc 
+@opindex floop-crc
+Do the loop crc conversion
 
 @item -fdce
 @opindex fdce

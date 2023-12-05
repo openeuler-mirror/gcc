@@ -3558,6 +3558,31 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
 )
 #endif
 
+#if GIMPLE
+/* Try to match   */
+  /*
+_4 = (int) _3; //NOP_EXPR (SSA_NAME @2)
+_5 = _4 ^ c_10; //BIT_XOR_EXPR (SSA_NAME@1, SSA_NAME)
+_6 = _5 & 255; //BIT_AND_EXPR (SSA_NAME, INTEGER_CST@3)
+  */
+(match (crc_match_index @1 @2 @3)
+   (bit_and (bit_xor (nop SSA_NAME@2) SSA_NAME@1) INTEGER_CST@3)
+   (if (INTEGRAL_TYPE_P (type) && tree_to_uhwi(@3) == 255))
+)
+#endif
+
+#if GIMPLE
+/* Try to match   */
+  /*
+_8 = c_12 >> 8; // RSHIFT_EXPR (SSA_NAME @1, INTEGER_CST @2)
+c_19 = _7 ^ _8; // BIT_XOR_EXPR (SSA_NAME@3, SSA_NAME)
+  */
+(match (crc_match_res @1 @2 @3)
+   (bit_xor SSA_NAME@3  (rshift SSA_NAME@1 INTEGER_CST@2))
+   (if (INTEGRAL_TYPE_P (type) && tree_to_uhwi(@2) == 8))
+)
+#endif
+
 /* Simplification moved from fold_cond_expr_with_comparison.  It may also
    be extended.  */
 /* This pattern implements two kinds simplification:
