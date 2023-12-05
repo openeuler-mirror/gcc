@@ -19478,6 +19478,8 @@ Enable the instructions to accelerate memory operations like @code{memcpy},
 Enable the Flag Manipulation instructions Extension.
 @item pauth
 Enable the Pointer Authentication Extension.
+@item sme
+Enable the Scalable Matrix Extension.
 
 @end table
 
