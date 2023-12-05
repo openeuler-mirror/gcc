@@ -4615,6 +4615,19 @@
   [(set_attr "type" "neon_shift_imm_long")]
 )
 
+(define_insn "*aarch64_simd_vec_unpacks_lo_shiftsi"
+  [(set (match_operand:V4SI 0 "register_operand" "=w")
+	(ashift:V4SI
+	  (sign_extend:V4SI
+	    (vec_select:V4HI
+	      (match_operand:V8HI 1 "register_operand" "w")
+	      (match_operand:V8HI 2 "vect_par_cnst_lo_half" "")))
+	  (match_operand:V4SI 3 "aarch64_simd_rshift_imm" "Dr")))]
+  "TARGET_SIMD"
+  "shll\t%0.4s, %1.4h, #%3"
+  [(set_attr "type" "neon_compare_zero")]
+)
+
 ;; vshll_high_n
 
 (define_insn "aarch64_<sur>shll2_n<mode>"
@@ -4630,6 +4643,19 @@
       return "<sur>shll2\\t%0.<Vwtype>, %1.<Vtype>, %2";
   }
   [(set_attr "type" "neon_shift_imm_long")]
+)
+
+(define_insn "*aarch64_simd_vec_unpacks_hi_shiftsi"
+  [(set (match_operand:V4SI 0 "register_operand" "=w")
+	(ashift:V4SI
+	  (sign_extend:V4SI
+	    (vec_select:V4HI
+	      (match_operand:V8HI 1 "register_operand" "w")
+	      (match_operand:V8HI 2 "vect_par_cnst_hi_half" "")))
+	  (match_operand:V4SI 3 "aarch64_simd_rshift_imm" "Dr")))]
+  "TARGET_SIMD"
+  "shll2\t%0.4s, %1.8h, #%3"
+  [(set_attr "type" "neon_compare_zero")]
 )
 
 ;; vrshr_n
