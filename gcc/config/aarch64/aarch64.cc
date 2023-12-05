@@ -10046,7 +10046,7 @@ aarch64_use_return_insn_p (void)
    from a deallocated stack, and we optimize the unwind records by
    emitting them all together if possible.  */
 void
-aarch64_expand_epilogue (bool for_sibcall)
+aarch64_expand_epilogue (rtx_call_insn *sibcall)
 {
   poly_int64 initial_adjust = cfun->machine->frame.initial_adjust;
   HOST_WIDE_INT callee_adjust = cfun->machine->frame.callee_adjust;
@@ -10194,7 +10194,7 @@ aarch64_expand_epilogue (bool for_sibcall)
 	   explicitly authenticate.
     */
   if (aarch64_return_address_signing_enabled ()
-      && (for_sibcall || !TARGET_ARMV8_3))
+      && (sibcall || !TARGET_ARMV8_3))
     {
       switch (aarch64_ra_sign_key)
 	{
@@ -10212,7 +10212,7 @@ aarch64_expand_epilogue (bool for_sibcall)
     }
 
   /* Stack adjustment for exception handler.  */
-  if (crtl->calls_eh_return && !for_sibcall)
+  if (crtl->calls_eh_return && !sibcall)
     {
       /* We need to unwind the stack by the offset computed by
 	 EH_RETURN_STACKADJ_RTX.  We have already reset the CFA
@@ -10223,7 +10223,7 @@ aarch64_expand_epilogue (bool for_sibcall)
     }
 
   emit_use (gen_rtx_REG (DImode, LR_REGNUM));
-  if (!for_sibcall)
+  if (!sibcall)
     emit_jump_insn (ret_rtx);
 }
 
@@ -28245,6 +28245,9 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_HAVE_SHADOW_CALL_STACK
 #define TARGET_HAVE_SHADOW_CALL_STACK true
+
+#undef TARGET_EMIT_EPILOGUE_FOR_SIBCALL
+#define TARGET_EMIT_EPILOGUE_FOR_SIBCALL aarch64_expand_epilogue
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
