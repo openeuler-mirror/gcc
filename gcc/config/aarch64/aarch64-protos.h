@@ -772,6 +772,7 @@ bool aarch64_constant_address_p (rtx);
 bool aarch64_emit_approx_div (rtx, rtx, rtx);
 bool aarch64_emit_approx_sqrt (rtx, rtx, bool);
 tree aarch64_vector_load_decl (tree);
+rtx aarch64_gen_callee_cookie (aarch64_feature_flags, arm_pcs);
 void aarch64_expand_call (rtx, rtx, rtx, bool);
 bool aarch64_expand_cpymem (rtx *);
 bool aarch64_expand_setmem (rtx *);
@@ -851,7 +852,7 @@ bool aarch64_is_mov_xn_imm (unsigned HOST_WIDE_INT);
 bool aarch64_use_return_insn_p (void);
 const char *aarch64_output_casesi (rtx *);
 
-unsigned int aarch64_tlsdesc_abi_id ();
+arm_pcs aarch64_tlsdesc_abi_id ();
 enum aarch64_symbol_type aarch64_classify_symbol (rtx, HOST_WIDE_INT);
 enum aarch64_symbol_type aarch64_classify_tls_symbol (rtx);
 enum reg_class aarch64_regno_regclass (unsigned);
