@@ -1082,7 +1082,7 @@
 	(match_operand:VNx16BI 0 "aarch64_simd_reg_or_minus_one" "Dm, Upa"))
    (set (reg:VNx16BI FFRT_REGNUM)
 	(unspec:VNx16BI [(match_dup 0)] UNSPEC_WRFFR))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    setffr
    wrffr\t%0.b"
@@ -1123,7 +1123,7 @@
 (define_insn "aarch64_rdffr"
   [(set (match_operand:VNx16BI 0 "register_operand" "=Upa")
 	(reg:VNx16BI FFRT_REGNUM))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "rdffr\t%0.b"
 )
 
@@ -1133,7 +1133,7 @@
 	(and:VNx16BI
 	  (reg:VNx16BI FFRT_REGNUM)
 	  (match_operand:VNx16BI 1 "register_operand" "Upa")))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "rdffr\t%0.b, %1/z"
 )
 
@@ -1149,7 +1149,7 @@
 	     (match_dup 1))]
 	  UNSPEC_PTEST))
    (clobber (match_scratch:VNx16BI 0 "=Upa"))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "rdffrs\t%0.b, %1/z"
 )
 
@@ -1163,7 +1163,7 @@
 	   (reg:VNx16BI FFRT_REGNUM)]
 	  UNSPEC_PTEST))
    (clobber (match_scratch:VNx16BI 0 "=Upa"))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "rdffrs\t%0.b, %1/z"
 )
 
@@ -1182,7 +1182,7 @@
 	(and:VNx16BI
 	  (reg:VNx16BI FFRT_REGNUM)
 	  (match_dup 1)))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "rdffrs\t%0.b, %1/z"
 )
 
@@ -1197,7 +1197,7 @@
 	  UNSPEC_PTEST))
    (set (match_operand:VNx16BI 0 "register_operand" "=Upa")
 	(reg:VNx16BI FFRT_REGNUM))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "rdffrs\t%0.b, %1/z"
 )
 
@@ -1327,7 +1327,7 @@
 	   (match_operand:SVE_FULL 1 "aarch64_sve_ld<fn>f1_operand" "Ut<fn>")
 	   (reg:VNx16BI FFRT_REGNUM)]
 	  SVE_LDFF1_LDNF1))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "ld<fn>f1<Vesize>\t%0.<Vetype>, %2/z, %1"
 )
 
@@ -1361,7 +1361,9 @@
 		(reg:VNx16BI FFRT_REGNUM)]
 	       SVE_LDFF1_LDNF1))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE && (~<SVE_HSDI:narrower_mask> & <SVE_PARTIAL_I:self_mask>) == 0"
+  "TARGET_SVE
+   && TARGET_NON_STREAMING
+   && (~<SVE_HSDI:narrower_mask> & <SVE_PARTIAL_I:self_mask>) == 0"
   "ld<fn>f1<ANY_EXTEND:s><SVE_PARTIAL_I:Vesize>\t%0.<SVE_HSDI:Vctype>, %2/z, %1"
   "&& !CONSTANT_P (operands[3])"
   {
@@ -1409,7 +1411,7 @@
 	   (match_operand:DI 4 "aarch64_gather_scale_operand_<Vesize>")
 	   (mem:BLK (scratch))]
 	  UNSPEC_LD1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     operands[5] = aarch64_ptrue_reg (<VPRED>mode);
   }
@@ -1427,7 +1429,7 @@
 	   (match_operand:DI 4 "aarch64_gather_scale_operand_<Vesize>" "Ui1, Ui1, Ui1, Ui1, i, i")
 	   (mem:BLK (scratch))]
 	  UNSPEC_LD1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ld1<Vesize>\t%0.s, %5/z, [%2.s]
    ld1<Vesize>\t%0.s, %5/z, [%2.s, #%1]
@@ -1449,7 +1451,7 @@
 	   (match_operand:DI 4 "aarch64_gather_scale_operand_<Vesize>" "Ui1, Ui1, Ui1, i")
 	   (mem:BLK (scratch))]
 	  UNSPEC_LD1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ld1<Vesize>\t%0.d, %5/z, [%2.d]
    ld1<Vesize>\t%0.d, %5/z, [%2.d, #%1]
@@ -1472,7 +1474,7 @@
 	   (match_operand:DI 4 "aarch64_gather_scale_operand_<Vesize>" "Ui1, i")
 	   (mem:BLK (scratch))]
 	  UNSPEC_LD1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, <su>xtw]
    ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, <su>xtw %p4]"
@@ -1499,7 +1501,7 @@
 	   (match_operand:DI 4 "aarch64_gather_scale_operand_<Vesize>" "Ui1, i")
 	   (mem:BLK (scratch))]
 	  UNSPEC_LD1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, sxtw]
    ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, sxtw %p4]"
@@ -1523,7 +1525,7 @@
 	   (match_operand:DI 4 "aarch64_gather_scale_operand_<Vesize>" "Ui1, i")
 	   (mem:BLK (scratch))]
 	  UNSPEC_LD1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, uxtw]
    ld1<Vesize>\t%0.d, %5/z, [%1, %2.d, uxtw %p4]"
@@ -1557,7 +1559,9 @@
 		(mem:BLK (scratch))]
 	       UNSPEC_LD1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE && (~<SVE_4HSI:narrower_mask> & <SVE_4BHI:self_mask>) == 0"
+  "TARGET_SVE
+   && TARGET_NON_STREAMING
+   && (~<SVE_4HSI:narrower_mask> & <SVE_4BHI:self_mask>) == 0"
   "@
    ld1<ANY_EXTEND:s><SVE_4BHI:Vesize>\t%0.s, %5/z, [%2.s]
    ld1<ANY_EXTEND:s><SVE_4BHI:Vesize>\t%0.s, %5/z, [%2.s, #%1]
@@ -1587,7 +1591,9 @@
 		(mem:BLK (scratch))]
 	       UNSPEC_LD1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
+  "TARGET_SVE
+   && TARGET_NON_STREAMING
+   && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
   "@
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%2.d]
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%2.d, #%1]
@@ -1618,7 +1624,9 @@
 		(mem:BLK (scratch))]
 	       UNSPEC_LD1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
+  "TARGET_SVE
+   && TARGET_NON_STREAMING
+   && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
   "@
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%1, %2.d, <ANY_EXTEND2:su>xtw]
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%1, %2.d, <ANY_EXTEND2:su>xtw %p4]"
@@ -1650,7 +1658,9 @@
 		(mem:BLK (scratch))]
 	       UNSPEC_LD1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
+  "TARGET_SVE
+   && TARGET_NON_STREAMING
+   && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
   "@
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%1, %2.d, sxtw]
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%1, %2.d, sxtw %p4]"
@@ -1679,7 +1689,9 @@
 		(mem:BLK (scratch))]
 	       UNSPEC_LD1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
+  "TARGET_SVE
+   && TARGET_NON_STREAMING
+   && (~<SVE_2HSDI:narrower_mask> & <SVE_2BHSI:self_mask>) == 0"
   "@
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%1, %2.d, uxtw]
    ld1<ANY_EXTEND:s><SVE_2BHSI:Vesize>\t%0.d, %5/z, [%1, %2.d, uxtw %p4]"
@@ -1710,7 +1722,7 @@
 	   (mem:BLK (scratch))
 	   (reg:VNx16BI FFRT_REGNUM)]
 	  UNSPEC_LDFF1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1w\t%0.s, %5/z, [%2.s]
    ldff1w\t%0.s, %5/z, [%2.s, #%1]
@@ -1733,7 +1745,7 @@
 	   (mem:BLK (scratch))
 	   (reg:VNx16BI FFRT_REGNUM)]
 	  UNSPEC_LDFF1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1d\t%0.d, %5/z, [%2.d]
    ldff1d\t%0.d, %5/z, [%2.d, #%1]
@@ -1758,7 +1770,7 @@
 	   (mem:BLK (scratch))
 	   (reg:VNx16BI FFRT_REGNUM)]
 	  UNSPEC_LDFF1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1d\t%0.d, %5/z, [%1, %2.d, sxtw]
    ldff1d\t%0.d, %5/z, [%1, %2.d, sxtw %p4]"
@@ -1782,7 +1794,7 @@
 	   (mem:BLK (scratch))
 	   (reg:VNx16BI FFRT_REGNUM)]
 	  UNSPEC_LDFF1_GATHER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1d\t%0.d, %5/z, [%1, %2.d, uxtw]
    ldff1d\t%0.d, %5/z, [%1, %2.d, uxtw %p4]"
@@ -1817,7 +1829,7 @@
 		(reg:VNx16BI FFRT_REGNUM)]
 	       UNSPEC_LDFF1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1<ANY_EXTEND:s><VNx4_NARROW:Vesize>\t%0.s, %5/z, [%2.s]
    ldff1<ANY_EXTEND:s><VNx4_NARROW:Vesize>\t%0.s, %5/z, [%2.s, #%1]
@@ -1848,7 +1860,7 @@
 		(reg:VNx16BI FFRT_REGNUM)]
 	       UNSPEC_LDFF1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1<ANY_EXTEND:s><VNx2_NARROW:Vesize>\t%0.d, %5/z, [%2.d]
    ldff1<ANY_EXTEND:s><VNx2_NARROW:Vesize>\t%0.d, %5/z, [%2.d, #%1]
@@ -1881,7 +1893,7 @@
 		(reg:VNx16BI FFRT_REGNUM)]
 	       UNSPEC_LDFF1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1<ANY_EXTEND:s><VNx2_NARROW:Vesize>\t%0.d, %5/z, [%1, %2.d, sxtw]
    ldff1<ANY_EXTEND:s><VNx2_NARROW:Vesize>\t%0.d, %5/z, [%1, %2.d, sxtw %p4]"
@@ -1910,7 +1922,7 @@
 		(reg:VNx16BI FFRT_REGNUM)]
 	       UNSPEC_LDFF1_GATHER))]
 	  UNSPEC_PRED_X))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    ldff1<ANY_EXTEND:s><VNx2_NARROW:Vesize>\t%0.d, %5/z, [%1, %2.d, uxtw]
    ldff1<ANY_EXTEND:s><VNx2_NARROW:Vesize>\t%0.d, %5/z, [%1, %2.d, uxtw %p4]"
@@ -1985,7 +1997,7 @@
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
 	     (match_operand:DI 8 "const_int_operand"))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     static const char *const insns[][2] = {
       "prf<SVE_FULL_I:Vesize>", "%0, [%2.s]",
@@ -2014,7 +2026,7 @@
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
 	     (match_operand:DI 8 "const_int_operand"))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     static const char *const insns[][2] = {
       "prf<SVE_FULL_I:Vesize>", "%0, [%2.d]",
@@ -2045,7 +2057,7 @@
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
 	     (match_operand:DI 8 "const_int_operand"))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     static const char *const insns[][2] = {
       "prfb", "%0, [%1, %2.d, sxtw]",
@@ -2075,7 +2087,7 @@
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
 	     (match_operand:DI 8 "const_int_operand"))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     static const char *const insns[][2] = {
       "prfb", "%0, [%1, %2.d, uxtw]",
@@ -2242,7 +2254,7 @@
 	   (match_operand:DI 3 "aarch64_gather_scale_operand_<Vesize>")
 	   (match_operand:SVE_24 4 "register_operand")]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     operands[5] = aarch64_ptrue_reg (<VPRED>mode);
   }
@@ -2260,7 +2272,7 @@
 	   (match_operand:DI 3 "aarch64_gather_scale_operand_<Vesize>" "Ui1, Ui1, Ui1, Ui1, i, i")
 	   (match_operand:SVE_4 4 "register_operand" "w, w, w, w, w, w")]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<Vesize>\t%4.s, %5, [%1.s]
    st1<Vesize>\t%4.s, %5, [%1.s, #%0]
@@ -2282,7 +2294,7 @@
 	   (match_operand:DI 3 "aarch64_gather_scale_operand_<Vesize>" "Ui1, Ui1, Ui1, i")
 	   (match_operand:SVE_2 4 "register_operand" "w, w, w, w")]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<Vesize>\t%4.d, %5, [%1.d]
    st1<Vesize>\t%4.d, %5, [%1.d, #%0]
@@ -2305,7 +2317,7 @@
 	   (match_operand:DI 3 "aarch64_gather_scale_operand_<Vesize>" "Ui1, i")
 	   (match_operand:SVE_2 4 "register_operand" "w, w")]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<Vesize>\t%4.d, %5, [%0, %1.d, <su>xtw]
    st1<Vesize>\t%4.d, %5, [%0, %1.d, <su>xtw %p3]"
@@ -2332,7 +2344,7 @@
 	   (match_operand:DI 3 "aarch64_gather_scale_operand_<Vesize>" "Ui1, i")
 	   (match_operand:SVE_2 4 "register_operand" "w, w")]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<Vesize>\t%4.d, %5, [%0, %1.d, sxtw]
    st1<Vesize>\t%4.d, %5, [%0, %1.d, sxtw %p3]"
@@ -2356,7 +2368,7 @@
 	   (match_operand:DI 3 "aarch64_gather_scale_operand_<Vesize>" "Ui1, i")
 	   (match_operand:SVE_2 4 "register_operand" "w, w")]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<Vesize>\t%4.d, %5, [%0, %1.d, uxtw]
    st1<Vesize>\t%4.d, %5, [%0, %1.d, uxtw %p3]"
@@ -2384,7 +2396,7 @@
 	   (truncate:VNx4_NARROW
 	     (match_operand:VNx4_WIDE 4 "register_operand" "w, w, w, w, w, w"))]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<VNx4_NARROW:Vesize>\t%4.s, %5, [%1.s]
    st1<VNx4_NARROW:Vesize>\t%4.s, %5, [%1.s, #%0]
@@ -2407,7 +2419,7 @@
 	   (truncate:VNx2_NARROW
 	     (match_operand:VNx2_WIDE 4 "register_operand" "w, w, w, w"))]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<VNx2_NARROW:Vesize>\t%4.d, %5, [%1.d]
    st1<VNx2_NARROW:Vesize>\t%4.d, %5, [%1.d, #%0]
@@ -2432,7 +2444,7 @@
 	   (truncate:VNx2_NARROW
 	     (match_operand:VNx2_WIDE 4 "register_operand" "w, w"))]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<VNx2_NARROW:Vesize>\t%4.d, %5, [%0, %1.d, sxtw]
    st1<VNx2_NARROW:Vesize>\t%4.d, %5, [%0, %1.d, sxtw %p3]"
@@ -2456,7 +2468,7 @@
 	   (truncate:VNx2_NARROW
 	     (match_operand:VNx2_WIDE 4 "register_operand" "w, w"))]
 	  UNSPEC_ST1_SCATTER))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    st1<VNx2_NARROW:Vesize>\t%4.d, %5, [%0, %1.d, uxtw]
    st1<VNx2_NARROW:Vesize>\t%4.d, %5, [%0, %1.d, uxtw %p3]"
@@ -2602,7 +2614,7 @@
 	   (match_operand:OI 1 "aarch64_sve_ld1ro_operand_<Vesize>"
 			       "UO<Vesize>")]
 	  UNSPEC_LD1RO))]
-  "TARGET_SVE_F64MM"
+  "TARGET_SVE_F64MM && TARGET_NON_STREAMING"
   {
     operands[1] = gen_rtx_MEM (<VEL>mode, XEXP (operands[1], 0));
     return "ld1ro<Vesize>\t%0.<Vetype>, %2/z, %1";
@@ -3834,7 +3846,7 @@
 	  [(match_operand:SVE_FULL_SDI 1 "register_operand" "w")
 	   (match_operand:SVE_FULL_SDI 2 "register_operand" "w")]
 	  UNSPEC_ADR))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "adr\t%0.<Vetype>, [%1.<Vetype>, %2.<Vetype>]"
 )
 
@@ -3850,7 +3862,7 @@
 		  (match_operand:VNx2DI 2 "register_operand" "w")))]
 	     UNSPEC_PRED_X)]
 	  UNSPEC_ADR))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "adr\t%0.d, [%1.d, %2.d, sxtw]"
   "&& !CONSTANT_P (operands[3])"
   {
@@ -3867,7 +3879,7 @@
 	     (match_operand:VNx2DI 2 "register_operand" "w")
 	     (match_operand:VNx2DI 3 "aarch64_sve_uxtw_immediate"))]
 	  UNSPEC_ADR))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "adr\t%0.d, [%1.d, %2.d, uxtw]"
 )
 
@@ -3879,7 +3891,7 @@
 	    (match_operand:VNx2DI 2 "register_operand" "w")
 	    (match_operand:VNx2DI 3 "aarch64_sve_uxtw_immediate"))
 	  (match_operand:VNx2DI 1 "register_operand" "w")))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "adr\t%0.d, [%1.d, %2.d, uxtw]"
 )
 
@@ -3894,7 +3906,7 @@
 	       (match_operand:SVE_FULL_SDI 3 "const_1_to_3_operand"))]
 	    UNSPEC_PRED_X)
 	  (match_operand:SVE_FULL_SDI 1 "register_operand")))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     operands[4] = CONSTM1_RTX (<VPRED>mode);
   }
@@ -3910,7 +3922,7 @@
 	       (match_operand:SVE_24I 3 "const_1_to_3_operand"))]
 	    UNSPEC_PRED_X)
 	  (match_operand:SVE_24I 1 "register_operand" "w")))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "adr\t%0.<Vctype>, [%1.<Vctype>, %2.<Vctype>, lsl %3]"
   "&& !CONSTANT_P (operands[4])"
   {
@@ -3934,7 +3946,7 @@
 	       (match_operand:VNx2DI 3 "const_1_to_3_operand"))]
 	    UNSPEC_PRED_X)
 	  (match_operand:VNx2DI 1 "register_operand" "w")))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "adr\t%0.d, [%1.d, %2.d, sxtw %3]"
   "&& (!CONSTANT_P (operands[4]) || !CONSTANT_P (operands[5]))"
   {
@@ -3955,7 +3967,7 @@
 	       (match_operand:VNx2DI 3 "const_1_to_3_operand"))]
 	    UNSPEC_PRED_X)
 	  (match_operand:VNx2DI 1 "register_operand" "w")))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "adr\t%0.d, [%1.d, %2.d, uxtw %3]"
   "&& !CONSTANT_P (operands[5])"
   {
@@ -6967,7 +6979,7 @@
 	     (match_operand:<VSI2QI> 3 "register_operand" "w, w")]
 	    MATMUL)
 	  (match_operand:VNx4SI_ONLY 1 "register_operand" "0, w")))]
-  "TARGET_SVE_I8MM"
+  "TARGET_SVE_I8MM && TARGET_NON_STREAMING"
   "@
    <sur>mmla\\t%0.s, %2.b, %3.b
    movprfx\t%0, %1\;<sur>mmla\\t%0.s, %2.b, %3.b"
@@ -7538,7 +7550,7 @@
 	   (match_operand:SVE_MATMULF 3 "register_operand" "w, w")
 	   (match_operand:SVE_MATMULF 1 "register_operand" "0, w")]
 	  FMMLA))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "@
    <sve_fp_op>\\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>
    movprfx\t%0, %1\;<sve_fp_op>\\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>"
@@ -8601,7 +8613,7 @@
 		       (match_operand:<VEL> 1 "register_operand")
 		       (match_operand:SVE_FULL_F 2 "register_operand")]
 		      UNSPEC_FADDA))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   {
     operands[3] = aarch64_ptrue_reg (<VPRED>mode);
   }
@@ -8614,7 +8626,7 @@
 		       (match_operand:<VEL> 1 "register_operand" "0")
 		       (match_operand:SVE_FULL_F 2 "register_operand" "w")]
 		      UNSPEC_FADDA))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "fadda\t%<Vetype>0, %3, %<Vetype>0, %2.<Vetype>"
 )
 
@@ -8668,7 +8680,7 @@
 	  [(match_operand:<VPRED> 1 "register_operand" "Upl")
 	   (match_operand:SVE_FULL_SD 2 "register_operand" "w")]
 	  UNSPEC_SVE_COMPACT))]
-  "TARGET_SVE"
+  "TARGET_SVE && TARGET_NON_STREAMING"
   "compact\t%0.<Vetype>, %1, %2.<Vetype>"
 )
 

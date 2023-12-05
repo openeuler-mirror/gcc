@@ -2706,7 +2706,7 @@
 
 (define_int_iterator SVE_FP_UNARY [UNSPEC_FRECPE UNSPEC_RSQRTE])
 
-(define_int_iterator SVE_FP_UNARY_INT [UNSPEC_FEXPA])
+(define_int_iterator SVE_FP_UNARY_INT [(UNSPEC_FEXPA "TARGET_NON_STREAMING")])
 
 (define_int_iterator SVE_INT_SHIFT_IMM [UNSPEC_ASRD
 					(UNSPEC_SQSHLU "TARGET_SVE2")
@@ -2720,7 +2720,7 @@
 (define_int_iterator SVE_BFLOAT_TERNARY_LONG [UNSPEC_BFDOT
 					      UNSPEC_BFMLALB
 					      UNSPEC_BFMLALT
-					      UNSPEC_BFMMLA])
+					      (UNSPEC_BFMMLA "TARGET_NON_STREAMING")])
 
 (define_int_iterator SVE_BFLOAT_TERNARY_LONG_LANE [UNSPEC_BFDOT
 						   UNSPEC_BFMLALB
