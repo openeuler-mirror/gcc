@@ -2384,6 +2384,37 @@ loop_only_exit_p (const class loop *loop, basic_block *body, const_edge exit)
   return true;
 }
 
+/* Returns whether the number of vectorized iterations for the loop can be
+   estimated from the given IR and update the corresponding loop attribute,
+   e.g., next_mask_114 = .WHILE_ULT (_122, niters.5_75, { 0, ... });  */
+
+bool
+number_of_iterations_vect (class loop *loop, tree lhs, tree rhs)
+{
+  loop->vec_nb_iterations = chrec_dont_know;
+
+  if ((TREE_CODE (lhs) != SSA_NAME && TREE_CODE (rhs) != SSA_NAME)
+      || (TREE_CODE (lhs) == SSA_NAME && TREE_CODE (rhs) == SSA_NAME))
+    return false;
+
+  tree ssa = TREE_CODE (lhs) == SSA_NAME ? lhs : rhs;
+  gimple *def_stmt = SSA_NAME_DEF_STMT (ssa);
+
+  if (gimple_code (def_stmt) != GIMPLE_CALL
+      || !gimple_call_internal_p (def_stmt))
+    return false;
+
+  internal_fn ifn = gimple_call_internal_fn (def_stmt);
+  if (ifn != IFN_WHILE_ULT)
+    return false;
+
+  gcall *call = dyn_cast<gcall *> (def_stmt);
+  tree niters = gimple_call_arg (call, 1);
+  loop->vec_nb_iterations = niters;
+
+  return true;
+}
+
 /* Stores description of number of iterations of LOOP derived from
    EXIT (an exit edge of the LOOP) in NITER.  Returns true if some useful
    information could be derived (and fields of NITER have meaning described
@@ -2453,6 +2484,9 @@ number_of_iterations_exit_assumptions (class loop *loop, edge exit,
   op0 = gimple_cond_lhs (stmt);
   op1 = gimple_cond_rhs (stmt);
   type = TREE_TYPE (op0);
+
+  if (TREE_CODE (type) == VECTOR_TYPE)
+    number_of_iterations_vect (loop, op0, op1);
 
   if (TREE_CODE (type) != INTEGER_TYPE
       && !POINTER_TYPE_P (type))
@@ -2730,14 +2764,14 @@ bool
 number_of_iterations_exit (class loop *loop, edge exit,
 			   class tree_niter_desc *niter,
 			   bool warn, bool every_iteration,
-			   basic_block *body)
+			   basic_block *body, bool guarantee)
 {
   gcond *stmt;
   if (!number_of_iterations_exit_assumptions (loop, exit, niter,
 					      &stmt, every_iteration, body))
     return false;
 
-  if (integer_nonzerop (niter->assumptions))
+  if (integer_nonzerop (niter->assumptions) || guarantee == false)
     return true;
 
   if (warn && dump_enabled_p ())

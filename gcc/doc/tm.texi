@@ -6122,6 +6122,27 @@ The default is @code{NULL_TREE} which means to not vectorize scatter
 stores.
 @end deftypefn
 
+@deftypefn {Target Hook} insn_code TARGET_VECTORIZE_CODE_FOR_PREFETCH (machine_mode @var{arg})
+This hook should return the decl of a function that implements the
+vectorized variant of the function with the @code{combined_fn} code
+@var{code} or @code{NULL_TREE} if such a function is not available.
+The return type of the vectorized function shall be of vector type
+@var{vec_type_out} and the argument types should be @var{vec_type_in}.
+@end deftypefn
+
+@deftypefn {Target Hook} insn_code TARGET_VECTORIZE_CODE_FOR_GATHER_PREFETCH (machine_mode @var{mode_to}, machine_mode @var{mode_form})
+This hook should return the decl of a function that implements the
+vectorized variant of the function with the @code{combined_fn} code
+@var{code} or @code{NULL_TREE} if such a function is not available.
+The return type of the vectorized function shall be of vector type
+@var{vec_type_out} and the argument types should be @var{vec_type_in}.
+@end deftypefn
+
+@deftypefn {Target Hook} bool TARGET_VECTORIZE_PREFETCH_HANDLEABLE_MODE_P (machine_mode @var{arg})
+This hook should return true if the target hardware architecture
+supports a full SVE data vector mode.
+@end deftypefn
+
 @deftypefn {Target Hook} int TARGET_SIMD_CLONE_COMPUTE_VECSIZE_AND_SIMDLEN (struct cgraph_node *@var{}, struct cgraph_simd_clone *@var{}, @var{tree}, @var{int})
 This hook should set @var{vecsize_mangle}, @var{vecsize_int}, @var{vecsize_float}
 fields in @var{simd_clone} structure pointed by @var{clone_info} argument and also

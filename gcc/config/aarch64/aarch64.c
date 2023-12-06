@@ -2367,6 +2367,13 @@ aarch64_sve_data_mode_p (machine_mode mode)
   return aarch64_classify_vector_mode (mode) & VEC_SVE_DATA;
 }
 
+/* Return true if MODE is an full SVE data vector mode.  */
+static bool
+aarch64_full_sve_data_mode_p (machine_mode mode)
+{
+  return aarch64_classify_vector_mode (mode) == VEC_SVE_DATA;
+}
+
 /* Return the number of defined bytes in one constituent vector of
    SVE mode MODE, which has vector flags VEC_FLAGS.  */
 static poly_int64
@@ -24369,6 +24376,17 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_ASM_FUNCTION_EPILOGUE
 #define TARGET_ASM_FUNCTION_EPILOGUE aarch64_sls_emit_blr_function_thunks
+
+#undef TARGET_VECTORIZE_CODE_FOR_PREFETCH
+#define TARGET_VECTORIZE_CODE_FOR_PREFETCH code_for_aarch64_sve_prefetch
+
+#undef TARGET_VECTORIZE_CODE_FOR_GATHER_PREFETCH
+#define TARGET_VECTORIZE_CODE_FOR_GATHER_PREFETCH \
+  code_for_aarch64_sve_gather_prefetch
+
+#undef TARGET_VECTORIZE_PREFETCH_HANDLEABLE_MODE_P
+#define TARGET_VECTORIZE_PREFETCH_HANDLEABLE_MODE_P \
+  aarch64_full_sve_data_mode_p
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 

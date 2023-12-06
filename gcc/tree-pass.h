@@ -383,6 +383,7 @@ extern gimple_opt_pass *make_pass_complete_unrolli (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_parallelize_loops (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_loop_prefetch (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_iv_optimize (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_llc_allocate (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_loop_done (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ch (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ch_vect (gcc::context *ctxt);

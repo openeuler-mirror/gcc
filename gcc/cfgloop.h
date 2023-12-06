@@ -272,6 +272,9 @@ public:
      the basic-block from being collected but its index can still be
      reused.  */
   basic_block former_header;
+
+  /* Number of latch executions from vectorization.  */
+  tree vec_nb_iterations;
 };
 
 /* Set if the loop is known to be infinite.  */

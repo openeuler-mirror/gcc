@@ -2789,7 +2789,7 @@ resolve_mixers (class loop *loop, tree chrec, bool *folded_casts)
    the loop body has been executed 6 times.  */
 
 tree
-number_of_latch_executions (class loop *loop)
+number_of_latch_executions (class loop *loop, bool guarantee)
 {
   edge exit;
   class tree_niter_desc niter_desc;
@@ -2810,7 +2810,8 @@ number_of_latch_executions (class loop *loop)
   res = chrec_dont_know;
   exit = single_exit (loop);
 
-  if (exit && number_of_iterations_exit (loop, exit, &niter_desc, false))
+  if (exit && number_of_iterations_exit (loop, exit, &niter_desc, false,
+					 true, NULL, guarantee))
     {
       may_be_zero = niter_desc.may_be_zero;
       res = niter_desc.niter;
@@ -2836,7 +2837,8 @@ number_of_latch_executions (class loop *loop)
       fprintf (dump_file, "))\n");
     }
 
-  loop->nb_iterations = res;
+  if (guarantee)
+    loop->nb_iterations = res;
   return res;
 }
 

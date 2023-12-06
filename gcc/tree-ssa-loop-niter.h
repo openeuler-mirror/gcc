@@ -27,7 +27,8 @@ extern bool loop_only_exit_p (const class loop *, basic_block *body,
 extern bool number_of_iterations_exit (class loop *, edge,
 				       class tree_niter_desc *niter, bool,
 				       bool every_iteration = true,
-				       basic_block * = NULL);
+				       basic_block * = NULL,
+				       bool guarantee = true);
 extern bool number_of_iterations_exit_assumptions (class loop *, edge,
 						   class tree_niter_desc *,
 						   gcond **, bool = true,
