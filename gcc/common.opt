@@ -1121,6 +1121,10 @@ Common Var(flag_array_widen_compare) Optimization
 Extends types for pointers to arrays to improve array comparsion performance.
 In some extreme situations this may result in unsafe behavior.
 
+fcrypto-accel-aes
+Common Var(flag_crypto_accel_aes) Init(0) Optimization
+Perform crypto acceleration AES pattern matching.
+
 fauto-inc-dec
 Common Var(flag_auto_inc_dec) Init(1) Optimization
 Generate auto-inc/dec instructions.
