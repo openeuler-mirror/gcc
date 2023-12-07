@@ -1279,6 +1279,10 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
   if (opts->x_flag_vtable_verify && opts->x_flag_lto)
     sorry ("vtable verification is not supported with LTO");
 
+  /* Currently -fauto-bolt is not supported for LTO.    */
+  if (opts->x_flag_auto_bolt && opts->x_flag_lto)
+    sorry ("%<-fauto-bolt%> is not supported with LTO");
+
   /* Control IPA optimizations based on different -flive-patching level.  */
   if (opts->x_flag_live_patching)
     control_options_for_live_patching (opts, opts_set,
@@ -1291,6 +1295,58 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
       = (opts->x_flag_unroll_loops
          || opts->x_flag_peel_loops
          || opts->x_optimize >= 3);
+  
+  if (opts->x_flag_auto_bolt)
+    {
+      /* Record the function section to facilitate the feedback
+	 data storage.  */
+      if (!opts->x_flag_function_sections)
+        {
+	  inform (loc,
+	          "%<-fauto-bolt%> should work with %<-ffunction-sections%>,"
+		  " enabling %<-ffunction-sections%>");
+	  opts->x_flag_function_sections = true;
+	}
+
+      /* Cancel the internal alignment of the function.  The binary
+	 optimizer bolt will cancel the internal alignment optimization
+	 of the function, so the alignment is meaningless at this time,
+	 and if not, it will bring trouble to the calculation of the
+	 offset address of the instruction.  */
+      if (opts->x_flag_align_jumps)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should not work with %<-falign-jumps%>,"
+		  " disabling %<-falign-jumps%>");
+	  opts->x_flag_align_jumps = false;
+	}
+
+      if (opts->x_flag_align_labels)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should not work with %<-falign-labels%>,"
+		  " disabling %<-falign-labels%>");
+	          opts->x_flag_align_labels = false;
+	}
+
+      if (opts->x_flag_align_loops)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should not work with %<-falign-loops%>,"
+		  " disabling %<-falign-loops%>");
+	  opts->x_flag_align_loops = false;
+	}
+
+      /* When parsing instructions in RTL phase, we need to know
+	 the call information of instructions to avoid being optimized.  */
+      if (!opts->x_flag_ipa_ra)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should work with %<-fipa-ra%>,"
+		  " enabling %<-fipa-ra%>");
+	  opts->x_flag_ipa_ra = true;
+	}
+    }
 
   /* With -fcx-limited-range, we do cheap and quick complex arithmetic.  */
   if (opts->x_flag_cx_limited_range)
@@ -3226,6 +3282,11 @@ common_handle_option (struct gcc_options *opts,
 				&opts->x_flag_align_functions,
 				&opts->x_str_align_functions);
       break;
+    
+    case OPT_fauto_bolt_:
+    case OPT_fauto_bolt:
+      /* Deferred.  */  
+      break;  
 
     case OPT_ftabstop_:
       /* It is documented that we silently ignore silly values.  */
