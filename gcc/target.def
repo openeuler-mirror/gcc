@@ -2422,7 +2422,7 @@ If @var{code} is out of range the function should return\n\
  tree, (unsigned code, bool initialize_p), NULL)
 
 /* Initialize (if INITIALIZE_P is true) and return the real code of
-   target-specific built-in function .
+   target-specific built-in function.
    Return NULL if that is not possible.  Return error_mark_node if CODE
    is outside of the range of valid crc32 codes.  */
 DEFHOOK

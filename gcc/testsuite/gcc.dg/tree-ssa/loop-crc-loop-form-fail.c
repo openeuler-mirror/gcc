@@ -62,7 +62,7 @@ static const ulg crc_32_tab[] = {
 };
 
 /* check when the loop have a innor loop, should fail.  */
-ulg updcrc(s, n)
+ulg updcrc (s, n)
     uch *s;                 /* pointer to bytes to pump through */
     unsigned n;             /* number of bytes in s[] */
 {
