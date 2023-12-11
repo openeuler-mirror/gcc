@@ -1058,4 +1058,10 @@ Common Joined UInteger Var(param_filter_kernels) Init(1) IntegerRange(0, 1) Para
 Allow LLC allocate pass to greedily filter kernels by traversing the corresponding basic blocks
 through edges with branch probability no less than param_branch_prob_threshold.
 
+-param=outer-loop-nums=
+Common Joined UInteger Var(param_outer_loop_num) Init(1) IntegerRange(1, 10) Param
+Maximum number of outer loops allowed to extend outer loops for loops that
+cannot recognize inner loop boundaries.
+
+
 ; This comment is to ensure we retain the blank line above.

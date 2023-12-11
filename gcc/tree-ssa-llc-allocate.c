@@ -312,9 +312,6 @@ get_references_in_stmt (gimple *stmt, vector<data_ref> &references)
 
 struct loop_filter_out_flag
 {
-  /* Use external gimple.  */
-  bool use_ext_gimple;
-
   /* Use external call.  */
   bool use_ext_call;
 
@@ -358,21 +355,7 @@ bool
 filter_out_loop_by_stmt_p (loop_filter_out_flag &loop_filter, gimple *stmt,
 		  const vector<data_ref> &references, unsigned int &start)
 {
-  /* check use_ext_gimple.  */
-  expanded_location cfun_xloc
-    = expand_location (DECL_SOURCE_LOCATION (current_function_decl));
   expanded_location xloc = expand_location (stmt->location);
-  if (xloc.file && filename_cmp (cfun_xloc.file, xloc.file))
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	{
-	  fprintf (dump_file, "use_ext_gimple: ");
-	  print_gimple_stmt (dump_file, stmt, 0, TDF_LINENO);
-	}
-      loop_filter.use_ext_gimple = true;
-      return true;
-    }
-
   /* check use_ext_call.  */
   if (gimple_code (stmt) == GIMPLE_CALL && !gimple_call_internal_p (stmt))
     {
@@ -421,11 +404,6 @@ filter_out_loop_by_stmt_p (loop_filter_out_flag &loop_filter, gimple *stmt,
 void
 dump_loop_filter_out_flag (loop_filter_out_flag &loop_filter)
 {
-  if (loop_filter.use_ext_gimple)
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "non-dense mem access: use_ext_gimple\n");
-    }
   if (loop_filter.use_ext_call)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
@@ -491,45 +469,6 @@ get_references_in_loop (vector<data_ref> &references,
     }
   free (body);
   return !filter_out_loop;
-}
-
-/* Determine whether the loop is a single path.  */
-
-bool
-single_path_p (class loop *loop, basic_block bb)
-{
-  if (bb == NULL)
-    return false;
-  if (bb == loop->latch)
-    return true;
-
-  gimple *stmt = last_stmt (bb);
-  bool res = false;
-
-  if (stmt && gimple_code (stmt) == GIMPLE_COND)
-    {
-      gcc_assert (EDGE_COUNT (bb->succs) == 2);
-      edge true_edge = NULL;
-      edge false_edge = NULL;
-      extract_true_false_edges_from_block (bb, &true_edge, &false_edge);
-
-      /* Returns false, if a branch occurs.  */
-      if (true_edge->dest->loop_father == loop
-	  && false_edge->dest->loop_father == loop)
-	return false;
-
-      if (true_edge->dest->loop_father == loop)
-	res = single_path_p (loop, true_edge->dest);
-      else
-	res = single_path_p (loop, false_edge->dest);
-    }
-  else
-    {
-      edge e = find_fallthru_edge (bb->succs);
-      if (e)
-	res = single_path_p (loop, e->dest);
-    }
-  return res;
 }
 
 /* Computes an estimated number of insns in LOOP, weighted by WEIGHTS.
@@ -611,6 +550,45 @@ dense_memory_p (const vector<data_ref> &references, class loop *loop)
 
 /* Analyze the inner loop and get the loop with dense memory access.  */
 
+void
+analyze_loop_dense_memory (vector<class loop *> &kernels,
+			  map<class loop *, vector<data_ref> > &kernels_refs,
+			  class loop *loop)
+{
+  vector<data_ref> references;
+  number_of_latch_executions (loop);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\n========== Processing loop %d: ==========\n",
+	      loop->num);
+      loop_dump (dump_file, loop);
+      flow_loop_dump (loop, dump_file, NULL, 1);
+      fprintf (dump_file, "loop unroll: %d\n", loop->unroll);
+    }
+
+  if (get_loop_exit_edges (loop).length () != 1)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "non-dense mem access: loop_branching\n");
+      return;
+    }
+
+  loop_filter_out_flag loop_filter = {false, false, true, false};
+
+  if (!get_references_in_loop (references, loop_filter, loop))
+    {
+      dump_loop_filter_out_flag (loop_filter);
+      return;
+    }
+
+  if (dense_memory_p (references, loop))
+    {
+      kernels_refs[loop] = references;
+      kernels.push_back (loop);
+    }
+}
+/* Analyze the inner loop and get the loop with dense memory access.  */
+
 bool
 get_dense_memory_kernels (vector<class loop *> &kernels,
 			  map<class loop *, vector<data_ref> > &kernels_refs)
@@ -619,40 +597,7 @@ get_dense_memory_kernels (vector<class loop *> &kernels,
     fprintf (dump_file, "\nPhase 1: get_dense_memory_kernels\n\n");
   class loop *loop = NULL;
   FOR_EACH_LOOP (loop, LI_ONLY_INNERMOST)
-    {
-      number_of_latch_executions (loop);
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	{
-	  fprintf (dump_file, "\n========== Processing loop %d: ==========\n",
-		  loop->num);
-	  loop_dump (dump_file, loop);
-	  flow_loop_dump (loop, dump_file, NULL, 1);
-	  fprintf (dump_file, "loop unroll: %d\n", loop->unroll);
-	}
-
-      if (get_loop_exit_edges (loop).length () != 1
-	  || !single_path_p (loop, loop->header))
-	{
-	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "non-dense mem access: loop_branching\n");
-	  continue;
-	}
-
-      vector<data_ref> references;
-      loop_filter_out_flag loop_filter = {false, false, false, true, false};
-
-      if (!get_references_in_loop (references, loop_filter, loop))
-	{
-	  dump_loop_filter_out_flag (loop_filter);
-	  continue;
-	}
-
-      if (dense_memory_p (references, loop))
-	{
-	  kernels_refs[loop] = references;
-	  kernels.push_back (loop);
-	}
-    }
+    analyze_loop_dense_memory (kernels, kernels_refs, loop);
   return kernels.size () > 0;
 }
 
@@ -1094,33 +1039,41 @@ trace_ref_info (data_ref &mem_ref, set <gimple *> &traced_ref_stmt)
   mem_ref.trace_status_p = true;
 }
 
+/* Trace all references in the loop.  */
+
+void
+trace_loop_refs_info (vector<data_ref> &refs, set <gimple *> &traced_ref_stmt)
+{
+  for (unsigned i = 0; i < refs.size (); ++i)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "trace_references_base_info %d:\n", i);
+	  print_generic_expr (dump_file, refs[i].ref, TDF_SLIM);
+	  fprintf (dump_file, "\n");
+	}
+      trace_ref_info (refs[i], traced_ref_stmt);
+    }
+}
+
 /* Tracing and sorting reference groups.  */
 
 void
 trace_data_refs_info (vector<class loop *> &kernels,
-		      map<class loop*, vector<data_ref> > &loop_refs)
+		      map<class loop*, vector<data_ref> > &loop_refs,
+		      set <gimple *> &traced_ref_stmt)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 2: trace_all_references_info\n\n");
 
-  set <gimple *> traced_ref_stmt;
-
   for (unsigned i = 0; i < kernels.size (); ++i)
     {
-      class loop* loop = kernels[i];
-
+      class loop *loop = kernels[i];
+      if (loop_refs.count (loop) == 0)
+	continue;
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "loop header %d:\n", loop->header->index);
-      for (unsigned j = 0; j < loop_refs[loop].size (); ++j)
-	{
-	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    {
-	      fprintf (dump_file, "trace_references_base_info %d:\n", j);
-	      print_generic_expr (dump_file, loop_refs[loop][j].ref, TDF_SLIM);
-	      fprintf (dump_file, "\n");
-	    }
-	  trace_ref_info (loop_refs[loop][j], traced_ref_stmt);
-	}
+      trace_loop_refs_info (loop_refs[loop], traced_ref_stmt);
     }
 }
 
@@ -1205,7 +1158,7 @@ void
 check_bound_iv_and_add_worklist (vector<tree> &worklist, set<tree> &walked,
 				 tree t, data_ref &mem_ref)
 {
-  if (TREE_CODE (t) != SSA_NAME)
+  if (t == NULL_TREE || TREE_CODE (t) != SSA_NAME)
     return;
 
   gimple *def_stmt = SSA_NAME_DEF_STMT (t);
@@ -1278,8 +1231,13 @@ trace_loop_bound_iv (data_ref &mem_ref)
     }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "\nmem_ref access dimension: %ld\n",
-	     mem_ref.loop_bounds.size ());
+    {
+      fprintf (dump_file, "\nmem_ref access dimension: %ld\n",
+	      mem_ref.loop_bounds.size ());
+      fprintf (dump_file, "Traced variables: ");
+      print_generic_expr (dump_file, mem_ref.base, TDF_SLIM);
+      fprintf (dump_file, "\n");
+    }
 
   return mem_ref.loop_bounds.size () > 0;
 }
@@ -1487,7 +1445,7 @@ trace_and_create_dominate_loop_bounds (data_ref &mem_ref)
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
 	      print_generic_expr (dump_file, mem_ref.ref, TDF_SLIM);
-	      fprintf (dump_file, "Tracing loop bound failed at dimension %d",
+	      fprintf (dump_file, "Tracing loop bound failed at dimension %d\n",
 		       i);
 	    }
 	  mem_ref.calc_by = UNHANDLE_CALC;
@@ -1565,42 +1523,245 @@ trace_ref_dimension_and_loop_bounds (data_ref &mem_ref)
     static_calculate_data_size (mem_ref);
 }
 
-/* analyze nested kernels.
-   1. multidimension loop analyze.
-   2. extended outer loop analyze.
-   Later we will extend outer loop analysis.
+/* Get the loop's niters tree.
+   Return NULL_TREE if not found.  */
+
+tree
+get_cur_loop_niters (map<class loop*, vector<data_ref> > &loop_refs,
+		     class loop* loop)
+{
+  if (loop_refs.count (loop) == 0)
+    return NULL_TREE;
+  vector<loop_bound> bounds = loop_refs[loop][0].loop_bounds;
+  return bounds.size () ? bounds[0].niters : NULL_TREE;
+}
+
+/* Trace the sources of the niters tree and return the
+   outermost depth of the loops containing them.
+   Return start_depth if not found.
+
+   example:
+   niters:(long) (((int) i_end_417 - (int) i_start_452) + 1)
+   operand_num: 1, subtree:(long) (((int) i_end_417 - (int) i_start_452) + 1)
+   operand_num: 2, subtree:((int) i_end_417 - (int) i_start_452) + 1
+   operand_num: 2, subtree:(int) i_end_417 - (int) i_start_452
+   operand_num: 1, subtree:(int) i_end_417
+   SSA_NAME of niters: i_end_417
+   gimple of SSA: i_end_417 = PHI <i_end_446(9), i_end_410(100)>
+   return gimple depth;
+*/
+
+unsigned
+trace_outer_loop_depth (tree niters, unsigned start_depth)
+{
+  /* If niter does not exist or the type is INTEGER_CST,
+     the loop bound is determined and return start_depth.  */
+  if (niters == NULL_TREE || TREE_CODE (niters) == INTEGER_CST)
+    return start_depth;
+
+  gimple *def_stmt = NULL;
+  /* niters examples: i_start_452, fEnd_35, fEnd_100.  */
+  enum tree_code niter_code = TREE_CODE (niters);
+  if (niter_code == SSA_NAME)
+    {
+      /* Trace the SSA that define this niter.  */
+      def_stmt = SSA_NAME_DEF_STMT (niters);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "ssa_name of niters: ");
+	  print_generic_expr (dump_file, niters);
+	  fprintf (dump_file, "\ngimple of ssa: \n");
+	  print_gimple_stmt (dump_file, def_stmt, 0, TDF_LINENO);
+	  fprintf (dump_file, "\n");
+	}
+      /* Termination condition of dfs.  Return the depth of the bb block.  */
+      if (gimple_code (def_stmt) == GIMPLE_PHI
+          || gimple_code (def_stmt) == GIMPLE_NOP)
+	{
+	  basic_block def_bb = gimple_bb (SSA_NAME_DEF_STMT (niters));
+	  if (def_bb == NULL || def_bb->loop_father == NULL)
+	    return start_depth;
+	  unsigned ret_depth = loop_depth (def_bb->loop_father);
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file, "Stop tracing the outer loop depth, ");
+	      fprintf (dump_file, "current depth: %d, current bb: %d\n",
+				  ret_depth, def_bb->index);
+	    }
+	  return ret_depth;
+	}
+      /* 'ASSIGN': Use dfs to trace the rhs of the assignment statement.  */
+      else if (gimple_code (def_stmt) == GIMPLE_ASSIGN)
+	{
+	  tree rhs = gimple_assign_rhs1 (def_stmt);
+	  if (TREE_CODE (rhs) == TARGET_MEM_REF)
+	    /* fEnd_35 = MEM[base: _19, index: ivtmp.96, step: 4,
+			     offset: 0B]  */
+	    return trace_outer_loop_depth (TREE_OPERAND (rhs, 2), start_depth);
+	  else
+	    {
+	      /* M.218_658 = MIN_EXPR <_631, _657>  */
+	      unsigned min_depth = start_depth;
+	      unsigned operand_num = gimple_num_ops (def_stmt);
+	      /* 'ASSIGN': start from 1 because op[0] is the lhs.  */
+	      for (unsigned i = 1; i < operand_num; i++)
+		{
+		  tree subtree = dyn_cast<gassign *>(def_stmt)->op[i];
+		  if (subtree == NULL)
+		    continue;
+		  unsigned depth = trace_outer_loop_depth (subtree, \
+				   start_depth);
+		  min_depth = MIN (min_depth, depth);
+		  }
+		return min_depth;
+	    }
+	}
+      else
+	{
+	  /* Adding termination conditions:
+	   1.  Niters is MEM variable;
+	   2.  Niters is a runtime value (smooth_uPtr), and consider \
+	       finding footprint in other mem_ref;
+	   3.  Niters is loop variable (i_start/i_end), and the boundary in \
+	       the outer loop depends on the variable j_start/j_end.  */
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file, "The loop termination condition");
+	      fprintf (dump_file, "is to be extended.\n");
+	    }
+	  return start_depth;
+	}
+    }
+  /* The operand nums can be obtained when the tree code is as follows.  */
+  else if (niter_code == NOP_EXPR || niter_code == MEM_REF
+	   || niter_code == ARRAY_REF || niter_code == COND_EXPR
+	   || niter_code == PLUS_EXPR || niter_code == MINUS_EXPR
+	   || niter_code == TARGET_MEM_REF || niter_code == POINTER_PLUS_EXPR)
+    {
+      /* operand_num is the operand in the niters statement.
+	 example: In the following niter statement, operand_num = 3.
+	 (unsigned int) fEnd_35 - (unsigned int) fEnd_100 + 4294967295.  */
+      unsigned operand_num = TREE_OPERAND_LENGTH (niters);
+      unsigned min_depth = start_depth;
+      for (unsigned i = 0; i < operand_num; i++)
+	{
+	  tree subtree = TREE_OPERAND (niters, i);
+	  if (subtree == NULL)
+	    continue;
+	  unsigned depth = trace_outer_loop_depth (subtree, start_depth);
+	  min_depth = MIN (min_depth, depth);
+	}
+      return min_depth;
+    }
+  else
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "niters is another tree code: %s\n", \
+		   get_tree_code_name (niter_code));
+	  print_generic_expr (dump_file, niters, TDF_SLIM);
+	  fprintf (dump_file, "\n");
+	}
+      return start_depth;
+    }
+}
+
+/* Traces the ref dimension information in each loop.  */
+
+void
+analyze_loop_refs_dimension (vector<data_ref> &refs)
+{
+  for (unsigned i = 0; i < refs.size (); ++i)
+    {
+      if (refs[i].trace_status_p == false)
+	continue;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "trace_reference_dimension %d:\n", i);
+	  print_generic_expr (dump_file, refs[i].ref, TDF_SLIM);
+	  fprintf (dump_file, "\n");
+	}
+      trace_ref_dimension_and_loop_bounds (refs[i]);
+    }
+}
+/* analyze nested kernels
+   1. multidimension loop analyze
+   2. extended outer loop analyze
 */
 
 bool
 analyze_nested_kernels (vector<class loop *> &kernels,
-			map<class loop*, vector<data_ref> > &loop_refs)
+			map<class loop*, vector<data_ref> > &loop_refs,
+			set <gimple *> &traced_ref_stmt)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 3: analyze_nested_kernels\n\n");
 
-  for (unsigned i = 0; i < kernels.size (); ++i)
+  /* `kernels` may be added in during outer loop extension phase,
+     thus using initial size to avoid repeatedly analyzing.  */
+  unsigned init_kernels_size = kernels.size ();
+  for (unsigned i = 0; i < init_kernels_size; ++i)
     {
       class loop* loop = kernels[i];
       if (loop_refs.count (loop) == 0)
 	continue;
 
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "\n\nloop header %d:\n", loop->header->index);
-      for (unsigned j = 0; j < loop_refs[loop].size (); ++j)
+	fprintf (dump_file, "loop header %d:\n", loop->header->index);
+      analyze_loop_refs_dimension (loop_refs[loop]);
+
+      unsigned depth = loop_depth (loop);
+      unsigned outer_depth = trace_outer_loop_depth (get_cur_loop_niters \
+			     (loop_refs, loop), depth);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "cur_depth: %d, outer_depth: %d\n", \
+			    depth, outer_depth);
+      /* param_outer_loop_num: number of loops of the extended outer loop.
+	 Outermost loop should not be extended when outer_depth = 0.
+	 `outer_depth == depth` means the current loop is the loop which
+	 boundary is known, so there is no need to extend the outer loop.  */
+      if (outer_depth == 0 || outer_depth == depth
+	  || depth > outer_depth + param_outer_loop_num)
+	continue;
+      /* Extend outer loop.  */
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "\nStart extending outer loop\n");
+      /* Superloops of the loop, start from the loop closest to the \
+	  current loop in the outermost loop.  */
+      for (unsigned j = 0; j < param_outer_loop_num && --depth; ++j)
 	{
-	  if (loop_refs[loop][j].trace_status_p == false)
+	  class loop* outer_loop = (*loop->superloops)[depth];
+	  /* The outer loop may be added when analyzing previous inner loops,
+	     i.e. the outer loop contains two or more inner loops.  */
+	  if (loop_refs.count (outer_loop))
 	    continue;
-
-	  if (dump_file && (dump_flags & TDF_DETAILS))
+	  /* phase1~phase3 analysis on the extended outer loop.  */
+	  analyze_loop_dense_memory (kernels, loop_refs, outer_loop);
+	  if (loop_refs.count (outer_loop) == 0)
+	    continue;
+	  for (unsigned k = 0; k < loop_refs[outer_loop].size (); ++k)
 	    {
-	      fprintf (dump_file, "\ntrace_reference_dimension at mem_ref "
-		       "index %d in loop %d:\n", j, loop->num);
-	      print_generic_expr (dump_file, loop_refs[loop][j].ref, TDF_SLIM);
-	      fprintf (dump_file, "\n");
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "outer_analyze_nested_kernels %d: ", k);
+		  print_generic_expr (dump_file, loop_refs[outer_loop][k].ref,\
+		  TDF_SLIM);
+		  fprintf (dump_file, "\n");
+		}
 	    }
-	  trace_ref_dimension_and_loop_bounds (loop_refs[loop][j]);
+	  trace_loop_refs_info (loop_refs[outer_loop], traced_ref_stmt);
+	  analyze_loop_refs_dimension (loop_refs[outer_loop]);
+	  outer_depth = trace_outer_loop_depth (get_cur_loop_niters \
+					       (loop_refs, outer_loop), depth);
+	  /* `outer_depth == depth` means the current loop is the loop which
+	   boundary is known, so there is no need to extend the outer loop.  */
+	  if (outer_depth == depth)
+	    break;
+	  else
+	    /* The outer loop cannot find the current loop boundary,
+	       Remove the record of outer_loop from the loop_refs.  */
+	    loop_refs.erase (outer_loop);
 	}
-
     }
   return true;
 }
@@ -2694,9 +2855,10 @@ llc_allocate (void)
   if (!get_dense_memory_kernels (kernels, kernels_refs))
     return;
 
-  trace_data_refs_info (kernels, kernels_refs);
+  set <gimple *> traced_ref_stmt;
+  trace_data_refs_info (kernels, kernels_refs, traced_ref_stmt);
 
-  if (!analyze_nested_kernels (kernels, kernels_refs))
+  if (!analyze_nested_kernels (kernels, kernels_refs, traced_ref_stmt))
     return;
 
   vector<class loop *> sorted_kernels;
