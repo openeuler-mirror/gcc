@@ -441,7 +441,8 @@ typedef struct
 #define VAR1(T, N, MAP, A) \
   AARCH64_SIMD_BUILTIN_##T##_##N##A,
 
-enum aarch64_crc_builtins{
+enum aarch64_crc_builtins
+{
   AARCH64_BUILTIN_CRC32B,
   AARCH64_BUILTIN_CRC32H,
   AARCH64_BUILTIN_CRC32W,
@@ -1327,15 +1328,17 @@ aarch64_general_builtin_decl (unsigned code, bool)
 
   return aarch64_builtin_decls[code];
 }
-/* Implement TARGET_GET_CRC_BUILTIN_CODE  */
-unsigned 
-get_crc_builtin_code(unsigned code, bool)
+
+/* Implement TARGET_GET_CRC_BUILTIN_CODE.  */
+unsigned
+get_crc_builtin_code (unsigned code, bool)
 {
   if (code > AARCH64_BUILTIN_CRC32W)
     return AARCH64_BUILTIN_MIN;
 
   unsigned res = AARCH64_BUILTIN_MIN;
-  switch (code) {
+  switch (code)
+  {
     case AARCH64_BUILTIN_CRC32B:
       res = AARCH64_BUILTIN_crc32b;
       break;

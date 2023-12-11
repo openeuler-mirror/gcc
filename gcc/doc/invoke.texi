@@ -460,7 +460,7 @@ Objective-C and Objective-C++ Dialects}.
 -fno-allocation-dce -fallow-store-data-races @gol
 -fassociative-math  -fauto-profile  -fauto-profile[=@var{path}] @gol
 -farray-widen-compare -fauto-inc-dec  -fbranch-probabilities @gol
--fcaller-saves -floop-crc @gol
+-fcaller-saves @gol
 -fcombine-stack-adjustments  -fconserve-stack @gol
 -fcompare-elim  -fcprop-registers  -fcrossjumping @gol
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules @gol
@@ -489,7 +489,7 @@ Objective-C and Objective-C++ Dialects}.
 -fisolate-erroneous-paths-dereference  -fisolate-erroneous-paths-attribute @gol
 -fivopts  -fkeep-inline-functions  -fkeep-static-functions @gol
 -fkeep-static-consts  -flimit-function-alignment  -flive-range-shrinkage @gol
--floop-block  -floop-interchange  -floop-strip-mine @gol
+-floop-block  -floop-crc  -floop-interchange  -floop-strip-mine @gol
 -floop-unroll-and-jam  -floop-nest-optimize @gol
 -floop-parallelize-all  -flra-remat  -flto  -flto-compression-level @gol
 -flto-partition=@var{alg}  -fmerge-all-constants @gol
@@ -9722,10 +9722,6 @@ extreme situations this may result in unsafe behavior.
 This option may generate better or worse code; results are highly dependent
 on the structure of loops within the source code.
 
-@item -floop-crc 
-@opindex floop-crc
-Do the loop crc conversion
-
 @item -fdce
 @opindex fdce
 Perform dead code elimination (DCE) on RTL@.
@@ -10496,6 +10492,10 @@ for @option{-Os}, since it usually increases code size.
 @opindex ftree-loop-optimize
 Perform loop optimizations on trees.  This flag is enabled by default
 at @option{-O} and higher.
+
+@item -floop-crc 
+@opindex floop-crc
+Do the loop crc conversion
 
 @item -ftree-loop-linear
 @itemx -floop-strip-mine

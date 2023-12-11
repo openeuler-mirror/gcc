@@ -13758,10 +13758,10 @@ aarch64_builtin_decl (unsigned int code, bool initialize_p)
 }
 
 /* Implement TARGET_GET_CRC_BUILTIN_CODE.  */
-static unsigned 
-aarch64_get_crc_builtin_code(unsigned code, bool initialize_p)
+static unsigned
+aarch64_get_crc_builtin_code (unsigned code, bool initialize_p)
 {
-  unsigned subcode = get_crc_builtin_code(code,initialize_p);
+  unsigned subcode = get_crc_builtin_code (code, initialize_p);
   unsigned res = subcode << AARCH64_BUILTIN_SHIFT;
   return res;
 }

@@ -61,7 +61,7 @@ static const ulg crc_32_tab[] = {
   0x2d02ef8dL
 };
 
-ulg updcrc(s, n)
+ulg updcrc (s, n)
     uch *s;                 /* pointer to bytes to pump through */
     unsigned n;             /* number of bytes in s[] */
 {

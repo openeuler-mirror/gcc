@@ -1,4 +1,5 @@
-/* loop crc.
+/* This pass converts special loops where do CRC algorithms to
+   simple CRC instructions in AArch64.
    Copyright (C) 2023-2023 Free Software Foundation, Inc.
 
 This file is part of GCC.
@@ -45,79 +46,90 @@ along with GCC; see the file COPYING3.  If not see
 #include "diagnostic-core.h"
 
 /* This pass handles scenarios similar to the following:
-ulg updcrc(s, n)
-    uch *s;                 
-    unsigned n;             
+ulg updcrc (s, n)
+    uch *s;
+    unsigned n;
 {
-    register ulg c;         
+    register ulg c;
 
     static ulg crc = (ulg)0xffffffffL; 
 
-    if (s == NULL) {
+    if (s == NULL)
+    {
         c = 0xffffffffL;
-    } else {
+    }
+    else
+    {
         c = crc;
-        if (n) do {
+        if (n)
+        do
+        {
             c = crc_32_tab[((int)c ^ (*s++)) & 0xff] ^ (c >> 8);
         } while (--n);
     }
     crc = c;
-    return c ^ 0xffffffffL;       
+    return c ^ 0xffffffffL;
 }
 
-If the hardware supports the crc instruction, then the pass completes the 
+If the hardware supports the crc instruction, then the pass completes the
 conversion of the above scenario into:
 
 #define SIZE_U32 sizeof(uint32_t)
 unsigned long updcrc(s, n)
-    unsigned char *s;                 
-    unsigned n;             
+    unsigned char *s;
+    unsigned n;
 {
-    register unsigned long c;         
+  register unsigned long c;
 
-    static unsigned long crc = (unsigned long)0xffffffffL; 
+  static unsigned long crc = (unsigned long)0xffffffffL;
 
-    if (s == NULL) {
-        c = 0xffffffffL;
-    } else {
-        c = crc;
-        if (n)
-        {
-          uint32_t nn = n/SIZE_U32;
-          do{
-            c = __crc32w(c,*((uint32_t *)s));
-            s += SIZE_U32;
-          }while(--nn);
-          if (n & sizeof(uint16_t)) {
-            c = __crc32h(c, *((uint16_t *)s));
-            s += sizeof(uint16_t);
-          }
-          if (n & sizeof(uint8_t))
-            c = __crc32b(c, *s);
-        }
+  if (s == NULL)
+  {
+    c = 0xffffffffL;
+  }
+  else
+  {
+    c = crc;
+    if (n)
+    {
+      uint32_t nn = n/SIZE_U32;
+      do
+      {
+        c = __crc32w (c,*((uint32_t *)s));
+        s += SIZE_U32;
+      } while(--nn);
     }
-    crc = c;
-    return c ^ 0xffffffffL;       
+  }
+  if (n & sizeof (uint16_t))
+  {
+    c = __crc32h (c, *((uint16_t *)s));
+    s += sizeof (uint16_t);
+  }
+  if (n & sizeof (uint8_t))
+    c = __crc32b (c, *s);
+  crc = c;
+  return c ^ 0xffffffffL;
 }
 
-This pass is to complete the conversion of such scenarios from the internal
-perspective of the compiler:
-1)match_crc_loop:The function completes the screening of such scenarios;
-2)convert_to_new_loop:The function completes the conversion of
-     			     origin_loop to new loops, and removes origin_loop;
-3)origin_loop_info: The structure is used to record important information
-     			  of origin_loop: such as loop exit,  initial value of induction 
-            variable, etc;
-4) create_new_loops: The function is used as the key content of the pass
-			  to complete the creation of new loops.  */
+This pass is to complete the conversion of such scenarios from
+the internal perspective of the compiler:
+1) match_crc_loop: The function completes the screening of such
+   scenarios;
+2) convert_to_new_loop: The function completes the conversion of
+   origin_loop to new loops, and removes origin_loop;
+3) origin_loop_info: The structure is used to record important
+   information of origin_loop: such as loop exit, initial value
+   of induction variable, etc;
+4) create_new_loops: The function is used as the key content
+   of the pass to complete the creation of new loops.  */
 
 extern bool gimple_crc_match_index (tree, tree *, tree (*)(tree));
 extern bool gimple_crc_match_res (tree, tree *, tree (*)(tree));
 
 static gimple *crc_table_read_stmt = NULL;
 
-static gphi* phi_s = NULL;
-static gphi* phi_c = NULL;
+static gphi *phi_s = NULL;
+static gphi *phi_c = NULL;
 static tree nn_tree = NULL;
 
 enum aarch64_crc_builtins
@@ -130,11 +142,11 @@ enum aarch64_crc_builtins
 /* The useful information of origin loop.  */
 struct origin_loop_info
 {
-  tree limit;		/* The limit index of the array in the old loop.  */
-  tree base_n;    /* The initial value of the old loop.  */
-  tree base_s;    /* The initial value of the old loop.  */
-  tree base_c;    /* The initial value of the old loop.  */
-  edge entry_edge;	/* The edge into the old loop.  */
+  tree limit;       /* The limit index of the array in the old loop.  */
+  tree base_n;      /* The initial value of the old loop.  */
+  tree base_s;      /* The initial value of the old loop.  */
+  tree base_c;      /* The initial value of the old loop.  */
+  edge entry_edge;  /* The edge into the old loop.  */
   edge exit_edge;   /* The edge outto the old loop.  */
   basic_block exit_bb;
 };
@@ -215,14 +227,14 @@ get_iv_upper_bound (gimple *stmt)
     return false;
 
   /* TODO: Currently, the input restrictions on lhs and rhs are implemented
-     through PARM_DECL. We may consider relax the restrictions later, and
+     through PARM_DECL.  We may consider relax the restrictions later, and
      we need to consider the overall adaptation scenario and adding test
-     cases. */
+     cases.  */
   if (ssa_name_var_p (lhs) && TREE_CODE (SSA_NAME_VAR (lhs)) == PARM_DECL)
-    {
-      origin_loop.limit = rhs;
-      origin_loop.base_n = lhs;
-    }
+  {
+    origin_loop.limit = rhs;
+    origin_loop.base_n = lhs;
+  }
   else
     return false;
 
@@ -233,26 +245,26 @@ get_iv_upper_bound (gimple *stmt)
 }
 
 /* Get origin loop info.  */
-static bool 
-get_origin_loop_info(class loop *loop)
+static bool
+get_origin_loop_info (class loop *loop)
 {
   vec<edge> edges;
-  edges = get_loop_exit_edges (loop); 
+  edges = get_loop_exit_edges (loop);
   origin_loop.exit_edge = edges[0];
   origin_loop.exit_bb = origin_loop.exit_edge->dest;
-  origin_loop.entry_edge = get_loop_preheader_edge(loop);
-  origin_loop.base_s = PHI_ARG_DEF_FROM_EDGE(phi_s,origin_loop.entry_edge);
-  origin_loop.base_c = PHI_ARG_DEF_FROM_EDGE(phi_c,origin_loop.entry_edge);
-  
+  origin_loop.entry_edge = get_loop_preheader_edge (loop);
+  origin_loop.base_s = PHI_ARG_DEF_FROM_EDGE (phi_s,origin_loop.entry_edge);
+  origin_loop.base_c = PHI_ARG_DEF_FROM_EDGE (phi_c,origin_loop.entry_edge);
+
   basic_block preheader_bb;
   preheader_bb = origin_loop.entry_edge->src;
-  
-  if(preheader_bb->preds->length() != 1)
+
+  if (preheader_bb->preds->length () != 1)
     return false;
 
   edge entry_pre_bb_edge;
   entry_pre_bb_edge = EDGE_PRED (preheader_bb, 0);
-  
+
   basic_block pre_preheader_bb;
   pre_preheader_bb = entry_pre_bb_edge->src;
 
@@ -260,21 +272,23 @@ get_origin_loop_info(class loop *loop)
   gimple *stmt;
   bool get_upper_bound = false;
   for (gsi = gsi_start_bb (pre_preheader_bb); !gsi_end_p (gsi); gsi_next (&gsi))
-  {
-    stmt = gsi_stmt (gsi);
-    if (stmt && gimple_code (stmt) == GIMPLE_COND
-        && get_iv_upper_bound (stmt)) {
-      get_upper_bound = true;
-      break;
+    {
+      stmt = gsi_stmt (gsi);
+      if (stmt && gimple_code (stmt) == GIMPLE_COND
+          && get_iv_upper_bound (stmt))
+        {
+          get_upper_bound = true;
+          break;
+        }
     }
-  }
 
   return get_upper_bound;
 }
 
 /* The loop form check will check the entire loop control flow
    It should be a loop that:
-   1. a do-while loop with header and latch only with no other control flow inside the loop
+   1. a do-while loop with header and latch only with no other control flow
+      inside the loop
    2. have only one exiting edge
    3. have only one back edge and one entry edge
 */
@@ -283,14 +297,15 @@ crc_loop_form_check (class loop *loop)
 {
   if (loop->num_nodes > 2 || loop->inner)
     return false;
-  // should only have 1 exit edge
+  // Should only have 1 exit edge
   vec<edge> edges;
   edges = get_loop_exit_edges (loop);
   if (edges.length() != 1)
     return false;
 
-  // The header should have only 2 incoming edges 
-  // One of them is the preheader edge and the other is the backedge from the latch
+  // The header should have only 2 incoming edges
+  // One of them is the preheader edge and the other is the backedge from the
+  // latch
   if (EDGE_COUNT (loop->header->preds) != 2)
     return false;
   edge e1 = EDGE_PRED (loop->header, 0);
@@ -317,23 +332,23 @@ only_one_array_read (class loop *loop, tree &crc_table)
       if (stmt == NULL)
         return false;
 
-      if (gimple_code (stmt) == GIMPLE_ASSIGN &&
-          TREE_CODE(gimple_assign_lhs (stmt)) == ARRAY_REF )
-          return false;
+      if (gimple_code (stmt) == GIMPLE_ASSIGN
+          && TREE_CODE (gimple_assign_lhs (stmt)) == ARRAY_REF)
+        return false;
 
-      if (gimple_code (stmt) == GIMPLE_ASSIGN &&
-          TREE_CODE(gimple_assign_rhs1 (stmt)) == ARRAY_REF)
-          {
-            if (crc_table == NULL &&
-                gimple_assign_rhs1 (stmt)->base.readonly_flag)
-              {
-                crc_table = gimple_assign_rhs1 (stmt);
-                crc_table_read_stmt = stmt;
-                res = true;
-              }
-            else
-              return false;
-          }
+      if (gimple_code (stmt) == GIMPLE_ASSIGN
+          && TREE_CODE (gimple_assign_rhs1 (stmt)) == ARRAY_REF)
+        {
+          if (crc_table == NULL
+              && gimple_assign_rhs1 (stmt)->base.readonly_flag)
+            {
+              crc_table = gimple_assign_rhs1 (stmt);
+              crc_table_read_stmt = stmt;
+              res = true;
+            }
+          else
+            return false;
+        }
     }
   return res;
 }
@@ -400,19 +415,26 @@ match_crc_table (tree crc_table)
   const unsigned LOW_BOUND = 0;
   const unsigned UP_BOUND = 255;
   const unsigned ELEMENT_SIZE = 8;
-  unsigned HOST_WIDE_INT lb = tree_to_uhwi (array_ref_low_bound (crc_table));
-  unsigned HOST_WIDE_INT ub = tree_to_uhwi (array_ref_up_bound (crc_table));
-  unsigned HOST_WIDE_INT es = tree_to_uhwi (array_ref_element_size (crc_table));
+  tree low_bound = array_ref_low_bound (crc_table);
+  tree up_bound = array_ref_up_bound (crc_table);
+  tree element_size = array_ref_element_size (crc_table);
+  if (low_bound == NULL || up_bound == NULL || element_size == NULL)
+    return false;
+  unsigned HOST_WIDE_INT lb = tree_to_uhwi (low_bound);
+  unsigned HOST_WIDE_INT ub = tree_to_uhwi (up_bound);
+  unsigned HOST_WIDE_INT es = tree_to_uhwi (element_size);
   if (lb != LOW_BOUND || ub != UP_BOUND || es != ELEMENT_SIZE)
     return false;
 
   tree decl = TREE_OPERAND (crc_table, 0);
   tree ctor = ctor_for_folding(decl);
-  for (int i = lb; i <= ub; i++) {
-    unsigned HOST_WIDE_INT val = tree_to_uhwi (CONSTRUCTOR_ELT (ctor,i)->value);
-    if (crc_32_tab[i] != val)
-      return false;
-  }
+  for (int i = lb; i <= ub; i++)
+    {
+      unsigned HOST_WIDE_INT val = tree_to_uhwi (CONSTRUCTOR_ELT (ctor,
+                                                                  i)->value);
+      if (crc_32_tab[i] != val)
+        return false;
+    }
   return true;
 }
 
@@ -426,21 +448,23 @@ crc_table_check (class loop *loop)
   if (!only_one_array_read (loop, crc_table))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-        fprintf (dump_file, "\nTable check fail. not only single array is read.\n");
+        fprintf (dump_file, "\nTable check fail. not only single array "
+                            "is read.\n");
       return false;
     }
   if (!match_crc_table (crc_table))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-        fprintf (dump_file, "\nTable check fail. Table not matching.\n");
+        fprintf (dump_file, "\nTable check fail.  Table not matching.\n");
       return false;
-    } 
+    }
   return  true;
 }
 
-/* check whether the evolution pattern of phi is phi = SSA_NAME + target*/
+/* Check whether the evolution pattern of phi is phi = SSA_NAME + target*/
 static bool
-evolution_pattern_plus_with_p (class loop* loop, gphi *phi, unsigned HOST_WIDE_INT target)
+evolution_pattern_plus_with_p (class loop *loop, gphi *phi,
+                               unsigned HOST_WIDE_INT target)
 {
   edge backedge = find_edge (loop->latch, loop->header);
   if (backedge == NULL)
@@ -449,7 +473,8 @@ evolution_pattern_plus_with_p (class loop* loop, gphi *phi, unsigned HOST_WIDE_I
   gimple *evolution_expr = SSA_NAME_DEF_STMT (evolution_node);
 
   if (evolution_expr && (gimple_assign_rhs_code (evolution_expr) == PLUS_EXPR ||
-                         gimple_assign_rhs_code (evolution_expr) == POINTER_PLUS_EXPR))
+                         gimple_assign_rhs_code (evolution_expr)
+                             == POINTER_PLUS_EXPR))
     {
       tree rhs1 = gimple_assign_rhs1 (evolution_expr);
       tree rhs2 = gimple_assign_rhs2 (evolution_expr);
@@ -471,13 +496,14 @@ check_num_of_phi (basic_block header,  gphi *capture[])
 
   for (gsi = gsi_start_phis (header); !gsi_end_p (gsi); gsi_next (&gsi))
     {
-        phi = gsi.phi();
-        if (phi) num_of_phi++;
-        if (num_of_phi > 3)
-          return false; 
-        capture[num_of_phi - 1] = phi;
+      phi = gsi.phi ();
+      if (phi)
+        num_of_phi++;
+      if (num_of_phi > 3)
+        return false;
+      capture[num_of_phi - 1] = phi;
     }
-  /* phi node should be exactly 3.  */
+  /* Phi node should be exactly 3.  */
   return num_of_phi == 3;   
 }
 
@@ -486,7 +512,7 @@ check_num_of_phi (basic_block header,  gphi *capture[])
    every time (n), and a 3rd one neither (c).  Return 3 phi nodes in
    the capture with the order of s,n,c.*/
 static bool
-check_evolution_pattern (class loop* loop,  gphi *capture[])
+check_evolution_pattern (class loop *loop,  gphi *capture[])
 {
   gphi *s=NULL;
   gphi *n=NULL;
@@ -494,29 +520,29 @@ check_evolution_pattern (class loop* loop,  gphi *capture[])
 
   for (int i = 0; i < 3; i++)
     {
-      if (evolution_pattern_plus_with_p(loop, capture[i], 1))
+      if (evolution_pattern_plus_with_p (loop, capture[i], 1))
         {
           if (s != NULL)
-            return false; 
+            return false;
           s = capture[i];
           phi_s = s;
         }
-      else if (evolution_pattern_plus_with_p(loop, capture[i], 4294967295))
+      else if (evolution_pattern_plus_with_p (loop, capture[i], 4294967295))
         {
           if (n != NULL)
-            return false;  
+            return false;
           n = capture[i];
         }
       else
         {
           if (c != NULL)
-            return false;  
+            return false;
           c = capture[i];
           phi_c = c;
         }
     }
 
-  // some envolution pattern cannot find 
+  // Some envolution pattern cannot find 
   if (!n || !s || !c)
     return false;
 
@@ -525,12 +551,13 @@ check_evolution_pattern (class loop* loop,  gphi *capture[])
   capture[2] = c;
   return true;
 }
-/* check the calculation pattern before and after the crc_table array read stmt.
+/* Check the calculation pattern before and after the crc_table array read stmt.
    _7 = crc_32_tab[_6];
-   The caculation of index _6 should be the result of a sequency of calculation by the s and c 
+   The caculation of index _6 should be the result of a sequency of calculation
+   by the s and c 
    The result of the array read _7 should be used to calculate the new c.  */
 static bool
-check_calculation_pattern (class loop* loop,  gphi *capture[])
+check_calculation_pattern (class loop *loop,  gphi *capture[])
 {
   gphi *s=capture[0];
   gphi *c=capture[2];
@@ -542,7 +569,7 @@ check_calculation_pattern (class loop* loop,  gphi *capture[])
   _5 =  _4 ^ c_10; //BIT_XOR_EXPR (SSA_NAME, PHI @1)
   _6 = _5 & 255; //BIT_XOR_EXPR (SSA_NAME, INTEGER_CST@3)
   */
-  if (!gimple_crc_match_index(index, res_ops, NULL))
+  if (!gimple_crc_match_index (index, res_ops, NULL))
     return false;
   gimple *s_res_stmt = SSA_NAME_DEF_STMT (res_ops[0]);
   if (!s_res_stmt)
@@ -552,38 +579,37 @@ check_calculation_pattern (class loop* loop,  gphi *capture[])
     return false;
   tree s_res = TREE_OPERAND (gimple_assign_rhs1 (s_def_stmt), 0);
   if (res_ops[1] != gimple_phi_result (c) || s_res != gimple_phi_result (s))
-  {
     return false;
-  }
 
   /* Try to match 
   _8 = c_12 >> 8; // RSHIFT_EXPR (SSA_NAME @1, INTEGER_CST @2)
   c_19 = _7 ^ _8; // BIT_XOR_EXPR (SSA_NAME@3, SSA_NAME)
   */
-  edge backedge = find_edge(loop->latch, loop->header);
+  edge backedge = find_edge (loop->latch, loop->header);
   tree updated_c = PHI_ARG_DEF_FROM_EDGE (c, backedge);
-  if (!gimple_crc_match_res(updated_c, res_ops, NULL))
+  if (!gimple_crc_match_res (updated_c, res_ops, NULL))
     return false;
   if (res_ops[0] != gimple_phi_result (c)
-      || res_ops[2] != gimple_assign_lhs(crc_table_read_stmt))
-  {
-    if (dump_file && (dump_flags & TDF_DETAILS))
-      fprintf (dump_file, "\n gimple_crc_match_res pattern check failed.\n");
-    return false;
-  }
+      || res_ops[2] != gimple_assign_lhs (crc_table_read_stmt))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+        fprintf (dump_file, "\n gimple_crc_match_res pattern check failed.\n");
+      return false;
+    }
 
   return true;
 }
 
-/* check the exit condition is n != 0.  */
+/* Check the exit condition is n != 0.  */
 static bool
-check_exit_condition (class loop* loop,  gphi *n)
+check_exit_condition (class loop *loop,  gphi *n)
 {
-  edge backedge = find_edge(loop->latch, loop->header);
+  edge backedge = find_edge (loop->latch, loop->header);
   gimple *cond_stmt = gsi_stmt (gsi_last_bb (loop->header));
-  if (!cond_stmt || gimple_code (cond_stmt) != GIMPLE_COND || gimple_cond_code (cond_stmt) != NE_EXPR
+  if (!cond_stmt || gimple_code (cond_stmt) != GIMPLE_COND 
+      || gimple_cond_code (cond_stmt) != NE_EXPR
       || gimple_cond_lhs (cond_stmt) != PHI_ARG_DEF_FROM_EDGE (n, backedge)
-      || tree_to_uhwi(gimple_cond_rhs (cond_stmt)) != 0)
+      || tree_to_uhwi (gimple_cond_rhs (cond_stmt)) != 0)
     return false;
   
   return  true;
@@ -620,8 +646,8 @@ so the matching condition is
    which is limited by the condition that the loop have exactly 3 phi nodes.
 2. The 3 loop variants should have evolution pattern as 1 of the 3 nodes is
    increased by 1 every itoration, 1 of the 3 nodes is decreased by 1 every itor
-   and the 3rd one is neither. These three tree node SSA value will be captured for
-   the later arithmatic pattern matching
+   and the 3rd one is neither. These three tree node SSA value will be captured
+   for the later arithmatic pattern matching
 3. Pattern matching for the index of crc_table
 4. pattern matching for the result of c calcuation after read from crc_table
 5. The exit condition matching. 
@@ -637,107 +663,101 @@ crc_loop_body_check (class loop *loop)
         fprintf (dump_file, "\n num of phi noeds check failed.\n");
       return false;
     }
-  if (!check_evolution_pattern(loop, capture))
+  if (!check_evolution_pattern (loop, capture))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
         fprintf (dump_file, "\n evolution pattern check failed.\n");
-      return false;     
+      return false;
     }
-  if (!check_calculation_pattern(loop, capture))
+  if (!check_calculation_pattern (loop, capture))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
         fprintf (dump_file, "\n calculation pattern check failed.\n");
-      return false;     
+      return false;
     }
-  if (!check_exit_condition(loop, capture[1] /* n*/))
+  if (!check_exit_condition (loop, capture[1]))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
         fprintf (dump_file, "\n exit condition check failed.\n");
-      return false;     
+      return false;
     }
   return true;
 }
 
-/* Check the prev_bb of prev_bb of loop header. The prev_bb we are trying to match is
+/* Check the prev_bb of prev_bb of loop header.  The prev_bb we are trying to
+match is
 
 c_15 = crc;
-if (n_16(D) != 0)
+if (n_16 (D) != 0)
   goto <bb 6>; [INV]
 else
   goto <bb 5>; [INV]
 
   In this case , we must be sure that the n is not zero.
   so the match condition is
-  1、the n is not zero.
+  1 the n is not zero.
 
   <bb 2> :
-if (s_13(D) == 0B)
+if (s_13 (D) == 0B)
   goto <bb 5>; [INV]
 else
   goto <bb 3>; [INV]
 
   In this case, we must be sure the s is not NULL.
   so the match condition is
-  1、the s is not NULL.
+  1 the s is not NULL.
 */
 static bool
-crc_prev_bb_of_loop_header_check(class loop *loop)
+crc_prev_bb_of_loop_header_check (class loop *loop)
 {
   basic_block header = loop->header;
   basic_block prev_header_bb = header->prev_bb;
-  if(NULL == prev_header_bb)
-  {
+  if (NULL == prev_header_bb)
     return false;
-  }
 
   basic_block prev_prev_header_bb = prev_header_bb->prev_bb;
-  if(NULL == prev_prev_header_bb)
-  {
+  if (NULL == prev_prev_header_bb)
     return false;
-  }
 
   gimple_stmt_iterator gsi;
   gimple *stmt;
   bool res = false;
-  for (gsi = gsi_start_bb (prev_prev_header_bb); !gsi_end_p (gsi); gsi_next (&gsi))
-  {
-    stmt = gsi_stmt (gsi);
-    if (stmt == NULL)
-      return false;
+  for (gsi = gsi_start_bb (prev_prev_header_bb); !gsi_end_p (gsi);
+       gsi_next (&gsi))
+    {
+      stmt = gsi_stmt (gsi);
+      if (stmt == NULL)
+        return false;
 
-    if (gimple_code (stmt) == GIMPLE_COND &&
-        gimple_cond_code(stmt) == NE_EXPR &&
-        TREE_CODE(gimple_cond_rhs (stmt)) == INTEGER_CST &&
-        tree_int_cst_sgn(gimple_cond_rhs (stmt)) == 0 )
+      if (gimple_code (stmt) == GIMPLE_COND
+          && gimple_cond_code (stmt) == NE_EXPR
+          && TREE_CODE (gimple_cond_rhs (stmt)) == INTEGER_CST
+          && tree_int_cst_sgn (gimple_cond_rhs (stmt)) == 0)
         {
           res = true;
           break;
         }
-  } 
+    }
 
-  if(!res)
-  {
+  if (!res)
     return false;
-  }                        
 
   basic_block first_bb = prev_prev_header_bb->prev_bb;
-  if(NULL == first_bb)
+  if (NULL == first_bb)
     return false;
 
   for (gsi = gsi_start_bb (first_bb); !gsi_end_p (gsi); gsi_next (&gsi))
-  {
-    stmt = gsi_stmt (gsi);
-    if (stmt == NULL)
-      return false;
+    {
+      stmt = gsi_stmt (gsi);
+      if (stmt == NULL)
+        return false;
 
-    if (gimple_code (stmt) == GIMPLE_COND &&
-        gimple_cond_code(stmt) == EQ_EXPR &&
-        TREE_CODE(gimple_cond_rhs (stmt)) == INTEGER_CST &&
-        tree_int_cst_sgn(gimple_cond_rhs (stmt)) == 0 )
-        {
-          return true;
-        }
-  }
+      if (gimple_code (stmt) == GIMPLE_COND
+          && gimple_cond_code (stmt) == EQ_EXPR
+          && TREE_CODE (gimple_cond_rhs (stmt)) == INTEGER_CST
+          && tree_int_cst_sgn (gimple_cond_rhs (stmt)) == 0)
+        return true;
+    }
 
   return false;
 }
@@ -745,86 +765,88 @@ crc_prev_bb_of_loop_header_check(class loop *loop)
 static bool
 match_crc_loop (class loop *loop)
 {
-  if (!crc_loop_form_check(loop))
+  if (!crc_loop_form_check (loop))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-	  fprintf (dump_file, "\nWrong loop form for crc matching.\n");
+        fprintf (dump_file, "\nWrong loop form for crc matching.\n");
       return false;
     }
-  if (!crc_table_check(loop))
+  if (!crc_table_check (loop))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-	  fprintf (dump_file, "\nWrong crc table for crc matching.\n");
+        fprintf (dump_file, "\nWrong crc table for crc matching.\n");
       return false;
     }
-  if (!crc_loop_body_check(loop))
+  if (!crc_loop_body_check (loop))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-	  fprintf (dump_file, "\nWrong loop body for crc matching.\n");
+        fprintf (dump_file, "\nWrong loop body for crc matching.\n");
       return false;
     }
-  if(!crc_prev_bb_of_loop_header_check(loop))
-  {
-    if (dump_file && (dump_flags & TDF_DETAILS))
-	  fprintf (dump_file, "\nWrong prev basic_blocks of loop header for crc matching.\n");
+  if (!crc_prev_bb_of_loop_header_check (loop))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+        fprintf (dump_file, "\nWrong prev basic_blocks of loop header for"
+                            " crc matching.\n");
       return false;
-  }
+    }
     
-    init_origin_loop_structure();
-    if(!get_origin_loop_info(loop))
-      return false;
+  init_origin_loop_structure ();
+  if (!get_origin_loop_info (loop))
+    return false;
 
   return true;
 }
 
 static void
 create_new_bb (basic_block &new_bb, basic_block after_bb,
-		  basic_block dominator_bb, class loop *outer)
+               basic_block dominator_bb, class loop *outer)
 {
   new_bb = create_empty_bb (after_bb);
   add_bb_to_loop (new_bb, outer);
   set_immediate_dominator (CDI_DOMINATORS, new_bb, dominator_bb);
 }
 
-static void 
-change_preheader_bb(edge entry_edge)
+static void
+change_preheader_bb (edge entry_edge)
 {
   gimple_seq stmts = NULL;
   gimple_stmt_iterator gsi;
-  gimple* g;
+  gimple *g;
   tree lhs1;
 
-  lhs1 = create_tmp_var(TREE_TYPE(origin_loop.base_n),"nn");
-  lhs1 = make_ssa_name(lhs1);
+  lhs1 = create_tmp_var (TREE_TYPE (origin_loop.base_n),"nn");
+  lhs1 = make_ssa_name (lhs1);
   gsi = gsi_last_bb (entry_edge->src);
-  g = gimple_build_assign(lhs1,RSHIFT_EXPR,origin_loop.base_n,
-                      build_int_cst (TREE_TYPE (origin_loop.base_n), 2));
-  gimple_seq_add_stmt(&stmts,g);
+  g = gimple_build_assign (lhs1, RSHIFT_EXPR, origin_loop.base_n,
+                           build_int_cst (TREE_TYPE (origin_loop.base_n), 2));
+  gimple_seq_add_stmt (&stmts, g);
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
   nn_tree = lhs1;
-  set_current_def(nn_tree, lhs1);
+  set_current_def (nn_tree, lhs1);
   nn_map.put (entry_edge->src, lhs1);
 }
 
-static gphi*
-create_phi_node_for_bb(tree old_name, basic_block bb)
+static gphi *
+create_phi_node_for_bb (tree old_name, basic_block bb)
 {
-  gphi *phi = create_phi_node(NULL_TREE, bb);
-  create_new_def_for(old_name, phi, gimple_phi_result_ptr(phi));
+  gphi *phi = create_phi_node (NULL_TREE, bb);
+  create_new_def_for (old_name, phi, gimple_phi_result_ptr (phi));
   return phi;
 }
 
-static gimple*
-call_builtin_fun(int code,tree& lhs, tree arg1, tree arg2)
+static gimple *
+call_builtin_fun (int code,tree &lhs, tree arg1, tree arg2)
 {
-  unsigned int builtin_code = targetm.get_crc_builtin_code(code, true);// 根据code获取到正确的builtin_fun_code
-  tree fn = targetm.builtin_decl(builtin_code,true);   // get the decl of __builtin_aarch64_crc32w
+  unsigned int builtin_code = targetm.get_crc_builtin_code (code, true);
+  // Get the decl of __builtin_aarch64_crc32w
+  tree fn = targetm.builtin_decl (builtin_code, true);
   if (!fn || fn == error_mark_node)
     fatal_error (input_location,
                  "target specific builtin not available");
-  gimple* call_builtin = gimple_build_call(fn, 2, arg1, arg2);  // _40 = __builtin_aarch64_crc32* (_1, _2);
+  gimple *call_builtin = gimple_build_call (fn, 2, arg1, arg2);
   lhs = make_ssa_name (unsigned_type_node);
-  gimple_call_set_lhs(call_builtin,lhs);
+  gimple_call_set_lhs (call_builtin, lhs);
 
   return call_builtin;
 }
@@ -843,58 +865,60 @@ call_builtin_fun(int code,tree& lhs, tree arg1, tree arg2)
    if (nn_31 != 0)
    The IR of bb is as above.  */
 static void
-create_loop_bb(basic_block& loop_bb, basic_block after_bb,
-               basic_block dominator_bb, class loop *outer, edge entry_edge)
+create_loop_bb (basic_block &loop_bb, basic_block after_bb,
+                basic_block dominator_bb, class loop *outer, edge entry_edge)
 {
   gimple_seq stmts = NULL;
   gimple_stmt_iterator gsi;
-  gimple* g;
-  gphi* phi_s_loop;
-  gphi* phi_c_loop;
-  gphi* phi_nn_loop;
+  gimple *g;
+  gphi *phi_s_loop;
+  gphi *phi_c_loop;
+  gphi *phi_nn_loop;
 
-  create_new_bb(loop_bb, after_bb, dominator_bb, outer);
-  redirect_edge_and_branch(entry_edge, loop_bb);
-  gsi = gsi_last_bb(loop_bb);
-  tree entry_nn = get_current_def(nn_tree);
-  phi_s_loop = create_phi_node_for_bb(origin_loop.base_s, loop_bb);
-  phi_c_loop = create_phi_node_for_bb(origin_loop.base_c, loop_bb);
-  phi_nn_loop = create_phi_node_for_bb(entry_nn, loop_bb);
+  create_new_bb (loop_bb, after_bb, dominator_bb, outer);
+  redirect_edge_and_branch (entry_edge, loop_bb);
+  gsi = gsi_last_bb (loop_bb);
+  tree entry_nn = get_current_def (nn_tree);
+  phi_s_loop = create_phi_node_for_bb (origin_loop.base_s, loop_bb);
+  phi_c_loop = create_phi_node_for_bb (origin_loop.base_c, loop_bb);
+  phi_nn_loop = create_phi_node_for_bb (entry_nn, loop_bb);
 
-  tree res_s = gimple_phi_result(phi_s_loop);
-  tree res_nn = gimple_phi_result(phi_nn_loop);
-  tree lhs1 = gimple_build(&stmts, NOP_EXPR, unsigned_type_node,
-                           gimple_phi_result(phi_c_loop));
-  g = gimple_build_assign(make_ssa_name(unsigned_type_node),
-                          fold_build2(MEM_REF,unsigned_type_node,res_s,
-                                      build_int_cst (build_pointer_type (unsigned_type_node), 0)));
-  gimple_seq_add_stmt(&stmts, g);
-  tree lhs2 = gimple_assign_lhs(g);  // _2 = MEM[(uint32_t *)s_14];
-  unsigned int code = AARCH64_BUILTIN_CRC32W; 
+  tree res_s = gimple_phi_result (phi_s_loop);
+  tree res_nn = gimple_phi_result (phi_nn_loop);
+  tree lhs1 = gimple_build (&stmts, NOP_EXPR, unsigned_type_node,
+                            gimple_phi_result (phi_c_loop));
+  g = gimple_build_assign (make_ssa_name (unsigned_type_node),
+                           fold_build2 (MEM_REF, unsigned_type_node, res_s,
+                                        build_int_cst (
+                                            build_pointer_type (
+                                                unsigned_type_node),0)));
+  gimple_seq_add_stmt (&stmts, g);
+  tree lhs2 = gimple_assign_lhs (g);  // _2 = MEM[(uint32_t *)s_14];
+  unsigned int code = AARCH64_BUILTIN_CRC32W;
   tree lhs3;
-  gimple* build_crc32w = call_builtin_fun(code,lhs3, lhs1, lhs2);
-  crc_map.put(loop_bb, lhs3);
-  gimple_seq_add_stmt(&stmts,build_crc32w);
+  gimple *build_crc32w = call_builtin_fun (code, lhs3, lhs1, lhs2);
+  crc_map.put (loop_bb, lhs3);
+  gimple_seq_add_stmt (&stmts, build_crc32w);
 
-  tree lhs4 = copy_ssa_name(origin_loop.base_c);
-  g = gimple_build_assign(lhs4, NOP_EXPR, lhs3);
-  gimple_seq_add_stmt(&stmts, g);
-  c_map.put(loop_bb, lhs4);
+  tree lhs4 = copy_ssa_name (origin_loop.base_c);
+  g = gimple_build_assign (lhs4, NOP_EXPR, lhs3);
+  gimple_seq_add_stmt (&stmts, g);
+  c_map.put (loop_bb, lhs4);
 
-  tree lhs5 = copy_ssa_name(origin_loop.base_s);
-  g = gimple_build_assign(lhs5, POINTER_PLUS_EXPR, res_s,
-                          build_int_cst (sizetype, 4));
-  gimple_seq_add_stmt(&stmts, g);
-  s_map.put(loop_bb, lhs5);
+  tree lhs5 = copy_ssa_name (origin_loop.base_s);
+  g = gimple_build_assign (lhs5, POINTER_PLUS_EXPR, res_s,
+                           build_int_cst (sizetype, 4));
+  gimple_seq_add_stmt (&stmts, g);
+  s_map.put (loop_bb, lhs5);
 
-  tree lhs6 = copy_ssa_name(nn_tree);
-  g = gimple_build_assign(lhs6, PLUS_EXPR, res_nn,
+  tree lhs6 = copy_ssa_name (nn_tree);
+  g = gimple_build_assign (lhs6, PLUS_EXPR, res_nn,
                            build_int_cst (TREE_TYPE (res_nn), 4294967295));
-  gimple_seq_add_stmt(&stmts,g);
-  nn_map.put(loop_bb, lhs6);
+  gimple_seq_add_stmt (&stmts,g);
+  nn_map.put (loop_bb, lhs6);
 
-  gcond* cond_stmt = gimple_build_cond (NE_EXPR, lhs6, origin_loop.limit,
-                                 NULL_TREE, NULL_TREE);
+  gcond *cond_stmt = gimple_build_cond (NE_EXPR, lhs6, origin_loop.limit,
+                                        NULL_TREE, NULL_TREE);
   gimple_seq_add_stmt (&stmts, cond_stmt);
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
 }
@@ -904,30 +928,32 @@ create_loop_bb(basic_block& loop_bb, basic_block after_bb,
     # s_46 = PHI <s_30(5)>
     _44 = n_26(D) & 2;
     if (_44 != 0)
-    The IR of bb is as above.    */
+    The IR of bb is as above.  */
 static void
-create_cond_bb(basic_block& cond_bb, basic_block after_bb,
-               basic_block dominator_bb, class loop *outer){
+create_cond_bb (basic_block &cond_bb, basic_block after_bb,
+                basic_block dominator_bb, class loop *outer)
+{
   gimple_seq stmts = NULL;
   gimple_stmt_iterator gsi;
-  gphi* phi_s_loop;
-  gphi* phi_c_loop;
+  gphi *phi_s_loop;
+  gphi *phi_c_loop;
 
-  create_new_bb(cond_bb, after_bb, dominator_bb, outer);
-  gsi = gsi_last_bb(cond_bb);
-  tree entry_nn = get_current_def(nn_tree);
-  phi_s_loop = create_phi_node_for_bb(origin_loop.base_s, cond_bb);
-  phi_c_loop = create_phi_node_for_bb(origin_loop.base_c, cond_bb);
-  tree res_s = gimple_phi_result(phi_s_loop);
-  set_current_def(origin_loop.base_s, res_s);
-  s_map.put(cond_bb, res_s);
-  tree res_c = gimple_phi_result(phi_c_loop);
-  set_current_def(origin_loop.base_c, res_c);
-  c_map.put(cond_bb, res_c);
+  create_new_bb (cond_bb, after_bb, dominator_bb, outer);
+  gsi = gsi_last_bb (cond_bb);
+  tree entry_nn = get_current_def (nn_tree);
+  phi_s_loop = create_phi_node_for_bb (origin_loop.base_s, cond_bb);
+  phi_c_loop = create_phi_node_for_bb (origin_loop.base_c, cond_bb);
+  tree res_s = gimple_phi_result (phi_s_loop);
+  set_current_def (origin_loop.base_s, res_s);
+  s_map.put (cond_bb, res_s);
+  tree res_c = gimple_phi_result (phi_c_loop);
+  set_current_def (origin_loop.base_c, res_c);
+  c_map.put (cond_bb, res_c);
 
-  tree lhs1 = gimple_build(&stmts, BIT_AND_EXPR, TREE_TYPE(origin_loop.base_n),
-              origin_loop.base_n, build_int_cst (TREE_TYPE (origin_loop.base_n), 2));
-  gcond* cond_stmt = gimple_build_cond (NE_EXPR, lhs1, origin_loop.limit,
+  tree lhs1 = gimple_build (&stmts, BIT_AND_EXPR,
+                            TREE_TYPE (origin_loop.base_n), origin_loop.base_n,
+                            build_int_cst (TREE_TYPE (origin_loop.base_n), 2));
+  gcond *cond_stmt = gimple_build_cond (NE_EXPR, lhs1, origin_loop.limit,
                                         NULL_TREE, NULL_TREE);
   gimple_seq_add_stmt (&stmts, cond_stmt);
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
@@ -938,41 +964,45 @@ create_cond_bb(basic_block& cond_bb, basic_block after_bb,
     _41 = __builtin_aarch64_crc32h (_8, _7);
     c_33 = (long unsigned int) _41;
     s_34 = s_30 + 2;
-    The IR of bb is as above.*/
+    The IR of bb is as above.  */
 static void
-create_cond_true_bb(basic_block& cond_true_bb, basic_block after_bb,
-                    basic_block dominator_bb, class loop *outer){
+create_cond_true_bb (basic_block &cond_true_bb, basic_block after_bb,
+                     basic_block dominator_bb, class loop *outer)
+{
   gimple_seq stmts = NULL;
-  gimple* g;
+  gimple *g;
   gimple_stmt_iterator gsi;
 
-  create_new_bb(cond_true_bb, after_bb, dominator_bb, outer);
-  gsi = gsi_last_bb(cond_true_bb);
-  tree s_46 = *(s_map.get(after_bb));
-  g = gimple_build_assign(make_ssa_name(short_unsigned_type_node),
-                          fold_build2(MEM_REF,short_unsigned_type_node,s_46,
-                                      build_int_cst (build_pointer_type (short_unsigned_type_node), 0)));
-  gimple_seq_add_stmt(&stmts,g);
-  tree lhs1 = gimple_assign_lhs(g);  // _7 = MEM[(uint16_t *)s_46];
+  create_new_bb (cond_true_bb, after_bb, dominator_bb, outer);
+  gsi = gsi_last_bb (cond_true_bb);
+  tree s_46 = *(s_map.get (after_bb));
+  tree type = build_pointer_type (short_unsigned_type_node);
+  g = gimple_build_assign (make_ssa_name (short_unsigned_type_node),
+                           fold_build2 (MEM_REF, short_unsigned_type_node, s_46,
+                                        build_int_cst (type, 0)));
+  gimple_seq_add_stmt (&stmts,g);
+  tree lhs1 = gimple_assign_lhs (g);  // _7 = MEM[(uint16_t *)s_46];
   unsigned int code = AARCH64_BUILTIN_CRC32H;
   tree lhs2;
-  gimple* call_builtin = call_builtin_fun(code, lhs2,*(crc_map.get(cond_true_bb->prev_bb->prev_bb)),lhs1);
-  crc_map.put(cond_true_bb,lhs2);
-  gimple_seq_add_stmt(&stmts, call_builtin);
+  gimple *call_builtin = call_builtin_fun (code, lhs2,
+                             *(crc_map.get (
+                                  cond_true_bb->prev_bb->prev_bb)), lhs1);
+  crc_map.put (cond_true_bb,lhs2);
+  gimple_seq_add_stmt (&stmts, call_builtin);
 
-  tree lhs3 = copy_ssa_name(origin_loop.base_c);
-  g = gimple_build_assign(lhs3, NOP_EXPR, lhs2);
-  gimple_seq_add_stmt(&stmts, g);
-  c_map.put(cond_true_bb, lhs3);
+  tree lhs3 = copy_ssa_name (origin_loop.base_c);
+  g = gimple_build_assign (lhs3, NOP_EXPR, lhs2);
+  gimple_seq_add_stmt (&stmts, g);
+  c_map.put (cond_true_bb, lhs3);
 
-  tree lhs5 = copy_ssa_name(s_46);
-  g = gimple_build_assign(lhs5, POINTER_PLUS_EXPR, s_46,
-                          build_int_cst (sizetype, 2)); //  s_30 + 2;
-  gimple_seq_add_stmt(&stmts, g);
-  s_map.put(cond_true_bb, lhs5);
+  tree lhs5 = copy_ssa_name (s_46);
+  g = gimple_build_assign (lhs5, POINTER_PLUS_EXPR, s_46,
+                           build_int_cst (sizetype, 2)); //  s_30 + 2;
+  gimple_seq_add_stmt (&stmts, g);
+  s_map.put (cond_true_bb, lhs5);
 
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
-  s_map.put(cond_true_bb, lhs5);
+  s_map.put (cond_true_bb, lhs5);
 }
 
 /* <bb 8> :
@@ -980,34 +1010,35 @@ create_cond_true_bb(basic_block& cond_true_bb, basic_block after_bb,
   # c_17 = PHI <c_6(6), c_33(7)>
   _3 = n_26(D) & 1;
   if (_3 != 0)
-   The IR of bb is as above.*/
+   The IR of bb is as above.  */
 static void
-create_cond_false_bb(basic_block& cond_false_bb, basic_block after_bb,
-                     basic_block dominator_bb, class loop *outer)
+create_cond_false_bb (basic_block &cond_false_bb, basic_block after_bb,
+                      basic_block dominator_bb, class loop *outer)
 {
   gimple_seq stmts = NULL;
   gimple_stmt_iterator gsi;
-  gphi* phi_s_cond_true_bb;
-  gphi* phi_c_cond_true_bb;
+  gphi *phi_s_cond_true_bb;
+  gphi *phi_c_cond_true_bb;
 
-  create_new_bb(cond_false_bb, after_bb, dominator_bb, outer);
-  make_single_succ_edge(after_bb, cond_false_bb, EDGE_FALLTHRU);
+  create_new_bb (cond_false_bb, after_bb, dominator_bb, outer);
+  make_single_succ_edge (after_bb, cond_false_bb, EDGE_FALLTHRU);
 
-  tree entry_s = get_current_def(origin_loop.base_s);
-  phi_s_cond_true_bb = create_phi_node_for_bb(entry_s, cond_false_bb);
-  tree entry_c = get_current_def(origin_loop.base_c);
-  phi_c_cond_true_bb = create_phi_node_for_bb(entry_c, cond_false_bb);
-  tree res_s = gimple_phi_result(phi_s_cond_true_bb);
-  set_current_def(origin_loop.base_s, res_s);
-  s_map.put(cond_false_bb, res_s);
-  tree res_c = gimple_phi_result(phi_c_cond_true_bb);
-  set_current_def(origin_loop.base_c, res_c);
-  c_map.put(cond_false_bb, res_c);
+  tree entry_s = get_current_def (origin_loop.base_s);
+  phi_s_cond_true_bb = create_phi_node_for_bb (entry_s, cond_false_bb);
+  tree entry_c = get_current_def (origin_loop.base_c);
+  phi_c_cond_true_bb = create_phi_node_for_bb (entry_c, cond_false_bb);
+  tree res_s = gimple_phi_result (phi_s_cond_true_bb);
+  set_current_def (origin_loop.base_s, res_s);
+  s_map.put (cond_false_bb, res_s);
+  tree res_c = gimple_phi_result (phi_c_cond_true_bb);
+  set_current_def (origin_loop.base_c, res_c);
+  c_map.put (cond_false_bb, res_c);
 
-  gsi = gsi_last_bb(cond_false_bb);
-  tree lhs1 = gimple_build(&stmts, BIT_AND_EXPR, TREE_TYPE(origin_loop.base_n),
-                           origin_loop.base_n, build_int_cst (TREE_TYPE (origin_loop.base_n), 1));
-  gcond* cond_stmt = gimple_build_cond (NE_EXPR, lhs1, origin_loop.limit,
+  gsi = gsi_last_bb (cond_false_bb);
+  tree lhs1 = gimple_build (&stmts, BIT_AND_EXPR,
+                            TREE_TYPE (origin_loop.base_n), origin_loop.base_n,
+                            build_int_cst (TREE_TYPE (origin_loop.base_n), 1));
+  gcond *cond_stmt = gimple_build_cond (NE_EXPR, lhs1, origin_loop.limit,
                                         NULL_TREE, NULL_TREE);
   gimple_seq_add_stmt (&stmts, cond_stmt);
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
@@ -1020,53 +1051,54 @@ create_cond_false_bb(basic_block& cond_false_bb, basic_block after_bb,
   c_36 = (long unsigned int) _42;
   The IR of bb is as above.  */
 static void
-create_lastcond_true_bb(basic_block& new_bb, basic_block after_bb,
-                         basic_block dominator_bb, class loop *outer){
+create_lastcond_true_bb (basic_block &new_bb, basic_block after_bb,
+                         basic_block dominator_bb, class loop *outer)
+{
   gimple_seq stmts = NULL;
   gimple_stmt_iterator gsi;
-  gimple* g;
+  gimple *g;
 
-  create_new_bb(new_bb, after_bb, dominator_bb, outer);
-  gsi = gsi_last_bb(new_bb);
+  create_new_bb (new_bb, after_bb, dominator_bb, outer);
+  gsi = gsi_last_bb (new_bb);
 
-  tree lhs1 = gimple_build(&stmts, NOP_EXPR, unsigned_type_node,
-                           get_current_def(origin_loop.base_c));
+  tree lhs1 = gimple_build (&stmts, NOP_EXPR, unsigned_type_node,
+                            get_current_def (origin_loop.base_c));
   tree lhs2;
-  tree s_15 = get_current_def(origin_loop.base_s);
+  tree s_15 = get_current_def (origin_loop.base_s);
   g = gimple_build_assign (make_ssa_name (unsigned_char_type_node),
                            fold_build2 (MEM_REF, unsigned_char_type_node, s_15,
-                                        build_int_cst (TREE_TYPE(s_15), 0)));
+                                        build_int_cst (TREE_TYPE (s_15), 0)));
   gimple_seq_add_stmt (&stmts, g);
   lhs2 = gimple_assign_lhs (g);
 
   unsigned int code = AARCH64_BUILTIN_CRC32B;
   tree lhs3;
-  gimple* call_builtin = call_builtin_fun(code, lhs3, lhs1, lhs2);
-  crc_map.put(new_bb,lhs3);
-  gimple_seq_add_stmt(&stmts,call_builtin);
+  gimple *call_builtin = call_builtin_fun (code, lhs3, lhs1, lhs2);
+  crc_map.put (new_bb,lhs3);
+  gimple_seq_add_stmt (&stmts,call_builtin);
 
-  tree lhs4 = copy_ssa_name(origin_loop.base_c);
-  g = gimple_build_assign(lhs4, NOP_EXPR, lhs3);
-  gimple_seq_add_stmt(&stmts, g);
-  c_map.put(new_bb, lhs4);
+  tree lhs4 = copy_ssa_name (origin_loop.base_c);
+  g = gimple_build_assign (lhs4, NOP_EXPR, lhs3);
+  gimple_seq_add_stmt (&stmts, g);
+  c_map.put (new_bb, lhs4);
 
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
 }
 
 static bool
-optional_add_phi_arg(gphi * phi, tree phi_res, tree phi_arg, edge e)
+optional_add_phi_arg (gphi * phi, tree phi_res, tree phi_arg, edge e)
 {
   location_t loc;
   if (same_ssa_name_var_p (phi_arg, phi_res))
-  {
-    if (virtual_operand_p (phi_arg))
-      loc = UNKNOWN_LOCATION;
-    else
-      loc = gimple_location (SSA_NAME_DEF_STMT (phi_arg));
-    add_phi_arg (phi, phi_arg, e, loc);
+    {
+      if (virtual_operand_p (phi_arg))
+        loc = UNKNOWN_LOCATION;
+      else
+        loc = gimple_location (SSA_NAME_DEF_STMT (phi_arg));
+      add_phi_arg (phi, phi_arg, e, loc);
 
-    return true;
-  }
+      return true;
+    }
 
   return false;
 }
@@ -1082,108 +1114,101 @@ update_phi_nodes (basic_block bb)
   tree res;
 
   for (gsi = gsi_start_phis (bb); !gsi_end_p (gsi); gsi_next (&gsi))
-  {
-    phi = gsi.phi ();
-    res = gimple_phi_result (phi);
-
-    FOR_EACH_EDGE (e, ei, bb->preds)
     {
-      if (PHI_ARG_DEF_FROM_EDGE (phi, e))
-        continue;
-      tree var_c;
-      tree* ptr_var_c = c_map.get (e->src);
-      if(ptr_var_c == NULL)
-      {
-        var_c = origin_loop.base_c;
-      } else {
-        var_c = *ptr_var_c;
-      }
-      if(optional_add_phi_arg(phi, res, var_c, e))
-        continue;
+      phi = gsi.phi ();
+      res = gimple_phi_result (phi);
 
-      tree var_nn;
-      tree* ptr_var_nn = nn_map.get (e->src);
-      if(ptr_var_nn == NULL)
+      FOR_EACH_EDGE (e, ei, bb->preds)
       {
-        var_nn = nn_tree;
-      } else {
-        var_nn = *ptr_var_nn;
-      }
-      if(optional_add_phi_arg(phi, res, var_nn, e))
-        continue;
+        if (PHI_ARG_DEF_FROM_EDGE (phi, e))
+          continue;
+        tree var_c;
+        tree *ptr_var_c = c_map.get (e->src);
+        if (ptr_var_c == NULL)
+          var_c = origin_loop.base_c;
+        else
+          var_c = *ptr_var_c;
+        if (optional_add_phi_arg (phi, res, var_c, e))
+          continue;
 
-      tree var_s;
-      tree* ptr_var_s = s_map.get (e->src);
-      if(ptr_var_s == NULL)
-      {
-        var_s = origin_loop.base_s;
-      } else {
-        var_s = *ptr_var_s;
+        tree var_nn;
+        tree *ptr_var_nn = nn_map.get (e->src);
+        if (ptr_var_nn == NULL)
+          var_nn = nn_tree;
+        else
+          var_nn = *ptr_var_nn;
+        if (optional_add_phi_arg (phi, res, var_nn, e))
+          continue;
+
+        tree var_s;
+        tree *ptr_var_s = s_map.get (e->src);
+        if (ptr_var_s == NULL)
+          var_s = origin_loop.base_s;
+        else
+          var_s = *ptr_var_s;
+        if (optional_add_phi_arg (phi, res, var_s, e))
+          continue;
       }
-      if(optional_add_phi_arg(phi, res, var_s, e))
-        continue;
     }
-  }
 }
 
-static void 
-create_new_loops(edge entry_edge)
+static void
+create_new_loops (edge entry_edge)
 {
-  class loop* new_loop = NULL;
+  class loop *new_loop = NULL;
   basic_block loop_bb, cond_bb, cond_true_bb, cond_false_bb, lastcond_true_bb;
   class loop *outer = entry_edge->src->loop_father;
-  change_preheader_bb(entry_edge);
+  change_preheader_bb (entry_edge);
 
-  create_loop_bb(loop_bb, entry_edge->src, entry_edge->src, outer, entry_edge);
-  create_cond_bb(cond_bb, loop_bb, loop_bb, outer);
-  make_edge(loop_bb, loop_bb, EDGE_TRUE_VALUE);
-  make_edge(loop_bb, cond_bb, EDGE_FALSE_VALUE);
-  update_phi_nodes(loop_bb);
+  create_loop_bb (loop_bb, entry_edge->src, entry_edge->src, outer, entry_edge);
+  create_cond_bb (cond_bb, loop_bb, loop_bb, outer);
+  make_edge (loop_bb, loop_bb, EDGE_TRUE_VALUE);
+  make_edge (loop_bb, cond_bb, EDGE_FALSE_VALUE);
+  update_phi_nodes (loop_bb);
 
   new_loop = alloc_loop ();
   new_loop->header = loop_bb;
   new_loop->latch = loop_bb;
   add_loop (new_loop, outer);
   if (dump_file && (dump_flags & TDF_DETAILS))
-  {
-    fprintf (dump_file, "\nPrint byte new loop %d:\n", new_loop->num);
-    flow_loop_dump (new_loop, dump_file, NULL, 1);
-    fprintf (dump_file, "\n\n");
-  }
+    {
+      fprintf (dump_file, "\nPrint byte new loop %d:\n", new_loop->num);
+      flow_loop_dump (new_loop, dump_file, NULL, 1);
+      fprintf (dump_file, "\n\n");
+    }
 
-  create_cond_true_bb(cond_true_bb, cond_bb, cond_bb, outer);
-  make_edge(cond_bb, cond_true_bb, EDGE_TRUE_VALUE);
-  create_cond_false_bb(cond_false_bb, cond_true_bb, cond_bb, outer);
-  make_edge(cond_bb, cond_false_bb, EDGE_FALSE_VALUE);
-  update_phi_nodes(cond_bb);
-  update_phi_nodes(cond_false_bb);
-  create_lastcond_true_bb(lastcond_true_bb, cond_false_bb, cond_false_bb, outer);
-  make_edge(cond_false_bb, lastcond_true_bb, EDGE_TRUE_VALUE);
-  make_edge(cond_false_bb, origin_loop.exit_bb, EDGE_FALSE_VALUE);
-  make_single_succ_edge(lastcond_true_bb, origin_loop.exit_bb, EDGE_FALLTHRU);
+  create_cond_true_bb (cond_true_bb, cond_bb, cond_bb, outer);
+  make_edge (cond_bb, cond_true_bb, EDGE_TRUE_VALUE);
+  create_cond_false_bb (cond_false_bb, cond_true_bb, cond_bb, outer);
+  make_edge (cond_bb, cond_false_bb, EDGE_FALSE_VALUE);
+  update_phi_nodes (cond_bb);
+  update_phi_nodes (cond_false_bb);
+  create_lastcond_true_bb (lastcond_true_bb, cond_false_bb,
+                           cond_false_bb, outer);
+  make_edge (cond_false_bb, lastcond_true_bb, EDGE_TRUE_VALUE);
+  make_edge (cond_false_bb, origin_loop.exit_bb, EDGE_FALSE_VALUE);
+  make_single_succ_edge (lastcond_true_bb, origin_loop.exit_bb, EDGE_FALLTHRU);
 
-  update_phi_nodes(origin_loop.exit_bb);
-  remove_edge(origin_loop.exit_edge);
+  update_phi_nodes (origin_loop.exit_bb);
+  remove_edge (origin_loop.exit_edge);
 }
 
 /* Clear information about the original loop.  */
 static void
-remove_origin_loop(class loop* loop)
+remove_origin_loop (class loop *loop)
 {
-  basic_block* body = get_loop_body_in_dom_order(loop);
+  basic_block *body = get_loop_body_in_dom_order (loop);
   unsigned n = loop->num_nodes;
-  for(int i = 0; i < n; ++i)
-  {
-    delete_basic_block(body[i]);
-  }
-  free(body);
-  delete_loop(loop);
+  for (int i = 0; i < n; ++i)
+    delete_basic_block (body[i]);
+  free (body);
+  delete_loop (loop);
 }
 
 /* Make sure that the dominance relationship of the newly inserted cfg
    is not missing.  */
 static void
-update_loop_dominator(cdi_direction dir)
+update_loop_dominator (cdi_direction dir)
 {
   gcc_assert (dom_info_available_p (dir));
 
@@ -1192,11 +1217,11 @@ update_loop_dominator(cdi_direction dir)
   {
     basic_block imm_bb = get_immediate_dominator (dir, bb);
     if (!imm_bb || bb == origin_loop.exit_bb)
-    {
-      set_immediate_dominator (CDI_DOMINATORS, bb,
+      {
+        set_immediate_dominator (CDI_DOMINATORS, bb,
                                recompute_dominator (CDI_DOMINATORS, bb));
-      continue;
-    }
+        continue;
+      }
   }
 }
 
@@ -1214,12 +1239,13 @@ convert_to_new_loop (class loop *loop)
 static unsigned int
 tree_ssa_loop_crc ()
 {
-  if(TARGET_CRC32 == false){
-    warning (OPT____,"The loop-crc optimization is not working."\
-		   "You should make sure that the specified architecture supports"\
-       " crc:-march=armv8.1-a");
-    return 0;
-  }
+  if (TARGET_CRC32 == false)
+    {
+      warning (OPT____,"The loop-crc optimization is not working." \
+                      "You should make sure that the specified architecture" \
+                      "supports crc:-march=armv8.1-a");
+      return 0;
+    }
   unsigned int todo = 0;
   class loop *loop;
 
@@ -1232,25 +1258,25 @@ tree_ssa_loop_crc ()
   FOR_EACH_LOOP (loop, LI_FROM_INNERMOST)
   {
     if (dump_file && (dump_flags & TDF_DETAILS))
-    {
-      fprintf (dump_file, "======================================\n");
-      fprintf (dump_file, "Processing loop %d:\n", loop->num);
-      fprintf (dump_file, "======================================\n");
-      flow_loop_dump (loop, dump_file, NULL, 1);
-      fprintf (dump_file, "\n\n");
-    }
+      {
+        fprintf (dump_file, "======================================\n");
+        fprintf (dump_file, "Processing loop %d:\n", loop->num);
+        fprintf (dump_file, "======================================\n");
+        flow_loop_dump (loop, dump_file, NULL, 1);
+        fprintf (dump_file, "\n\n");
+      }
 
     if (match_crc_loop (loop))
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-        {
-          fprintf (dump_file, "The %dth loop form is success matched,"
-            "and the loop can be optimized.\n",
-            loop->num);
-        }
+      {
+        if (dump_file && (dump_flags & TDF_DETAILS))
+          {
+             fprintf (dump_file, "The %dth loop form is success matched,"
+                                "and the loop can be optimized.\n",
+                     loop->num);
+          }
 
-      convert_to_new_loop (loop);
-    }
+        convert_to_new_loop (loop);
+      }
   }
 
   todo |= (TODO_update_ssa);
@@ -1260,7 +1286,6 @@ tree_ssa_loop_crc ()
 /* Loop crc.  */
 
 namespace {
-
 const pass_data pass_data_tree_loop_crc =
 {
   GIMPLE_PASS,
@@ -1281,11 +1306,10 @@ public:
     : gimple_opt_pass (pass_data_tree_loop_crc, ctxt)
   {}
 
-  /* opt_pass methods: */
+  /* Opt_pass methods: */
   virtual bool gate (function *);
   virtual unsigned int execute (function *);
-
-}; // class pass_loop_crc
+}; // Class pass_loop_crc
 
 bool
 pass_loop_crc::gate (function *)
@@ -1304,15 +1328,15 @@ pass_loop_crc::execute (function *fun)
       || POINTER_SIZE != 64 || TYPE_PRECISION (integer_type_node) != 32)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "The current data mode is not supported,"
-			    "only the LP64 date mode is supported.\n");
+        fprintf (dump_file, "The current data mode is not supported,"
+                            "only the LP64 date mode is supported.\n");
       return 0;
     }
 
   return tree_ssa_loop_crc ();
 }
 
-} // anon namespace
+} // Anon namespace
 
 gimple_opt_pass *
 make_pass_loop_crc (gcc::context *ctxt)
