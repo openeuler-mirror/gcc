@@ -303,6 +303,7 @@ along with GCC; see the file COPYING3.  If not see
 	  /* Run IVOPTs after the last pass that uses data-reference analysis
 	     as that doesn't handle TARGET_MEM_REFs.  */
 	  NEXT_PASS (pass_iv_optimize);
+	  NEXT_PASS (pass_llc_allocate);
 	  NEXT_PASS (pass_lim);
 	  NEXT_PASS (pass_tree_loop_done);
       POP_INSERT_PASSES ()

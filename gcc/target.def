@@ -2072,6 +2072,37 @@ DEFHOOK
  (void *data),
  default_destroy_cost_data)
 
+/* Function for vector prefetch operation.  */
+DEFHOOK
+(code_for_prefetch,
+ "This hook should return the decl of a function that implements the\n\
+vectorized variant of the function with the @code{combined_fn} code\n\
+@var{code} or @code{NULL_TREE} if such a function is not available.\n\
+The return type of the vectorized function shall be of vector type\n\
+@var{vec_type_out} and the argument types should be @var{vec_type_in}.",
+ insn_code, (machine_mode arg),
+ NULL)
+
+/* Function for vector gather prefetch operation.  */
+DEFHOOK
+(code_for_gather_prefetch,
+ "This hook should return the decl of a function that implements the\n\
+vectorized variant of the function with the @code{combined_fn} code\n\
+@var{code} or @code{NULL_TREE} if such a function is not available.\n\
+The return type of the vectorized function shall be of vector type\n\
+@var{vec_type_out} and the argument types should be @var{vec_type_in}.",
+ insn_code, (machine_mode mode_to, machine_mode mode_form),
+ NULL)
+
+/* Function to check whether the target hardware architecture supports
+   a full SVE data vector mode.  */
+DEFHOOK
+(prefetch_handleable_mode_p,
+ "This hook should return true if the target hardware architecture\n\
+supports a full SVE data vector mode.",
+ bool, (machine_mode arg),
+ NULL)
+
 HOOK_VECTOR_END (vectorize)
 
 #undef HOOK_PREFIX

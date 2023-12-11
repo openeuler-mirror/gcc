@@ -2233,6 +2233,10 @@ Common Joined RejectNegative UInteger Var(prefetch_level) Init(0) IntegerRange(0
 Generate prefetch instructions, if available, for arrays in loops. The prefetch
 level can control the optimize level to array prefetch.
 
+fllc-allocate
+Common Report Var(flag_llc_allocate) Init(-1) Optimization
+Generate LLC hint instructions.
+
 fprofile
 Common Report Var(profile_flag)
 Enable basic program profiling code.

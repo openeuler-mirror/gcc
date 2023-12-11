@@ -8365,6 +8365,17 @@ print_loops (FILE *file, int verbosity)
     print_loop_and_siblings (file, bb->loop_father, 0, verbosity);
 }
 
+/* Dump a loop to file.  */
+
+void
+loop_dump (FILE *file, class loop *loop)
+{
+  print_loop (file, loop, 0, 0);
+  fprintf (file, "vec_niter = ");
+  print_generic_expr (file, loop->vec_nb_iterations);
+  fprintf (file, "\n");
+}
+
 /* Dump a loop.  */
 
 DEBUG_FUNCTION void

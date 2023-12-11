@@ -102,10 +102,12 @@ init_internal_fns ()
    direct_internal_fn.  */
 #define not_direct { -2, -2, false }
 #define mask_load_direct { -1, 2, false }
+#define mask_prefetch_direct { -1, 2, false }
 #define load_lanes_direct { -1, -1, false }
 #define mask_load_lanes_direct { -1, -1, false }
 #define gather_load_direct { 3, 1, false }
 #define mask_store_direct { 3, 2, false }
+#define gather_prefetch_direct { 3, 1, false }
 #define store_lanes_direct { 0, 0, false }
 #define mask_store_lanes_direct { 0, 0, false }
 #define vec_cond_mask_direct { 0, 0, false }
@@ -2520,6 +2522,53 @@ expand_mask_load_optab_fn (internal_fn, gcall *stmt, convert_optab optab)
 
 #define expand_mask_load_lanes_optab_fn expand_mask_load_optab_fn
 
+/* Expand MASK_PREFETCH call STMT using optab OPTAB.
+   .MASK_STORE (_5, 64B, loop_mask_98, vect__8.10_102);
+   .MASK_PREFETCH (_68, 64B, loop_mask_98, vect__8.10_102, 4);
+*/
+
+static void
+expand_mask_prefetch_optab_fn (internal_fn, gcall *stmt, direct_optab optab)
+{
+  if (targetm.vectorize.code_for_prefetch == NULL
+      || targetm.vectorize.prefetch_handleable_mode_p == NULL)
+    return;
+
+  tree base = gimple_call_arg (stmt, 0);
+  if (base == NULL_TREE)
+    return;
+
+  tree maskt = gimple_call_arg (stmt, 2);
+  tree target = gimple_call_arg (stmt, 3);
+  tree prfop = gimple_call_arg (stmt, 4);
+  HOST_WIDE_INT prfop_int = tree_to_uhwi (prfop);
+  /* Bit 3 of the prfop selects stores over loads.  */
+  HOST_WIDE_INT access = prfop_int & 8;
+  /* Bits 1 and 2 specify the locality; 0-based for svprfop but
+     1-based for PREFETCH.  */
+  HOST_WIDE_INT locality = ((prfop_int >> 1) & 3) + 1;
+
+  machine_mode m_mode = TYPE_MODE (TREE_TYPE (target));
+  if (!targetm.vectorize.prefetch_handleable_mode_p (m_mode))
+    return;
+  insn_code icode = targetm.vectorize.code_for_prefetch (m_mode);
+
+  rtx mask = expand_normal (maskt);
+  rtx base_rtx = expand_normal (base);
+  /* Convert ptr_mode value X to Pmode.  */
+  if (ptr_mode == SImode)
+    base_rtx = simplify_gen_unary (ZERO_EXTEND, DImode, base_rtx, SImode);
+
+  unsigned i = 0;
+  class expand_operand ops[5];
+  create_input_operand (&ops[i++], mask, TYPE_MODE (TREE_TYPE (maskt)));
+  create_address_operand (&ops[i++], base_rtx);
+  create_integer_operand (&ops[i++], prfop_int);
+  create_integer_operand (&ops[i++], access);
+  create_integer_operand (&ops[i++], locality);
+  expand_insn (icode, i, ops);
+}
+
 /* Expand MASK_STORE{,_LANES} call STMT using optab OPTAB.  */
 
 static void
@@ -2920,6 +2969,70 @@ expand_gather_load_optab_fn (internal_fn, gcall *stmt, direct_optab optab)
     emit_move_insn (lhs_rtx, ops[0].value);
 }
 
+/* Expand {MASK_,}GATHER_PREFETCH call CALL using optab OPTAB.
+  vect_patt_97.14_77 = .MASK_GATHER_LOAD (_78, vect__14.13_79, 8, { 0.0, ... }, loop_mask_87);
+  .MASK_GATHER_PREFETCH (_45, vect__14.13_79, 8, { 0.0, ... }, loop_mask_87, vect_patt_97.14_77, 4);
+*/
+
+static void
+expand_gather_prefetch_optab_fn (internal_fn, gcall *stmt, direct_optab optab)
+{
+  if (targetm.vectorize.code_for_gather_prefetch == NULL
+      || targetm.vectorize.prefetch_handleable_mode_p == NULL)
+    return;
+
+  /* Extracting tree nodes, only expand for scalar base and vector index.  */
+  tree base = gimple_call_arg (stmt, 0);
+  if (VECTOR_TYPE_P (TREE_TYPE (base)))
+    return;
+  tree offset = gimple_call_arg (stmt, 1);
+  if (VECTOR_TYPE_P (TREE_TYPE (offset)) == false)
+    return;
+
+  tree scale = gimple_call_arg (stmt, 2);
+  tree mask = gimple_call_arg (stmt, 4);
+  tree target = gimple_call_arg (stmt, 5);
+  tree prfop = gimple_call_arg (stmt, 6);
+
+  /* Convert to the rtx node.  */
+  rtx base_rtx = expand_normal (base);
+  /* Convert ptr_mode value X to Pmode.  */
+  if (ptr_mode == SImode)
+    base_rtx = simplify_gen_unary (ZERO_EXTEND, DImode, base_rtx, SImode);
+  rtx offset_rtx = expand_normal (offset);
+  rtx const_rtx = CONST0_RTX (TYPE_MODE (TREE_TYPE (target)));
+  rtx mask_rtx = expand_normal (mask);
+  HOST_WIDE_INT scale_int = tree_to_shwi (scale);
+  HOST_WIDE_INT prfop_int = tree_to_uhwi (prfop);
+  /* Bit 3 of the prfop selects stores over loads.  */
+  HOST_WIDE_INT access = prfop_int & 8;
+  /* Bits 1 and 2 specify the locality; 0-based for svprfop but
+     1-based for PREFETCH.  */
+  HOST_WIDE_INT locality = ((prfop_int >> 1) & 3) + 1;
+
+  /* add operand.  */
+  unsigned int i = 0;
+  class expand_operand ops[9];
+  create_input_operand (&ops[i++], mask_rtx, TYPE_MODE (TREE_TYPE (mask)));
+  create_address_operand (&ops[i++], base_rtx);
+  create_input_operand (&ops[i++], offset_rtx, TYPE_MODE (TREE_TYPE (offset)));
+  /* Check whether the index has unsigned.  */
+  create_integer_operand (&ops[i++], TYPE_UNSIGNED (TREE_TYPE (offset)));
+  create_integer_operand (&ops[i++], scale_int);
+  create_input_operand (&ops[i++], const_rtx, GET_MODE (const_rtx));
+  create_integer_operand (&ops[i++], prfop_int);
+  create_integer_operand (&ops[i++], access);
+  create_integer_operand (&ops[i++], locality);
+
+  machine_mode reg_mode = GET_MODE (offset_rtx);
+  machine_mode m_mode = TYPE_MODE (TREE_TYPE (target));
+  if (!targetm.vectorize.prefetch_handleable_mode_p (m_mode))
+    return;
+  insn_code icode = targetm.vectorize.code_for_gather_prefetch
+					       (m_mode, reg_mode);
+  expand_insn (icode, i, ops);
+}
+
 /* Expand DIVMOD() using:
  a) optab handler for udivmod/sdivmod if it is available.
  b) If optab_handler doesn't exist, generate call to
@@ -3210,9 +3323,11 @@ multi_vector_optab_supported_p (convert_optab optab, tree_pair types,
 #define direct_cond_binary_optab_supported_p direct_optab_supported_p
 #define direct_cond_ternary_optab_supported_p direct_optab_supported_p
 #define direct_mask_load_optab_supported_p direct_optab_supported_p
+#define direct_mask_prefetch_optab_supported_p direct_optab_supported_p
 #define direct_load_lanes_optab_supported_p multi_vector_optab_supported_p
 #define direct_mask_load_lanes_optab_supported_p multi_vector_optab_supported_p
 #define direct_gather_load_optab_supported_p convert_optab_supported_p
+#define direct_gather_prefetch_optab_supported_p direct_optab_supported_p
 #define direct_mask_store_optab_supported_p direct_optab_supported_p
 #define direct_store_lanes_optab_supported_p multi_vector_optab_supported_p
 #define direct_mask_store_lanes_optab_supported_p multi_vector_optab_supported_p
