@@ -1705,6 +1705,11 @@ floop-nest-optimize
 Common Report Var(flag_loop_nest_optimize) Optimization
 Enable the loop nest optimizer.
 
+fsplit-ldp-stp
+Common Report Var(flag_split_ldp_stp) Optimization
+Split load/store pair instructions into separate load/store operations
+for better performance.
+
 fstrict-volatile-bitfields
 Common Report Var(flag_strict_volatile_bitfields) Init(-1) Optimization
 Force bitfield accesses to match their type width.

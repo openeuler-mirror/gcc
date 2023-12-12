@@ -487,6 +487,7 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_reorder_blocks);
 	  NEXT_PASS (pass_leaf_regs);
 	  NEXT_PASS (pass_split_before_sched2);
+	  NEXT_PASS (pass_split_complex_instructions);
 	  NEXT_PASS (pass_sched2);
 	  NEXT_PASS (pass_stack_regs);
 	  PUSH_INSERT_PASSES_WITHIN (pass_stack_regs)
