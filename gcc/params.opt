@@ -1005,6 +1005,14 @@ Target size of compressed pointer, which should be 8, 16 or 32.
 Common Joined UInteger Var(semi_relayout_level) Init(13) IntegerRange(11, 15) Param Optimization
 Set capacity of each bucket to semi-relayout to (1 << semi-relayout-level) / 8 .
 
+-param=param-ldp-dependency-search-range=
+Common Joined UInteger Var(param_ldp_dependency_search_range) Init(16) IntegerRange(1, 32) Param Optimization
+Range for depended ldp search in split-ldp-stp path.
+
+-param=param-relayout-bucket-num=
+Common Joined UInteger Var(param_relayout_bucket_num) Init(15) IntegerRange(1, 20) Param Optimization
+Relayout num of bucket.
+
 -param=mem-access-ratio=
 Common Joined UInteger Var(param_mem_access_ratio) Init(20) IntegerRange(0, 100) Param Optimization
 Memory access ratio (in percent).

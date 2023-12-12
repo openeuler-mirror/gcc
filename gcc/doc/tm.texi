@@ -11870,6 +11870,14 @@ object files that are not referenced from @code{main} and uses export
 lists.
 @end defmac
 
+@deftypefn {Target Hook} bool TARGET_IS_LDP_INSN (int @var{icode})
+Return true if icode is corresponding to any of the LDP instruction types.
+@end deftypefn
+
+@deftypefn {Target Hook} bool TARGET_IS_STP_INSN (int @var{icode})
+Return true if icode is corresponding to any of the STP instruction types.
+@end deftypefn
+
 @deftypefn {Target Hook} bool TARGET_CANNOT_MODIFY_JUMPS_P (void)
 This target hook returns @code{true} past the point in which new jump
 instructions could be created.  On machines that require a register for
