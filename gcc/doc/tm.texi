@@ -11870,6 +11870,35 @@ object files that are not referenced from @code{main} and uses export
 lists.
 @end defmac
 
+@deftypefn {Target Hook} machine_mode TARGET_GET_V16QI_MODE ()
+This function get the 16 byte elements vector mode if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_REV32V16QI (rtx @var{dest}, rtx @var{src})
+This function generate the byte reverse instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESEV16QI (rtx @var{dest}, rtx @var{src1}, rtx @var{src2})
+This function generate the AES encryption instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESDV16QI (rtx @var{dest}, rtx @var{src1}, rtx @var{src2})
+This function generate the AES decryption instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESMCV16QI (rtx @var{dest}, rtx @var{src})
+This function generate the AES mix columns instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESIMCV16QI (rtx @var{dest}, rtx @var{src})
+This function generate the AES inversed mix columns instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
 @deftypefn {Target Hook} bool TARGET_IS_LDP_INSN (int @var{icode})
 Return true if icode is corresponding to any of the LDP instruction types.
 @end deftypefn

@@ -23894,6 +23894,30 @@ is_aarch64_stp_insn (int icode)
   return false;
 }
 
+machine_mode
+aarch64_get_v16qi_mode ()
+{
+  return V16QImode;
+}
+
+#undef TARGET_GET_V16QI_MODE
+#define TARGET_GET_V16QI_MODE aarch64_get_v16qi_mode
+
+#undef TARGET_GEN_REV32V16QI
+#define TARGET_GEN_REV32V16QI gen_aarch64_rev32v16qi
+
+#undef TARGET_GEN_AESEV16QI
+#define TARGET_GEN_AESEV16QI gen_aarch64_crypto_aesev16qi
+
+#undef TARGET_GEN_AESDV16QI
+#define TARGET_GEN_AESDV16QI gen_aarch64_crypto_aesdv16qi
+
+#undef TARGET_GEN_AESMCV16QI
+#define TARGET_GEN_AESMCV16QI gen_aarch64_crypto_aesmcv16qi
+
+#undef TARGET_GEN_AESIMCV16QI
+#define TARGET_GEN_AESIMCV16QI gen_aarch64_crypto_aesimcv16qi
+
 #undef TARGET_IS_LDP_INSN
 #define TARGET_IS_LDP_INSN is_aarch64_ldp_insn
 

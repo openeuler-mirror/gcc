@@ -1069,6 +1069,10 @@ floop-crc
 Common Report Var(flag_loop_crc) Optimization
 Do the loop crc conversion.
 
+fcrypto-accel-aes
+Common Report Var(flag_crypto_accel_aes) Init(0) Optimization
+Perform crypto acceleration AES pattern matching.
+
 fauto-inc-dec
 Common Report Var(flag_auto_inc_dec) Init(1) Optimization
 Generate auto-inc/dec instructions.
