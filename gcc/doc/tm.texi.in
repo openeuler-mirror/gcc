@@ -8010,6 +8010,18 @@ object files that are not referenced from @code{main} and uses export
 lists.
 @end defmac
 
+@hook TARGET_GET_V16QI_MODE
+
+@hook TARGET_GEN_REV32V16QI
+
+@hook TARGET_GEN_AESEV16QI
+
+@hook TARGET_GEN_AESDV16QI
+
+@hook TARGET_GEN_AESMCV16QI
+
+@hook TARGET_GEN_AESIMCV16QI
+
 @hook TARGET_IS_LDP_INSN
 
 @hook TARGET_IS_STP_INSN
