@@ -39,13 +39,13 @@ main (int argc, char *argv[])
   return 0;
 }
 
-/* { dg-final { scan-tree-dump-times "ref_count = (?:\[3-9\]|\[1-9\]\\d{1,}), ninsns = \[1-9\]\\d*, mem_to_insn_ratio = 0.\[2-9\]\\d*" 2 "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "Tracing succeeded" 6 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "ref_count = (?:\[3-9\]|\[1-9\]\\d{1,}), ninsns = \[1-9\]\\d*, mem_to_insn_ratio = 0.\[2-9\]\\d*" 4 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "Tracing succeeded" 14 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-not   "Tracing failed" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-not   "static_data_size:" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "\{ (?:\\d+\\(\\d+\\) ){1}\}" 4 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "\{ (?:\\d+\\(\\d+\\) ){1}\}" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-not   ", size: (?!(0\.000000))" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times ", size: 0\.000000" 6 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times ", size: 0\.000000" 8 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "\\d x_data \\(0.000000, 1, 0\\) : 3" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "\\d A_j \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "\\d A_data \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } } */

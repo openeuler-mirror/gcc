@@ -14,15 +14,14 @@
 # along with GCC; see the file COPYING3.  If not see
 # <http://www.gnu.org/licenses/>.
 
-load_lib gcc-dg.exp
+load_lib g++-dg.exp
 load_lib target-supports.exp
 
 # Initialize `dg'.
 dg-init
 
-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.c]] \
+dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.C]] \
 	"" "-fllc-allocate"
 
 # All done.
 dg-finish
-

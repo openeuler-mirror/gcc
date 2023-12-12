@@ -60,4 +60,4 @@ SUBROUTINE tra_ldf_iso
 END SUBROUTINE tra_ldf_iso
 
 ! { dg-final { scan-tree-dump-times "Traced variables at vectp_ztfw" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "Tracing unusual number or occurrences of base variables. Choose ztfw." 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "Tracing unusual number or occurrences of base variables.  Choose ztfw." 2 "llc_allocate" } }
