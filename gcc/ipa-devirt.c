@@ -103,9 +103,14 @@ along with GCC; see the file COPYING3.  If not see
   indirect polymorphic edge all possible polymorphic call targets of the call.
 
   pass_ipa_devirt performs simple speculative devirtualization.
+  pass_ipa_icp performs simple indirect call promotion.
 */
 
 #include "config.h"
+#define INCLUDE_ALGORITHM
+#define INCLUDE_SET
+#define INCLUDE_MAP
+#define INCLUDE_LIST
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -127,6 +132,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "ipa-fnsummary.h"
 #include "demangle.h"
 #include "dbgcnt.h"
+#include "gimple-iterator.h"
 #include "gimple-pretty-print.h"
 #include "intl.h"
 #include "stringpool.h"
@@ -4369,5 +4375,1854 @@ make_pass_ipa_odr (gcc::context *ctxt)
   return new pass_ipa_odr (ctxt);
 }
 
+/* Function signature map used to look up function decl which corresponds to
+   the given function type.  */
+typedef std::set<unsigned> type_set;
+typedef std::set<tree> decl_set;
+typedef std::map<unsigned, type_set*> type_alias_map;
+typedef std::map<unsigned, decl_set*> type_decl_map;
+typedef std::map<unsigned, tree> uid_to_type_map;
+typedef std::map<tree, tree> type_map;
+
+static bool has_address_taken_functions_with_varargs = false;
+static type_set *unsafe_types = NULL;
+static type_alias_map *fta_map = NULL;
+static type_alias_map *ta_map = NULL;
+static type_map *ctype_map = NULL;
+static type_alias_map *cbase_to_ptype = NULL;
+static type_decl_map *fs_map = NULL;
+static uid_to_type_map *type_uid_map = NULL;
+
+static void
+print_type_set(unsigned ftype_uid, type_alias_map *map)
+{
+  if (!map->count (ftype_uid))
+    return;
+  type_set* s = (*map)[ftype_uid];
+  for (type_set::const_iterator it = s->begin (); it != s->end (); it++)
+    fprintf (dump_file, it == s->begin () ? "%d" : ", %d", *it);
+}
+
+static void
+dump_type_with_uid (const char *msg, tree type, dump_flags_t flags = TDF_NONE)
+{
+  fprintf (dump_file, msg);
+  print_generic_expr (dump_file, type, flags);
+  fprintf (dump_file, " (%d)\n", TYPE_UID (type));
+}
+
+/* Walk aggregate type and collect types of scalar elements.  */
+
+static void
+collect_scalar_types (tree tp, std::list<tree> &types)
+{
+  /* TODO: take into account different field offsets.
+     Also support array casts.  */
+  if (tp && dump_file && (dump_flags & TDF_DETAILS))
+    dump_type_with_uid ("Walk var's type: ", tp, TDF_UID);
+  if (RECORD_OR_UNION_TYPE_P (tp))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Record's fields {\n");
+      for (tree field = TYPE_FIELDS (tp); field;
+	   field = DECL_CHAIN (field))
+	{
+	  if (TREE_CODE (field) != FIELD_DECL)
+	    continue;
+	  collect_scalar_types (TREE_TYPE (field), types);
+	}
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "}\n");
+      return;
+    }
+  if (TREE_CODE (tp) == ARRAY_TYPE)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Array's innermost type:\n");
+      /* Take the innermost component type.  */
+      tree elt;
+      for (elt = TREE_TYPE (tp); TREE_CODE (elt) == ARRAY_TYPE;
+	   elt = TREE_TYPE (elt))
+	if (dump_file && (dump_flags & TDF_DETAILS))
+	  print_generic_expr (dump_file, elt);
+      collect_scalar_types (elt, types);
+      return;
+    }
+  types.push_back (tp);
+}
+
+static void maybe_register_aliases (tree type1, tree type2);
+
+/* Walk type lists and maybe register type aliases.  */
+
+static void
+compare_type_lists (std::list<tree> tlist1, std::list<tree> tlist2)
+{
+  for (std::list<tree>::iterator ti1 = tlist1.begin (), ti2 = tlist2.begin ();
+       ti1 != tlist1.end (); ++ti1, ++ti2)
+    {
+      /* TODO: correct the analysis results if lists have different length.  */
+      if (ti2 == tlist2.end ())
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Type lists with different length!\n");
+	  break;
+	}
+      maybe_register_aliases (*ti1, *ti2);
+    }
+}
+
+/* For two given types collect scalar element types and
+   compare the result lists to find type aliases.  */
+
+static void
+collect_scalar_types_and_find_aliases (tree t1, tree t2)
+{
+  std::list<tree> tlist1;
+  std::list<tree> tlist2;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "First type list: ");
+  collect_scalar_types (t1, tlist1);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Second type list: ");
+  collect_scalar_types (t2, tlist2);
+  compare_type_lists (tlist1, tlist2);
+}
+
+/* Dump type with the corresponding set from the map.  */
+
+static void
+dump_type_uid_with_set (const char *msg, tree type, type_alias_map *map,
+			bool dump_type = true, bool with_newline = true)
+{
+  fprintf (dump_file, msg, TYPE_UID (type));
+  if (dump_type)
+    print_generic_expr (dump_file, type);
+  fprintf (dump_file, " (");
+  print_type_set (TYPE_UID (type), map);
+  fprintf (dump_file, ")");
+  fprintf (dump_file, with_newline ? "\n" : " ");
+}
+
+static void
+dump_two_types_uids_with_set (const char *msg, unsigned t1_uid,
+			      unsigned t2_uid, type_alias_map *map)
+{
+  fprintf (dump_file, msg, t1_uid, t2_uid);
+  fprintf (dump_file, " (");
+  print_type_set (t1_uid, map);
+  fprintf (dump_file, ")\n");
+}
+
+/* Register type aliases in the map.  Return true if new alias
+   is registered.  */
+
+static bool
+register_ailas_type (tree type, tree alias_type, type_alias_map *map,
+		     bool only_merge = false)
+{
+  /* TODO: maybe support the case with one missed type.  */
+  if (!type || !alias_type)
+    return false;
+  unsigned type_uid = TYPE_UID (type);
+  unsigned alias_type_uid = TYPE_UID (alias_type);
+  if (type_uid_map->count (type_uid) == 0)
+    (*type_uid_map)[type_uid] = type;
+  if (type_uid_map->count (alias_type_uid) == 0)
+    (*type_uid_map)[alias_type_uid] = alias_type;
+
+  if (map->count (type_uid) == 0 && map->count (alias_type_uid) == 0)
+    {
+      (*map)[type_uid] = new type_set ();
+      (*map)[alias_type_uid] = (*map)[type_uid];
+    }
+  else if (map->count (type_uid) == 0)
+    (*map)[type_uid] = (*map)[alias_type_uid];
+  else if (map->count (alias_type_uid) == 0)
+    (*map)[alias_type_uid] = (*map)[type_uid];
+  else if (map->count (type_uid) && map->count (alias_type_uid))
+    {
+      if ((*map)[type_uid] == (*map)[alias_type_uid])
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    dump_two_types_uids_with_set ("Types (%d) and (%d) are already in",
+					  type_uid, alias_type_uid, map);
+	  return false;
+	}
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  dump_type_uid_with_set ("T1 (%d) in set", type, map, false, true);
+	  dump_type_uid_with_set ("T2 (%d) in set", alias_type, map,
+				  false, true);
+	}
+      (*map)[type_uid]->insert ((*map)[alias_type_uid]->begin (),
+				(*map)[alias_type_uid]->end ());
+      type_set *type_set = (*map)[alias_type_uid];
+      for (type_set::const_iterator it1 = type_set->begin ();
+	   it1 != type_set->end (); ++it1)
+	(*map)[*it1] = (*map)[type_uid];
+      delete type_set;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "MERGE: ");
+    }
+   if (!only_merge)
+     {
+       (*map)[type_uid]->insert (alias_type_uid);
+       (*map)[type_uid]->insert (type_uid);
+     }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_two_types_uids_with_set ("Insert types (%d) and (%d) into set",
+				  type_uid, alias_type_uid, map);
+  return true;
+}
+
+static void
+dump_two_types_with_uids (const char *msg, tree t1, tree t2)
+{
+  fprintf (dump_file, msg);
+  print_generic_expr (dump_file, t1, TDF_UID);
+  fprintf (dump_file, " (%d), ", TYPE_UID (t1));
+  print_generic_expr (dump_file, t2, TDF_UID);
+  fprintf (dump_file, " (%d)\n", TYPE_UID (t2));
+}
+
+static void
+analyze_pointees (tree type1, tree type2)
+{
+  gcc_assert (POINTER_TYPE_P (type1) && POINTER_TYPE_P (type2));
+  tree base1 = TREE_TYPE (type1);
+  tree base2 = TREE_TYPE (type2);
+  /* TODO: maybe analyze void pointers.  */
+  if (VOID_TYPE_P(base1) || VOID_TYPE_P(base2))
+    return;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_two_types_with_uids ("Walk pointee types: ", base1, base2);
+  collect_scalar_types_and_find_aliases (base1, base2);
+}
+
+static void
+map_canonical_base_to_pointer (tree type, tree to_insert)
+{
+  type = TYPE_MAIN_VARIANT (type);
+  tree base_type = TREE_TYPE (type);
+  tree cbase_type = TYPE_CANONICAL (base_type);
+  if (!cbase_type)
+    return;
+  unsigned cbase_type_uid = TYPE_UID (cbase_type);
+  if (type_uid_map->count (cbase_type_uid) == 0)
+    (*type_uid_map)[cbase_type_uid] = cbase_type;
+
+  if (cbase_to_ptype->count (cbase_type_uid) == 0)
+    {
+      (*cbase_to_ptype)[cbase_type_uid] = new type_set ();
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "New map cb-to-p=(%d): ", cbase_type_uid);
+    }
+  else if (!(*cbase_to_ptype)[cbase_type_uid]->count (TYPE_UID (to_insert)))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Found map cb-to-p=(%d): ", cbase_type_uid);
+    }
+  else
+    return;
+  /* Add all variants of 'to_insert' type.  */
+  for (tree t = to_insert; t; t = TYPE_NEXT_VARIANT (t))
+    {
+      unsigned t_uid = TYPE_UID (t);
+      if (!(*cbase_to_ptype)[cbase_type_uid]->count (t_uid))
+	{
+	  (*cbase_to_ptype)[cbase_type_uid]->insert (t_uid);
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	     fprintf (dump_file, "(%d) ", t_uid);
+	}
+      if (type_uid_map->count (t_uid) == 0)
+	(*type_uid_map)[t_uid] = t;
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\n");
+}
+
+/* Analyse two types and maybe register them as aliases. Also collect
+   unsafe function types and map canonical base types to corresponding
+   pointer types.  */
+
+static void
+maybe_register_aliases (tree type1, tree type2)
+{
+  if (type1 && POINTER_TYPE_P (type1) && !FUNCTION_POINTER_TYPE_P (type1))
+    map_canonical_base_to_pointer (type1, type1);
+  if (type2 && POINTER_TYPE_P (type2) && !FUNCTION_POINTER_TYPE_P (type2))
+    map_canonical_base_to_pointer (type2, type2);
+
+  if (type1 == type2 || !type1 || !type2)
+    return;
+
+  if (POINTER_TYPE_P (type1) && POINTER_TYPE_P (type2))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_two_types_with_uids ("Pointer types: ", type1, type2);
+      if (register_ailas_type (type1, type2, ta_map))
+	analyze_pointees (type1, type2);
+    }
+  /* If function and non-function type pointers alias,
+     the function type is unsafe.  */
+  if (FUNCTION_POINTER_TYPE_P (type1) && !FUNCTION_POINTER_TYPE_P (type2))
+    unsafe_types->insert (TYPE_UID (type1));
+  if (FUNCTION_POINTER_TYPE_P (type2) && !FUNCTION_POINTER_TYPE_P (type1))
+    unsafe_types->insert (TYPE_UID (type2));
+
+  /* Try to figure out with pointers to incomplete types.  */
+  if (POINTER_TYPE_P (type1) && POINTER_TYPE_P (type2))
+    {
+      type1 = TYPE_MAIN_VARIANT (type1);
+      type2 = TYPE_MAIN_VARIANT (type2);
+      tree base1 = TREE_TYPE (type1);
+      tree base2 = TREE_TYPE (type2);
+      if (RECORD_OR_UNION_TYPE_P (base1) && RECORD_OR_UNION_TYPE_P (base2))
+	{
+	  tree cb1 = TYPE_CANONICAL (base1);
+	  tree cb2 = TYPE_CANONICAL (base2);
+	  if (cb1 && !cb2)
+	    map_canonical_base_to_pointer (type1, type2);
+	  if (cb2 && !cb1)
+	    map_canonical_base_to_pointer (type2, type1);
+	}
+    }
+}
+
+/* Maybe register non-void/equal type aliases.  */
+
+static void
+maybe_register_non_void_aliases (tree t1, tree t2)
+{
+  gcc_assert (t1 && t2);
+  if (type_uid_map->count (TYPE_UID (t1)) == 0)
+    (*type_uid_map)[TYPE_UID (t1)] = t1;
+  if (type_uid_map->count (TYPE_UID (t2)) == 0)
+    (*type_uid_map)[TYPE_UID (t2)] = t2;
+
+  /* Skip equal and void types.  */
+  if (t1 == t2 || VOID_TYPE_P (t1) || VOID_TYPE_P (t2))
+    return;
+  maybe_register_aliases (t1, t2);
+}
+
+/* Detect function type in call stmt.  */
+
+static tree
+get_call_fntype (gcall *stmt)
+{
+  tree fntype = NULL;
+  if (gimple_call_fndecl (stmt) && TREE_TYPE (gimple_call_fndecl (stmt)))
+    fntype = TREE_TYPE (gimple_call_fndecl (stmt));
+  else
+    {
+      tree call_fn = gimple_call_fn (stmt);
+      tree ptype = TREE_TYPE (call_fn);
+      gcc_assert (ptype && TREE_TYPE (ptype));
+      fntype = TREE_TYPE (ptype);
+    }
+  gcc_assert (fntype && fntype != void_type_node
+	      && (TREE_CODE (fntype) == FUNCTION_TYPE
+		  || TREE_CODE (fntype) == METHOD_TYPE));
+  return fntype;
+}
+
+static void
+dump_global_var (tree decl)
+{
+  fprintf (dump_file, "Analyze global var: ");
+  print_generic_decl (dump_file, decl, TDF_NONE);
+  fprintf (dump_file, "\n");
+}
+
+static void
+collect_block_elt_types (tree tp, std::list<tree> &types, tree block)
+{
+  tree vt = TREE_TYPE (tp);
+  gcc_assert (vt);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      const char *msg = TREE_CODE (block) == BLOCK ? "VAR's block: " :
+						     "VAR's ctor: ";
+      fprintf (dump_file, msg);
+      print_generic_expr (dump_file, tp);
+      dump_type_with_uid (" with type ", vt);
+    }
+  collect_scalar_types (vt, types);
+}
+
+/* Compare types of initialization block's or constructor's elements and
+   fields of the initializer type to find type aliases.  */
+
+static void
+compare_block_and_init_type (tree block, tree t1)
+{
+  std::list<tree> tlist1;
+  std::list<tree> tlist2;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Init's type list: ");
+  collect_scalar_types (t1, tlist1);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Block's type list: ");
+  if (TREE_CODE (block) == CONSTRUCTOR)
+    {
+      unsigned HOST_WIDE_INT idx;
+      tree value;
+      FOR_EACH_CONSTRUCTOR_VALUE (CONSTRUCTOR_ELTS (block), idx, value)
+	{
+	  gcc_assert (value);
+	  collect_block_elt_types (value, tlist2, block);
+	}
+    }
+  else if (TREE_CODE (block) == BLOCK)
+    for (tree var = BLOCK_VARS (block); var; var = DECL_CHAIN (var))
+      {
+	if (TREE_CODE (var) != VAR_DECL)
+	  continue;
+	collect_block_elt_types (var, tlist2, block);
+      }
+  else
+    gcc_unreachable ();
+  compare_type_lists (tlist1, tlist2);
+}
+
+/* Analyze global var to find type aliases comparing types of var and
+   initializer elements.  */
+
+static void
+analyze_global_var (varpool_node *var)
+{
+  var->get_constructor();
+  tree decl = var->decl;
+  if (TREE_CODE (decl) == SSA_NAME || !DECL_INITIAL (decl)
+      || integer_zerop (DECL_INITIAL (decl)))
+    return;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_global_var (decl);
+  tree var_type = TREE_TYPE (decl);
+  tree init_type = TREE_TYPE (DECL_INITIAL (decl));
+  gcc_assert (var_type && init_type);
+  if (RECORD_OR_UNION_TYPE_P (init_type)
+      && !initializer_zerop (DECL_INITIAL (decl)))
+    compare_block_and_init_type (DECL_INITIAL (decl), init_type);
+  else if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Is not a record with nonzero init\n");
+
+  if (var_type == init_type)
+    return;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_two_types_with_uids ("Mismatch of var and init types: ",
+			      var_type, init_type);
+  collect_scalar_types_and_find_aliases (var_type, init_type);
+}
+
+static void
+dump_function_node_info (struct cgraph_node *n)
+{
+  fprintf (dump_file, "\nAnalyse function node: ");
+  print_generic_expr (dump_file, n->decl);
+  fprintf (dump_file, "\n");
+  tree fndecl_type = TREE_TYPE (n->decl);
+  dump_type_with_uid ("Function decl type: ", fndecl_type, TDF_UID);
+  if (TREE_TYPE (fndecl_type))
+    dump_type_with_uid ("Return type: ", TREE_TYPE (fndecl_type));
+  tree argt = TYPE_ARG_TYPES (fndecl_type);
+  for (unsigned i = 1; argt && argt != void_type_node
+       && !VOID_TYPE_P (TREE_VALUE (argt)); ++i, argt = TREE_CHAIN (argt))
+    {
+      tree atype = TREE_VALUE (argt);
+      fprintf (dump_file, "%d-arg type: ", i);
+      dump_type_with_uid ("", atype);
+    }
+  fprintf (dump_file, "\n");
+}
+
+static void
+dump_call_stmt_info (gcall *stmt, tree fntype)
+{
+  fprintf (dump_file, "\nAnalyse call stmt: ");
+  if (stmt)
+    print_gimple_stmt (dump_file, stmt, 3, TDF_DETAILS);
+  else
+    fprintf (dump_file, "(no stmt)\n");
+  dump_type_with_uid ("fntype=", fntype, TDF_UID);
+  if (gimple_call_fntype (stmt))
+    dump_type_with_uid ("fntype1=", gimple_call_fntype (stmt), TDF_UID);
+  if (gimple_call_fndecl (stmt) && TREE_TYPE (gimple_call_fndecl (stmt)))
+    dump_type_with_uid ("fntype2=", TREE_TYPE (gimple_call_fndecl (stmt)),
+			TDF_UID);
+}
+
+/* Dump actual and formal arg types.  */
+
+static void
+dump_arg_types_with_uids (int i, tree t1, tree t2)
+{
+  if (i >= 0)
+    fprintf (dump_file, "Call's %d-arg types: ", i);
+  else
+    fprintf (dump_file, "Call's return types: ");
+  fprintf (dump_file, "(%d) and (%d) ", TYPE_UID (t1), TYPE_UID (t2));
+  print_generic_expr (dump_file, t1, TDF_UID);
+  fprintf (dump_file, " ");
+  print_generic_expr (dump_file, t2, TDF_UID);
+  fprintf (dump_file, "\n");
+}
+
+/* Analyze call graph edge with connected call stmt to find type aliases in
+   arguments and return value casts.  */
+
+static void
+analyze_cgraph_edge (cgraph_edge *e)
+{
+  gcall *stmt = e->call_stmt;
+  gcc_assert (stmt != NULL);
+  tree fntype = get_call_fntype (stmt);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_call_stmt_info (stmt, fntype);
+  if (gimple_has_lhs (stmt))
+    {
+      tree t1 = TREE_TYPE (gimple_call_lhs (stmt));
+      tree t2 = TREE_TYPE (fntype);
+      const int is_return_arg = -1;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_arg_types_with_uids (is_return_arg, t1, t2);
+      maybe_register_non_void_aliases (t1, t2);
+    }
+
+  tree argt = TYPE_ARG_TYPES (fntype);
+  if (!argt)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Finish call stmt analysis\n");
+      return;
+    }
+  gcc_assert (argt);
+  unsigned num_args = gimple_call_num_args (stmt);
+  for (unsigned i = 0; i < num_args && argt; ++i, argt = TREE_CHAIN (argt))
+    {
+      tree arg = gimple_call_arg (stmt, i);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_arg_types_with_uids (i, TREE_VALUE (argt), TREE_TYPE (arg));
+      if (TREE_VALUE (argt) == TREE_TYPE (arg)
+	  || !POINTER_TYPE_P (TREE_VALUE (argt))
+	  || !POINTER_TYPE_P (TREE_TYPE (arg)))
+	continue;
+      maybe_register_non_void_aliases (TREE_VALUE (argt), TREE_TYPE (arg));
+      tree t1 = TREE_TYPE (TREE_VALUE (argt));
+      tree t2 = TREE_TYPE (TREE_TYPE (arg));
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Call's %d-arg base types: (%d) and (%d)\n",
+		 i, (t1 ? TYPE_UID (t1) : 0), (t2 ? TYPE_UID (t2) : 0));
+      maybe_register_non_void_aliases (t1, t2);
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "End list of args\n");
+  tree fndecl_type = NULL;
+  if (e->callee && e->callee->decl)
+    fndecl_type = TREE_TYPE (e->callee->decl);
+  if (fndecl_type && fndecl_type != fntype)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Function decl and edge types mismatch:\n");
+      register_ailas_type (fntype, fndecl_type, fta_map);
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "End call stmt analysis\n");
+}
+
+static void
+dump_assign_info (gimple *stmt, tree rhs, tree lhs_type, tree rhs_type)
+{
+  fprintf (dump_file, "\nAnalyse assign cast/copy stmt, rhs=%s: ",
+	   get_tree_code_name (TREE_CODE (rhs)));
+  print_gimple_stmt (dump_file, stmt, 3, TDF_DETAILS);
+  fprintf (dump_file, "Types: ");
+  print_generic_expr (dump_file, lhs_type);
+  fprintf (dump_file, ", ");
+  print_generic_expr (dump_file, rhs_type);
+  fprintf (dump_file, "\n");
+}
+
+/* Analyze cast/copy assign stmt to find type aliases.  */
+
+static void
+analyze_assign_stmt (gimple *stmt)
+{
+  gcc_assert (is_gimple_assign (stmt));
+  tree rhs_type = NULL_TREE;
+  tree lhs_type = TREE_TYPE (gimple_assign_lhs (stmt));
+  tree rhs = gimple_assign_rhs1 (stmt);
+  if (TREE_CODE (rhs) == MEM_REF)
+    {
+      rhs = TREE_OPERAND (rhs, 0);
+      tree ptr_type = TREE_TYPE (rhs);
+      gcc_assert (POINTER_TYPE_P (ptr_type));
+      rhs_type = TREE_TYPE (ptr_type);
+    }
+  else if (TREE_CODE (rhs) == ADDR_EXPR)
+    {
+      rhs = TREE_OPERAND (rhs, 0);
+      if (VAR_OR_FUNCTION_DECL_P (rhs) || TREE_CODE (rhs) == STRING_CST
+	  || TREE_CODE (rhs) == ARRAY_REF || TREE_CODE (rhs) == PARM_DECL)
+	rhs_type = build_pointer_type (TREE_TYPE (rhs));
+      else if (TREE_CODE (rhs) == COMPONENT_REF)
+	{
+	  rhs = TREE_OPERAND (rhs, 1);
+	  rhs_type = build_pointer_type (TREE_TYPE (rhs));
+	}
+      else if (TREE_CODE (rhs) == MEM_REF)
+	{
+	  rhs = TREE_OPERAND (rhs, 0);
+	  rhs_type = TREE_TYPE (rhs);
+	  gcc_assert (POINTER_TYPE_P (rhs_type));
+	}
+      else
+	gcc_unreachable();
+    }
+  else
+    rhs_type = TREE_TYPE (rhs);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_assign_info (stmt, rhs, lhs_type, rhs_type);
+  if (CONSTANT_CLASS_P (rhs) && !zerop (rhs)
+      && FUNCTION_POINTER_TYPE_P (TREE_TYPE (rhs)))
+    {
+      tree ftype = TREE_TYPE (rhs_type);
+      unsafe_types->insert (TYPE_UID (ftype));
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Function type (%d) is unsafe due to assign "
+		 "non-zero cst to function pointer\n", TYPE_UID (ftype));
+    }
+  maybe_register_non_void_aliases (lhs_type, rhs_type);
+}
+
+/* Walk all fn's stmt to analyze assigns.  */
+
+static void
+analyze_assigns (function* fn)
+{
+  push_cfun (fn);
+  basic_block bb;
+  gimple_stmt_iterator si;
+  FOR_EACH_BB_FN (bb, fn)
+    for (si = gsi_start_bb (bb); !gsi_end_p (si); gsi_next (&si))
+      {
+	gimple *stmt = gsi_stmt (si);
+	if (!gimple_assign_cast_p (stmt) && !gimple_assign_copy_p (stmt))
+	  continue;
+	analyze_assign_stmt (stmt);
+      }
+  pop_cfun ();
+}
+
+/* Walk all functions to collect sets of type aliases.  */
+
+static void
+collect_type_alias_sets ()
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\n\nCollect type alias sets walking global vars.\n");
+
+  varpool_node *var;
+  FOR_EACH_VARIABLE (var)
+    if (var->real_symbol_p ())
+      analyze_global_var (var);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nCollect type alias sets walking functions.\n");
+
+  struct cgraph_node *n;
+  FOR_EACH_FUNCTION (n)
+    {
+      if (!n->has_gimple_body_p ())
+	continue;
+      n->get_body ();
+      function *fn = DECL_STRUCT_FUNCTION (n->decl);
+      if (!fn)
+	continue;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_function_node_info (n);
+      /* Analyze direct/indirect function calls.  */
+      for (cgraph_edge *e = n->callees; e; e = e->next_callee)
+	analyze_cgraph_edge (e);
+      for (cgraph_edge *e = n->indirect_calls; e; e = e->next_callee)
+	analyze_cgraph_edge (e);
+      /* Analyze assign (with casts) statements.  */
+      analyze_assigns (fn);
+    }
+}
+
+static void
+process_cbase_to_ptype_map ()
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nProcess types in cbase-to-ptypes map:\n");
+
+  for (type_alias_map::iterator it1 = cbase_to_ptype->begin ();
+       it1 != cbase_to_ptype->end (); ++it1)
+    {
+      type_set *set = it1->second;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_type_uid_with_set ("cb=(%d): ", (*type_uid_map)[it1->first],
+				cbase_to_ptype);
+      tree ctype = NULL;
+      for (type_set::const_iterator it2 = set->begin ();
+	   it2 != set->end (); it2++)
+	{
+	  tree t2 = (*type_uid_map)[*it2];
+	  if (t2 == TYPE_MAIN_VARIANT (t2))
+	    {
+	      ctype = t2;
+	      break;
+	    }
+	}
+      if (!ctype)
+	continue;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_type_with_uid ("Select canonical type: ", ctype);
+      for (type_set::const_iterator it2 = set->begin ();
+	   it2 != set->end (); it2++)
+	{
+	  tree t = (*type_uid_map)[*it2];
+	  if (!ctype_map->count (t))
+	    {
+	      (*ctype_map)[t] = ctype;
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		fprintf (dump_file, "Set canonical type for (%d)->c(%d)\n",
+			 *it2, TYPE_UID (ctype));
+	    }
+	  else if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Canonical type is already set (%d)->c(%d)\n",
+		     *it2, TYPE_UID ((*ctype_map)[t]));
+	}
+    }
+}
+
+static void
+set_canonical_type_for_type_set (type_set *set)
+{
+  tree one_canonical = NULL;
+  for (type_set::const_iterator it = set->begin (); it != set->end (); it++)
+    {
+      tree t = (*type_uid_map)[*it];
+      gcc_assert (t);
+      if ((TYPE_CANONICAL (t) || ctype_map->count (t)))
+	{
+	  one_canonical = TYPE_CANONICAL (t) ? TYPE_CANONICAL (t)
+					     : (*ctype_map)[t];
+	  gcc_assert (COMPLETE_TYPE_P (t));
+	  break;
+	}
+    }
+  for (type_set::const_iterator it = set->begin (); it != set->end (); it++)
+    {
+      tree t = (*type_uid_map)[*it];
+      if (!ctype_map->count (t))
+	{
+	  (*ctype_map)[t] = one_canonical;
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      if (one_canonical)
+		fprintf (dump_file, "Set canonical type for (%d)->c(%d)\n",
+			 TYPE_UID (t), TYPE_UID (one_canonical));
+	      else
+		fprintf (dump_file, "Set NULL canonical for (%d)\n", *it);
+	    }
+	}
+      else if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  tree ct = (*ctype_map)[t];
+	  fprintf (dump_file, "Canonical type is already set (%d)->c(%d)\n",
+		   TYPE_UID (t), ct ? TYPE_UID (ct) : -1);
+	}
+    }
+}
+
+static void
+dump_is_type_set_incomplete (type_set * set)
+{
+  bool has_complete_types = false;
+  for (type_set::const_iterator it = set->begin (); it != set->end (); it++)
+    if (COMPLETE_TYPE_P ((*type_uid_map)[*it]))
+      {
+	has_complete_types = true;
+	break;
+      }
+  if (!has_complete_types)
+    fprintf (dump_file, "Set of incomplete types\n");
+}
+
+static void
+process_alias_type_sets ()
+{
+  if (dump_file)
+    fprintf (dump_file, "\nProcess alias sets of types:\n");
+  /* Keep processed types to process each type set (in ta_map) only once.  */
+  type_set processed_types;
+  for (type_alias_map::iterator it1 = ta_map->begin ();
+       it1 != ta_map->end (); ++it1)
+    {
+      tree type = (*type_uid_map)[it1->first];
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_type_uid_with_set ("(%d) ", type, ta_map);
+      if (processed_types.count (TYPE_UID (type)) != 0
+	  || unsafe_types->count (TYPE_UID (type)) != 0)
+	continue;
+      type_set *set = it1->second;
+      for (type_set::const_iterator it2 = set->begin ();
+	   it2 != set->end (); it2++)
+	processed_types.insert (*it2);
+      /* Check if this type set contains function pointers and
+	 non-function pointers.  */
+      bool has_no_fp = false, has_fp = false;
+      for (type_set::const_iterator it2 = set->begin ();
+	   it2 != set->end (); it2++)
+	{
+	  tree t2 = (*type_uid_map)[*it2];
+	  if (FUNCTION_POINTER_TYPE_P (t2))
+	    has_fp = true;
+	  else
+	    has_no_fp = true;
+	  if (has_fp && has_no_fp)
+	    break;
+	}
+      if (has_fp)
+	{
+	  for (type_set::const_iterator it2 = set->begin ();
+	       it2 != set->end (); it2++)
+	    {
+	      tree t2 = (*type_uid_map)[*it2];
+	      /* If it's a type set with mixed function and not-function types,
+		 mark all function pointer types in the set as unsafe.  */
+	      if (has_no_fp && FUNCTION_POINTER_TYPE_P (t2))
+		{
+		  tree ftype = TREE_TYPE (t2);
+		  unsafe_types->insert (TYPE_UID (ftype));
+		  if (dump_file && (dump_flags & TDF_DETAILS))
+		    fprintf (dump_file, "Insert function type (%d) to unsafe "
+			     "due to escape its pointer type (%d) to mixed "
+			     "alias set (printed before)\n",
+			     TYPE_UID (ftype), TYPE_UID (t2));
+		}
+	      /* If it's a type set with only function pointer types,
+		 mark all base function types in the set as aliases.  */
+	      if (!has_no_fp)
+		{
+		  gcc_assert (FUNCTION_POINTER_TYPE_P (type)
+			      && FUNCTION_POINTER_TYPE_P (t2));
+		  if (dump_file && (dump_flags & TDF_DETAILS))
+		    fprintf (dump_file, "Insert function type aliases by "
+			     "function pointer aliases:\n");
+		  register_ailas_type (TREE_TYPE (type), TREE_TYPE (t2),
+				       fta_map);
+		}
+	    }
+	}
+      set_canonical_type_for_type_set (set);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_is_type_set_incomplete (set);
+    }
+}
+
+static void
+dump_unsafe_and_canonical_types ()
+{
+  fprintf (dump_file, "\nList of unsafe types:\n");
+  for (type_set::iterator it = unsafe_types->begin ();
+       it != unsafe_types->end (); ++it)
+    {
+      print_generic_expr (dump_file, (*type_uid_map)[*it]);
+      fprintf (dump_file, " (%d)\n", *it);
+    }
+  fprintf (dump_file, "\nList of alias canonical types:\n");
+  for (type_alias_map::iterator it = ta_map->begin ();
+       it != ta_map->end (); ++it)
+    {
+      tree type = (*type_uid_map)[it->first];
+      if (ctype_map->count (type) == 0)
+	continue;
+      print_generic_expr (dump_file, type);
+      fprintf (dump_file, " -> ");
+      tree ctype = (*ctype_map)[type];
+      if (ctype != NULL)
+	{
+	  print_generic_expr (dump_file, ctype);
+	  fprintf (dump_file, " (%d)->(%d)\n",
+		   TYPE_UID (type), TYPE_UID (ctype));
+	}
+      else
+	 fprintf (dump_file, " null\n");
+    }
+}
+
+static void
+init_function_type_alias_for_edge (cgraph_edge *e)
+{
+  gcall *stmt = e->call_stmt;
+  gcc_assert (stmt != NULL);
+  tree fntype = get_call_fntype (stmt);
+  if (fta_map->count (TYPE_UID (fntype)) == 0)
+    register_ailas_type (fntype, fntype, fta_map);
+}
+
+/* This pass over all function types makes each function type to have
+   at least one alias (itself).  */
+
+static void
+init_function_type_aliases ()
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nInit aliases for all function types.\n");
+
+  struct cgraph_node *n;
+  FOR_EACH_FUNCTION (n)
+    {
+      tree fntype = TREE_TYPE (n->decl);
+      if (fta_map->count (TYPE_UID (fntype)) == 0)
+	register_ailas_type (fntype, fntype, fta_map);
+
+      if (!n->has_gimple_body_p ())
+	continue;
+      n->get_body ();
+      function *fn = DECL_STRUCT_FUNCTION (n->decl);
+      if (!fn)
+	continue;
+
+      /* Init for function types of direct/indirect callees.  */
+      for (cgraph_edge *e = n->callees; e; e = e->next_callee)
+	init_function_type_alias_for_edge (e);
+      for (cgraph_edge *e = n->indirect_calls; e; e = e->next_callee)
+	init_function_type_alias_for_edge (e);
+    }
+}
+
+/* In lto-common.c there is the global canonical type table and the
+   corresponding machinery which detects the same types from differens
+   modules and joins them assigning the one canonical type.  However
+   lto does not set the goal to do a complete and precise matching, so
+   sometimes a few types has no TYPE_CANONICAL set.  Since ICP relies on
+   precise type matching, we create the similar table and register all
+   the required types in it.  */
+
+static std::map<const_tree, hashval_t> *canonical_type_hash_cache = NULL;
+static std::map<hashval_t, tree> *icp_canonical_types = NULL;
+
+static hashval_t hash_canonical_type (tree type);
+
+/* Register canonical type in icp_canonical_types and ctype_map evaluating
+   its hash (using hash_canonical_type) if it's needed.  */
+
+static hashval_t
+icp_register_canonical_type (tree t)
+{
+  hashval_t hash;
+  if (canonical_type_hash_cache->count ((const_tree) t) == 0)
+    {
+      tree t1 = TYPE_MAIN_VARIANT (t);
+      if (!COMPLETE_TYPE_P (t1) && TYPE_CANONICAL (t1)
+	  && COMPLETE_TYPE_P (TYPE_CANONICAL (t1)))
+	{
+	  t1 = TYPE_CANONICAL (t1);
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Use complete canonical (%d) for (%d)\n",
+		     TYPE_UID (t1), TYPE_UID (t));
+	}
+      hash = hash_canonical_type (t1);
+      /* Cache the just computed hash value.  */
+      (*canonical_type_hash_cache)[(const_tree) t] = hash;
+    }
+  else
+    hash = (*canonical_type_hash_cache)[(const_tree) t];
+
+  tree new_type = t;
+  if (icp_canonical_types->count (hash))
+    {
+      new_type = (*icp_canonical_types)[hash];
+      gcc_checking_assert (new_type != t);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Found canonical (%d) for (%d), h=%u\n",
+		 TYPE_UID (new_type), TYPE_UID (t), (unsigned int) hash);
+    }
+  else
+    {
+      (*icp_canonical_types)[hash] = t;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Register canonical %d, h=%u\n", TYPE_UID (t),
+		 (unsigned int) hash);
+    }
+  if (ctype_map->count (t) == 0)
+    (*ctype_map)[t] = new_type;
+  return hash;
+}
+
+/* Merge hstate with hash of the given type.  If the type is not registered,
+   register it in the maps of the canonical types. */
+
+static void
+iterative_hash_canonical_type (tree type, inchash::hash &hstate)
+{
+  hashval_t v;
+  /* All type variants have same TYPE_CANONICAL.  */
+  type = TYPE_MAIN_VARIANT (type);
+  if (canonical_type_hash_cache->count ((const_tree) type))
+    v = (*canonical_type_hash_cache)[(const_tree) type];
+  else
+    v = icp_register_canonical_type (type);
+  hstate.merge_hash (v);
+}
+
+/* Compute and return hash for the given type.  It does not take into account
+   base types of pointer types.  */
+
+static hashval_t
+hash_canonical_type (tree type)
+{
+  inchash::hash hstate;
+  enum tree_code code;
+  /* Combine a few common features of types so that types are grouped into
+     smaller sets; when searching for existing matching types to merge,
+     only existing types having the same features as the new type will be
+     checked.  */
+  code = tree_code_for_canonical_type_merging (TREE_CODE (type));
+  hstate.add_int (code);
+  if (!RECORD_OR_UNION_TYPE_P (type))
+    hstate.add_int (TYPE_MODE (type));
+  /* Incorporate common features of numerical types.  */
+  if (INTEGRAL_TYPE_P (type)
+      || SCALAR_FLOAT_TYPE_P (type)
+      || FIXED_POINT_TYPE_P (type)
+      || TREE_CODE (type) == OFFSET_TYPE
+      || POINTER_TYPE_P (type))
+    {
+      hstate.add_int (TYPE_PRECISION (type));
+      if (!type_with_interoperable_signedness (type))
+	hstate.add_int (TYPE_UNSIGNED (type));
+    }
+  if (VECTOR_TYPE_P (type))
+    {
+      hstate.add_poly_int (TYPE_VECTOR_SUBPARTS (type));
+      hstate.add_int (TYPE_UNSIGNED (type));
+    }
+  if (TREE_CODE (type) == COMPLEX_TYPE)
+    hstate.add_int (TYPE_UNSIGNED (type));
+  if (POINTER_TYPE_P (type))
+    hstate.add_int (TYPE_ADDR_SPACE (TREE_TYPE (type)));
+  /* For array types hash the domain bounds and the string flag.  */
+  if (TREE_CODE (type) == ARRAY_TYPE && TYPE_DOMAIN (type))
+    {
+      hstate.add_int (TYPE_STRING_FLAG (type));
+      /* OMP lowering can introduce error_mark_node in place of
+	 random local decls in types.  */
+      if (TYPE_MIN_VALUE (TYPE_DOMAIN (type)) != error_mark_node)
+	inchash::add_expr (TYPE_MIN_VALUE (TYPE_DOMAIN (type)), hstate);
+      if (TYPE_MAX_VALUE (TYPE_DOMAIN (type)) != error_mark_node)
+	inchash::add_expr (TYPE_MAX_VALUE (TYPE_DOMAIN (type)), hstate);
+    }
+  /* Recurse for aggregates with a single element type.  */
+  if (TREE_CODE (type) == ARRAY_TYPE
+      || TREE_CODE (type) == COMPLEX_TYPE
+      || TREE_CODE (type) == VECTOR_TYPE)
+    iterative_hash_canonical_type (TREE_TYPE (type), hstate);
+  /* Incorporate function return and argument types.  */
+  if (TREE_CODE (type) == FUNCTION_TYPE || TREE_CODE (type) == METHOD_TYPE)
+    {
+      unsigned nargs = 0;
+      iterative_hash_canonical_type (TREE_TYPE (type), hstate);
+      for (tree p = TYPE_ARG_TYPES (type); p; p = TREE_CHAIN (p))
+	{
+	  iterative_hash_canonical_type (TREE_VALUE (p), hstate);
+	  nargs++;
+	}
+      hstate.add_int (nargs);
+    }
+  if (RECORD_OR_UNION_TYPE_P (type))
+    {
+      unsigned nfields = 0;
+      for (tree f = TYPE_FIELDS (type); f; f = TREE_CHAIN (f))
+	if (TREE_CODE (f) == FIELD_DECL)
+	  {
+	    iterative_hash_canonical_type (TREE_TYPE (f), hstate);
+	    nfields++;
+	  }
+      hstate.add_int (nfields);
+    }
+  return hstate.end ();
+}
+
+/* It finds canonical type in ctype_map and icp_canonical_types maps.  */
+
+static tree
+find_canonical_type (tree type)
+{
+  if (ctype_map->count (type))
+    return (*ctype_map)[type];
+  if (canonical_type_hash_cache->count ((const_tree) type) == 0)
+    return NULL;
+  hashval_t h = (*canonical_type_hash_cache)[(const_tree) type];
+  if (icp_canonical_types->count (h))
+    return (*icp_canonical_types)[h];
+  return NULL;
+}
+
+/* It updates hash for the given type taking into account pointees in pointer
+   types.  If the type is incomplete function type, it returns true.  It's used
+   only for function type hash calculation. */
+
+static bool
+initial_hash_canonical_type (tree type, inchash::hash &hstate)
+{
+  /* All type variants have same TYPE_CANONICAL.  */
+  type = TYPE_MAIN_VARIANT (type);
+  if (VOID_TYPE_P (type))
+    {
+      hstate.add_int (POINTER_TYPE);
+      return false;
+    }
+  hstate.add_int (TREE_CODE (type));
+  hstate.add_int (TYPE_MODE (type));
+  if (POINTER_TYPE_P (type))
+    {
+      tree base_type = TREE_TYPE (type);
+      hstate.add_int (TYPE_ADDR_SPACE (base_type));
+      return initial_hash_canonical_type (base_type, hstate);
+    }
+  tree ctype = find_canonical_type (type);
+  if (!ctype)
+    {
+      if (TREE_CODE (type) == FUNCTION_TYPE || TREE_CODE (type) == METHOD_TYPE)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Due to ftype (%d)\n", TYPE_UID (type));
+	  return true;
+	}
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	dump_type_with_uid ("Has NO canonical type: ", type, TDF_UID);
+      icp_register_canonical_type (type);
+      if (ctype_map->count(type))
+	ctype = (*ctype_map)[type];
+      if (ctype && dump_file && (dump_flags & TDF_DETAILS))
+	dump_type_with_uid ("Found canonical type: ", ctype, TDF_UID);
+    }
+  else if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_type_with_uid ("Canonical type: ", ctype, TDF_UID);
+  hstate.add_int (TYPE_UID (ctype));
+  return false;
+}
+
+/* It returns hash value for the given function type. If the function type is
+   incomplete, insert it in the incomplete_hash_ftype set.  */
+
+static hashval_t
+get_hash_for_ftype (tree type, type_set *incomplete_hash_ftype)
+{
+  bool incomplete = false;
+  inchash::hash hstate;
+  /* Function type is expected.  */
+  gcc_assert (TREE_CODE (type) == FUNCTION_TYPE
+	      || TREE_CODE (type) == METHOD_TYPE);
+  /* Hash return type.  */
+  tree rt = TREE_TYPE (type);
+  tree ct = rt ? find_canonical_type (rt) : void_type_node;
+  incomplete |= initial_hash_canonical_type (ct ? ct : rt, hstate);
+  /* Hash arg types.  */
+  tree argt = TYPE_ARG_TYPES (type);
+  if (!argt)
+    incomplete |= initial_hash_canonical_type (void_type_node, hstate);
+  else
+    for (unsigned i = 1; argt; ++i, argt = TREE_CHAIN (argt))
+      {
+	tree ct = find_canonical_type (TREE_VALUE (argt));
+	ct = ct ? ct : TREE_VALUE (argt);
+	incomplete |= initial_hash_canonical_type (ct, hstate);
+      }
+  if (incomplete && incomplete_hash_ftype->count (TYPE_UID (type)) == 0)
+    incomplete_hash_ftype->insert (TYPE_UID (type));
+  else if (!incomplete && incomplete_hash_ftype->count (TYPE_UID (type)) != 0)
+    incomplete_hash_ftype->erase (TYPE_UID (type));
+  return hstate.end();
+}
+
+/* Find type aliases evaluating type hashes and connecting types with
+   the same hash values.  */
+
+static void
+find_type_aliases_by_compatibility ()
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nFind type aliases checking their compatibility.\n");
+
+  std::map<hashval_t, tree> hash_to_ftype;
+  type_set *incomplete_hash_ftype = new type_set;
+  canonical_type_hash_cache = new std::map<const_tree, hashval_t>;
+  icp_canonical_types = new std::map<hashval_t, tree>;
+
+  bool changed;
+  int i = 0;
+  do
+    {
+      changed = false;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Iteration %d\n", i);
+      for (type_alias_map::iterator it = fta_map->begin ();
+	   it != fta_map->end (); ++it)
+	{
+	  tree type = (*type_uid_map)[it->first];
+	  if (TYPE_CANONICAL (type))
+	    continue;
+	  hashval_t hash = get_hash_for_ftype (type, incomplete_hash_ftype);
+	  if (incomplete_hash_ftype->count (TYPE_UID (type)) != 0)
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		fprintf (dump_file, "Incomplete (%d), h=%u\n", TYPE_UID (type),
+			 (unsigned int) hash);
+	      continue;
+	    }
+	  if (hash_to_ftype.count (hash) == 0)
+	    hash_to_ftype[hash] = type;
+	  TYPE_CANONICAL (type) = hash_to_ftype[hash];
+	  changed = true;
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "(%d)->(%d), h=%u\n", TYPE_UID (type),
+		     TYPE_UID (TYPE_CANONICAL (type)), (unsigned int) hash);
+	}
+      i++;
+    }
+  while (changed);
+
+  delete incomplete_hash_ftype;
+  delete icp_canonical_types;
+  delete canonical_type_hash_cache;
+}
+
+static void
+dump_function_type_aliases_list ()
+{
+  fprintf (dump_file, "\nList of function type aliases:\n");
+  for (type_alias_map::iterator it = fta_map->begin ();
+       it != fta_map->end (); ++it)
+    dump_type_uid_with_set ("(%d) ", (*type_uid_map)[it->first], fta_map);
+}
+
+/* Collect type aliases and find missed canonical types.  */
+
+static void
+collect_function_type_aliases ()
+{
+  collect_type_alias_sets ();
+  process_cbase_to_ptype_map ();
+  process_alias_type_sets ();
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_unsafe_and_canonical_types ();
+
+  /* TODO: maybe remove this pass.  */
+  init_function_type_aliases ();
+  for (type_alias_map::iterator it = fta_map->begin ();
+       it != fta_map->end (); ++it)
+    set_canonical_type_for_type_set (it->second);
+  find_type_aliases_by_compatibility ();
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    dump_function_type_aliases_list ();
+}
+
+static void
+dump_function_signature_info (struct cgraph_node *n, tree ftype, bool varargs)
+{
+  fprintf (dump_file, "Function decl: ");
+  print_generic_expr (dump_file, n->decl);
+  dump_type_uid_with_set (" with type (%d) ", ftype, fta_map, true, false);
+  if (varargs)
+    fprintf (dump_file, "has varargs, ");
+  if (TREE_CODE (ftype) == METHOD_TYPE)
+    fprintf (dump_file, "is method, ");
+  if (!n->address_taken)
+    fprintf (dump_file, "is not address taken, ");
+  if (unsafe_types->count (TYPE_UID (ftype)))
+    fprintf (dump_file, "is unsafe, ");
+  fprintf (dump_file, "\n");
+}
+
+/* Check if the function has variadic arguments.
+   It's corrected count_num_arguments ().  */
+
+static bool
+has_varargs (tree decl)
+{
+  tree t;
+  unsigned int num = 0;
+  for (t = TYPE_ARG_TYPES (TREE_TYPE (decl));
+       t && TREE_VALUE (t) != void_type_node; t = TREE_CHAIN (t))
+    num++;
+  if (!t && num)
+    return true;
+  return false;
+}
+
+/* Join fs_map's sets for function type aliases.  */
+
+static void
+merge_fs_map_for_ftype_aliases ()
+{
+  if (dump_file)
+    fprintf (dump_file, "\n\nMerge decl sets for function type aliases:\n");
+  type_set processed_types;
+  for (type_decl_map::iterator it1 = fs_map->begin ();
+       it1 != fs_map->end (); ++it1)
+    {
+      if (processed_types.count (it1->first) != 0)
+	continue;
+      decl_set *d_set = it1->second;
+      tree type = (*type_uid_map)[it1->first];
+      type_set *set = (*fta_map)[it1->first];
+      for (type_set::const_iterator it2 = set->begin ();
+	   it2 != set->end (); it2++)
+	{
+	  tree t2 = (*type_uid_map)[*it2];
+	  processed_types.insert (*it2);
+	  if (type == t2)
+	    continue;
+	  gcc_assert ((TREE_CODE (type) == FUNCTION_TYPE
+		       || TREE_CODE (type) == METHOD_TYPE)
+		      && (TREE_CODE (t2) == FUNCTION_TYPE
+			  || TREE_CODE (t2) == METHOD_TYPE));
+	  if (fs_map->count (*it2) == 0 || (*fs_map)[*it2] == NULL)
+	    (*fs_map)[*it2] = d_set;
+	  else
+	    {
+	      decl_set *t2_decl_set = (*fs_map)[*it2];
+	      (*fs_map)[*it2] = d_set;
+	      gcc_assert (t2_decl_set && t2_decl_set->size() > 0);
+	      d_set->insert (t2_decl_set->begin (), t2_decl_set->end ());
+	      delete t2_decl_set;
+	    }
+	}
+    }
+}
+
+/* Dump function types with set of functions corresponding to it.  */
+
+static void
+dump_function_signature_sets ()
+{
+  fprintf (dump_file, "\n\nUnique sets of function signatures:\n");
+  std::set<decl_set *> processed_sets;
+  for (type_decl_map::iterator it1 = fs_map->begin ();
+       it1 != fs_map->end (); ++it1)
+    {
+      decl_set *set = it1->second;
+      if (processed_sets.count (set) != 0)
+	continue;
+      processed_sets.insert (set);
+      fprintf (dump_file, "{ ");
+      print_type_set (it1->first, fta_map);
+      fprintf (dump_file, " : ");
+      for (decl_set::const_iterator it2 = set->begin ();
+	   it2 != set->end (); it2++)
+	{
+	  fprintf (dump_file, it2 == set->begin () ? "" : ", ");
+	  print_generic_expr (dump_file, *it2);
+	  fprintf (dump_file, "(%d)", DECL_UID (*it2));
+	}
+      fprintf (dump_file, "}\n");
+    }
+}
+
+/* Fill the map of function types to sets of function decls.  */
+
+static void
+collect_function_signatures ()
+{
+  if (dump_file)
+    fprintf (dump_file, "\n\nCollect function signatures:\n");
+  struct cgraph_node *n;
+  FOR_EACH_FUNCTION (n)
+    {
+      gcc_assert (n->decl && TREE_TYPE (n->decl));
+      tree ftype = TREE_TYPE (n->decl);
+      bool varargs = has_varargs (n->decl);
+      if (varargs && n->address_taken)
+	has_address_taken_functions_with_varargs = true;
+      if (dump_file)
+	dump_function_signature_info (n, ftype, varargs);
+      if (!n->address_taken)
+	continue;
+      /* TODO: make a separate pass at the end to remove canonicals.  */
+      tree ctype = TYPE_CANONICAL (ftype);
+      unsigned alias_type_fs = ctype ? TYPE_UID (ctype) : 0;
+      if (dump_file)
+	fprintf (dump_file, "canonical type: %d %ld\n",
+		 alias_type_fs, fs_map->count (alias_type_fs));
+      if (alias_type_fs)
+	{
+	  if (fs_map->count (TYPE_UID (ctype)) == 0)
+	    (*fs_map)[TYPE_UID (ctype)] = new decl_set ();
+	  if (dump_file)
+	    fprintf (dump_file, "insert decl (%d) to set of map [%d]\n",
+		     DECL_UID (n->decl), TYPE_UID (ctype));
+	  (*fs_map)[TYPE_UID (ctype)]->insert (n->decl);
+	}
+    }
+  merge_fs_map_for_ftype_aliases ();
+  if (dump_file)
+    dump_function_signature_sets ();
+}
+
+#define MAX_TARG_STAT 4
+struct icp_stats
+{
+  int npolymorphic;
+  int nspeculated;
+  int nsubst;
+  int ncold;
+  int nmultiple;
+  int noverwritable;
+  int nnotdefined;
+  int nexternal;
+  int nartificial;
+  int nremove;
+  int nicp;
+  int nspec;
+  int nf;
+  int ncalls;
+  int nindir;
+  int nind_only;
+  int ntargs[MAX_TARG_STAT + 1];
+};
+
+static void
+dump_processing_function (struct cgraph_node *n, struct icp_stats &stats)
+{
+  fprintf (dump_file, "\n\nProcesing function %s\n", n->dump_name ());
+  print_generic_expr (dump_file, n->decl);
+  fprintf (dump_file, "\n");
+  dump_type_with_uid ("Func's type: ", TREE_TYPE (n->decl));
+  if (dump_file && (dump_flags & TDF_STATS))
+    {
+      struct cgraph_edge *e;
+      stats.nf++;
+      for (e = n->indirect_calls; e; e = e->next_callee)
+	stats.nindir++;
+      for (e = n->callees; e; e = e->next_callee)
+	stats.ncalls++;
+      stats.ncalls += stats.nindir;
+      if (n->callers == NULL)
+	{
+	  fprintf (dump_file, "Function has NO callers\n");
+	  stats.nind_only++;
+	}
+    }
+}
+
+static void
+dump_indirect_call_site (tree call_fn, tree call_fn_ty)
+{
+  fprintf (dump_file, "Indirect call site: ");
+  print_generic_expr (dump_file, call_fn);
+  dump_type_with_uid ("\nFunction pointer type: ", call_fn_ty);
+}
+
+static void
+erase_from_unreachable (unsigned type_uid, type_set &unreachable)
+{
+  unreachable.erase (type_uid);
+  if (!fta_map->count (type_uid))
+    return;
+  type_set *set = (*fta_map)[type_uid];
+  for (type_set::const_iterator it = set->begin (); it != set->end (); it++)
+    unreachable.erase (*it);
+}
+
+static void
+dump_found_fdecls (decl_set *decls, unsigned ctype_uid)
+{
+  fprintf (dump_file, "Signature analysis FOUND decls (%d):", ctype_uid);
+  for (decl_set::const_iterator it = decls->begin (); it != decls->end (); it++)
+    {
+      print_generic_expr (dump_file, *it);
+      fprintf (dump_file, "(%d), ", DECL_UID (*it));
+    }
+  if (unsafe_types->count (ctype_uid))
+    fprintf (dump_file, "type is UNSAFE");
+  fprintf (dump_file, "\n");
+}
+
+static void
+count_found_targets (struct icp_stats &stats, unsigned size)
+{
+  gcc_assert (size > 0);
+  stats.ntargs[size > MAX_TARG_STAT ? MAX_TARG_STAT : size - 1]++;
+}
+
+/* Promote the indirect call.  */
+
+static void
+promote_call (struct cgraph_edge *e, struct cgraph_node *n,
+	      struct cgraph_node *likely_target, struct icp_stats *stats)
+{
+  if (dump_enabled_p ())
+    {
+      dump_printf_loc (MSG_OPTIMIZED_LOCATIONS, e->call_stmt,
+		       "promoting indirect call in %s to %s\n",
+		       n->dump_name (), likely_target->dump_name ());
+    }
+  if (!likely_target->can_be_discarded_p ())
+    {
+      symtab_node *sn = likely_target->noninterposable_alias ();
+      cgraph_node *alias = dyn_cast<cgraph_node *> (sn);
+      if (alias)
+	likely_target = alias;
+    }
+  gimple *new_call;
+  if (flag_icp_speculatively)
+    {
+      e->make_speculative (likely_target, e->count.apply_scale (5, 10));
+      new_call = e->call_stmt;
+      stats->nspec++;
+    }
+  else
+    {
+      cgraph_edge *e2 = cgraph_edge::make_direct (e, likely_target);
+      new_call = cgraph_edge::redirect_call_stmt_to_callee (e2);
+      stats->nsubst++;
+    }
+  if (dump_file)
+    {
+      fprintf (dump_file, "The call is substituted by: ");
+      print_gimple_stmt (dump_file, new_call, 0);
+      fprintf (dump_file, "\n");
+    }
+}
+
+/* Find functions which are called only indirectly and if they are not in
+   fs_map, they can be removed.  For now it is used only to print stats.  */
+
+static int
+find_functions_can_be_removed (type_set &unreachable)
+{
+  int nremove = 0;
+  if (dump_file)
+    fprintf (dump_file, "\nRemove unused functions:\n");
+  struct cgraph_node *n;
+  FOR_EACH_FUNCTION (n)
+    {
+      gcc_assert (n->decl && TREE_TYPE (n->decl));
+      if (n->callers != NULL)
+	continue;
+      tree ftype = TREE_TYPE (n->decl);
+      tree ctype = TYPE_CANONICAL (ftype);
+      if (!ctype || !unreachable.count (TYPE_UID (ctype))
+	  || unsafe_types->count (TYPE_UID (ftype))
+	  || TREE_CODE (ftype) == METHOD_TYPE || n->callers != NULL
+	  || !n->definition || n->alias || n->thunk.thunk_p || n->clones)
+	continue;
+      if (dump_file)
+	fprintf (dump_file, "%s is not used\n", n->dump_name ());
+      nremove++;
+    }
+  return nremove;
+}
+
+static void
+dump_stats (struct icp_stats &st)
+{
+  fprintf (dump_file, "\nSTATS: %i candidates for indirect call promotion,"
+	   " %i substituted, %i speculatively promoted, %i cold\n"
+	   "%i have multiple targets, %i already speculated, %i external,"
+	   " %i not defined, %i artificial, %i polymorphic calls,"
+	   " %i overwritable\n", st.nicp, st.nsubst, st.nspec, st.ncold,
+	   st.nmultiple, st.nspeculated, st.nexternal, st.nnotdefined,
+	   st.nartificial, st.npolymorphic, st.noverwritable);
+  if (!(dump_flags & TDF_STATS))
+    return;
+  fprintf (dump_file, "EXTRA STATS: %i functions, %i indirect calls,"
+	   " %i total calls, %i called only indirectly, %i may be removed\n"
+	   "Indirect call sites with found targets ", st.nf, st.nindir,
+	   st.ncalls, st.nind_only, st.nremove);
+  for (unsigned i = 0; i < MAX_TARG_STAT; i++)
+    fprintf (dump_file, "%u:%i, ", i + 1, st.ntargs[i]);
+  fprintf (dump_file, "more:%i\n", st.ntargs[MAX_TARG_STAT]);
+}
+
+/* Optimize indirect calls.  When an indirect call has only one target,
+   promote it into a direct call.  */
+
+static bool
+optimize_indirect_calls ()
+{
+  /* TODO: maybe move to the top of ipa_icp.  */
+  if (has_address_taken_functions_with_varargs)
+    {
+      if (dump_file)
+	fprintf (dump_file, "\n\nAddress taken function with varargs is found."
+		 " Skip the optimization.\n");
+      return false;
+    }
+  struct icp_stats stats = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			    0, 0, 0, 0, 0, {0, 0, 0, 0, 0}};
+  /* At first assume all function types are unreadchable.  */
+  type_set unreachable_ftypes;
+  if (dump_file && (dump_flags & TDF_STATS))
+    for (type_decl_map::iterator it = fs_map->begin ();
+	 it != fs_map->end (); ++it)
+      unreachable_ftypes.insert (it->first);
+
+  struct cgraph_node *n;
+  FOR_EACH_DEFINED_FUNCTION (n)
+    {
+      if (dump_file)
+	dump_processing_function (n, stats);
+      struct cgraph_edge *e;
+      bool update = false;
+      if (!opt_for_fn (n->decl, flag_icp) || !n->has_gimple_body_p ()
+	  || n->inlined_to || !n->indirect_calls)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, "Skip the function\n");
+	  continue;
+	}
+      /* If the function has indirect calls which are not polymorphic,
+	 process its body, otherwise continue.  */
+      bool non_polymorphic_calls = false;
+      for (e = n->indirect_calls; e; e = e->next_callee)
+	if (!e->indirect_info->polymorphic)
+	  {
+	    non_polymorphic_calls = true;
+	    break;
+	  }
+      if (!non_polymorphic_calls)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, "All indirect calls are polymorphic,"
+		     "skip...\n");
+	  continue;
+	}
+      /* Get the function body to operate with call statements.  */
+      n->get_body ();
+      /* Walk indirect call sites and apply the optimization.  */
+      cgraph_edge *next;
+      for (e = n->indirect_calls; e; e = next)
+	{
+	  next = e->next_callee;
+	  if (e->indirect_info->polymorphic)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Target is polymorphic, skip...\n\n");
+	      stats.npolymorphic++;
+	      continue;
+	    }
+	  stats.nicp++;
+	  struct cgraph_node *likely_target = NULL;
+	  gcall *stmt = e->call_stmt;
+	  gcc_assert (stmt != NULL);
+	  tree call_fn = gimple_call_fn (stmt);
+	  tree call_fn_ty = TREE_TYPE (call_fn);
+	  if (dump_file)
+	    dump_indirect_call_site (call_fn, call_fn_ty);
+	  tree decl = NULL_TREE;
+	  if (POINTER_TYPE_P (call_fn_ty))
+	    {
+	      if (dump_file)
+		dump_type_with_uid ("Pointee type: ", TREE_TYPE (call_fn_ty));
+	      if (dump_file && (dump_flags & TDF_STATS))
+		erase_from_unreachable (TYPE_UID (TREE_TYPE (call_fn_ty)),
+					unreachable_ftypes);
+	      /* Try to use the signature analysis results.  */
+	      tree ctype = TYPE_CANONICAL (TREE_TYPE (call_fn_ty));
+	      unsigned ctype_uid = ctype ? TYPE_UID (ctype) : 0;
+	      if (ctype_uid && fs_map->count (ctype_uid))
+		{
+		  if (dump_flags && (dump_flags & TDF_STATS))
+		    erase_from_unreachable (ctype_uid, unreachable_ftypes);
+		  decl_set *decls = (*fs_map)[ctype_uid];
+		  if (dump_file)
+		    dump_found_fdecls (decls, ctype_uid);
+		  /* TODO: optimize for multple targets.  */
+		  if (!unsafe_types->count (ctype_uid) && decls->size () == 1)
+		    {
+		      decl = *(decls->begin ());
+		      likely_target = cgraph_node::get (decl);
+		    }
+		  if (!unsafe_types->count (ctype_uid)
+		      && (dump_flags & TDF_STATS))
+		    count_found_targets (stats, decls->size ());
+		}
+	    }
+	  if (!decl || !likely_target)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Callee is unknown\n\n");
+	      continue;
+	    }
+	  if (TREE_CODE (TREE_TYPE (decl)) == METHOD_TYPE)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Callee is method\n\n");
+	      continue;
+	    }
+	  if (e->speculative)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Call is already speculated\n\n");
+	      stats.nspeculated++;
+	      continue;
+	    }
+	  if (!likely_target->definition)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Target is not a definition\n\n");
+	      stats.nnotdefined++;
+	      continue;
+	    }
+	  /* Do not introduce new references to external symbols.  While we
+	     can handle these just well, it is common for programs to
+	     incorrectly with headers defining methods they are linked
+	     with.  */
+	  if (DECL_EXTERNAL (likely_target->decl))
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Target is external\n\n");
+	      stats.nexternal++;
+	      continue;
+	    }
+	  /* Don't use an implicitly-declared destructor (c++/58678).  */
+	  struct cgraph_node *non_thunk_target
+	    = likely_target->function_symbol ();
+	  if (DECL_ARTIFICIAL (non_thunk_target->decl))
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Target is artificial\n\n");
+	      stats.nartificial++;
+	      continue;
+	    }
+	  if (likely_target->get_availability () <= AVAIL_INTERPOSABLE
+	      && likely_target->can_be_discarded_p ())
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Target is overwritable\n\n");
+	      stats.noverwritable++;
+	      continue;
+	    }
+	  else if (dbg_cnt (icp))
+	    {
+	      promote_call (e, n, likely_target, &stats);
+	      update = true;
+	    }
+	}
+      if (update)
+	ipa_update_overall_fn_summary (n);
+    }
+
+  if (dump_file && (dump_flags & TDF_STATS))
+    stats.nremove = find_functions_can_be_removed (unreachable_ftypes);
+
+  if (dump_file)
+    dump_stats (stats);
+  return stats.nsubst || stats.nspec;
+}
+
+/* Delete the given MAP with allocated sets.  One set may be associated with
+   more then one type/decl.  */
+
+template <typename MAP>
+static void
+remove_type_alias_map (MAP *map)
+{
+  std::set<typename MAP::mapped_type> processed_sets;
+  for (typename MAP::iterator it = map->begin (); it != map->end (); it++)
+    {
+      typename MAP::mapped_type set = it->second;
+      if (processed_sets.count (set) != 0)
+	continue;
+      processed_sets.insert (set);
+      delete set;
+    }
+  delete map;
+}
+
+/* The ipa indirect call promotion pass. Run required analysis and optimize
+   indirect calls.
+   When indirect call has only one target, promote it into a direct call.  */
+
+static unsigned int
+ipa_icp (void)
+{
+  ta_map = new type_alias_map;
+  fta_map = new type_alias_map;
+  cbase_to_ptype = new type_alias_map;
+  fs_map = new type_decl_map;
+  ctype_map = new type_map;
+  unsafe_types = new type_set;
+  type_uid_map = new uid_to_type_map;
+
+  /* Find type aliases, fill the function signature map and
+     optimize indirect calls.  */
+  collect_function_type_aliases ();
+  collect_function_signatures ();
+  bool optimized = optimize_indirect_calls ();
+
+  remove_type_alias_map (ta_map);
+  remove_type_alias_map (fta_map);
+  remove_type_alias_map (cbase_to_ptype);
+  remove_type_alias_map (fs_map);
+  delete ctype_map;
+  delete unsafe_types;
+  delete type_uid_map;
+
+  return optimized ? TODO_remove_functions : 0;
+}
+
+namespace {
+
+const pass_data pass_data_ipa_icp =
+{
+  IPA_PASS, /* type */
+  "icp", /* name */
+  OPTGROUP_NONE, /* optinfo_flags */
+  TV_IPA_ICP, /* tv_id */
+  0, /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  0, /* todo_flags_finish */
+};
+
+class pass_ipa_icp : public ipa_opt_pass_d
+{
+public:
+  pass_ipa_icp (gcc::context *ctxt)
+    : ipa_opt_pass_d (pass_data_ipa_icp, ctxt,
+		      NULL, /* generate_summary */
+		      NULL, /* write_summary */
+		      NULL, /* read_summary */
+		      NULL, /* write_optimization_summary */
+		      NULL, /* read_optimization_summary */
+		      NULL, /* stmt_fixup */
+		      0, /* function_transform_todo_flags_start */
+		      NULL, /* function_transform */
+		      NULL) /* variable_transform */
+  {}
+
+  /* opt_pass methods: */
+  virtual bool gate (function *)
+    {
+      return (optimize && flag_icp && !seen_error ()
+	      && (in_lto_p || flag_whole_program));
+    }
+
+  virtual unsigned int execute (function *) { return ipa_icp (); }
+
+}; // class pass_ipa_icp
+
+} // anon namespace
+
+ipa_opt_pass_d *
+make_pass_ipa_icp (gcc::context *ctxt)
+{
+  return new pass_ipa_icp (ctxt);
+}
 
 #include "gt-ipa-devirt.h"
