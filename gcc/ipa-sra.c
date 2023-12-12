@@ -3090,6 +3090,14 @@ process_edge_to_unknown_caller (cgraph_edge *cs)
   gcc_checking_assert (from_ifs);
   isra_call_summary *csum = call_sums->get (cs);
 
+  /* TODO: implement better support for call edges inserted after summary
+     collection but before sra wpa invocation.  */
+  if (!csum)
+    {
+      csum = call_sums->get_create (cs);
+      csum->m_return_ignored = true;
+    }
+
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "Processing an edge to an unknown caller from %s:\n",
 	     cs->caller->dump_name ());
