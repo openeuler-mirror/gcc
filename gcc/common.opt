@@ -1274,6 +1274,10 @@ fdevirtualize
 Common Report Var(flag_devirtualize) Optimization
 Try to convert virtual calls to direct ones.
 
+fipa-ic
+Common Report Var(flag_ipa_ic) Optimization Init(0)
+Perform interprocedural analysis of indirect calls.
+
 ficp
 Common Report Var(flag_icp) Optimization Init(0)
 Try to promote indirect calls to direct ones.
@@ -2244,6 +2248,10 @@ level can control the optimize level to array prefetch.
 fllc-allocate
 Common Report Var(flag_llc_allocate) Init(-1) Optimization
 Generate LLC hint instructions.
+
+fipa-prefetch
+Common Report Var(flag_ipa_prefetch) Init(0) Optimization
+Generate prefetch instructions, if available, using IPA info.
 
 fprofile
 Common Report Var(profile_flag)

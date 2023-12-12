@@ -1411,6 +1411,7 @@ OBJS = \
 	ipa-inline-analysis.o \
 	ipa-inline-transform.o \
 	ipa-predicate.o \
+	ipa-prefetch.o \
 	ipa-profile.o \
 	ipa-prop.o \
 	ipa-param-manipulation.o \
