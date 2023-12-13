@@ -5624,6 +5624,7 @@ if_convert (bool after_combine)
       df_live_add_problem ();
       df_live_set_all_dirty ();
     }
+  free_dominance_info (CDI_DOMINATORS);
   cleanup_cfg (CLEANUP_EXPENSIVE);
 
   /* Record whether we are after combine pass.  */
