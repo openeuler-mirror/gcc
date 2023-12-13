@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fif-conversion-gimple -fdump-tree-optimized" } */
+/* { dg-options "-O2 -fif-conversion-gimple -fdump-tree-optimized -ftree-fold-phiopt" } */
 
 int test_int (int optimizable_int) {
     if (optimizable_int > 5)
