@@ -336,11 +336,14 @@ only_one_array_read (class loop *loop, tree &crc_table)
           && TREE_CODE (gimple_assign_lhs (stmt)) == ARRAY_REF)
         return false;
 
+      /* Only one-dimensional integer arrays meet the condition.  */
       if (gimple_code (stmt) == GIMPLE_ASSIGN
-          && TREE_CODE (gimple_assign_rhs1 (stmt)) == ARRAY_REF)
+          && TREE_CODE (gimple_assign_rhs1 (stmt)) == ARRAY_REF
+          && TREE_CODE (TREE_OPERAND (gimple_assign_rhs1 (stmt), 0)) == VAR_DECL
+          && TREE_CODE (TREE_TYPE (gimple_assign_rhs1 (stmt))) == INTEGER_TYPE)
         {
           if (crc_table == NULL
-              && gimple_assign_rhs1 (stmt)->base.readonly_flag)
+              && TREE_READONLY (gimple_assign_rhs1 (stmt)))
             {
               crc_table = gimple_assign_rhs1 (stmt);
               crc_table_read_stmt = stmt;
@@ -437,7 +440,6 @@ match_crc_table (tree crc_table)
     }
   return true;
 }
-
 
 /* Check the crc table.  The loop should have only one data reference. 
    And match the data reference with the predefined array.  */
