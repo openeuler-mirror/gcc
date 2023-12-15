@@ -1030,13 +1030,11 @@ Common Joined UInteger Var(param_mem_access_num) Init(3) Param Optimization
 Memory access num.
 
 -param=prefetch-offset=
-Common Joined UInteger Var(param_prefetch_offset) Init(1024)
-IntegerRange(1, 999999) Param Optimization
+Common Joined UInteger Var(param_prefetch_offset) Init(1024) IntegerRange(1, 999999) Param Optimization
 Prefetch Offset, which is usually a power of two due to cache line size.
 
 -param=branch-prob-threshold=
-Common Joined UInteger Var(param_branch_prob_threshold) Init(80) IntegerRange(50, 100)
-Param Optimization
+Common Joined UInteger Var(param_branch_prob_threshold) Init(80) IntegerRange(50, 100) Param Optimization
 High Execution Rate Branch Threshold.
 
 -param=issue-topn=
@@ -1050,24 +1048,6 @@ Force issue the topn LLC mem_ref hint, without generating dynamic multi-branches
 -param=llc-capacity-per-core=
 Common Joined UInteger Var(param_llc_capacity_per_core) Init(114) IntegerRange(0, 999999) Param
 LLC capacity per core.
-
--param=target-variables=
-Common Joined Var(param_target_variables) Init("") Param Optimization
---param=target-variables=<var>[,<var>,...] Target variables for prefetching, separated by comma,
-without space.  The representation of a variable can be complex and containing space, please surround
-it by quotation marks and escape special characters in Linux.  The input length should be no more
-than 512 characters.
-
--param=use-ref-group-index=
-Common Joined UInteger Var(param_use_ref_group_index) Init(0) IntegerRange(0, 1) Param Optimization
-Prefetch the target variables by their indices in sorted ref_groups, use together with parameter
-target-variables.
-
--param=mem-ref-index=
-Common Joined Var(param_mem_ref_index) Init("") Param Optimization
---param=mem-ref-index=<idx>[,<idx>,...] Prefetch the target variable at the memory reference
-location with the index of customized order, separated by comma, without space.  The input length
-should be no more than 512 characters.
 
 -param=filter-kernels=
 Common Joined UInteger Var(param_filter_kernels) Init(1) IntegerRange(0, 1) Param
