@@ -23,7 +23,6 @@ along with GCC; see the file COPYING3.  If not see
 #define INCLUDE_VECTOR
 #define INCLUDE_LIST
 #define INCLUDE_ALGORITHM
-#define INCLUDE_STRING
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -1866,7 +1865,10 @@ filter_and_sort_kernels (vector<class loop *> &sorted_kernels,
   list<basic_block> walked_header_bb; /* Used to record nested loops.  */
 
   for (unsigned i = 0; i < kernels.size (); ++i)
-    end_bb.insert (kernels[i]->header);
+    {
+      if (kernels[i]->inner == NULL)
+	end_bb.insert (kernels[i]->header);
+    }
 
   dump_loop_headers ("kernels", kernels);
 
@@ -2380,30 +2382,6 @@ issue_builtin_prefetch (data_ref &mem_ref)
   update_ssa (TODO_update_ssa_only_virtuals);
 }
 
-/* Retrieve memory reference at the specific index.  */
-
-data_ref
-get_data_ref_at_idx (ref_group &var_ref_group)
-{
-  unsigned int mem_ref_size = static_cast<unsigned int>(
-      			var_ref_group.ref_scores.size ());
-  if (strlen (param_mem_ref_index) == 0)
-    return var_ref_group.first_use;
-  else
-    {
-      /* Insert prefetch hint at highly-likely-used location with the given
-	 index.  */
-      if (var_ref_group.mem_ref_index >= mem_ref_size)
-	{
-	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "WARNING: The target data_ref index is out "
-		     "of range.  Use top index instead!\n");
-	  return var_ref_group.ref_scores[0].d_ref;
-	}
-      return var_ref_group.ref_scores[var_ref_group.mem_ref_index].d_ref;
-    }
-}
-
 /* Static form insertion and issue instruction.  We may check the
    determination of the ARM SVE architecture before SVE hint insertion.  */
 
@@ -2415,7 +2393,7 @@ static_issue (vector<ref_group> &ref_groups, int num_issue_var)
 
   for (int i = 0; i < num_issue_var; ++i)
     {
-      data_ref mem_ref = get_data_ref_at_idx (ref_groups[i]);
+      data_ref mem_ref = ref_groups[i].first_use;
       if (mem_ref.vectorize_p)
 	{
 	  enum internal_fn ifn_code = gimple_call_internal_fn
@@ -2591,10 +2569,7 @@ issue_llc_hint (vector<ref_group> &ref_groups)
     }
   if (param_force_issue)
     {
-      if (strlen (param_target_variables) > 0)
-	static_issue (ref_groups, static_cast<int>(ref_groups.size ()));
-      else
-	static_issue (ref_groups, num_issue_var);
+      static_issue (ref_groups, num_issue_var);
       return;
     }
   calc_type topn_calc_type = STATIC_CALC;
@@ -2626,224 +2601,6 @@ issue_llc_hint (vector<ref_group> &ref_groups)
 }
 
 /* ==================== phase entry ====================  */
-/* Check whether a string can be converted to an unsigned integer.  */
-
-bool is_unsigned_int (const string &s)
-{
-  if (s.empty () || s.size () > PREFETCH_TOOL_NUM_MAX_LEN)
-    return false;
-
-  for (unsigned int i = 0; i < s.size (); ++i)
-    {
-      if (s[i] < '0' || s[i] > '9')
-	return false;
-    }
-  return true;
-}
-
-/* Parse a substring separated by comma.  If the substring is valid and
-   non-empty, store it as a parsed element.  */
-
-bool
-parse_string_helper (const string &substr, vector<string>& str_elts,
-		     bool check_unsigned, size_t start, size_t end)
-{
-  if (substr == "" && dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "WARNING: The input string from %lu to %lu is "
-	     "empty.\n", start, end);
-  else if (check_unsigned && !is_unsigned_int (substr))
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "ERROR: not an unsigned integer: %s\n",
-		 substr.c_str ());
-      str_elts.clear ();
-      return false;
-    }
-  else
-    str_elts.push_back (substr);
-  return true;
-}
-
-/* Parse a user input string, separated by comma.  */
-
-void
-parse_string (const string &s, vector<string>& str_elts,
-	      bool check_unsigned = false)
-{
-  string delim = ",";
-  size_t start = 0;
-  size_t end = s.find (delim);
-  string substr = s.substr (start, end - start);
-  while (end != string::npos)
-    {
-      if (!parse_string_helper (substr, str_elts, check_unsigned, start, end))
-	return;
-      start = end + delim.size ();
-      end = s.find (delim, start);
-      substr = s.substr (start, end - start);
-    }
-  parse_string_helper (substr, str_elts, check_unsigned, start, end);
-}
-
-/* Parse user input of target variables and memory indices and create a map
-   that assigns a target variable to a memory index.  */
-
-void
-parse_param_inputs (map<string, unsigned int> &var2mem_idx)
-{
-  /* The user input length should have an input length limit.  */
-  if ((strlen (param_target_variables) >= PREFETCH_TOOL_INPUT_MAX_LEN
-       || strlen (param_mem_ref_index) >= PREFETCH_TOOL_INPUT_MAX_LEN)
-      && dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "INVALID INPUT: The user inputs for target variables "
-	      "and/or memory reference indices are too long for parsing.\n");
-
-  vector<string> var_names;
-  string target_variables = param_target_variables;
-  if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Start parsing target variables:\n");
-  if (param_use_ref_group_index)
-    parse_string (target_variables, var_names, true);
-  else
-    parse_string (target_variables, var_names, false);
-  if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Finish parsing target variables.\n\n");
-
-  vector<string> var_mem_indices;
-  string mem_indices = param_mem_ref_index;
-  if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Start parsing memory reference indices:\n");
-  parse_string (mem_indices, var_mem_indices, true);
-  if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Finish parsing memory reference indices.\n\n");
-
-  /* Construct a map of var_name: var_mem_index.  */
-  if (var_names.size () > 0)
-    {
-      if (var_mem_indices.size () < var_names.size ())
-	{
-	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "WARNING: The number of provided memory "
-		     "reference indices is less than that of target "
-		     "variables.\nUse the top index for all variables "
-		     "instead.\n");
-	  for (string& var_name : var_names)
-	    var2mem_idx[var_name] = 0;
-	}
-      else
-	{
-	  if (var_mem_indices.size () > var_names.size ()
-	      && dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "WARNING: The number of target variables is "
-		     "less than that of memory reference indices.\n");
-	  for (unsigned int i = 0; i < var_names.size (); ++i)
-	    {
-	      var2mem_idx[var_names[i]] = static_cast<unsigned int>(
-		atoi (var_mem_indices[i].c_str ()));
-	    }
-	}
-    }
-}
-
-/* Filter reference groups by only selecting target variables from the user
-   input.  There are two options for prefetching target variables:
-   1. Specify variable name parsed by the pass, which you can double-check at
-      "sorted ref_groups" section in the dump file.
-   2. Specify variable rank exhibited at "sorted ref_groups" section in the
-      dump file.
-*/
-
-void
-prefetch_variables (const vector<ref_group>& ref_groups,
-		    vector<ref_group>& reduced_ref_groups)
-{
-  map<unsigned int, unsigned int> ref_group2mem_idx;
-
-  map<string, unsigned int> var2mem_idx;  /* externally defined.  */
-  parse_param_inputs (var2mem_idx);
-
-  if (param_use_ref_group_index)
-    {
-      /* Use ref_group index at "sorted ref_groups" section to specify
-	 variable.  */
-      /* Collect the variables in "reduced_ref_group" only if their indices
-	show up at "sorted ref_groups" section.  */
-      for (const pair<string, unsigned int> &var_mem_idx : var2mem_idx)
-	{
-	  unsigned int var_idx = static_cast<unsigned int>(atoi (
-				    var_mem_idx.first.c_str ()));
-	  if (var_idx < ref_groups.size ())
-	    ref_group2mem_idx[var_idx] = var_mem_idx.second;
-	  else if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "WARNING: The index \"%u\" does not show "
-		      "up in the ref_groups.\n", var_idx);
-	}
-    }
-  else
-    {
-      /* Use variable name shown up at "sorted ref_groups" section to specify
-	 variable:
-	 var2ref_group_idx + var2mem_idx -> ref_group2mem_idx.  */
-      /* Create a map that assigns the variable name to its corresponding
-	 ref_group index.  */
-      map<string, unsigned int> var2ref_group_idx;  /* internally detected.  */
-      for (unsigned int i = 0; i < ref_groups.size (); ++i)
-	{
-	  const ref_group &curr_ref_group = ref_groups[i];
-	  const int UINT_MAX_DIGIT = 10;
-	  /* Unrecognizable variable name related to ref_group.  */
-	  if (!get_name (curr_ref_group.var))
-	    {
-	      /* If the variable name does not have a string representation,
-		 we can rename it by "tmp_var_" + <sorted_ref_group_index>.  */
-	      char group_idx[UINT_MAX_DIGIT];
-	      sprintf (group_idx, "%u", i);
-	      string tmp_var_name = "tmp_var_" + std::string (group_idx);
-	      fprintf (dump_file, "Unrecognizable variable name at ref_group "
-		       "index %u.\nThe tree expression for variable is: ", i);
-	      print_generic_expr (dump_file, curr_ref_group.var, TDF_SLIM);
-	      fprintf (dump_file, "\n");
-	      var2ref_group_idx[tmp_var_name] = i;
-	    }
-	  else
-	    var2ref_group_idx[std::string (get_name (curr_ref_group.var))] = i;
-	}
-      /* Collect the variables in "reduced_ref_group" only if they show up in
-	 the ref_groups.  */
-      for (const pair<string, unsigned int> &var_mem_idx : var2mem_idx)
-	{
-	  if (var2ref_group_idx.count (var_mem_idx.first))
-	    {
-	      unsigned int ref_group_idx = var2ref_group_idx[var_mem_idx.first];
-	      ref_group2mem_idx[ref_group_idx] = var_mem_idx.second;
-	    }
-	  else if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "WARNING: Target variable \" %s \" does "
-		      "not show up in the ref_groups.  Check whether it needs "
-		      "temporary variable name.\n",
-		      var_mem_idx.first.c_str ());
-	}
-    }
-
-  for (const pair<unsigned int, unsigned int> &ref_group_mem_idx :
-       ref_group2mem_idx)
-    {
-      ref_group curr_ref_group = ref_groups[ref_group_mem_idx.first];
-      curr_ref_group.mem_ref_index = ref_group_mem_idx.second;
-      reduced_ref_groups.push_back (curr_ref_group);
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	{
-	  fprintf (dump_file, "\nNOTICE: Prefetching target variable \" ");
-	  print_generic_expr (dump_file, curr_ref_group.var, TDF_SLIM);
-	  fprintf (dump_file, " \" at ref_group index %u and memory location "
-		   "index %u.\n", ref_group_mem_idx.first,
-		   ref_group_mem_idx.second);
-	}
-    }
-  if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "\n\n");
-}
-
 
 /* The LLC intelligent allocation consists of 6 steps.  */
 
@@ -2869,17 +2626,7 @@ llc_allocate (void)
   if (!record_and_sort_ref_groups (ref_groups, sorted_kernels, kernels_refs))
     return;
 
-  if (strlen (param_target_variables) > 0)
-    {
-      /* If "param_target_variables" is not empty, we will issue parsed target
-	variables compulsorily.  */
-      param_force_issue = true;
-      vector<ref_group> reduced_ref_groups;
-      prefetch_variables (ref_groups, reduced_ref_groups);
-      issue_llc_hint (reduced_ref_groups);
-    }
-  else
-    issue_llc_hint (ref_groups);
+  issue_llc_hint (ref_groups);
 }
 
 /* Check whether the function is an operator reloading function.  */

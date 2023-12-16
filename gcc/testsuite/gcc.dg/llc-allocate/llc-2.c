@@ -45,7 +45,7 @@ main (int argc, char *argv[])
 /* { dg-final { scan-tree-dump-not   "static_data_size:" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "\{ (?:\\d+\\(\\d+\\) ){1}\}" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-not   ", size: (?!(0\.000000))" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times ", size: 0\.000000" 8 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times ", size: 0\.000000" 6 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "\\d x_data \\(0.000000, 1, 0\\) : 3" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "\\d A_j \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "\\d A_data \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } } */

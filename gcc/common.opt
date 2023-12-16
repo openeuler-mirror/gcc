@@ -2255,7 +2255,7 @@ Generate prefetch instructions, if available, for arrays in loops. The prefetch
 level can control the optimize level to array prefetch.
 
 fllc-allocate
-Common Report Var(flag_llc_allocate) Init(-1) Optimization
+Common Report Var(flag_llc_allocate) Optimization
 Generate LLC hint instructions.
 
 fipa-prefetch
