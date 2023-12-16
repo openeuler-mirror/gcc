@@ -1985,11 +1985,10 @@ bbs_ok_for_cmove_arith (basic_block bb_a,
 
       if (!sset_a)
 	goto end_cmove_arith_check_and_fail;
-      if (a_insn == last_a)
-	continue;
       /* Record all registers that BB_A sets.  */
       FOR_EACH_INSN_DEF (def, a_insn)
-	bitmap_set_bit (bba_sets, DF_REF_REGNO (def));
+	if (!(to_rename && DF_REF_REG (def) == to_rename && a_insn == last_a))
+	  bitmap_set_bit (bba_sets, DF_REF_REGNO (def));
     }
 
   bitmap_and (intersections, df_get_live_in (bb_b), bba_sets);
