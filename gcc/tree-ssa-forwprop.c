@@ -2662,14 +2662,28 @@ check_def_use_order (vec<gimple *> &first_stmts, vec<gimple *> &second_stmts)
 /* Check similarity of stmts in the block of arithmetic operations.  */
 
 static bool
-check_arithmetic_block (vec<gimple *> &initial_perm_stmts, unsigned nstmts)
+check_arithmetic_block (auto_vec<gimple *> &all_arith_stmts,
+			vec<gimple *> &initial_perm_stmts, unsigned nstmts)
 {
   auto_vec<gimple *> next_stmts (nstmts);
   auto_vec<gimple *> prev_stmts (nstmts);
+  hash_set<gimple *> arith_stmt_set;
 
   enum tree_code code;
   unsigned i;
-  gimple *stmt_it;
+  gimple *stmt_it, *last_stmt = all_arith_stmts[all_arith_stmts.length () - 1];
+
+  /* Check that the arithmetic operations follow each other.  */
+  all_arith_stmts.qsort (gimple_uid_cmp);
+  FOR_EACH_VEC_ELT (all_arith_stmts, i, stmt_it)
+    arith_stmt_set.add (stmt_it);
+
+  gimple_stmt_iterator gsi;
+  for (gsi = gsi_for_stmt (all_arith_stmts[0]); gsi_stmt (gsi) != last_stmt;
+       gsi_next (&gsi))
+    if (!arith_stmt_set.contains (gsi_stmt (gsi)))
+      return false;
+
   FOR_EACH_VEC_ELT (initial_perm_stmts, i, stmt_it)
     prev_stmts.quick_push (stmt_it);
 
@@ -2778,7 +2792,7 @@ analyze_perm_fwprop (tree type, unsigned HOST_WIDE_INT nelts,
     }
 
   /* Check that all results has the same arithmetic patterns.  */
-  if (!check_arithmetic_block (final_arith_stmts, nelts))
+  if (!check_arithmetic_block (all_arith_stmts, final_arith_stmts, nelts))
     return false;
 
   if (final_arith_stmts.length () < nelts)
