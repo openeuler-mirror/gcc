@@ -4105,6 +4105,12 @@ ipa_struct_reorg::maybe_record_assign (cgraph_node *node, gassign *stmt)
 	maybe_mark_or_record_other_side (rhs, lhs, stmt);
       if (TREE_CODE (lhs) == SSA_NAME)
 	maybe_mark_or_record_other_side (lhs, rhs, stmt);
+
+      /* Handle missing ARRAY_REF cases.  */
+      if (TREE_CODE (lhs) == ARRAY_REF)
+	mark_type_as_escape (TREE_TYPE (lhs), escape_array, stmt);
+      if (TREE_CODE (rhs) == ARRAY_REF)
+	mark_type_as_escape (TREE_TYPE (rhs), escape_array, stmt);
     }
 }
 
@@ -6169,6 +6175,7 @@ ipa_struct_reorg::rewrite_expr (tree expr, tree newexpr[max_split], bool ignore_
   bool escape_from_base = false;
 
   tree newbase[max_split];
+  memset (newbase, 0, sizeof (tree[max_split]));
   memset (newexpr, 0, sizeof(tree[max_split]));
 
   if (TREE_CODE (expr) == CONSTRUCTOR)
@@ -8162,43 +8169,14 @@ ipa_struct_reorg::rewrite_cond (gcond *stmt,
    should be removed. */
 
 bool
-ipa_struct_reorg::rewrite_debug (gimple *stmt, gimple_stmt_iterator *)
+ipa_struct_reorg::rewrite_debug (gimple *, gimple_stmt_iterator *)
 {
-  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
-    {
-      /* Delete debug gimple now.  */
-      return true;
-    }
-  bool remove = false;
-  if (gimple_debug_bind_p (stmt))
-    {
-      tree var = gimple_debug_bind_get_var (stmt);
-      tree newvar[max_split];
-      if (rewrite_expr (var, newvar, true))
-	remove = true;
-      if (gimple_debug_bind_has_value_p (stmt))
-	{
-          var = gimple_debug_bind_get_value (stmt);
-	  if (TREE_CODE (var) == POINTER_PLUS_EXPR)
-	    var = TREE_OPERAND (var, 0);
-	  if (rewrite_expr (var, newvar, true))
-	    remove = true;
-	}
-    }
-  else if (gimple_debug_source_bind_p (stmt))
-    {
-      tree var = gimple_debug_source_bind_get_var (stmt);
-      tree newvar[max_split];
-      if (rewrite_expr (var, newvar, true))
-	remove = true;
-      var = gimple_debug_source_bind_get_value (stmt);
-      if (TREE_CODE (var) == POINTER_PLUS_EXPR)
-	var = TREE_OPERAND (var, 0);
-      if (rewrite_expr (var, newvar, true))
-	remove = true;
-    }
-
-  return remove;
+  /* In debug statements, there might be some statements that have
+     been optimized out in gimple but left in debug gimple.  Sometimes
+     these statements need to be analyzed to escape, but in rewrite
+     stage it shouldn't happen.  It needs to care a lot to handle these
+     cases but seems useless.  So now we just delete debug gimple.  */
+  return true;
 }
 
 /* Rewrite PHI nodes, return true if the PHI was replaced. */
