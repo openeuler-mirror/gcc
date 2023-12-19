@@ -1750,6 +1750,10 @@ fif-conversion-gimple
 Common Report Var(flag_if_conversion_gimple) Optimization
 Perform conversion of conditional jumps to branchless equivalents during gimple transformations.
 
+fconvert-minmax
+Common Report Var(flag_convert_minmax) Optimization
+Convert saturating clipping to min max.
+
 fstack-reuse=
 Common Joined RejectNegative Enum(stack_reuse_level) Var(flag_stack_reuse) Init(SR_ALL) Optimization
 -fstack-reuse=[all|named_vars|none]	Set stack reuse level for local variables.
