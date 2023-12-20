@@ -4791,10 +4791,10 @@
 	    (vec_select:V4HI
 	      (match_operand:V8HI 1 "register_operand" "w")
 	      (match_operand:V8HI 2 "vect_par_cnst_lo_half" "")))
-	  (match_operand:V4SI 3 "aarch64_simd_rshift_imm" "Dr")))]
+	  (match_operand:V4SI 3 "aarch64_simd_shift_imm_bitsize_v4si" "i")))]
   "TARGET_SIMD"
   "shll\t%0.4s, %1.4h, #%3"
-  [(set_attr "type" "neon_compare_zero")]
+  [(set_attr "type" "neon_shift_imm_long")]
 )
 
 ;; vshll_high_n
@@ -4821,10 +4821,10 @@
 	    (vec_select:V4HI
 	      (match_operand:V8HI 1 "register_operand" "w")
 	      (match_operand:V8HI 2 "vect_par_cnst_hi_half" "")))
-	  (match_operand:V4SI 3 "aarch64_simd_rshift_imm" "Dr")))]
+	  (match_operand:V4SI 3 "aarch64_simd_shift_imm_bitsize_v4si" "i")))]
   "TARGET_SIMD"
   "shll2\t%0.4s, %1.8h, #%3"
-  [(set_attr "type" "neon_compare_zero")]
+  [(set_attr "type" "neon_shift_imm_long")]
 )
 
 ;; vrshr_n
