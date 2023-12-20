@@ -1,5 +1,5 @@
 /* { dg-do compile { target aarch64-*-* } } */
-/* { dg-additional-options "-fsplit-ldp-stp" } */
+/* { dg-additional-options "-O1 -fsplit-ldp-stp" } */
 /*
  *    Test is:
  *        Pattern where LDP insns should be split with rearrangement in order
