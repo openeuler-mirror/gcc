@@ -1863,6 +1863,7 @@ filter_and_sort_kernels (vector<class loop *> &sorted_kernels,
 
   set<basic_block> end_bb;
   list<basic_block> walked_header_bb; /* Used to record nested loops.  */
+  set<int> walked_non_header_bb_idx;
 
   for (unsigned i = 0; i < kernels.size (); ++i)
     {
@@ -1895,7 +1896,15 @@ filter_and_sort_kernels (vector<class loop *> &sorted_kernels,
 	  /* bb is not the head of the loop, go to the next.  */
 	  if (bb != bb->loop_father->header)
 	    {
-	      bb = next_high_probability_bb (bb);
+	      if (walked_non_header_bb_idx.count (bb->index))
+		{
+		  if (dump_file && (dump_flags & TDF_DETAILS))
+		    fprintf (dump_file, "Find same-loop cycle.  "
+			     "Abort filtering process.\n");
+		  return false;
+		}
+	      walked_non_header_bb_idx.insert (bb->index);
+      	      bb = next_high_probability_bb (bb);
 	      continue;
 	    }
 
