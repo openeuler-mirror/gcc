@@ -444,8 +444,13 @@ srtype::has_dead_field (void)
       if (!(this_field->field_access & READ_FIELD)
 	 && !FUNCTION_POINTER_TYPE_P (this_field->fieldtype))
 	{
-	  may_dfe = true;
-	  break;
+	  /* Fields with escape risks should not be processed. */
+	  if (this_field->type == NULL
+	      || (this_field->type->escapes == does_not_escape))
+	    {
+	      may_dfe = true;
+	      break;
+	    }
 	}
     }
   return may_dfe;
@@ -1030,7 +1035,11 @@ srtype::create_new_type (void)
       if (current_layout_opt_level & DEAD_FIELD_ELIMINATION
 	  && !(f->field_access & READ_FIELD)
 	  && !FUNCTION_POINTER_TYPE_P (f->fieldtype))
-	continue;
+	{
+	  /* Fields with escape risks should not be processed. */
+	  if (f->type == NULL || (f->type->escapes == does_not_escape))
+	    continue;
+	}
       f->create_new_fields (newtype, newfields, newlast);
     }
 
