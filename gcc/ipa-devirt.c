@@ -4399,6 +4399,11 @@ print_type_set(unsigned ftype_uid, type_alias_map *map)
   if (!map->count (ftype_uid))
     return;
   type_set* s = (*map)[ftype_uid];
+  if (!s)
+    {
+      fprintf (dump_file, "%d (no set)", ftype_uid);
+      return;
+    }
   for (type_set::const_iterator it = s->begin (); it != s->end (); it++)
     fprintf (dump_file, it == s->begin () ? "%d" : ", %d", *it);
 }
@@ -4966,7 +4971,8 @@ analyze_assign_stmt (gimple *stmt)
     {
       rhs = TREE_OPERAND (rhs, 0);
       if (VAR_OR_FUNCTION_DECL_P (rhs) || TREE_CODE (rhs) == STRING_CST
-	  || TREE_CODE (rhs) == ARRAY_REF || TREE_CODE (rhs) == PARM_DECL)
+	  || TREE_CODE (rhs) == ARRAY_REF || TREE_CODE (rhs) == PARM_DECL
+	  || TREE_CODE (rhs) == LABEL_DECL)
 	rhs_type = build_pointer_type (TREE_TYPE (rhs));
       else if (TREE_CODE (rhs) == COMPONENT_REF)
 	{
@@ -4980,7 +4986,12 @@ analyze_assign_stmt (gimple *stmt)
 	  gcc_assert (POINTER_TYPE_P (rhs_type));
 	}
       else
-	gcc_unreachable();
+	{
+	  fprintf (dump_file, "\nUnsupported rhs type %s in assign stmt: ",
+		   get_tree_code_name (TREE_CODE (rhs)));
+	  print_gimple_stmt (dump_file, stmt, 0);
+	  gcc_unreachable ();
+	}
     }
   else
     rhs_type = TREE_TYPE (rhs);
@@ -5678,6 +5689,8 @@ merge_fs_map_for_ftype_aliases ()
       decl_set *d_set = it1->second;
       tree type = (*type_uid_map)[it1->first];
       type_set *set = (*fta_map)[it1->first];
+      if (!set)
+	continue;
       for (type_set::const_iterator it2 = set->begin ();
 	   it2 != set->end (); it2++)
 	{

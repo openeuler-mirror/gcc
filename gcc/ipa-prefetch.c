@@ -167,6 +167,7 @@ analyse_cgraph ()
 	}
 
       /* TODO: maybe remove loop info here.  */
+      n->get_body ();
       push_cfun (DECL_STRUCT_FUNCTION (n->decl));
       calculate_dominance_info (CDI_DOMINATORS);
       loop_optimizer_init (LOOPS_NORMAL);
@@ -1540,9 +1541,28 @@ optimize_function (cgraph_node *n, function *fn)
       return 0;
     }
   else if (dump_file)
-    fprintf (dump_file, "Dominator bb %d for MRs\n", dom_bb->index);
+    {
+      fprintf (dump_file, "Dominator bb %d for MRs:\n", dom_bb->index);
+      gimple_dump_bb (dump_file, dom_bb, 0, dump_flags);
+      fprintf (dump_file, "\n");
+    }
 
-  split_block (dom_bb, (gimple *) NULL);
+  /* Try to find comp_mr's stmt in the dominator bb.  */
+  gimple *last_used = NULL;
+  for (gimple_stmt_iterator si = gsi_last_bb (dom_bb); !gsi_end_p (si);
+       gsi_prev (&si))
+    if (comp_mr->stmts[0] == gsi_stmt (si))
+      {
+	last_used = gsi_stmt (si);
+	if (dump_file)
+	  {
+	    fprintf (dump_file, "Last used stmt in dominator bb:\n");
+	    print_gimple_stmt (dump_file, last_used, 0);
+	  }
+	break;
+      }
+
+  split_block (dom_bb, last_used);
   gimple_stmt_iterator gsi = gsi_last_bb (dom_bb);
 
   /* Create new inc var.  Insert new_var = old_var + step * factor.  */

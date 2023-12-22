@@ -11899,12 +11899,16 @@ This function generate the AES inversed mix columns instruction
  of 16 byte elements vector if target supports this.
 @end deftypefn
 
-@deftypefn {Target Hook} bool TARGET_IS_LDP_INSN (int @var{icode})
-Return true if icode is corresponding to any of the LDP instruction types.
+@deftypefn {Target Hook} bool TARGET_IS_LDP_INSN (int @var{icode}, bool *@var{has_wb})
+Return true if @var{icode} is corresponding to any of the LDP instruction
+types.  If @var{has_wb} is not NULL then its value is set to true if LDP
+contains post-index or pre-index operation.
 @end deftypefn
 
-@deftypefn {Target Hook} bool TARGET_IS_STP_INSN (int @var{icode})
-Return true if icode is corresponding to any of the STP instruction types.
+@deftypefn {Target Hook} bool TARGET_IS_STP_INSN (int @var{icode}, bool *@var{has_wb})
+Return true if @var{icode} is corresponding to any of the STP instruction
+types.  If @var{has_wb} is not NULL then its value is set to true if STP
+contains post-index or pre-index operation.
 @end deftypefn
 
 @deftypefn {Target Hook} bool TARGET_CANNOT_MODIFY_JUMPS_P (void)
