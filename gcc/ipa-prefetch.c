@@ -1522,6 +1522,13 @@ optimize_function (cgraph_node *n, function *fn)
 		 "Skip the case.\n");
       return 0;
     }
+  if (!tree_fits_shwi_p (inc_mr->step))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Cannot represent incremental MR's step as "
+		 "integer.  Skip the case.\n");
+      return 0;
+    }
   if (dump_file && !used_mrs.empty ())
     print_mrs_ids (used_mrs, "Common list of used mrs:\n");
 
@@ -1607,13 +1614,19 @@ optimize_function (cgraph_node *n, function *fn)
   else
     inc_code = PLUS_EXPR;
   tree step = inc_mr->step;
-  unsigned dist_val = tree_to_uhwi (step) * param_ipa_prefetch_distance_factor;
+  HOST_WIDE_INT dist_val = tree_to_shwi (step)
+			   * param_ipa_prefetch_distance_factor;
   tree dist = build_int_cst (TREE_TYPE (step), dist_val);
   tree new_inc_var = gimple_build (&stmts, inc_code, var_type, inc_var, dist);
   (*decl_map)[inc_var] = new_inc_var;
+  if (dump_file)
+    {
+      fprintf (dump_file, "New distance value: %ld, new inc var: ", dist_val);
+      print_generic_expr (dump_file, new_inc_var);
+      fprintf (dump_file, "\n");
+    }
 
   /* Create other new vars.  Insert new stmts.  */
-  struct walk_stmt_info wi;
   stmt_set processed_stmts;
   for (memref_set::const_iterator it = used_mrs.begin ();
        it != used_mrs.end (); it++)
