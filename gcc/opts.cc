@@ -1283,6 +1283,10 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
   if (opts->x_flag_auto_bolt && opts->x_flag_lto)
     sorry ("%<-fauto-bolt%> is not supported with LTO");
 
+  /* Currently -fbolt-use is not supported for LTO.  */
+  if (opts->x_flag_bolt_use && opts->x_flag_lto)
+    sorry ("-fbolt-use is not supported with LTO");
+
   /* Control IPA optimizations based on different -flive-patching level.  */
   if (opts->x_flag_live_patching)
     control_options_for_live_patching (opts, opts_set,
@@ -3284,9 +3288,28 @@ common_handle_option (struct gcc_options *opts,
       break;
     
     case OPT_fauto_bolt_:
+      opts->x_flag_auto_bolt = true;
+      /* FALLTHRU */
     case OPT_fauto_bolt:
-      /* Deferred.  */  
-      break;  
+      if (opts->x_flag_bolt_use)
+        error_at (loc,
+		  "-fauto-bolt conflicts with -fbolt-use.");
+      break;
+
+    case OPT_fbolt_use_:
+    case OPT_fbolt_use:
+      if (opts->x_flag_auto_bolt)
+        error_at (loc,
+		  "-fauto-bolt conflicts with -fbolt-use.");
+    break;
+
+    case OPT_fbolt_target_:
+      /* Deferred.  */
+      break;
+
+    case OPT_fbolt_option_:
+      /* Defferred */  
+      break;
 
     case OPT_ftabstop_:
       /* It is documented that we silently ignore silly values.  */
