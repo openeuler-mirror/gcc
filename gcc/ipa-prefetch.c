@@ -1092,6 +1092,15 @@ analyse_loops ()
 	  memref_t *mr = it->first, *mr2 = it->second;
 	  if (mr2 == NULL || !(*fmrs_map)[fn]->count (mr))
 	    continue;
+	  /* For now optimize only MRs that mem is MEM_REF.
+	     TODO: support other MR types.  */
+	  if (TREE_CODE (mr->mem) != MEM_REF)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Skip MR %d: unsupported tree code = %s\n",
+			 mr->mr_id, get_tree_code_name (TREE_CODE (mr->mem)));
+	      continue;
+	    }
 	  if (!optimize_mrs_map->count (fn))
 	    (*optimize_mrs_map)[fn] = new memref_set;
 	  (*optimize_mrs_map)[fn]->insert (mr);
@@ -1104,7 +1113,7 @@ analyse_loops ()
 	       it != (*optimize_mrs_map)[fn]->end (); it++)
 	    {
 	      memref_t *mr = *it, *mr2 = (*mr_candidate_map)[mr];
-	      fprintf (dump_file, "MRs %d,%d with incremental offset ",
+	      fprintf (dump_file, "MRs %d, %d with incremental offset ",
 		       mr->mr_id, mr2->mr_id);
 	      print_generic_expr (dump_file, mr2->offset);
 	      fprintf (dump_file, "\n");
@@ -1437,6 +1446,27 @@ remap_gimple_op_r (tree *tp, int *walk_subtrees, void *data)
   return NULL_TREE;
 }
 
+/* Copy stmt and remap its operands.  */
+
+static gimple *
+gimple_copy_and_remap (gimple *stmt)
+{
+  gimple *copy = gimple_copy (stmt);
+  gcc_checking_assert (!is_gimple_debug (copy));
+
+  /* Remap all the operands in COPY.  */
+  struct walk_stmt_info wi;
+  memset (&wi, 0, sizeof (wi));
+  wi.info = copy;
+  walk_gimple_op (copy, remap_gimple_op_r, &wi);
+  if (dump_file)
+    {
+      fprintf (dump_file, "Stmt copy after remap:\n");
+      print_gimple_stmt (dump_file, copy, 0);
+    }
+  return copy;
+}
+
 static void
 create_cgraph_edge (cgraph_node *n, gimple *stmt)
 {
@@ -1585,7 +1615,6 @@ optimize_function (cgraph_node *n, function *fn)
   /* Create other new vars.  Insert new stmts.  */
   struct walk_stmt_info wi;
   stmt_set processed_stmts;
-  memref_tree_map mr_new_trees;
   for (memref_set::const_iterator it = used_mrs.begin ();
        it != used_mrs.end (); it++)
     {
@@ -1606,23 +1635,10 @@ optimize_function (cgraph_node *n, function *fn)
 	    }
 	  /* Create a new copy of STMT and duplicate STMT's virtual
 	     operands.  */
-	  gimple *copy = gimple_copy (mr->stmts[i]);
-	  gcc_checking_assert (!is_gimple_debug (copy));
-
-	  /* Remap all the operands in COPY.  */
-	  memset (&wi, 0, sizeof (wi));
-	  last_stmt = copy;
-	  wi.info = copy;
-	  walk_gimple_op (copy, remap_gimple_op_r, &wi);
-	  if (dump_file)
-	    {
-	      fprintf (dump_file, "Stmt %d after remap:\n",i);
-	      print_gimple_stmt (dump_file, copy, 0);
-	    }
-	  gimple_seq_add_stmt (&stmts, copy);
+	  last_stmt = gimple_copy_and_remap (mr->stmts[i]);
+	  gimple_seq_add_stmt (&stmts, last_stmt);
 	}
       gcc_assert (last_stmt);
-      mr_new_trees[mr] = gimple_assign_lhs (last_stmt);
       if (dump_file)
 	{
 	  fprintf (dump_file, "MR (%d) new mem: ", mr->mr_id);
@@ -1664,23 +1680,11 @@ optimize_function (cgraph_node *n, function *fn)
 	    continue;
 	  processed_stmts.insert (mr->stmts[i]);
 
-	  gimple *copy = gimple_copy (mr->stmts[i]);
-	  gcc_checking_assert (!is_gimple_debug (copy));
-
-	  /* Remap all the operands in COPY.  */
-	  memset (&wi, 0, sizeof (wi));
-	  wi.info = copy;
-	  walk_gimple_op (copy, remap_gimple_op_r, &wi);
-	  if (dump_file)
-	    {
-	      fprintf (dump_file, "Stmt %d after remap:\n",i);
-	      print_gimple_stmt (dump_file, copy, 0);
-	    }
+	  gimple *copy = gimple_copy_and_remap (mr->stmts[i]);
 	  gimple_seq_add_stmt (&stmts, copy);
 	}
       gimple *last_stmt = mr->stmts[0];
       gcc_assert (last_stmt);
-      mr_new_trees[mr] = gimple_assign_lhs (last_stmt);
       tree write_p = mr->is_store ? integer_one_node : integer_zero_node;
       tree addr = get_mem_ref_address_ssa_name (mr->mem, NULL_TREE);
       if (decl_map->count (addr))
@@ -1689,6 +1693,11 @@ optimize_function (cgraph_node *n, function *fn)
 				     3, addr, write_p, local);
       pcalls.safe_push (last_stmt);
       gimple_seq_add_stmt (&stmts, last_stmt);
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Insert %d prefetch stmt:\n", j);
+	  print_gimple_stmt (dump_file, last_stmt, 0);
+	}
     }
 
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
@@ -1827,7 +1836,7 @@ pass_ipa_prefetch::gate (function *)
 	  /* Don't bother doing anything if the program has errors.  */
 	  && !seen_error ()
 	  && flag_lto_partition == LTO_PARTITION_ONE
-	  /* Only enable struct optimizations in lto or whole_program.  */
+	  /* Only enable prefetch optimizations in lto or whole_program.  */
 	  && (in_lto_p || flag_whole_program));
 }
 
