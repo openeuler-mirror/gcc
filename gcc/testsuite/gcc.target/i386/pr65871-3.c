@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -mbmi" } */
+/* { dg-options "-O2 -ftree-fold-phiopt -mbmi" } */
 
 int foo (int x, int y)
 {

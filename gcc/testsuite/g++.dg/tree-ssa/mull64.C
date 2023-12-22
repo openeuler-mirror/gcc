@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fmerge-mull -Wno-psabi -fdump-tree-forwprop1-details -fdump-tree-forwprop4-details" } */
+/* { dg-options "-O2 -ftree-fold-phiopt -fmerge-mull -Wno-psabi -fdump-tree-forwprop1-details -fdump-tree-forwprop4-details" } */
 
 #  define BN_BITS4        32
 #  define BN_MASK2        (0xffffffffffffffffL)
