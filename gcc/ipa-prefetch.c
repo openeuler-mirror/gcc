@@ -1467,6 +1467,31 @@ gimple_copy_and_remap (gimple *stmt)
   return copy;
 }
 
+/* Copy and remap stmts listed in MR in reverse order to last_idx, skipping
+   processed ones.  Insert new stmts to the sequence.  */
+
+static gimple *
+gimple_copy_and_remap_memref_stmts (memref_t *mr, gimple_seq &stmts,
+				    int last_idx, stmt_set &processed)
+{
+  gimple *last_stmt = NULL;
+  for (int i = mr->stmts.length () - 1; i >= last_idx ; i--)
+    {
+      if (processed.count (mr->stmts[i]))
+	continue;
+      processed.insert (mr->stmts[i]);
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Copy stmt %d from used MR (%d):\n",
+		   i, mr->mr_id);
+	  print_gimple_stmt (dump_file, mr->stmts[i], 0);
+	}
+      last_stmt = gimple_copy_and_remap (mr->stmts[i]);
+      gimple_seq_add_stmt (&stmts, last_stmt);
+  }
+  return last_stmt;
+}
+
 static void
 create_cgraph_edge (cgraph_node *n, gimple *stmt)
 {
@@ -1606,7 +1631,16 @@ optimize_function (cgraph_node *n, function *fn)
   decl_map = new tree_map;
   gcc_assert (comp_mr->stmts[0] && gimple_assign_single_p (comp_mr->stmts[0]));
   tree inc_var = gimple_assign_lhs (comp_mr->stmts[0]);
+  /* If old_var definition dominates the current use, just use it, otherwise
+     evaluate it just before new inc var evaluation.  */
   gimple_seq stmts = NULL;
+  stmt_set processed_stmts;
+  if (!dominated_by_p (CDI_DOMINATORS, dom_bb, gimple_bb (comp_mr->stmts[0])))
+    {
+      gimple *tmp = gimple_copy_and_remap_memref_stmts (comp_mr, stmts, 0,
+							processed_stmts);
+      inc_var = gimple_assign_lhs (tmp);
+    }
   tree var_type = TREE_TYPE (inc_var);
   enum tree_code inc_code;
   if (TREE_CODE (var_type) == POINTER_TYPE)
@@ -1627,30 +1661,14 @@ optimize_function (cgraph_node *n, function *fn)
     }
 
   /* Create other new vars.  Insert new stmts.  */
-  stmt_set processed_stmts;
   for (memref_set::const_iterator it = used_mrs.begin ();
        it != used_mrs.end (); it++)
     {
       memref_t *mr = *it;
-      gimple *last_stmt = NULL;
       if (mr == comp_mr)
 	continue;
-      for (int i = mr->stmts.length () - 1; i >= 0 ; i--)
-	{
-	  if (processed_stmts.count (mr->stmts[i]))
-	    continue;
-	  processed_stmts.insert (mr->stmts[i]);
-	  if (dump_file)
-	    {
-	      fprintf (dump_file, "Copy stmt %d from used MR (%d):\n",
-		       i, mr->mr_id);
-	      print_gimple_stmt (dump_file, mr->stmts[i], 0);
-	    }
-	  /* Create a new copy of STMT and duplicate STMT's virtual
-	     operands.  */
-	  last_stmt = gimple_copy_and_remap (mr->stmts[i]);
-	  gimple_seq_add_stmt (&stmts, last_stmt);
-	}
+      gimple *last_stmt = gimple_copy_and_remap_memref_stmts (mr, stmts, 0,
+							      processed_stmts);
       gcc_assert (last_stmt);
       if (dump_file)
 	{
@@ -1687,15 +1705,7 @@ optimize_function (cgraph_node *n, function *fn)
       memref_t *mr = vmrs[j];
       /* Don't need to copy the last stmt, since we insert prefetch insn
 	 instead of it.  */
-      for (int i = mr->stmts.length () - 1; i >= 1 ; i--)
-	{
-	  if (processed_stmts.count (mr->stmts[i]))
-	    continue;
-	  processed_stmts.insert (mr->stmts[i]);
-
-	  gimple *copy = gimple_copy_and_remap (mr->stmts[i]);
-	  gimple_seq_add_stmt (&stmts, copy);
-	}
+      gimple_copy_and_remap_memref_stmts (mr, stmts, 1, processed_stmts);
       gimple *last_stmt = mr->stmts[0];
       gcc_assert (last_stmt);
       tree write_p = mr->is_store ? integer_one_node : integer_zero_node;
