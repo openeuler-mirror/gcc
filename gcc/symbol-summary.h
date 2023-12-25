@@ -103,16 +103,15 @@ protected:
   /* Allocates new data that are stored within map.  */
   T* allocate_new ()
   {
-    /* In structure optimizatons, we call new to ensure that
-       the allocated memory is initialized to 0.  */
-    if (flag_ipa_struct_reorg)
-      return is_ggc () ? new (ggc_internal_alloc (sizeof (T))) T ()
-		       : new T ();
-
     /* Call gcc_internal_because we do not want to call finalizer for
        a type T.  We call dtor explicitly.  */
-    return is_ggc () ? new (ggc_internal_alloc (sizeof (T))) T ()
-		     : m_allocator.allocate () ;
+    T* allocated = is_ggc () ? new (ggc_internal_alloc (sizeof (T))) T ()
+			     : m_allocator.allocate ();
+    /* In structure optimizatons, we call memset to ensure that
+       the allocated memory is initialized to 0.  */
+    if (flag_ipa_struct_reorg)
+      memset (allocated, 0, sizeof (T));
+    return allocated;
   }
 
   /* Release an item that is stored within map.  */
@@ -121,12 +120,7 @@ protected:
     if (is_ggc ())
       ggc_delete (item);
     else
-      {
-	if (flag_ipa_struct_reorg)
-	  delete item;
-	else
-	  m_allocator.remove (item);
-      }
+      m_allocator.remove (item);
   }
 
   /* Unregister all call-graph hooks.  */

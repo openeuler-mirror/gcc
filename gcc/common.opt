@@ -1993,9 +1993,9 @@ Common Var(flag_ipa_struct_reorg) Init(0) Optimization
 Perform structure layout optimizations.
 
 fipa-struct-reorg=
-Common RejectNegative Joined UInteger Var(struct_layout_optimize_level) Init(0) IntegerRange(0, 4)
--fipa-struct-reorg=[0,1,2,3,4] adding none, struct-reorg, reorder-fields,
-dfe, safe-pointer-compression optimizations.
+Common RejectNegative Joined UInteger Var(struct_layout_optimize_level) Init(0) IntegerRange(0, 5)
+-fipa-struct-reorg=[0,1,2,3,4,5] adding none, struct-reorg, reorder-fields,
+dfe, safe-pointer-compression, unsafe-pointer-compression optimizations.
 
 fipa-vrp
 Common Var(flag_ipa_vrp) Optimization
