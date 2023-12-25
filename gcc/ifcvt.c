@@ -2176,7 +2176,10 @@ noce_rename_regs_in_bb (basic_block test_bb, bitmap rename_regs)
       rtx x = SET_DEST (sset);
       if (!REG_P (x) || !bitmap_bit_p (rename_regs, REGNO (x)))
 	continue;
-
+      /* Do not need to rename dest in the last instruction
+	 it will be renamed anyway.  */
+      if (insn == last_insn)
+	continue;
       machine_mode mode = GET_MODE (x);
       rtx tmp = gen_reg_rtx (mode);
       if (!validate_replace_rtx_part (x, tmp, &SET_DEST (sset), insn))
