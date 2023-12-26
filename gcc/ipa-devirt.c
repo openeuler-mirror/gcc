@@ -4669,12 +4669,19 @@ maybe_register_aliases (tree type1, tree type2)
       if (register_ailas_type (type1, type2, ta_map))
 	analyze_pointees (type1, type2);
     }
+  unsigned type1_uid = TYPE_UID (type1);
+  unsigned type2_uid = TYPE_UID (type2);
+  if (type_uid_map->count (type1_uid) == 0)
+    (*type_uid_map)[type1_uid] = type1;
+  if (type_uid_map->count (type2_uid) == 0)
+    (*type_uid_map)[type2_uid] = type2;
+
   /* If function and non-function type pointers alias,
      the function type is unsafe.  */
   if (FUNCTION_POINTER_TYPE_P (type1) && !FUNCTION_POINTER_TYPE_P (type2))
-    unsafe_types->insert (TYPE_UID (type1));
+    unsafe_types->insert (type1_uid);
   if (FUNCTION_POINTER_TYPE_P (type2) && !FUNCTION_POINTER_TYPE_P (type1))
-    unsafe_types->insert (TYPE_UID (type2));
+    unsafe_types->insert (type2_uid);
 
   /* Try to figure out with pointers to incomplete types.  */
   if (POINTER_TYPE_P (type1) && POINTER_TYPE_P (type2))
@@ -4972,7 +4979,7 @@ analyze_assign_stmt (gimple *stmt)
       rhs = TREE_OPERAND (rhs, 0);
       if (VAR_OR_FUNCTION_DECL_P (rhs) || TREE_CODE (rhs) == STRING_CST
 	  || TREE_CODE (rhs) == ARRAY_REF || TREE_CODE (rhs) == PARM_DECL
-	  || TREE_CODE (rhs) == LABEL_DECL)
+	  || TREE_CODE (rhs) == LABEL_DECL || TREE_CODE (rhs) == CONST_DECL)
 	rhs_type = build_pointer_type (TREE_TYPE (rhs));
       else if (TREE_CODE (rhs) == COMPONENT_REF)
 	{
