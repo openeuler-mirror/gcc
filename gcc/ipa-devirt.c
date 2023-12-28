@@ -4979,7 +4979,8 @@ analyze_assign_stmt (gimple *stmt)
       rhs = TREE_OPERAND (rhs, 0);
       if (VAR_OR_FUNCTION_DECL_P (rhs) || TREE_CODE (rhs) == STRING_CST
 	  || TREE_CODE (rhs) == ARRAY_REF || TREE_CODE (rhs) == PARM_DECL
-	  || TREE_CODE (rhs) == LABEL_DECL || TREE_CODE (rhs) == CONST_DECL)
+	  || TREE_CODE (rhs) == LABEL_DECL || TREE_CODE (rhs) == CONST_DECL
+	  || TREE_CODE (rhs) == RESULT_DECL)
 	rhs_type = build_pointer_type (TREE_TYPE (rhs));
       else if (TREE_CODE (rhs) == COMPONENT_REF)
 	{
