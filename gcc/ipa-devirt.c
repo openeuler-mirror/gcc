@@ -4995,9 +4995,12 @@ analyze_assign_stmt (gimple *stmt)
 	}
       else
 	{
-	  fprintf (dump_file, "\nUnsupported rhs type %s in assign stmt: ",
-		   get_tree_code_name (TREE_CODE (rhs)));
-	  print_gimple_stmt (dump_file, stmt, 0);
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file, "\nUnsupported rhs type %s in assign stmt: ",
+		       get_tree_code_name (TREE_CODE (rhs)));
+	      print_gimple_stmt (dump_file, stmt, 0);
+	    }
 	  gcc_unreachable ();
 	}
     }
