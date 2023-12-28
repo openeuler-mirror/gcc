@@ -943,6 +943,9 @@ compare_memrefs (memref_t* mr, memref_t* mr2)
       (*mr_candidate_map)[mr] = mr2;
       return;
     }
+  /* Probably we shouldn't leave nulls in the map.  */
+  if ((*mr_candidate_map)[mr] == NULL)
+    return;
   /* TODO: support analysis with incrementation of different fields.  */
   if ((*mr_candidate_map)[mr]->offset != mr2->offset)
     {
