@@ -2391,7 +2391,7 @@ public:
   /* opt_pass methods: */
   virtual bool gate (function *)
     {
-      if (flag_crypto_accel_aes <= 0)
+      if (flag_crypto_accel_aes <= 0 || optimize < 1)
 	return false;
       return targetm.get_v16qi_mode
 	&& targetm.gen_rev32v16qi
