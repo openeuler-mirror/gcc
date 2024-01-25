@@ -943,6 +943,9 @@ compare_memrefs (memref_t* mr, memref_t* mr2)
       (*mr_candidate_map)[mr] = mr2;
       return;
     }
+  /* Probably we shouldn't leave nulls in the map.  */
+  if ((*mr_candidate_map)[mr] == NULL)
+    return;
   /* TODO: support analysis with incrementation of different fields.  */
   if ((*mr_candidate_map)[mr]->offset != mr2->offset)
     {
@@ -1730,6 +1733,7 @@ optimize_function (cgraph_node *n, function *fn)
   for (unsigned i = 0; i < pcalls.length (); i++)
     create_cgraph_edge (n, pcalls[i]);
   ipa_update_overall_fn_summary (n);
+  renumber_gimple_stmt_uids (DECL_STRUCT_FUNCTION (n->decl));
 
   return 1;
 }
