@@ -1108,6 +1108,26 @@ struct processor_costs ppca2_cost = {
   0,			/* SF->DF convert */
 };
 
+/* Instruction costs on C2000 processors.  */
+static const
+struct processor_costs c2000_cost = {
+  COSTS_N_INSNS (3),	/* mulsi */
+  COSTS_N_INSNS (3),	/* mulsi_const */
+  COSTS_N_INSNS (3),	/* mulsi_const9 */
+  COSTS_N_INSNS (3),	/* muldi */
+  COSTS_N_INSNS (19),	/* divsi */
+  COSTS_N_INSNS (35),	/* divdi */
+  COSTS_N_INSNS (3),	/* fp */
+  COSTS_N_INSNS (3),	/* dmul */
+  COSTS_N_INSNS (14),	/* sdiv */
+  COSTS_N_INSNS (17),	/* ddiv */
+  128,			/* cache line size */
+  32,			/* l1 cache */
+  512,			/* l2 cache */
+  12,			/* prefetch streams */
+  COSTS_N_INSNS (3),	/* SF->DF convert */
+};
+
 /* Support for -mveclibabi=<xxx> to control which vector library to use.  */
 static tree (*rs6000_veclib_handler) (combined_fn, tree, tree);
 
@@ -4045,7 +4065,8 @@ rs6000_option_override_internal (bool global_init_p)
      cases.  */
   if (!(rs6000_isa_flags_explicit & OPTION_MASK_P8_FUSION))
     {
-      if (processor_target_table[tune_index].processor == PROCESSOR_POWER8)
+      if (processor_target_table[tune_index].processor == PROCESSOR_POWER8 || 
+	  processor_target_table[tune_index].processor == PROCESSOR_C2000)
 	rs6000_isa_flags |= OPTION_MASK_P8_FUSION;
       else
 	rs6000_isa_flags &= ~OPTION_MASK_P8_FUSION;
@@ -4465,11 +4486,13 @@ rs6000_option_override_internal (bool global_init_p)
 			&& rs6000_tune != PROCESSOR_POWER10
 			&& rs6000_tune != PROCESSOR_PPCA2
 			&& rs6000_tune != PROCESSOR_CELL
-			&& rs6000_tune != PROCESSOR_PPC476);
+			&& rs6000_tune != PROCESSOR_PPC476
+			&& rs6000_tune != PROCESSOR_C2000);
   rs6000_sched_groups = (rs6000_tune == PROCESSOR_POWER4
 			 || rs6000_tune == PROCESSOR_POWER5
 			 || rs6000_tune == PROCESSOR_POWER7
-			 || rs6000_tune == PROCESSOR_POWER8);
+			 || rs6000_tune == PROCESSOR_POWER8
+			 || rs6000_tune == PROCESSOR_C2000);
   rs6000_align_branch_targets = (rs6000_tune == PROCESSOR_POWER4
 				 || rs6000_tune == PROCESSOR_POWER5
 				 || rs6000_tune == PROCESSOR_POWER6
@@ -4480,7 +4503,8 @@ rs6000_option_override_internal (bool global_init_p)
 				 || rs6000_tune == PROCESSOR_PPCE500MC
 				 || rs6000_tune == PROCESSOR_PPCE500MC64
 				 || rs6000_tune == PROCESSOR_PPCE5500
-				 || rs6000_tune == PROCESSOR_PPCE6500);
+				 || rs6000_tune == PROCESSOR_PPCE6500
+				 || rs6000_tune == PROCESSOR_C2000);
 
   /* Allow debug switches to override the above settings.  These are set to -1
      in rs6000.opt to indicate the user hasn't directly set the switch.  */
@@ -4783,6 +4807,10 @@ rs6000_option_override_internal (bool global_init_p)
 	rs6000_cost = &ppca2_cost;
 	break;
 
+      case PROCESSOR_C2000:
+	rs6000_cost = &c2000_cost;
+	break;
+
       default:
 	gcc_unreachable ();
       }
@@ -4948,7 +4976,8 @@ rs6000_loop_align (rtx label)
 	  || rs6000_tune == PROCESSOR_POWER5
 	  || rs6000_tune == PROCESSOR_POWER6
 	  || rs6000_tune == PROCESSOR_POWER7
-	  || rs6000_tune == PROCESSOR_POWER8))
+	  || rs6000_tune == PROCESSOR_POWER8
+	  || rs6000_tune == PROCESSOR_C2000))
     return align_flags (5);
   else
     return align_loops;
@@ -5791,6 +5820,10 @@ rs6000_machine_from_flags (void)
   /* Titan */
   if (rs6000_cpu == PROCESSOR_TITAN)
     return "titan";
+
+  /* C2000 */
+  if (rs6000_cpu == PROCESSOR_C2000)
+    return "c2000";
 
   /* 500 series and 800 series */
   if (rs6000_cpu == PROCESSOR_MPCCORE)
@@ -10042,6 +10075,7 @@ rs6000_reassociation_width (unsigned int opc ATTRIBUTE_UNUSED,
     case PROCESSOR_POWER8:
     case PROCESSOR_POWER9:
     case PROCESSOR_POWER10:
+    case PROCESSOR_C2000:
       if (DECIMAL_FLOAT_MODE_P (mode))
 	return 1;
       if (VECTOR_MODE_P (mode))
@@ -17790,6 +17824,7 @@ rs6000_adjust_cost (rtx_insn *insn, int dep_type, rtx_insn *dep_insn, int cost,
 		 || rs6000_tune == PROCESSOR_POWER8
 		 || rs6000_tune == PROCESSOR_POWER9
 		 || rs6000_tune == PROCESSOR_POWER10
+		 || rs6000_tune == PROCESSOR_C2000
                  || rs6000_tune == PROCESSOR_CELL)
                 && recog_memoized (dep_insn)
                 && (INSN_CODE (dep_insn) >= 0))
@@ -18360,6 +18395,7 @@ rs6000_issue_rate (void)
   case PROCESSOR_POWER7:
     return 5;
   case PROCESSOR_POWER8:
+  case PROCESSOR_C2000:
     return 7;
   case PROCESSOR_POWER9:
     return 6;
@@ -19276,6 +19312,7 @@ insn_must_be_first_in_group (rtx_insn *insn)
         }
       break;
     case PROCESSOR_POWER8:
+    case PROCESSOR_C2000:
       type = get_attr_type (insn);
 
       switch (type)
@@ -19405,6 +19442,7 @@ insn_must_be_last_in_group (rtx_insn *insn)
     }
     break;
   case PROCESSOR_POWER8:
+  case PROCESSOR_C2000:
     type = get_attr_type (insn);
 
     switch (type)
@@ -19523,7 +19561,7 @@ force_new_group (int sched_verbose, FILE *dump, rtx *group_insns,
 
       /* Do we have a special group ending nop? */
       if (rs6000_tune == PROCESSOR_POWER6 || rs6000_tune == PROCESSOR_POWER7
-	  || rs6000_tune == PROCESSOR_POWER8)
+	  || rs6000_tune == PROCESSOR_POWER8 || rs6000_tune == PROCESSOR_C2000)
 	{
 	  nop = gen_group_ending_nop ();
 	  emit_insn_before (nop, next_insn);
@@ -22332,7 +22370,8 @@ rs6000_register_move_cost (machine_mode mode,
       else if ((rs6000_tune == PROCESSOR_POWER6
 		|| rs6000_tune == PROCESSOR_POWER7
 		|| rs6000_tune == PROCESSOR_POWER8
-		|| rs6000_tune == PROCESSOR_POWER9)
+		|| rs6000_tune == PROCESSOR_POWER9
+		|| rs6000_tune == PROCESSOR_C2000)
 	       && reg_class_subset_p (rclass, SPECIAL_REGS))
         ret = 6 * hard_regno_nregs (FIRST_GPR_REGNO, mode);
 

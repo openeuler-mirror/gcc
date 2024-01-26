@@ -525,6 +525,7 @@ static const struct asm_name asm_names[] = {
   { "e5500",	"-me5500" },
   { "e6500",	"-me6500" },
   { "titan",	"-mtitan" },
+  { "c2000", 	"-mc2000" },
   { NULL,	"\
 %{mpower9-vector: -mpower9; \
   mpower8-vector|mcrypto|mdirect-move|mhtm: -mpower8; \
