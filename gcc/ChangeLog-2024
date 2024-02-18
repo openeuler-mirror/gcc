@@ -1,0 +1,34 @@
+2024-01-26  YuanFeng Chen  <yuanfeng.chen@shingroup.cn>
+
+	* config.gcc: Add c2000 cpu.
+	* config/rs6000/c2000.md: New file.
+	* config/rs6000/driver-rs6000.c (asm_names): Add c2000 cpu.
+	* config/rs6000/rs6000-cpus.def (RS6000_CPU): New instantiation for c2000 cpu.
+	* config/rs6000/rs6000.h (PROCESSOR_C2000): Declare.
+	* config/rs6000/rs6000.cc (c2000_cost): New cost.
+	(rs6000_option_override_internal): Enable power8 fusion if we are tuning for c2000.
+	(rs6000_option_override_internal): Set rs6000_always_hint to false for c2000.
+	(rs6000_option_override_internal): Set rs6000_sched_groups to false for c2000.
+	(rs6000_option_override_internal): Set rs6000_align_branch_targets to false for c2000.
+	(rs6000_option_override_internal): Set c2000 costs.
+	(rs6000_loop_align): Add support for c2000 cpu.
+	(rs6000_machine_from_flags): Likewise.
+	(rs6000_reassociation_width): Likewise.
+	(rs6000_adjust_cost): Likewise.
+	(rs6000_issue_rate): Likewise.
+	(insn_must_be_first_in_group): Likewise.
+	(insn_must_be_last_in_group): Likewise.
+	(force_new_group): Likewise.
+	(rs6000_register_move_cost): Likewise.
+	* config/rs6000/rs6000-string.cc (expand_compare_loop): Add support for c2000 cpu.
+	* config/rs6000/rs6000-tables.opt: Regenerate. 
+	* config/rs6000/rs6000.h: (ASM_CPU_SPEC): Add mcpu=c2000.
+	* config/rs6000/rs6000.md:(define_attr "cpu"): Add c2000 cpu.
+	* config/rs6000/t-rs6000: (MD_INCLUDES): Add c2000.md.
+	* doc/invoke.texi (mcpu): Add c2000 cpu.
+
+Copyright (C) 2024 Free Software Foundation, Inc.
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.
