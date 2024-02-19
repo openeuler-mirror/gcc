@@ -421,7 +421,8 @@ match_crc_table (tree crc_table)
   tree low_bound = array_ref_low_bound (crc_table);
   tree up_bound = array_ref_up_bound (crc_table);
   tree element_size = array_ref_element_size (crc_table);
-  if (low_bound == NULL || up_bound == NULL || element_size == NULL)
+  if (!tree_fits_uhwi_p(low_bound) || !tree_fits_uhwi_p(up_bound) ||
+      !tree_fits_uhwi_p(element_size))
     return false;
   unsigned HOST_WIDE_INT lb = tree_to_uhwi (low_bound);
   unsigned HOST_WIDE_INT ub = tree_to_uhwi (up_bound);
