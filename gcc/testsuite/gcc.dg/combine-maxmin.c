@@ -52,4 +52,4 @@ void hf (uint8_t *dsth, uint8_t *dstv, uint8_t *dstc, uint8_t *src,
 /* { dg-final { scan-assembler-times {[us]min\t} 6 } }  */
 /* All of the vectorized patterns are expected to be matched.  */
 /* { dg-final { scan-assembler-not {cmtst\t} } }  */
-/* { dg-final { scan-assembler-times {uzp1\t} 5 } }  */
+/* { dg-final { scan-assembler-times {uzp1\t} 2 } }  */
