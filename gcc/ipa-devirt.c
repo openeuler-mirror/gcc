@@ -4805,10 +4805,12 @@ compare_block_and_init_type (tree block, tree t1)
 static void
 analyze_global_var (varpool_node *var)
 {
-  var->get_constructor();
   tree decl = var->decl;
-  if (TREE_CODE (decl) == SSA_NAME || !DECL_INITIAL (decl)
-      || integer_zerop (DECL_INITIAL (decl)))
+  if (decl || !DECL_INITIAL (decl))
+    return;
+  var->get_constructor ();
+  if (TREE_CODE (decl) == SSA_NAME || integer_zerop (DECL_INITIAL (decl))
+      || TREE_CODE (DECL_INITIAL (decl)) == ERROR_MARK)
     return;
 
   if (dump_file && (dump_flags & TDF_DETAILS))
