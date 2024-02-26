@@ -452,6 +452,7 @@
 (include "../arm/cortex-a57.md")
 (include "../arm/exynos-m1.md")
 (include "falkor.md")
+(include "hip11.md")
 (include "saphira.md")
 (include "thunderx.md")
 (include "../arm/xgene1.md")
