@@ -79,8 +79,6 @@ const unsigned int WRITE_COST = 2;
 
 namespace {
 
-using namespace std;
-
 /* loop bound info of the memory reference located.  */
 struct loop_bound
 {
@@ -144,7 +142,7 @@ struct data_ref
   tree step;
 
   /* loop boundary info of each dimension.  */
-  vector<loop_bound> loop_bounds;
+  std::vector<loop_bound> loop_bounds;
 
   /* memory data size, Unit: MB.  */
   double data_size;
@@ -191,7 +189,7 @@ struct data_ref
 /* Add ref node and print.  */
 
 void
-add_ref (vector<data_ref> &references, tree op, gimple *stmt,
+add_ref (std::vector<data_ref> &references, tree op, gimple *stmt,
 	 bool vectorize_p, bool read_p)
 {
   data_ref ref;
@@ -210,7 +208,7 @@ add_ref (vector<data_ref> &references, tree op, gimple *stmt,
 /* Get the references from the simple call (vectorization type).  */
 
 void
-get_references_in_gimple_call (gimple *stmt, vector<data_ref> &references)
+get_references_in_gimple_call (gimple *stmt, std::vector<data_ref> &references)
 {
   if (gimple_code (stmt) != GIMPLE_CALL)
     return;
@@ -276,7 +274,7 @@ get_references_in_gimple_call (gimple *stmt, vector<data_ref> &references)
 /* Stores the locations of memory references in STMT to REFERENCES.  */
 
 void
-get_references_in_stmt (gimple *stmt, vector<data_ref> &references)
+get_references_in_stmt (gimple *stmt, std::vector<data_ref> &references)
 {
   if (!gimple_vuse (stmt))
     return;
@@ -326,7 +324,7 @@ struct loop_filter_out_flag
 
 /* Check whether an external node is used.  */
 
-bool use_ext_node_p (const vector<data_ref> &references,
+bool use_ext_node_p (const std::vector<data_ref> &references,
 		     unsigned int &start)
 {
   expanded_location cfun_xloc
@@ -352,7 +350,7 @@ bool use_ext_node_p (const vector<data_ref> &references,
 
 bool
 filter_out_loop_by_stmt_p (loop_filter_out_flag &loop_filter, gimple *stmt,
-		  const vector<data_ref> &references, unsigned int &start)
+		  const std::vector<data_ref> &references, unsigned int &start)
 {
   expanded_location xloc = expand_location (stmt->location);
   /* check use_ext_call.  */
@@ -431,7 +429,7 @@ dump_loop_filter_out_flag (loop_filter_out_flag &loop_filter)
 /* Get references in loop.  */
 
 bool
-get_references_in_loop (vector<data_ref> &references,
+get_references_in_loop (std::vector<data_ref> &references,
 			loop_filter_out_flag &loop_filter,
 			class loop *loop)
 {
@@ -501,7 +499,7 @@ estimate_loop_insns (class loop *loop, eni_weights *weights)
 /* Check whether the memory access is dense.  */
 
 bool
-dense_memory_p (const vector<data_ref> &references, class loop *loop)
+dense_memory_p (const std::vector<data_ref> &references, class loop *loop)
 {
   int ref_count = references.size ();
   unsigned int ninsns = estimate_loop_insns (loop, &eni_size_weights);
@@ -550,11 +548,12 @@ dense_memory_p (const vector<data_ref> &references, class loop *loop)
 /* Analyze the inner loop and get the loop with dense memory access.  */
 
 void
-analyze_loop_dense_memory (vector<class loop *> &kernels,
-			  map<class loop *, vector<data_ref> > &kernels_refs,
-			  class loop *loop)
+analyze_loop_dense_memory (std::vector<class loop *> &kernels,
+			   std::map<class loop *,
+				    std::vector<data_ref> > &kernels_refs,
+			   class loop *loop)
 {
-  vector<data_ref> references;
+  std::vector<data_ref> references;
   number_of_latch_executions (loop);
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
@@ -589,8 +588,9 @@ analyze_loop_dense_memory (vector<class loop *> &kernels,
 /* Analyze the inner loop and get the loop with dense memory access.  */
 
 bool
-get_dense_memory_kernels (vector<class loop *> &kernels,
-			  map<class loop *, vector<data_ref> > &kernels_refs)
+get_dense_memory_kernels (std::vector<class loop *> &kernels,
+			  std::map<class loop *,
+				   std::vector<data_ref> > &kernels_refs)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 1: get_dense_memory_kernels\n\n");
@@ -631,7 +631,8 @@ generic_decl_p (tree expr)
    Add different initial node based on different gimple statements.  */
 
 void
-add_worklist (vector<tree> &worklist, set<tree> &walked, gimple *def_stmt)
+add_worklist (std::vector<tree> &worklist, std::set<tree> &walked,
+	      gimple *def_stmt)
 {
   if (gimple_code (def_stmt) == GIMPLE_PHI)
     {
@@ -715,8 +716,8 @@ add_worklist (vector<tree> &worklist, set<tree> &walked, gimple *def_stmt)
 */
 
 void
-trace_base_var_helper (tree arg, set<tree> &walked,
-		       map<tree, int>& base_var_candid)
+trace_base_var_helper (tree arg, std::set<tree> &walked,
+		       std::map<tree, int>& base_var_candid)
 {
   if (arg == NULL)
     return;
@@ -765,7 +766,7 @@ trace_base_var_helper (tree arg, set<tree> &walked,
       print_gimple_stmt (dump_file, def_stmt, 0, TDF_SLIM);
     }
 
-  vector<tree> worklist;
+  std::vector<tree> worklist;
   add_worklist (worklist, walked, def_stmt);
   for (unsigned i = 0; i < worklist.size (); ++i)
     trace_base_var_helper (worklist[i], walked, base_var_candid);
@@ -781,9 +782,9 @@ trace_base_var_helper (tree arg, set<tree> &walked,
     (e.g., criterion 2: 1 -> any odd number).    */
 
 bool
-trace_base_var (tree &var, tree arg, set<tree> &walked)
+trace_base_var (tree &var, tree arg, std::set<tree> &walked)
 {
-  map<tree, int> base_var_candid;
+  std::map<tree, int> base_var_candid;
   trace_base_var_helper (arg, walked, base_var_candid);
   bool is_tracing_unusual = false;
   if (base_var_candid.size () == 1)
@@ -791,7 +792,7 @@ trace_base_var (tree &var, tree arg, set<tree> &walked)
   else
     {
       is_tracing_unusual = true;
-      for (const pair<tree, int>& base_var_count : base_var_candid)
+      for (const std::pair<tree, int>& base_var_count : base_var_candid)
 	if (base_var_count.second == 1)
 	  var = base_var_count.first;
     }
@@ -800,7 +801,7 @@ trace_base_var (tree &var, tree arg, set<tree> &walked)
       fprintf (dump_file, "Traced variables at ");
       print_generic_expr (dump_file, arg, TDF_SLIM);
       fprintf (dump_file, ":\n");
-      for (const pair<tree, int>& base_var_count : base_var_candid)
+      for (const std::pair<tree, int>& base_var_count : base_var_candid)
 	fprintf (dump_file, "%s:%d, ", get_name (base_var_count.first),
 		  base_var_count.second);
       fprintf (dump_file, "\n");
@@ -817,7 +818,7 @@ trace_base_var (tree &var, tree arg, set<tree> &walked)
 /* Tracing direct memory reference information.  */
 
 bool
-trace_direct_mem_ref (data_ref &mem_ref, set <gimple *> &traced_ref_stmt)
+trace_direct_mem_ref (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt)
 {
   if (TREE_CODE (mem_ref.ref) != TARGET_MEM_REF)
     return false;
@@ -829,7 +830,7 @@ trace_direct_mem_ref (data_ref &mem_ref, set <gimple *> &traced_ref_stmt)
   mem_ref.index = TREE_OPERAND (mem_ref.ref, 2);
   mem_ref.step = TREE_OPERAND (mem_ref.ref, 3);
 
-  set<tree> walked;
+  std::set<tree> walked;
   if (mem_ref.var == NULL_TREE
       && !trace_base_var (mem_ref.var, mem_ref.base, walked))
     return false;
@@ -843,7 +844,7 @@ trace_direct_mem_ref (data_ref &mem_ref, set <gimple *> &traced_ref_stmt)
    If true, it is an indirect access.  */
 
 bool
-trace_indirect_operand (tree arg, set<gimple *> &traced_ref_stmt)
+trace_indirect_operand (tree arg, std::set<gimple *> &traced_ref_stmt)
 {
   if (TREE_CODE (arg) != SSA_NAME)
     return false;
@@ -889,7 +890,7 @@ trace_indirect_operand (tree arg, set<gimple *> &traced_ref_stmt)
 
 bool
 trace_indirect_ptr (tree &base, tree &index, tree arg,
-		    set<gimple *> traced_ref_stmt)
+		    std::set<gimple *> traced_ref_stmt)
 {
   gimple *def_stmt = SSA_NAME_DEF_STMT (arg);
 
@@ -922,7 +923,7 @@ trace_indirect_ptr (tree &base, tree &index, tree arg,
 
 bool
 trace_indirect_array (tree &base, tree &index,
-		      set<gimple *> traced_ref_stmt, tree ref)
+		      std::set<gimple *> traced_ref_stmt, tree ref)
 {
   if (TREE_CODE (ref) != ARRAY_REF)
     return false;
@@ -937,7 +938,7 @@ trace_indirect_array (tree &base, tree &index,
 
 bool
 trace_indirect_mem_ref (data_ref &mem_ref,
-			set <gimple *> &traced_ref_stmt)
+			std::set<gimple *> &traced_ref_stmt)
 {
   /* Processing of vectorization types.  */
   if (mem_ref.vectorize_p)
@@ -947,7 +948,7 @@ trace_indirect_mem_ref (data_ref &mem_ref,
 	{
 	  mem_ref.base = gimple_call_arg (mem_ref.stmt, 0);
 	  mem_ref.regular_p = false;
-	  set<tree> walked;
+	  std::set<tree> walked;
 	  if (mem_ref.var == NULL_TREE
 	      && !trace_base_var (mem_ref.var, mem_ref.base, walked))
 	    return false;
@@ -983,7 +984,7 @@ trace_indirect_mem_ref (data_ref &mem_ref,
 	  mem_ref.base = base;
 	  mem_ref.index = index;
 	  mem_ref.regular_p = false;
-	  set<tree> walked;
+	  std::set<tree> walked;
 	  if (mem_ref.var == NULL_TREE
 	      && !trace_base_var (mem_ref.var, mem_ref.base, walked))
 	    return false;
@@ -1002,7 +1003,7 @@ trace_indirect_mem_ref (data_ref &mem_ref,
 */
 
 void
-trace_ref_info (data_ref &mem_ref, set <gimple *> &traced_ref_stmt)
+trace_ref_info (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt)
 {
   enum tree_code ref_code = TREE_CODE (mem_ref.ref);
   if (/* Vectorized and non-vectorized direct access.  */
@@ -1041,7 +1042,8 @@ trace_ref_info (data_ref &mem_ref, set <gimple *> &traced_ref_stmt)
 /* Trace all references in the loop.  */
 
 void
-trace_loop_refs_info (vector<data_ref> &refs, set <gimple *> &traced_ref_stmt)
+trace_loop_refs_info (std::vector<data_ref> &refs,
+		      std::set<gimple *> &traced_ref_stmt)
 {
   for (unsigned i = 0; i < refs.size (); ++i)
     {
@@ -1058,9 +1060,9 @@ trace_loop_refs_info (vector<data_ref> &refs, set <gimple *> &traced_ref_stmt)
 /* Tracing and sorting reference groups.  */
 
 void
-trace_data_refs_info (vector<class loop *> &kernels,
-		      map<class loop*, vector<data_ref> > &loop_refs,
-		      set <gimple *> &traced_ref_stmt)
+trace_data_refs_info (std::vector<class loop *> &kernels,
+		      std::map<class loop*, std::vector<data_ref> > &loop_refs,
+		      std::set<gimple *> &traced_ref_stmt)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 2: trace_all_references_info\n\n");
@@ -1140,7 +1142,8 @@ loop_bound_iv_p (tree t, tree &outer_loop_t)
 /* add worklist and walked list.  */
 
 void
-add_worklist_walked (vector<tree> &worklist, set<tree> &walked, tree node)
+add_worklist_walked (std::vector<tree> &worklist, std::set<tree> &walked,
+		     tree node)
 {
   if (!walked.count (node))
     {
@@ -1154,7 +1157,8 @@ add_worklist_walked (vector<tree> &worklist, set<tree> &walked, tree node)
 /* check bound iv and add worklist.  */
 
 void
-check_bound_iv_and_add_worklist (vector<tree> &worklist, set<tree> &walked,
+check_bound_iv_and_add_worklist (std::vector<tree> &worklist,
+				 std::set<tree> &walked,
 				 tree t, data_ref &mem_ref)
 {
   if (t == NULL_TREE || TREE_CODE (t) != SSA_NAME)
@@ -1216,9 +1220,9 @@ trace_loop_bound_iv (data_ref &mem_ref)
     mem_ref.loop_bounds.push_back (
 	    loop_bound (mem_ref.index, SSA_NAME_DEF_STMT (mem_ref.index)));
 
-  vector<tree> worklist;
+  std::vector<tree> worklist;
   worklist.push_back (mem_ref.base);
-  set<tree> walked;
+  std::set<tree> walked;
 
   while (worklist.size ())
     {
@@ -1509,11 +1513,11 @@ trace_ref_dimension_and_loop_bounds (data_ref &mem_ref)
 	loop_bound_dump (dump_file, mem_ref.loop_bounds[i]);
 
       if (niters == NULL_TREE || niters == chrec_dont_know)
-	mem_ref.calc_by = min (mem_ref.calc_by, UNHANDLE_CALC);
+	mem_ref.calc_by = std::min (mem_ref.calc_by, UNHANDLE_CALC);
       else if (TREE_CODE (niters) != INTEGER_CST)
-	mem_ref.calc_by = min (mem_ref.calc_by, RUNTIME_CALC);
+	mem_ref.calc_by = std::min (mem_ref.calc_by, RUNTIME_CALC);
       else
-	mem_ref.calc_by = min (mem_ref.calc_by, STATIC_CALC);
+	mem_ref.calc_by = std::min (mem_ref.calc_by, STATIC_CALC);
     }
 
   if (mem_ref.calc_by == RUNTIME_CALC)
@@ -1526,12 +1530,12 @@ trace_ref_dimension_and_loop_bounds (data_ref &mem_ref)
    Return NULL_TREE if not found.  */
 
 tree
-get_cur_loop_niters (map<class loop*, vector<data_ref> > &loop_refs,
+get_cur_loop_niters (std::map<class loop*, std::vector<data_ref> > &loop_refs,
 		     class loop* loop)
 {
   if (loop_refs.count (loop) == 0)
     return NULL_TREE;
-  vector<loop_bound> bounds = loop_refs[loop][0].loop_bounds;
+  std::vector<loop_bound> bounds = loop_refs[loop][0].loop_bounds;
   return bounds.size () ? bounds[0].niters : NULL_TREE;
 }
 
@@ -1575,7 +1579,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
 	}
       /* Termination condition of dfs.  Return the depth of the bb block.  */
       if (gimple_code (def_stmt) == GIMPLE_PHI
-          || gimple_code (def_stmt) == GIMPLE_NOP)
+	  || gimple_code (def_stmt) == GIMPLE_NOP)
 	{
 	  basic_block def_bb = gimple_bb (SSA_NAME_DEF_STMT (niters));
 	  if (def_bb == NULL || def_bb->loop_father == NULL)
@@ -1610,7 +1614,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
 		    continue;
 		  unsigned depth = trace_outer_loop_depth (subtree, \
 				   start_depth);
-		  min_depth = MIN (min_depth, depth);
+		  min_depth = std::min (min_depth, depth);
 		  }
 		return min_depth;
 	    }
@@ -1648,7 +1652,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
 	  if (subtree == NULL)
 	    continue;
 	  unsigned depth = trace_outer_loop_depth (subtree, start_depth);
-	  min_depth = MIN (min_depth, depth);
+	  min_depth = std::min (min_depth, depth);
 	}
       return min_depth;
     }
@@ -1668,7 +1672,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
 /* Traces the ref dimension information in each loop.  */
 
 void
-analyze_loop_refs_dimension (vector<data_ref> &refs)
+analyze_loop_refs_dimension (std::vector<data_ref> &refs)
 {
   for (unsigned i = 0; i < refs.size (); ++i)
     {
@@ -1689,9 +1693,10 @@ analyze_loop_refs_dimension (vector<data_ref> &refs)
 */
 
 bool
-analyze_nested_kernels (vector<class loop *> &kernels,
-			map<class loop*, vector<data_ref> > &loop_refs,
-			set <gimple *> &traced_ref_stmt)
+analyze_nested_kernels (std::vector<class loop *> &kernels,
+			std::map<class loop*,
+				 std::vector<data_ref> > &loop_refs,
+			std::set<gimple *> &traced_ref_stmt)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 3: analyze_nested_kernels\n\n");
@@ -1840,7 +1845,7 @@ next_high_probability_bb (basic_block bb)
 /* Dump loop header bb.  */
 
 void
-dump_loop_headers (const char *name, vector<class loop *> &loops)
+dump_loop_headers (const char *name, std::vector<class loop *> &loops)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
   {
@@ -1855,15 +1860,15 @@ dump_loop_headers (const char *name, vector<class loop *> &loops)
 /* Combine and sort candidate loops.  */
 
 bool
-filter_and_sort_kernels (vector<class loop *> &sorted_kernels,
-			 vector<class loop *> &kernels)
+filter_and_sort_kernels (std::vector<class loop *> &sorted_kernels,
+			 std::vector<class loop *> &kernels)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "\nPhase 4: filter_and_sort_kernels:\n\n");
 
-  set<basic_block> end_bb;
-  list<basic_block> walked_header_bb; /* Used to record nested loops.  */
-  set<int> walked_non_header_bb_idx;
+  std::set<basic_block> end_bb;
+  std::list<basic_block> walked_header_bb; /* Used to record nested loops.  */
+  std::set<int> walked_non_header_bb_idx;
 
   for (unsigned i = 0; i < kernels.size (); ++i)
     {
@@ -1875,7 +1880,7 @@ filter_and_sort_kernels (vector<class loop *> &sorted_kernels,
 
   if (!param_filter_kernels)
     {
-      for (vector<class loop *>::iterator it = kernels.begin ();
+      for (std::vector<class loop *>::iterator it = kernels.begin ();
 	   it != kernels.end (); ++it)
 	sorted_kernels.push_back (*it);
     }
@@ -1985,10 +1990,10 @@ struct ref_group
     110: read, regular, non-parallel
     111: read, regular, parallel
   */
-  map<int, vector<data_ref> > ref_use;
+  std::map<int, std::vector<data_ref> > ref_use;
 
   /* scores for different memory references.  */
-  vector<ref_score> ref_scores;
+  std::vector<ref_score> ref_scores;
 
   ref_group ()
     {
@@ -2003,10 +2008,10 @@ struct ref_group
 /* calculate reuse level.  */
 
 unsigned int
-calculate_reuse_level (map<int, vector<data_ref> > &var_use)
+calculate_reuse_level (std::map<int, std::vector<data_ref> > &var_use)
 {
   unsigned int level = 0;
-  for (map<int, vector<data_ref> >::iterator it = var_use.begin ();
+  for (std::map<int, std::vector<data_ref> >::iterator it = var_use.begin ();
        it != var_use.end (); ++it)
     {
       unsigned int parallel = 1;
@@ -2043,13 +2048,13 @@ ref_group_reuse_cmp (const ref_group &a, const ref_group &b)
 /* Sort reference groups.  */
 
 void
-sort_ref_groups (vector<ref_group> &ref_groups,
-		 map<tree, ref_group> &ref_groups_map)
+sort_ref_groups (std::vector<ref_group> &ref_groups,
+		 std::map<tree, ref_group> &ref_groups_map)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "\nsort_ref_groups_by_reuse_level\n");
 
-  for (map<tree, ref_group>::iterator it = ref_groups_map.begin ();
+  for (std::map<tree, ref_group>::iterator it = ref_groups_map.begin ();
        it != ref_groups_map.end (); ++it)
     {
       (*it).second.reuse_level = calculate_reuse_level ((*it).second.ref_use);
@@ -2062,7 +2067,7 @@ sort_ref_groups (vector<ref_group> &ref_groups,
 	}
     }
 
-  sort (ref_groups.begin (), ref_groups.end (), ref_group_reuse_cmp);
+  std::sort (ref_groups.begin (), ref_groups.end (), ref_group_reuse_cmp);
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
@@ -2111,7 +2116,7 @@ enum data_attribute
    If the reference group is not found, create a group.  */
 
 void
-record_mem_ref (map<tree, ref_group> &ref_groups, data_ref &mem_ref)
+record_mem_ref (std::map<tree, ref_group> &ref_groups, data_ref &mem_ref)
 {
   unsigned int index = (mem_ref.parallel_p << DA_PARALLEL)
 	      + (mem_ref.regular_p << DA_REGULAR) + (mem_ref.read_p << DA_READ);
@@ -2127,9 +2132,9 @@ record_mem_ref (map<tree, ref_group> &ref_groups, data_ref &mem_ref)
   /* Ref_groups' calc_by depends on the inserted mem_ref's calc_by.
      Runtime issue requires the specified mem_ref's calc_by to be >= 1.
      Temporarily modified ref_group's first_use after sorting mem_refs.  */
-  ref_groups[mem_ref.var].calc_by = max (ref_groups[mem_ref.var].calc_by,
+  ref_groups[mem_ref.var].calc_by = std::max (ref_groups[mem_ref.var].calc_by,
 					 mem_ref.calc_by);
-  ref_groups[mem_ref.var].var_size = max (ref_groups[mem_ref.var].var_size,
+  ref_groups[mem_ref.var].var_size = std::max (ref_groups[mem_ref.var].var_size,
 					  mem_ref.data_size);
   ref_groups[mem_ref.var].ref_use[index].push_back (mem_ref);
 
@@ -2182,15 +2187,16 @@ data_ref_reuse_cmp (const ref_score &a, const ref_score &b)
    order of the customized sorting scheme.  */
 
 void
-sort_mem_ref_in_ref_group (map<tree, ref_group> &ref_groups_map)
+sort_mem_ref_in_ref_group (std::map<tree, ref_group> &ref_groups_map)
 {
   if (dump_file)
     fprintf (dump_file, "\nsorted data_references:\n");
-  for (map<tree, ref_group>::iterator it = ref_groups_map.begin ();
+  for (std::map<tree, ref_group>::iterator it = ref_groups_map.begin ();
        it != ref_groups_map.end (); ++it)
     {
-      vector<ref_score> &ref_scores = (*it).second.ref_scores;
-      stable_sort (ref_scores.begin (), ref_scores.end (), data_ref_reuse_cmp);
+      std::vector<ref_score> &ref_scores = (*it).second.ref_scores;
+      std::stable_sort (ref_scores.begin (), ref_scores.end (),
+			data_ref_reuse_cmp);
       /* Update ref_group's first_use and calc_by with the first mem_ref after
 	 sorting.  */
       (*it).second.first_use = (*it).second.ref_scores[0].d_ref;
@@ -2214,14 +2220,15 @@ sort_mem_ref_in_ref_group (map<tree, ref_group> &ref_groups_map)
 /* Tracing and sorting reference groups.  */
 
 bool
-record_and_sort_ref_groups (vector<ref_group> &ref_groups,
-			    vector<class loop *> &kernels,
-			    map<class loop*, vector<data_ref> > &loop_refs)
+record_and_sort_ref_groups (std::vector<ref_group> &ref_groups,
+			    std::vector<class loop *> &kernels,
+			    std::map<class loop*,
+				     std::vector<data_ref> > &loop_refs)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 5: trace_all_references_details\n\n");
 
-  map<tree, ref_group> ref_groups_map;
+  std::map<tree, ref_group> ref_groups_map;
 
   for (unsigned i = 0; i < kernels.size (); ++i)
     {
@@ -2395,7 +2402,7 @@ issue_builtin_prefetch (data_ref &mem_ref)
    determination of the ARM SVE architecture before SVE hint insertion.  */
 
 void
-static_issue (vector<ref_group> &ref_groups, int num_issue_var)
+static_issue (std::vector<ref_group> &ref_groups, int num_issue_var)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "static issue\n");
@@ -2425,8 +2432,8 @@ static_issue (vector<ref_group> &ref_groups, int num_issue_var)
    a COND_EXPR.  */
 
 tree
-calc_stmts_gen (vector<ref_group> &ref_groups, gimple_seq &cond_expr_stmt_list,
-		int num_issue_var)
+calc_stmts_gen (std::vector<ref_group> &ref_groups,
+		gimple_seq &cond_expr_stmt_list, int num_issue_var)
 {
   /* Accumulated keep size.  */
   tree total_size = build_real_from_int_cst
@@ -2483,7 +2490,7 @@ calc_stmts_gen (vector<ref_group> &ref_groups, gimple_seq &cond_expr_stmt_list,
 /* Runtime form insertion and issue instruction.  */
 
 void
-runtime_issue (vector<ref_group> &ref_groups, int num_issue_var)
+runtime_issue (std::vector<ref_group> &ref_groups, int num_issue_var)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "runtime issue\n");
@@ -2547,7 +2554,7 @@ runtime_issue (vector<ref_group> &ref_groups, int num_issue_var)
 /* Issue llc hints through prefetch instructions.  */
 
 void
-issue_llc_hint (vector<ref_group> &ref_groups)
+issue_llc_hint (std::vector<ref_group> &ref_groups)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "issue_llc_hint:\n");
@@ -2567,7 +2574,7 @@ issue_llc_hint (vector<ref_group> &ref_groups)
   if (ref_groups.size () == 0)
     return;
 
-  int num_issue_var = min (param_issue_topn,
+  int num_issue_var = std::min (param_issue_topn,
 			   static_cast<int>(ref_groups.size ()));
   if (num_issue_var < param_issue_topn
       && dump_file && (dump_flags & TDF_DETAILS))
@@ -2583,7 +2590,7 @@ issue_llc_hint (vector<ref_group> &ref_groups)
     }
   calc_type topn_calc_type = STATIC_CALC;
   for (int i = 0; i < num_issue_var; ++i)
-    topn_calc_type = min (topn_calc_type, ref_groups[i].calc_by);
+    topn_calc_type = std::min (topn_calc_type, ref_groups[i].calc_by);
 
   if (topn_calc_type == STATIC_CALC)
     {
@@ -2616,22 +2623,22 @@ issue_llc_hint (vector<ref_group> &ref_groups)
 void
 llc_allocate (void)
 {
-  map<class loop *, vector<data_ref> > kernels_refs;
-  vector<class loop *> kernels;
+  std::map<class loop *, std::vector<data_ref> > kernels_refs;
+  std::vector<class loop *> kernels;
   if (!get_dense_memory_kernels (kernels, kernels_refs))
     return;
 
-  set <gimple *> traced_ref_stmt;
+  std::set<gimple *> traced_ref_stmt;
   trace_data_refs_info (kernels, kernels_refs, traced_ref_stmt);
 
   if (!analyze_nested_kernels (kernels, kernels_refs, traced_ref_stmt))
     return;
 
-  vector<class loop *> sorted_kernels;
+  std::vector<class loop *> sorted_kernels;
   if (!filter_and_sort_kernels (sorted_kernels, kernels))
     return;
 
-  vector<ref_group> ref_groups;
+  std::vector<ref_group> ref_groups;
   if (!record_and_sort_ref_groups (ref_groups, sorted_kernels, kernels_refs))
     return;
 
