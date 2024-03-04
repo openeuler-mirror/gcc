@@ -1863,6 +1863,12 @@ fi
 AC_SUBST(isllibs)
 AC_SUBST(islinc)
 
+# Check for BOLT support.
+AC_ARG_ENABLE(bolt,
+[AS_HELP_STRING([--enable-bolt], [enable bolt optimization support])],
+enable_bolt=$enableval,
+enable_bolt=no; default_enable_bolt=no)
+
 # Check for LTO support.
 AC_ARG_ENABLE(lto,
 [AS_HELP_STRING([--enable-lto], [enable link time optimization support])],
@@ -1871,6 +1877,16 @@ enable_lto=yes; default_enable_lto=yes)
 
 ACX_ELF_TARGET_IFELSE([# ELF platforms build the lto-plugin always.
   build_lto_plugin=yes
+
+  # ELF platforms can build the bolt-plugin.
+  # NOT BUILD BOLT BY DEFAULT.
+  case $target in
+    aarch64*-*-linux*)
+    if test $enable_bolt = yes; then :
+      build_bolt_plugin=yes
+    fi
+    ;;
+  esac
 ],[if test x"$default_enable_lto" = x"yes" ; then
     case $target in
       *-apple-darwin[[912]]* | *-cygwin* | *-mingw* | *djgpp*) ;;
@@ -2047,6 +2063,10 @@ if test -d ${srcdir}/gcc; then
     if test "${build_lto_plugin}" = "yes" ; then
       configdirs="$configdirs lto-plugin"
     fi
+  fi
+
+  if test "${build_bolt_plugin}" = "yes" ; then
+      configdirs="$configdirs bolt-plugin"
   fi
 
   # If we're building an offloading compiler, add the LTO front end.
@@ -2457,7 +2477,7 @@ fi
 extra_host_libiberty_configure_flags=
 extra_host_zlib_configure_flags=
 case " $configdirs " in
-  *" lto-plugin "* | *" libcc1 "*)
+  *" lto-plugin "* | *" libcc1 "* | *" bolt-plugin "*)    
     # When these are to be built as shared libraries, the same applies to
     # libiberty.
     extra_host_libiberty_configure_flags=--enable-shared

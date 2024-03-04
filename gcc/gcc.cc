@@ -1156,6 +1156,8 @@ proper position among the other output files.  */
 %{!fsyntax-only:%{!c:%{!M:%{!MM:%{!E:%{!S:\
     %(linker) " \
     LINK_PLUGIN_SPEC \
+   "%{fauto-bolt|fauto-bolt=*|fbolt-use|fbolt-use=*: \
+    -plugin %(linker_auto_bolt_plugin_file) }"\
    "%{flto|flto=*:%<fcompare-debug*} \
     %{flto} %{fno-lto} %{flto=*} %l " LINK_PIE_SPEC \
    "%{fuse-ld=*:-fuse-ld=%*} " LINK_COMPRESS_DEBUG_SPEC \
@@ -1210,6 +1212,7 @@ static const char *endfile_spec = ENDFILE_SPEC;
 static const char *startfile_spec = STARTFILE_SPEC;
 static const char *linker_name_spec = LINKER_NAME;
 static const char *linker_plugin_file_spec = "";
+static const char *linker_auto_bolt_plugin_file_spec = "";
 static const char *lto_wrapper_spec = "";
 static const char *lto_gcc_spec = "";
 static const char *post_link_spec = POST_LINK_SPEC;
@@ -1723,6 +1726,8 @@ static struct spec_list static_specs[] =
   INIT_STATIC_SPEC ("multilib_reuse",		&multilib_reuse),
   INIT_STATIC_SPEC ("linker",			&linker_name_spec),
   INIT_STATIC_SPEC ("linker_plugin_file",	&linker_plugin_file_spec),
+  INIT_STATIC_SPEC ("linker_auto_bolt_plugin_file",
+    &linker_auto_bolt_plugin_file_spec),
   INIT_STATIC_SPEC ("lto_wrapper",		&lto_wrapper_spec),
   INIT_STATIC_SPEC ("lto_gcc",			&lto_gcc_spec),
   INIT_STATIC_SPEC ("post_link",		&post_link_spec),
@@ -9118,6 +9123,24 @@ driver::maybe_run_linker (const char *argv0) const
 	    }
 #endif
 	  set_static_spec_shared (&lto_gcc_spec, argv0);
+
+	  /* Set bolt-plugin.  */
+	  const char *fauto_bolt = "fauto-bolt";
+	  const char *fbolt_use = "fbolt-use";
+	  if (switch_matches (fauto_bolt, fauto_bolt + strlen (fauto_bolt), 1)
+	    || switch_matches (fbolt_use, fbolt_use + strlen (fbolt_use), 1))
+	    {
+	      linker_auto_bolt_plugin_file_spec = find_a_file (&exec_prefixes,
+		BOLTPLUGINSONAME, X_OK, false);
+	      if (!linker_auto_bolt_plugin_file_spec)
+		{
+		  fatal_error (input_location,
+			       "-fauto-bolt or -fbolt-use is used, but %s is not found",
+			       BOLTPLUGINSONAME);
+
+		}
+	    }
+
 	}
 
       /* Rebuild the COMPILER_PATH and LIBRARY_PATH environment variables
