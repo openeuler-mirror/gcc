@@ -86,6 +86,7 @@
 #include "tree-pass.h"
 #include "cfgbuild.h"
 #include "symbol-summary.h"
+#include "value-range.h"
 #include "ipa-prop.h"
 #include "ipa-fnsummary.h"
 
