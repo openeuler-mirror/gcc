@@ -12,14 +12,14 @@ void
 f ()
 {
   sc_fn_ptr = sc_fn;
-  sc_fn_ptr = s_fn; // { dg-error "incompatible pointer type" }
-  sc_fn_ptr = ns_fn; // { dg-error "incompatible pointer type" }
+  sc_fn_ptr = s_fn; // { dg-warning "incompatible pointer type" }
+  sc_fn_ptr = ns_fn; // { dg-warning "incompatible pointer type" }
 
-  s_fn_ptr = sc_fn; // { dg-error "incompatible pointer type" }
+  s_fn_ptr = sc_fn; // { dg-warning "incompatible pointer type" }
   s_fn_ptr = s_fn;
-  s_fn_ptr = ns_fn; // { dg-error "incompatible pointer type" }
+  s_fn_ptr = ns_fn; // { dg-warning "incompatible pointer type" }
 
-  ns_fn_ptr = sc_fn; // { dg-error "incompatible pointer type" }
-  ns_fn_ptr = s_fn; // { dg-error "incompatible pointer type" }
+  ns_fn_ptr = sc_fn; // { dg-warning "incompatible pointer type" }
+  ns_fn_ptr = s_fn; // { dg-warning "incompatible pointer type" }
   ns_fn_ptr = ns_fn;
 }

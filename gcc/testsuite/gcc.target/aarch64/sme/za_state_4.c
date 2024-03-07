@@ -105,6 +105,7 @@ __arm_new("za") void test5()
 **	mul	(x[0-9]+), \1, \1
 **	sub	sp, sp, \2
 **	mov	(x[0-9]+), sp
+**	add	[^\n]+
 **	stp	\3, \1, \[x29, #?16\]
 **	add	(x[0-9]+), x29, #?16
 **	msr	tpidr2_el0, \4

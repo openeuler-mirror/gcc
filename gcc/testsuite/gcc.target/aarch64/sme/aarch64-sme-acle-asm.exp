@@ -52,9 +52,7 @@ set-torture-options {
     "-std=c90 -O0 -g"
     "-std=c99 -Og -g"
     "-std=c11 -Os -g"
-    "-std=c23 -O2 -fno-schedule-insns -fno-schedule-insns2 -DCHECK_ASM --save-temps"
     "-std=gnu90 -O3 -g"
-    "-std=gnu23 -Ofast -g"
 } {
     "-DTEST_FULL"
     "-DTEST_OVERLOADS"

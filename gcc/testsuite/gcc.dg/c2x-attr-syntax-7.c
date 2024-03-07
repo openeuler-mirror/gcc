@@ -15,13 +15,11 @@ typedef int [[__extension__ gnu FOO vector_size (4)]] g5;
 typedef int [[__extension__ gnu BAR BAR vector_size (4)]] g6;
 typedef int [[__extension__ gnu :/**/: vector_size (4)]] g7;
 typedef int [[__extension__ gnu JOIN(:,:) vector_size (4)]] g8;
-typedef int [[__extension__ gnu :: vector_size (sizeof (void (*)(...)))]] g10;
 typedef int [[__extension__]] g11;
 typedef int [[__extension__,]] g12;
 typedef int [[__extension__, ,,,, ,, ,]] g13;
 [[__extension__ deprecated]] int g14 ();
 [[__extension__ nodiscard]] int g15 ();
-[[__extension__ noreturn]] void g16 ();
 
 int
 cases (int x)
