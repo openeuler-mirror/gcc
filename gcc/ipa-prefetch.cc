@@ -167,6 +167,7 @@ analyse_cgraph ()
 	}
 
       /* TODO: maybe remove loop info here.  */
+      n->get_body ();
       push_cfun (DECL_STRUCT_FUNCTION (n->decl));
       calculate_dominance_info (CDI_DOMINATORS);
       loop_optimizer_init (LOOPS_NORMAL);
@@ -365,6 +366,7 @@ typedef std::map<memref_t *, memref_t *> memref_map;
 typedef std::map<memref_t *, tree> memref_tree_map;
 
 typedef std::set<gimple *> stmt_set;
+typedef std::set<tree> tree_set;
 typedef std::map<tree, tree> tree_map;
 
 tree_memref_map *tm_map;
@@ -942,6 +944,9 @@ compare_memrefs (memref_t* mr, memref_t* mr2)
       (*mr_candidate_map)[mr] = mr2;
       return;
     }
+  /* Probably we shouldn't leave nulls in the map.  */
+  if ((*mr_candidate_map)[mr] == NULL)
+    return;
   /* TODO: support analysis with incrementation of different fields.  */
   if ((*mr_candidate_map)[mr]->offset != mr2->offset)
     {
@@ -1090,6 +1095,15 @@ analyse_loops ()
 	  memref_t *mr = it->first, *mr2 = it->second;
 	  if (mr2 == NULL || !(*fmrs_map)[fn]->count (mr))
 	    continue;
+	  /* For now optimize only MRs that mem is MEM_REF.
+	     TODO: support other MR types.  */
+	  if (TREE_CODE (mr->mem) != MEM_REF)
+	    {
+	      if (dump_file)
+		fprintf (dump_file, "Skip MR %d: unsupported tree code = %s\n",
+			 mr->mr_id, get_tree_code_name (TREE_CODE (mr->mem)));
+	      continue;
+	    }
 	  if (!optimize_mrs_map->count (fn))
 	    (*optimize_mrs_map)[fn] = new memref_set;
 	  (*optimize_mrs_map)[fn]->insert (mr);
@@ -1102,7 +1116,7 @@ analyse_loops ()
 	       it != (*optimize_mrs_map)[fn]->end (); it++)
 	    {
 	      memref_t *mr = *it, *mr2 = (*mr_candidate_map)[mr];
-	      fprintf (dump_file, "MRs %d,%d with incremental offset ",
+	      fprintf (dump_file, "MRs %d, %d with incremental offset ",
 		       mr->mr_id, mr2->mr_id);
 	      print_generic_expr (dump_file, mr2->offset);
 	      fprintf (dump_file, "\n");
@@ -1111,8 +1125,21 @@ analyse_loops ()
     }
 }
 
+/* Compare memrefs by IDs; helper for qsort.  */
+
+static int
+memref_id_cmp (const void *p1, const void *p2)
+{
+  const memref_t *mr1 = *(const memref_t **) p1;
+  const memref_t *mr2 = *(const memref_t **) p2;
+
+  if ((unsigned) mr1->mr_id > (unsigned) mr2->mr_id)
+    return 1;
+  return -1;
+}
+
 /* Reduce the set filtering out memrefs with the same memory references,
-   return the result vector of memrefs.  */
+   sort and return the result vector of memrefs.  */
 
 static void
 reduce_memref_set (memref_set *set, vec<memref_t *> &vec)
@@ -1149,6 +1176,7 @@ reduce_memref_set (memref_set *set, vec<memref_t *> &vec)
 	    vec.safe_push (mr1);
 	}
     }
+  vec.qsort (memref_id_cmp);
   if (dump_file)
     {
       fprintf (dump_file, "MRs (%d) after filtering: ", vec.length ());
@@ -1435,6 +1463,52 @@ remap_gimple_op_r (tree *tp, int *walk_subtrees, void *data)
   return NULL_TREE;
 }
 
+/* Copy stmt and remap its operands.  */
+
+static gimple *
+gimple_copy_and_remap (gimple *stmt)
+{
+  gimple *copy = gimple_copy (stmt);
+  gcc_checking_assert (!is_gimple_debug (copy));
+
+  /* Remap all the operands in COPY.  */
+  struct walk_stmt_info wi;
+  memset (&wi, 0, sizeof (wi));
+  wi.info = copy;
+  walk_gimple_op (copy, remap_gimple_op_r, &wi);
+  if (dump_file)
+    {
+      fprintf (dump_file, "Stmt copy after remap:\n");
+      print_gimple_stmt (dump_file, copy, 0);
+    }
+  return copy;
+}
+
+/* Copy and remap stmts listed in MR in reverse order to last_idx, skipping
+   processed ones.  Insert new stmts to the sequence.  */
+
+static gimple *
+gimple_copy_and_remap_memref_stmts (memref_t *mr, gimple_seq &stmts,
+				    int last_idx, stmt_set &processed)
+{
+  gimple *last_stmt = NULL;
+  for (int i = mr->stmts.length () - 1; i >= last_idx ; i--)
+    {
+      if (processed.count (mr->stmts[i]))
+	continue;
+      processed.insert (mr->stmts[i]);
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Copy stmt %d from used MR (%d):\n",
+		   i, mr->mr_id);
+	  print_gimple_stmt (dump_file, mr->stmts[i], 0);
+	}
+      last_stmt = gimple_copy_and_remap (mr->stmts[i]);
+      gimple_seq_add_stmt (&stmts, last_stmt);
+  }
+  return last_stmt;
+}
+
 static void
 create_cgraph_edge (cgraph_node *n, gimple *stmt)
 {
@@ -1490,6 +1564,13 @@ optimize_function (cgraph_node *n, function *fn)
 		 "Skip the case.\n");
       return 0;
     }
+  if (!tree_fits_shwi_p (inc_mr->step))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Cannot represent incremental MR's step as "
+		 "integer.  Skip the case.\n");
+      return 0;
+    }
   if (dump_file && !used_mrs.empty ())
     print_mrs_ids (used_mrs, "Common list of used mrs:\n");
 
@@ -1539,16 +1620,44 @@ optimize_function (cgraph_node *n, function *fn)
       return 0;
     }
   else if (dump_file)
-    fprintf (dump_file, "Dominator bb %d for MRs\n", dom_bb->index);
+    {
+      fprintf (dump_file, "Dominator bb %d for MRs:\n", dom_bb->index);
+      gimple_dump_bb (dump_file, dom_bb, 0, dump_flags);
+      fprintf (dump_file, "\n");
+    }
 
-  split_block (dom_bb, (gimple *) NULL);
+  /* Try to find comp_mr's stmt in the dominator bb.  */
+  gimple *last_used = NULL;
+  for (gimple_stmt_iterator si = gsi_last_bb (dom_bb); !gsi_end_p (si);
+       gsi_prev (&si))
+    if (comp_mr->stmts[0] == gsi_stmt (si))
+      {
+	last_used = gsi_stmt (si);
+	if (dump_file)
+	  {
+	    fprintf (dump_file, "Last used stmt in dominator bb:\n");
+	    print_gimple_stmt (dump_file, last_used, 0);
+	  }
+	break;
+      }
+
+  split_block (dom_bb, last_used);
   gimple_stmt_iterator gsi = gsi_last_bb (dom_bb);
 
   /* Create new inc var.  Insert new_var = old_var + step * factor.  */
   decl_map = new tree_map;
   gcc_assert (comp_mr->stmts[0] && gimple_assign_single_p (comp_mr->stmts[0]));
   tree inc_var = gimple_assign_lhs (comp_mr->stmts[0]);
+  /* If old_var definition dominates the current use, just use it, otherwise
+     evaluate it just before new inc var evaluation.  */
   gimple_seq stmts = NULL;
+  stmt_set processed_stmts;
+  if (!dominated_by_p (CDI_DOMINATORS, dom_bb, gimple_bb (comp_mr->stmts[0])))
+    {
+      gimple *tmp = gimple_copy_and_remap_memref_stmts (comp_mr, stmts, 0,
+							processed_stmts);
+      inc_var = gimple_assign_lhs (tmp);
+    }
   tree var_type = TREE_TYPE (inc_var);
   enum tree_code inc_code;
   if (TREE_CODE (var_type) == POINTER_TYPE)
@@ -1556,52 +1665,33 @@ optimize_function (cgraph_node *n, function *fn)
   else
     inc_code = PLUS_EXPR;
   tree step = inc_mr->step;
-  unsigned dist_val = tree_to_uhwi (step) * param_ipa_prefetch_distance_factor;
+  HOST_WIDE_INT dist_val = tree_to_shwi (step)
+			   * param_ipa_prefetch_distance_factor;
   tree dist = build_int_cst (TREE_TYPE (step), dist_val);
   tree new_inc_var = gimple_build (&stmts, inc_code, var_type, inc_var, dist);
   (*decl_map)[inc_var] = new_inc_var;
+  if (dump_file)
+    {
+      fprintf (dump_file, "New distance value: %ld, new inc var: ", dist_val);
+      print_generic_expr (dump_file, new_inc_var);
+      fprintf (dump_file, "\n");
+    }
 
   /* Create other new vars.  Insert new stmts.  */
-  struct walk_stmt_info wi;
-  stmt_set processed_stmts;
-  memref_tree_map mr_new_trees;
+  vec<memref_t *> used_mr_vec = vNULL;
   for (memref_set::const_iterator it = used_mrs.begin ();
        it != used_mrs.end (); it++)
+    used_mr_vec.safe_push (*it);
+  used_mr_vec.qsort (memref_id_cmp);
+
+  for (unsigned int j = 0; j < used_mr_vec.length (); j++)
     {
-      memref_t *mr = *it;
-      gimple *last_stmt = NULL;
+      memref_t *mr = used_mr_vec[j];
       if (mr == comp_mr)
 	continue;
-      for (int i = mr->stmts.length () - 1; i >= 0 ; i--)
-	{
-	  if (processed_stmts.count (mr->stmts[i]))
-	    continue;
-	  processed_stmts.insert (mr->stmts[i]);
-	  if (dump_file)
-	    {
-	      fprintf (dump_file, "Copy stmt %d from used MR (%d):\n",
-		       i, mr->mr_id);
-	      print_gimple_stmt (dump_file, mr->stmts[i], 0);
-	    }
-	  /* Create a new copy of STMT and duplicate STMT's virtual
-	     operands.  */
-	  gimple *copy = gimple_copy (mr->stmts[i]);
-	  gcc_checking_assert (!is_gimple_debug (copy));
-
-	  /* Remap all the operands in COPY.  */
-	  memset (&wi, 0, sizeof (wi));
-	  last_stmt = copy;
-	  wi.info = copy;
-	  walk_gimple_op (copy, remap_gimple_op_r, &wi);
-	  if (dump_file)
-	    {
-	      fprintf (dump_file, "Stmt %d after remap:\n",i);
-	      print_gimple_stmt (dump_file, copy, 0);
-	    }
-	  gimple_seq_add_stmt (&stmts, copy);
-	}
+      gimple *last_stmt = gimple_copy_and_remap_memref_stmts (mr, stmts, 0,
+							      processed_stmts);
       gcc_assert (last_stmt);
-      mr_new_trees[mr] = gimple_assign_lhs (last_stmt);
       if (dump_file)
 	{
 	  fprintf (dump_file, "MR (%d) new mem: ", mr->mr_id);
@@ -1632,42 +1722,31 @@ optimize_function (cgraph_node *n, function *fn)
       local = integer_three_node;
       break;
     }
+  tree_set prefetched_addrs;
   for (unsigned int j = 0; j < vmrs.length (); j++)
     {
       memref_t *mr = vmrs[j];
       /* Don't need to copy the last stmt, since we insert prefetch insn
 	 instead of it.  */
-      for (int i = mr->stmts.length () - 1; i >= 1 ; i--)
-	{
-	  if (processed_stmts.count (mr->stmts[i]))
-	    continue;
-	  processed_stmts.insert (mr->stmts[i]);
-
-	  gimple *copy = gimple_copy (mr->stmts[i]);
-	  gcc_checking_assert (!is_gimple_debug (copy));
-
-	  /* Remap all the operands in COPY.  */
-	  memset (&wi, 0, sizeof (wi));
-	  wi.info = copy;
-	  walk_gimple_op (copy, remap_gimple_op_r, &wi);
-	  if (dump_file)
-	    {
-	      fprintf (dump_file, "Stmt %d after remap:\n",i);
-	      print_gimple_stmt (dump_file, copy, 0);
-	    }
-	  gimple_seq_add_stmt (&stmts, copy);
-	}
+      gimple_copy_and_remap_memref_stmts (mr, stmts, 1, processed_stmts);
       gimple *last_stmt = mr->stmts[0];
       gcc_assert (last_stmt);
-      mr_new_trees[mr] = gimple_assign_lhs (last_stmt);
       tree write_p = mr->is_store ? integer_one_node : integer_zero_node;
       tree addr = get_mem_ref_address_ssa_name (mr->mem, NULL_TREE);
       if (decl_map->count (addr))
 	addr = (*decl_map)[addr];
+      if (prefetched_addrs.count (addr))
+	continue;
       last_stmt = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
 				     3, addr, write_p, local);
       pcalls.safe_push (last_stmt);
       gimple_seq_add_stmt (&stmts, last_stmt);
+      prefetched_addrs.insert (addr);
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Insert %d prefetch stmt:\n", j);
+	  print_gimple_stmt (dump_file, last_stmt, 0);
+	}
     }
 
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
@@ -1677,6 +1756,7 @@ optimize_function (cgraph_node *n, function *fn)
   for (unsigned i = 0; i < pcalls.length (); i++)
     create_cgraph_edge (n, pcalls[i]);
   ipa_update_overall_fn_summary (n);
+  renumber_gimple_stmt_uids (DECL_STRUCT_FUNCTION (n->decl));
 
   return 1;
 }
@@ -1806,7 +1886,7 @@ pass_ipa_prefetch::gate (function *)
 	  /* Don't bother doing anything if the program has errors.  */
 	  && !seen_error ()
 	  && flag_lto_partition == LTO_PARTITION_ONE
-	  /* Only enable struct optimizations in lto or whole_program.  */
+	  /* Only enable prefetch optimizations in lto or whole_program.  */
 	  && (in_lto_p || flag_whole_program));
 }
 
