@@ -5758,6 +5758,54 @@ merge_fs_map_for_ftype_aliases ()
     }
 }
 
+/* Save results of indirect call analysis for the next passes.  */
+
+static void
+save_analysis_results ()
+{
+  if (dump_file)
+    fprintf (dump_file, "\n\nSave results of indirect call analysis.\n");
+
+  struct cgraph_node *n;
+  FOR_EACH_FUNCTION (n)
+    {
+      cgraph_edge *e, *next;
+      for (e = n->indirect_calls; e; e = next)
+	{
+	  next = e->next_callee;
+	  if (e->indirect_info->polymorphic)
+	    continue;
+	  gcall *stmt = e->call_stmt;
+	  gcc_assert (stmt != NULL);
+	  tree call_fn = gimple_call_fn (stmt);
+	  tree call_fn_ty = TREE_TYPE (call_fn);
+	  if (!POINTER_TYPE_P (call_fn_ty))
+	    continue;
+
+	  tree ctype = TYPE_CANONICAL (TREE_TYPE (call_fn_ty));
+	  unsigned ctype_uid = ctype ? TYPE_UID (ctype) : 0;
+	  if (!ctype_uid || unsafe_types->count (ctype_uid)
+	      || !fs_map->count (ctype_uid))
+	    continue;
+	  /* TODO: cleanup noninterposable aliases.  */
+	  decl_set *decls = (*fs_map)[ctype_uid];
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, "For call ");
+	      print_gimple_stmt (dump_file, stmt, 0);
+	    }
+	  vec_alloc (e->indirect_info->targets, decls->size ());
+	  for (decl_set::const_iterator it = decls->begin ();
+	       it != decls->end (); it++)
+	    {
+	      struct cgraph_node *target = cgraph_node::get (*it);
+	      /* TODO: maybe discard some targets.  */
+	      e->indirect_info->targets->quick_push (target);
+	    }
+	}
+    }
+}
+
 /* Dump function types with set of functions corresponding to it.  */
 
 static void
@@ -5822,6 +5870,8 @@ collect_function_signatures ()
 	}
     }
   merge_fs_map_for_ftype_aliases ();
+  if (flag_ipa_ic)
+    save_analysis_results ();
   if (dump_file)
     dump_function_signature_sets ();
 }
@@ -6217,7 +6267,7 @@ ipa_icp (void)
      optimize indirect calls.  */
   collect_function_type_aliases ();
   collect_function_signatures ();
-  bool optimized = optimize_indirect_calls ();
+  bool optimized = flag_icp ? optimize_indirect_calls () : false;
 
   remove_type_alias_map (ta_map);
   remove_type_alias_map (fta_map);
@@ -6264,7 +6314,7 @@ public:
   /* opt_pass methods: */
   virtual bool gate (function *)
     {
-      return (optimize && flag_icp && !seen_error ()
+      return (optimize && (flag_icp || flag_ipa_ic) && !seen_error ()
 	      && (in_lto_p || flag_whole_program));
     }
 

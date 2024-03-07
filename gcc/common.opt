@@ -1316,6 +1316,10 @@ fdevirtualize
 Common Var(flag_devirtualize) Optimization
 Try to convert virtual calls to direct ones.
 
+fipa-ic
+Common Var(flag_ipa_ic) Optimization Init(0)
+Perform interprocedural analysis of indirect calls.
+
 ficp
 Common Var(flag_icp) Optimization Init(0)
 Try to promote indirect calls to direct ones.
@@ -2350,6 +2354,10 @@ Run predictive commoning optimization.
 fprefetch-loop-arrays
 Common Var(flag_prefetch_loop_arrays) Init(-1) Optimization
 Generate prefetch instructions, if available, for arrays in loops.
+
+fipa-prefetch
+Common Var(flag_ipa_prefetch) Init(0) Optimization
+Generate prefetch instructions, if available, using IPA info.
 
 fprofile
 Common Var(profile_flag)

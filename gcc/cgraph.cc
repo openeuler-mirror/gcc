@@ -998,6 +998,7 @@ cgraph_node::create_indirect_edge (gcall *call_stmt, int ecf_flags,
   edge->indirect_info = cgraph_allocate_init_indirect_info ();
   edge->indirect_info->ecf_flags = ecf_flags;
   edge->indirect_info->vptr_changed = true;
+  edge->indirect_info->targets = NULL;
 
   /* Record polymorphic call info.  */
   if (!cloning_p

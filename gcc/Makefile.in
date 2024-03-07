@@ -1466,6 +1466,7 @@ OBJS = \
 	ipa-modref.o \
 	ipa-modref-tree.o \
 	ipa-predicate.o \
+	ipa-prefetch.o \
 	ipa-profile.o \
 	ipa-prop.o \
 	ipa-param-manipulation.o \
