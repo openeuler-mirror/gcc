@@ -542,6 +542,9 @@ split_block_1 (basic_block bb, void *i)
     return NULL;
 
   new_bb->count = bb->count;
+  /* Copy discriminator from original bb for distinguishes among
+     several basic blocks that share a common locus, allowing for
+     more accurate autofdo.  */
   new_bb->discriminator = bb->discriminator;
 
   if (dom_info_available_p (CDI_DOMINATORS))
@@ -1113,6 +1116,10 @@ duplicate_block (basic_block bb, edge e, basic_block after, copy_bb_data *id)
     move_block_after (new_bb, after);
 
   new_bb->flags = (bb->flags & ~BB_DUPLICATED);
+  /* Copy discriminator from original bb for distinguishes among
+     several basic blocks that share a common locus, allowing for
+     more accurate autofdo.  */
+  new_bb->discriminator = bb->discriminator;
   FOR_EACH_EDGE (s, ei, bb->succs)
     {
       /* Since we are creating edges from a new block to successors
