@@ -4402,12 +4402,15 @@ get_fdo_count_quality (profile_count count)
   return profile_quality[count.quality ()];
 }
 
-static const char *
+/* If the function is not public, return the function_name/file_name for
+   disambiguation of local symbols since there could be identical function
+   names coming from identical file names.  The caller needs to free memory.  */
+static char *
 alias_local_functions (const char *fnname)
 {
   if (TREE_PUBLIC (cfun->decl))
     {
-      return fnname;
+      return concat (fnname, NULL);
     }
   return concat (fnname, "/", lbasename (dump_base_name), NULL);
 }
@@ -4457,12 +4460,13 @@ dump_direct_callee_info_to_asm (basic_block bb, gcov_type call_count)
 
 	  if (callee)
 	    {
+	      char *func_name =
+		      alias_local_functions (get_fnname_from_decl (callee));
 	      fprintf (asm_out_file, "\t.string \"%x\"\n",
 		       INSN_ADDRESSES (INSN_UID (insn)));
 
 	      fprintf (asm_out_file, "\t.string \"%s%s\"\n",
-		       ASM_FDO_CALLEE_FLAG,
-                       alias_local_functions (get_fnname_from_decl (callee)));
+		       ASM_FDO_CALLEE_FLAG, func_name);
 
               fprintf (asm_out_file,
                        "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
@@ -4472,9 +4476,9 @@ dump_direct_callee_info_to_asm (basic_block bb, gcov_type call_count)
                 {
                   fprintf (dump_file, "call: %x --> %s \n",
                            INSN_ADDRESSES (INSN_UID (insn)),
-                           alias_local_functions
-                           (get_fnname_from_decl (callee)));
+			   func_name);
                 }
+	      free (func_name);
             }
         }
      } 
@@ -4547,8 +4551,9 @@ dump_bb_info_to_asm (basic_block bb, gcov_type bb_count)
 static void 
 dump_function_info_to_asm (const char *fnname)
 {
+  char *func_name = alias_local_functions (fnname);
   fprintf (asm_out_file, "\t.string \"%s%s\"\n",
-           ASM_FDO_CALLER_FLAG, alias_local_functions (fnname));
+	   ASM_FDO_CALLER_FLAG, func_name);
   fprintf (asm_out_file, "\t.string \"%s%d\"\n",
            ASM_FDO_CALLER_SIZE_FLAG, get_function_end_addr ());
   fprintf (asm_out_file, "\t.string \"%s%s\"\n",
@@ -4557,7 +4562,7 @@ dump_function_info_to_asm (const char *fnname)
   if (dump_file)
     {
       fprintf (dump_file, "\n FUNC_NAME: %s\n",
-               alias_local_functions (fnname));
+	       func_name);
       fprintf (dump_file, " file: %s\n",
                dump_base_name);
       fprintf (dump_file, "profile_status: %s\n",
@@ -4567,6 +4572,7 @@ dump_function_info_to_asm (const char *fnname)
       fprintf (dump_file, " function_bind: %s\n",
                simple_get_function_bind ());
     }
+  free (func_name);
 }
 
 /* Dump function profile into form AutoFDO or PGO to asm.    */
