@@ -1221,4 +1221,9 @@ Target size of compressed pointer, which should be 8, 16 or 32.
 -param=param-ldp-dependency-search-range=
 Common Joined UInteger Var(param_ldp_dependency_search_range) Init(16) IntegerRange(1, 32) Param Optimization
 Range for depended ldp search in split-ldp-stp path.
+
+-param=semi-relayout-level=
+Common Joined UInteger Var(semi_relayout_level) Init(13) IntegerRange(11, 15) Param Optimization
+Set capacity of each bucket to semi-relayout to (1 << semi-relayout-level) / 8 .
+
 ; This comment is to ensure we retain the blank line above.
