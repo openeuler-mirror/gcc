@@ -3014,7 +3014,10 @@ common_handle_option (struct gcc_options *opts,
       /* FALLTHRU */
     case OPT_fauto_profile:
       enable_fdo_optimizations (opts, opts_set, value);
-      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_correction, value);
+	  /* 2 is special and means flag_profile_correction trun on by
+	     -fauto-profile.  */
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_correction,
+			   (value ? 2 : 0));
       break;
 
     case OPT_fipa_struct_reorg_:
