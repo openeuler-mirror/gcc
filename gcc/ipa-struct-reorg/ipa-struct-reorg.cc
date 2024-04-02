@@ -7541,9 +7541,11 @@ ipa_struct_reorg::check_and_prune_struct_for_pointer_compression (void)
       if (!type->has_legal_alloc_num)
 	{
 	  if (current_layout_opt_level & POINTER_COMPRESSION_UNSAFE)
+	    {
 	    if (dump_file)
 	      fprintf (dump_file, " has unknown alloc size, but"
 				  " in unsafe mode, so");
+	    }
 	  else
 	    {
 	      if (dump_file)
