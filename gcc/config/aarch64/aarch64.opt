@@ -262,6 +262,10 @@ Use an immediate to offset from the stack protector guard register, sp_el0.
 This option is for use with fstack-protector-strong and not for use in
 user-land code.
 
+mcmlt-arith
+Target Var(flag_cmlt_arith) Optimization Init(0)
+Use SIMD cmlt instruction to perform some arithmetic/logic calculations.
+
 TargetVariable
 long aarch64_stack_protector_guard_offset = 0
 

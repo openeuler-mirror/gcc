@@ -6454,6 +6454,54 @@
   [(set_attr "type" "neon_compare<q>, neon_compare_zero<q>")]
 )
 
+;; Use cmlt to replace vector arithmetic operations like this (SImode example):
+;; B = (((A >> 15) & 0x00010001) << 16) - ((A >> 15) & 0x00010001)
+;; TODO: maybe extend to scalar operations or other cm** instructions.
+
+(define_insn "*aarch64_cmlt_as_arith<mode>"
+  [(set (match_operand:<V_INT_EQUIV> 0 "register_operand" "=w")
+	(minus:<V_INT_EQUIV>
+	  (ashift:<V_INT_EQUIV>
+	    (and:<V_INT_EQUIV>
+	      (lshiftrt:<V_INT_EQUIV>
+		(match_operand:VDQHSD 1 "register_operand" "w")
+		(match_operand:VDQHSD 2 "half_size_minus_one_operand"))
+	      (match_operand:VDQHSD 3 "cmlt_arith_mask_operand"))
+	    (match_operand:VDQHSD 4 "half_size_operand"))
+	  (and:<V_INT_EQUIV>
+	    (lshiftrt:<V_INT_EQUIV>
+	      (match_dup 1)
+	      (match_dup 2))
+	    (match_dup 3))))]
+  "TARGET_SIMD && flag_cmlt_arith"
+  "cmlt\t%<v>0.<V2ntype>, %<v>1.<V2ntype>, #0"
+  [(set_attr "type" "neon_compare_zero")]
+)
+
+;; The helper definition that allows combiner to use the previous pattern.
+
+(define_insn_and_split "*arch64_cmlt_tmp<mode>"
+  [(set (match_operand:<V_INT_EQUIV> 0 "register_operand" "=w")
+	(and:<V_INT_EQUIV>
+	  (lshiftrt:<V_INT_EQUIV>
+	    (match_operand:VDQHSD 1 "register_operand" "w")
+	    (match_operand:VDQHSD 2 "half_size_minus_one_operand"))
+	  (match_operand:VDQHSD 3 "cmlt_arith_mask_operand")))]
+  "TARGET_SIMD && flag_cmlt_arith"
+  "#"
+  "&& reload_completed"
+  [(set (match_operand:<V_INT_EQUIV> 0 "register_operand")
+	(lshiftrt:<V_INT_EQUIV>
+	  (match_operand:VDQHSD 1 "register_operand")
+	  (match_operand:VDQHSD 2 "half_size_minus_one_operand")))
+   (set (match_dup 0)
+	(and:<V_INT_EQUIV>
+	  (match_dup 0)
+	  (match_operand:VDQHSD 3 "cmlt_arith_mask_operand")))]
+  ""
+  [(set_attr "type" "neon_compare_zero")]
+)
+
 (define_insn_and_split "aarch64_cm<optab>di"
   [(set (match_operand:DI 0 "register_operand" "=w,w,r")
 	(neg:DI

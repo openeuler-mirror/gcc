@@ -14064,6 +14064,21 @@ cost_minus:
 	    return true;
 	  }
 
+	/* Detect aarch64_cmlt_as_arith instruction.  Now only this pattern
+	   matches the condition.  The costs of cmlt and sub instructions
+	   are comparable, so we are not increasing the cost here.  */
+	if (flag_cmlt_arith && GET_CODE (op0) == ASHIFT
+	    && GET_CODE (op1) == AND)
+	  {
+	    rtx op0_subop0 = XEXP (op0, 0);
+	    if (rtx_equal_p (op0_subop0, op1))
+	      {
+		rtx lshrt_op = XEXP (op0_subop0, 0);
+		if (GET_CODE (lshrt_op) == LSHIFTRT)
+		  return true;
+	      }
+	  }
+
 	/* Look for SUB (extended register).  */
 	if (is_a <scalar_int_mode> (mode)
 	    && aarch64_rtx_arith_op_extract_p (op1))
