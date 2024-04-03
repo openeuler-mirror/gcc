@@ -7977,6 +7977,10 @@ object files that are not referenced from @code{main} and uses export
 lists.
 @end defmac
 
+@hook TARGET_IS_LDP_INSN
+
+@hook TARGET_IS_STP_INSN
+
 @hook TARGET_CANNOT_MODIFY_JUMPS_P
 
 @hook TARGET_HAVE_CONDITIONAL_EXECUTION

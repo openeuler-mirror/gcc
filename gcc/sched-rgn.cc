@@ -44,6 +44,8 @@ along with GCC; see the file COPYING3.  If not see
    are actually scheduled.  */
 
 #include "config.h"
+#define INCLUDE_SET
+#define INCLUDE_VECTOR
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -65,6 +67,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "dbgcnt.h"
 #include "pretty-print.h"
 #include "print-rtl.h"
+#include "cfgrtl.h"
 
 /* Disable warnings about quoting issues in the pp_xxx calls below
    that (intentionally) don't follow GCC diagnostic conventions.  */
@@ -3949,6 +3952,662 @@ rtl_opt_pass *
 make_pass_sched_fusion (gcc::context *ctxt)
 {
   return new pass_sched_fusion (ctxt);
+}
+
+namespace {
+
+/* Def-use analysis special functions implementation.  */
+
+static struct df_link *
+get_defs (rtx_insn *insn, rtx reg)
+{
+  df_ref use;
+  struct df_link *ref_chain, *ref_link;
+
+  FOR_EACH_INSN_USE (use, insn)
+    {
+      if (GET_CODE (DF_REF_REG (use)) == SUBREG)
+	return NULL;
+      if (REGNO (DF_REF_REG (use)) == REGNO (reg))
+	break;
+    }
+
+  gcc_assert (use != NULL);
+
+  ref_chain = DF_REF_CHAIN (use);
+
+  for (ref_link = ref_chain; ref_link; ref_link = ref_link->next)
+    {
+      /* Problem getting some definition for this instruction.  */
+      if (ref_link->ref == NULL)
+	return NULL;
+      if (DF_REF_INSN_INFO (ref_link->ref) == NULL)
+	return NULL;
+      /* As global regs are assumed to be defined at each function call
+	  dataflow can report a call_insn as being a definition of REG.
+	  But we can't do anything with that in this pass so proceed only
+	  if the instruction really sets REG in a way that can be deduced
+	  from the RTL structure.  */
+      if (global_regs[REGNO (reg)]
+	  && !set_of (reg, DF_REF_INSN (ref_link->ref)))
+	return NULL;
+    }
+
+  return ref_chain;
+}
+
+static struct df_link *
+get_uses (rtx_insn *insn, rtx reg)
+{
+  df_ref def;
+  struct df_link *ref_chain, *ref_link;
+
+  FOR_EACH_INSN_DEF (def, insn)
+    if (REGNO (DF_REF_REG (def)) == REGNO (reg))
+      break;
+
+  gcc_assert (def != NULL && "Broken def-use analisys chain.");
+
+  ref_chain = DF_REF_CHAIN (def);
+
+  for (ref_link = ref_chain; ref_link; ref_link = ref_link->next)
+    {
+      /* Problem getting some use for this instruction.  */
+      if (ref_link->ref == NULL)
+	return NULL;
+    }
+
+  return ref_chain;
+}
+
+const pass_data pass_data_split_complex_instructions = {
+  RTL_PASS,			     /* Type.  */
+  "split_complex_instructions",	     /* Name.  */
+  OPTGROUP_NONE,		     /* Optinfo_flags.  */
+  TV_SPLIT_CMP_INS,		     /* Tv_id.  */
+  0,				     /* Properties_required.  */
+  0,				     /* Properties_provided.  */
+  0,				     /* Properties_destroyed.  */
+  0,				     /* Todo_flags_start.  */
+  (TODO_df_verify | TODO_df_finish), /* Todo_flags_finish.  */
+};
+
+/* Pass split_complex_instructions finds LOAD PAIR instructions (LDP) that can
+   be split into two LDR instructions.  It splits only those LDP for which one
+   half of the requested memory is contained in the preceding STORE (STR/STP)
+   instruction whose base register has the same definition.  This allows
+   to use hardware store-to-load forwarding mechanism and to get one half of
+   requested memory from the store queue of CPU.
+
+   TODO: Add split of STP.
+   TODO: Add split of vector STP and LDP.  */
+class pass_split_complex_instructions : public rtl_opt_pass
+{
+private:
+  enum mem_access_insn_t
+  {
+    UNDEFINED,
+    LDP,
+    /* LDP with post-index (see loadwb_pair in config/aarch64.md).  */
+    LDP_WB,
+    /* LDP that contains one destination register in RTL IR
+       (see movti_aarch64 in config/aarch64.md).  */
+    LDP_TI,
+    STP,
+    /* STP with pre-index (see storewb_pair in config/aarch64.md).  */
+    STP_WB,
+    /* STP that contains one source register in RTL IR
+       (see movti_aarch64 in config/aarch64.md).  */
+    STP_TI,
+    STR
+  };
+
+  std::set<rtx_insn *> dependent_stores_candidates;
+  std::set<rtx_insn *> ldp_to_split_list;
+
+  void split_ldp_ti (rtx_insn *insn);
+  void split_ldp (rtx_insn *ldp_insn);
+  /* Emit a NEW_INSNS chain, recognize instruction code of each new instruction
+     and replace OLD_INSN with the emitted sequence.  */
+  void replace_insn (rtx_insn *old_insn, rtx_insn *new_insns);
+
+  mem_access_insn_t get_insn_type (rtx_insn *insn);
+  bool is_typeof_ldp (mem_access_insn_t insn_type);
+  bool is_typeof_stp (mem_access_insn_t insn_type);
+
+  bool bfs_for_reg_dependent_store (rtx_insn *ldp_insn, basic_block search_bb,
+				    rtx_insn *search_insn,
+				    int search_range
+				    = param_ldp_dependency_search_range);
+  bool is_store_reg_dependent (rtx_insn *ldp_insn, rtx_insn *str_insn);
+  void init_df ();
+  void find_dependent_stores_candidates (rtx_insn *ldp_insn,
+					 mem_access_insn_t insn_type);
+
+  rtx get_memref (rtx_insn *insn, mem_access_insn_t insn_type);
+  rtx get_base_reg (rtx memref);
+  /* Set OFFSET to the offset value.  Returns TRUE if MEMREF's address
+     expression is supported, FALSE otherwise.  */
+  bool get_offset (rtx memref, int &offset);
+  /* Return size of memory referenced by MEMREF.  Returns -1 if INSN_TYPE
+     wasn't recognized.  */
+  int get_unit_size (rtx memref, mem_access_insn_t insn_type);
+
+public:
+  pass_split_complex_instructions (gcc::context *ctxt)
+      : rtl_opt_pass (pass_data_split_complex_instructions, ctxt)
+  {
+  }
+  /* opt_pass methods: */
+  virtual bool gate (function *);
+
+  virtual unsigned int
+  execute (function *)
+  {
+    basic_block bb;
+    rtx_insn *insn;
+
+    init_df ();
+    ldp_to_split_list.clear ();
+    FOR_EACH_BB_FN (bb, cfun)
+      {
+	FOR_BB_INSNS (bb, insn)
+	  {
+	    mem_access_insn_t insn_type = get_insn_type (insn);
+	    if (!is_typeof_ldp (insn_type))
+	      continue;
+
+	    find_dependent_stores_candidates (insn, insn_type);
+	    if (!dependent_stores_candidates.empty ()
+	       && bfs_for_reg_dependent_store (insn, bb, insn))
+	      {
+		ldp_to_split_list.insert (insn);
+	      }
+	  }
+      }
+
+    for (std::set<rtx_insn *>::iterator i = ldp_to_split_list.begin ();
+	 i != ldp_to_split_list.end (); ++i)
+      split_ldp (*i);
+
+    return 0;
+  }
+}; // class pass_split_complex_instructions
+
+bool
+pass_split_complex_instructions::is_typeof_ldp (
+    mem_access_insn_t insn_type)
+{
+  return (insn_type == LDP || insn_type == LDP_WB || insn_type == LDP_TI);
+}
+
+bool
+pass_split_complex_instructions::is_typeof_stp (
+    mem_access_insn_t insn_type)
+{
+  return (insn_type == STP || insn_type == STP_WB || insn_type == STP_TI);
+}
+
+rtx
+pass_split_complex_instructions::get_memref (
+    rtx_insn *insn, mem_access_insn_t insn_type)
+{
+  rtx insn_pat = PATTERN (insn);
+  rtx memref = NULL;
+
+  switch (insn_type)
+    {
+      case LDP:
+	memref = SET_SRC (XVECEXP (insn_pat, 0, 0));
+	break;
+      case LDP_WB:
+	memref = SET_SRC (XVECEXP (insn_pat, 0, 1));
+	break;
+      case LDP_TI:
+	memref = SET_SRC (insn_pat);
+	break;
+      case STP:
+	memref = SET_DEST (XVECEXP (insn_pat, 0, 0));
+	break;
+      case STP_WB:
+	memref = SET_DEST (XVECEXP (insn_pat, 0, 1));
+	break;
+      case STP_TI:
+      case STR:
+	memref = SET_DEST (insn_pat);
+	break;
+      default:
+	break;
+    }
+
+  if (memref && !MEM_P (memref))
+    return NULL;
+  return memref;
+}
+
+rtx
+pass_split_complex_instructions::get_base_reg (rtx memref)
+{
+  if (!memref || !MEM_P (memref))
+    return NULL;
+  rtx addr_exp = XEXP (memref, 0);
+
+  switch (GET_CODE (addr_exp))
+    {
+      case REG:
+	return addr_exp;
+      case PLUS:
+      case PRE_DEC:
+      case PRE_INC:
+      case POST_DEC:
+      case POST_INC:
+	if (REG_P (XEXP (addr_exp, 0)))
+	  return XEXP (addr_exp, 0);
+      default:
+	return NULL;
+    }
+}
+
+int
+pass_split_complex_instructions::get_unit_size (
+    rtx memref, mem_access_insn_t insn_type)
+{
+  if (!memref)
+    return -1;
+
+  switch (insn_type)
+    {
+      case LDP:
+      case STP:
+      case LDP_WB:
+      case STP_WB:
+      case STR:
+	return GET_MODE_SIZE (GET_MODE (memref)).to_constant ();
+      case LDP_TI:
+      case STP_TI:
+	return GET_MODE_SIZE (E_DImode).to_constant ();
+      default:
+	return -1;
+    }
+}
+
+bool
+pass_split_complex_instructions::bfs_for_reg_dependent_store (
+    rtx_insn *ldp_insn, basic_block search_bb, rtx_insn *search_insn,
+    int search_range)
+{
+  rtx_insn *current_search_insn = search_insn;
+
+  for (int i = search_range; i > 0; --i)
+    {
+      if (!current_search_insn)
+	return false;
+
+      if (dependent_stores_candidates.find (current_search_insn)
+	  != dependent_stores_candidates.end ())
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, "LDP to split:\n");
+	      print_rtl_single (dump_file, ldp_insn);
+	      fprintf (dump_file, "Found STR:\n");
+	      print_rtl_single (dump_file, current_search_insn);
+	    }
+	  return true;
+	}
+      if (current_search_insn == BB_HEAD (search_bb))
+	{
+	  /* Search in all parent BBs for the reg_dependent store.  */
+	  edge_iterator ei;
+	  edge e;
+
+	  FOR_EACH_EDGE (e, ei, search_bb->preds)
+	    if (e->src->index != 0
+		&& bfs_for_reg_dependent_store (ldp_insn, e->src,
+						BB_END (e->src), i - 1))
+	      return true;
+	  return false;
+	}
+      else
+	{
+	  if (!active_insn_p (current_search_insn))
+	    i++;
+	  current_search_insn = PREV_INSN (current_search_insn);
+	}
+    }
+  return false;
+}
+
+void
+pass_split_complex_instructions::init_df ()
+{
+  df_set_flags (DF_RD_PRUNE_DEAD_DEFS);
+  df_chain_add_problem (DF_UD_CHAIN + DF_DU_CHAIN);
+  df_mir_add_problem ();
+  df_live_add_problem ();
+  df_live_set_all_dirty ();
+  df_analyze ();
+  df_set_flags (DF_DEFER_INSN_RESCAN);
+}
+
+void
+pass_split_complex_instructions::find_dependent_stores_candidates (
+    rtx_insn *ldp_insn, mem_access_insn_t insn_type)
+{
+  dependent_stores_candidates.clear ();
+
+  rtx base_reg = get_base_reg (get_memref (ldp_insn, insn_type));
+  if (!base_reg)
+    return;
+
+  df_link *defs = get_defs (ldp_insn, base_reg);
+  if (!defs)
+    return;
+
+  for (df_link *def = defs; def; def = def->next)
+    {
+      df_link *uses = get_uses (DF_REF_INSN (def->ref), DF_REF_REG (def->ref));
+      if (!uses)
+	continue;
+      for (df_link *use = uses; use; use = use->next)
+	{
+	  if (DF_REF_CLASS (use->ref) == DF_REF_REGULAR
+	      && DF_REF_INSN (use->ref) != ldp_insn
+	      && is_store_reg_dependent (ldp_insn, DF_REF_INSN (use->ref)))
+	    dependent_stores_candidates.insert (DF_REF_INSN (use->ref));
+	}
+    }
+}
+
+bool
+pass_split_complex_instructions::is_store_reg_dependent (rtx_insn *ldp_insn,
+							 rtx_insn *str_insn)
+{
+  if (!str_insn)
+    return false;
+
+  mem_access_insn_t st_type = get_insn_type (str_insn);
+  if (!is_typeof_stp (st_type) && st_type != STR)
+    return false;
+
+  mem_access_insn_t ld_type = get_insn_type (ldp_insn);
+  rtx ld_memref = get_memref (ldp_insn, ld_type);
+  rtx st_memref = get_memref (str_insn, st_type);
+  rtx ld_base_reg = get_base_reg (ld_memref);
+  rtx st_base_reg =  get_base_reg (st_memref);
+
+  if (!ld_base_reg || !st_base_reg
+      || REGNO (ld_base_reg) != REGNO (st_base_reg))
+    return false;
+
+  int ld_offset = 0;
+  int st_offset = 0;
+  if (get_offset (ld_memref, ld_offset)
+      && get_offset (st_memref, st_offset))
+    {
+      int ld_unit_size = get_unit_size (ld_memref, ld_type);
+      int st_size = get_unit_size (st_memref, st_type);
+      if (st_type != STR)
+	st_size *= 2;
+
+      if (ld_unit_size < 0 || st_size < 0)
+	return false;
+
+      bool st_has_low_ld_part = (ld_offset >= st_offset
+	&& (ld_offset + ld_unit_size <= st_offset + st_size));
+      bool st_has_high_ld_part = ((ld_offset + ld_unit_size >= st_offset)
+	&& (ld_offset + 2 * ld_unit_size <= st_offset + st_size));
+      bool st_has_not_full_ld = (ld_offset < st_offset
+	|| (ld_offset + 2 * ld_unit_size > st_offset + st_size));
+
+      if ((st_has_low_ld_part || st_has_high_ld_part) && st_has_not_full_ld)
+	return true;
+    }
+
+  return false;
+}
+
+bool
+pass_split_complex_instructions::get_offset (rtx memref, int &offset)
+{
+  rtx addr_exp = XEXP (memref, 0);
+
+  switch (GET_CODE (addr_exp))
+    {
+      case REG:
+      case POST_DEC:
+      case POST_INC:
+	offset = 0;
+	return true;
+      case PRE_DEC:
+	offset = -(GET_MODE_SIZE (GET_MODE (memref)).to_constant ());
+	return true;
+      case PRE_INC:
+	offset = GET_MODE_SIZE (GET_MODE (memref)).to_constant ();
+	return true;
+      case PLUS:
+	if (CONST_INT_P (XEXP (addr_exp, 1)))
+	  {
+	    offset = INTVAL (XEXP (addr_exp, 1));
+	    return true;
+	  }
+      default:
+	return false;
+    }
+}
+
+void
+pass_split_complex_instructions::replace_insn (rtx_insn *old_insn,
+					       rtx_insn *new_insns)
+{
+  rtx_insn *prev_insn = PREV_INSN (old_insn);
+  start_sequence ();
+
+  emit_insn (new_insns);
+  if (dump_file)
+    {
+      fprintf (dump_file, "Split LDP:\n");
+      print_rtl_single (dump_file, old_insn);
+      fprintf (dump_file, "Split into:\n");
+    }
+
+  for (rtx_insn *insn = new_insns; insn; insn = NEXT_INSN (insn))
+    {
+	INSN_CODE (insn) = recog (PATTERN (insn), insn, NULL);
+	if (dump_file)
+	  {
+	    print_rtl_single (dump_file, insn);
+	  }
+    }
+
+  rtx_insn *seq = get_insns ();
+  unshare_all_rtl_in_chain (seq);
+  end_sequence ();
+
+  emit_insn_after_setloc (seq, prev_insn, INSN_LOCATION (old_insn));
+  delete_insn_and_edges (old_insn);
+}
+
+void
+pass_split_complex_instructions::split_ldp (rtx_insn *ldp_insn)
+{
+  rtx pat = PATTERN (ldp_insn);
+  mem_access_insn_t insn_type = get_insn_type (ldp_insn);
+  gcc_assert (is_typeof_ldp (insn_type));
+
+  rtx load_rtx_1 = NULL;
+  rtx load_rtx_2 = NULL;
+  rtx post_index_rtx = NULL;
+
+  switch (insn_type)
+    {
+      case LDP:
+	load_rtx_1 = copy_rtx (XVECEXP (pat, 0, 0));
+	load_rtx_2 = copy_rtx (XVECEXP (pat, 0, 1));
+	break;
+      case LDP_WB:
+	post_index_rtx = copy_rtx (XVECEXP (pat, 0, 0));
+	load_rtx_1 = copy_rtx (XVECEXP (pat, 0, 1));
+	load_rtx_2 = copy_rtx (XVECEXP (pat, 0, 2));
+	break;
+      case LDP_TI:
+	split_ldp_ti (ldp_insn);
+	return;
+      default:
+	return;
+    }
+
+  int dest_regno = REGNO (SET_DEST (load_rtx_1));
+  int base_regno = REGNO (get_base_reg (get_memref (ldp_insn, insn_type)));
+
+  /* In cases like ldp r1,r2,[r1[, #imm]] emit ldr r2,[r1[, #imm]] first.
+     For LDP with post-index don't split such instruction.  */
+  if (base_regno == dest_regno)
+    {
+      if (insn_type == LDP)
+	std::swap (load_rtx_1, load_rtx_2);
+      else
+	return;
+    }
+
+  /* Construct the instruction chain for subsequent emitting.  */
+  rtx_insn *insn_seq = make_insn_raw (load_rtx_1);
+  rtx_insn *load_insn_2 = make_insn_raw (load_rtx_2);
+  SET_NEXT_INSN (insn_seq) = load_insn_2;
+  SET_NEXT_INSN (load_insn_2) = NULL;
+  if (post_index_rtx)
+    {
+      rtx_insn *post_index_insn = make_insn_raw (post_index_rtx);
+      SET_NEXT_INSN (load_insn_2) = post_index_insn;
+      SET_NEXT_INSN (post_index_insn) = NULL;
+    }
+
+  replace_insn (ldp_insn, insn_seq);
+}
+
+void
+pass_split_complex_instructions::split_ldp_ti (rtx_insn *insn)
+{
+  rtx pat = PATTERN (insn);
+  rtx memref = get_memref (insn, LDP_TI);
+  int unit_size = get_unit_size (memref, LDP_TI);
+  rtx base_reg = get_base_reg (memref);
+  rtx dest_reg = SET_DEST (pat);
+
+  rtx reg_index_rtx = NULL;
+  rtx load_rtx_1 = NULL;
+  rtx load_rtx_2 = NULL;
+  bool post_index = false;
+  int offset = 0;
+
+  rtx load_1_memref = gen_rtx_MEM (DImode, base_reg);
+
+  rtx addr_expr = XEXP (memref, 0);
+  if (GET_CODE (addr_expr) == PLUS)
+    {
+      offset = INTVAL (XEXP (addr_expr, 1));
+      XEXP (load_1_memref, 0) = gen_rtx_PLUS (DImode, base_reg,
+					      GEN_INT (offset));
+    }
+
+  rtx load_2_memref = gen_rtx_MEM (DImode,
+    gen_rtx_PLUS (DImode, base_reg, GEN_INT (offset + unit_size)));
+
+  load_rtx_1 = gen_rtx_SET (gen_rtx_REG (DImode, REGNO (dest_reg)),
+			    load_1_memref);
+  load_rtx_2 = gen_rtx_SET (gen_rtx_REG (DImode, REGNO (dest_reg) + 1),
+			    load_2_memref);
+
+  if (GET_CODE (addr_expr) == PRE_INC || GET_CODE (addr_expr) == PRE_DEC
+      || GET_CODE (addr_expr) == POST_INC || GET_CODE (addr_expr) == POST_DEC)
+    {
+      /* The amount of increment or decrement is equal to size of
+	 machine-mode of the containing MEMREF (see rtl.def).  */
+      int index_offset = GET_MODE_SIZE (GET_MODE (memref)).to_constant ();
+
+      if (GET_CODE (addr_expr) == PRE_DEC || GET_CODE (addr_expr) == POST_DEC)
+	index_offset = -index_offset;
+
+      if (GET_CODE (addr_expr) == POST_INC || GET_CODE (addr_expr) == POST_DEC)
+	post_index = true;
+
+      reg_index_rtx = gen_rtx_SET (base_reg,
+				   gen_rtx_PLUS (DImode, base_reg,
+						 GEN_INT (index_offset)));
+    }
+
+  /* In cases like ldp r1,r2,[r1] we emit ldr r2,[r1] first.  */
+  if (REGNO (base_reg) == REGNO (dest_reg))
+    std::swap (load_rtx_1, load_rtx_2);
+
+  /* Construct the instruction chain for subsequent emitting.  */
+  rtx_insn *insn_seq = make_insn_raw (load_rtx_1);
+  rtx_insn *load_insn_2 = make_insn_raw (load_rtx_2);
+  SET_NEXT_INSN (insn_seq) = load_insn_2;
+  SET_NEXT_INSN (load_insn_2) = NULL;
+  if (post_index && reg_index_rtx)
+    {
+      rtx_insn *post_index_insn = make_insn_raw (reg_index_rtx);
+      SET_NEXT_INSN (load_insn_2) = post_index_insn;
+      SET_NEXT_INSN (post_index_insn) = NULL;
+    }
+  else if (!post_index && reg_index_rtx)
+    {
+      rtx_insn *pre_index = make_insn_raw (reg_index_rtx);
+      SET_NEXT_INSN (pre_index) = insn_seq;
+      insn_seq = pre_index;
+    }
+
+  replace_insn (insn, insn_seq);
+}
+
+pass_split_complex_instructions::mem_access_insn_t
+pass_split_complex_instructions::get_insn_type (rtx_insn *insn)
+{
+  if (!INSN_P (insn))
+    return UNDEFINED;
+
+  int icode = INSN_CODE (insn);
+  if (icode == -1)
+    icode = recog (PATTERN (insn), insn, 0);
+  bool has_wb = false;
+
+  if (targetm.is_ldp_insn (icode, &has_wb))
+    return (has_wb ? LDP_WB : LDP);
+
+  if (targetm.is_stp_insn (icode, &has_wb))
+    return (has_wb ? STP_WB : STP);
+
+  rtx set_insn = single_set (insn);
+  if (set_insn && (GET_MODE (SET_SRC (set_insn)) == E_TImode
+      || GET_MODE (SET_DEST (set_insn)) == E_TImode))
+    {
+      if (MEM_P (SET_SRC (set_insn)) && REG_P (SET_DEST (set_insn)))
+	return LDP_TI;
+      if (MEM_P (SET_DEST (set_insn)) && REG_P (SET_SRC (set_insn)))
+	return STP_TI;
+    }
+
+  if (set_insn && MEM_P (SET_DEST (set_insn)) && REG_P (SET_SRC (set_insn))
+      && GET_MODE (SET_DEST (set_insn)) != BLKmode)
+    return STR;
+
+  return UNDEFINED;
+}
+
+bool
+pass_split_complex_instructions::gate (function *)
+{
+  return targetm.is_ldp_insn && targetm.is_stp_insn && optimize > 0
+	 && flag_split_ldp_stp > 0;
+}
+
+} // anon namespace
+
+rtl_opt_pass *
+make_pass_split_complex_instructions (gcc::context *ctxt)
+{
+  return new pass_split_complex_instructions (ctxt);
 }
 
 #if __GNUC__ >= 10
