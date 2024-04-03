@@ -213,12 +213,19 @@ class dr_with_seg_len
 public:
   dr_with_seg_len (data_reference_p d, tree len, unsigned HOST_WIDE_INT size,
 		   unsigned int a)
-    : dr (d), seg_len (len), access_size (size), align (a) {}
-
+    : dr (d), seg_len (len), seg_len2 (len), access_size (size), align (a)
+    {}
+  dr_with_seg_len (data_reference_p d, tree len, tree len2,
+		   unsigned HOST_WIDE_INT size, unsigned int a)
+    : dr (d), seg_len (len), seg_len2 (len2), access_size (size), align (a)
+    {}
   data_reference_p dr;
   /* The offset of the last access that needs to be checked minus
      the offset of the first.  */
   tree seg_len;
+  /* The second version of segment length.  Currently this is used to
+     soften checks for a small number of iterations.  */
+  tree seg_len2;
   /* A value that, when added to abs (SEG_LEN), gives the total number of
      bytes in the segment.  */
   poly_uint64 access_size;
