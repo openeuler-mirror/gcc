@@ -1316,6 +1316,14 @@ fdevirtualize
 Common Var(flag_devirtualize) Optimization
 Try to convert virtual calls to direct ones.
 
+ficp
+Common Var(flag_icp) Optimization Init(0)
+Try to promote indirect calls to direct ones.
+
+ficp-speculatively
+Common Var(flag_icp_speculatively) Optimization
+Promote indirect calls speculatively.
+
 fdiagnostics-show-location=
 Common Joined RejectNegative Enum(diagnostic_prefixing_rule)
 -fdiagnostics-show-location=[once|every-line]	How often to emit source location at the beginning of line-wrapped diagnostics.
