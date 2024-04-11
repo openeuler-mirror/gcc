@@ -3033,6 +3033,14 @@ process_edge_to_unknown_caller (cgraph_edge *cs)
   gcc_checking_assert (from_ifs);
   isra_call_summary *csum = call_sums->get (cs);
 
+  /* TODO: implement better support for call edges inserted after summary
+     collection but before sra wpa invocation.  */
+  if (!csum)
+    {
+      csum = call_sums->get_create (cs);
+      csum->m_return_ignored = true;
+    }
+
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "Processing an edge to an unknown caller from %s:\n",
 	     cs->caller->dump_name ());
@@ -3385,6 +3393,13 @@ param_splitting_across_edge (cgraph_edge *cs)
   gcc_checking_assert (from_ifs && from_ifs->m_parameters);
 
   isra_call_summary *csum = call_sums->get (cs);
+  /* TODO: implement better support for call edges inserted after summary
+     collection but before sra wpa invocation.  */
+  if (!csum)
+    {
+      csum = call_sums->get_create (cs);
+      csum->m_return_ignored = true;
+    }
   gcc_checking_assert (csum);
   unsigned args_count = csum->m_arg_flow.length ();
   isra_func_summary *to_ifs = func_sums->get (callee);

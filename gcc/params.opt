@@ -309,6 +309,14 @@ Maximum pieces that IPA-SRA tracks per formal parameter, as a consequence, also 
 Common Joined UInteger Var(param_ipa_sra_ptr_growth_factor) Init(2) Param Optimization
 Maximum allowed growth of number and total size of new parameters that ipa-sra replaces a pointer to an aggregate with.
 
+-param=ipa-prefetch-distance-factor=
+Common Joined UInteger Var(param_ipa_prefetch_distance_factor) Init(4) Param Optimization
+The factor represents the number of inductive variable incrementations to evaluate an indirect memory address for IPA prefetch.
+
+-param=ipa-prefetch-locality=
+Common Joined UInteger Var(param_ipa_prefetch_locality) Init(3) IntegerRange(0, 3) Param Optimization
+The flag represents temporal locality value between 0 and 3, the higher value means the higher temporal locality in the data.
+
 -param=ira-loop-reserved-regs=
 Common Joined UInteger Var(param_ira_loop_reserved_regs) Init(2) Param Optimization
 The number of registers in each class kept unused by loop invariant motion.
