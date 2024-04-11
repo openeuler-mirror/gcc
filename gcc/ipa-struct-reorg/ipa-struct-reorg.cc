@@ -466,10 +466,19 @@ srtype::has_dead_field (void)
   unsigned i;
   FOR_EACH_VEC_ELT (fields, i, this_field)
     {
-      if (!(this_field->field_access & READ_FIELD))
+      /* Function pointer members are not processed, because DFE
+         does not currently support accurate analysis of function
+         pointers, and we have not identified specific use cases. */
+      if (!(this_field->field_access & READ_FIELD)
+	 && !FUNCTION_POINTER_TYPE_P (this_field->fieldtype))
 	{
-	  may_dfe = true;
-	  break;
+	  /* Fields with escape risks should not be processed. */
+	  if (this_field->type == NULL
+	      || (this_field->type->escapes == does_not_escape))
+	    {
+	      may_dfe = true;
+	      break;
+	    }
 	}
     }
   return may_dfe;
@@ -1032,8 +1041,13 @@ srtype::create_new_type (void)
     {
       srfield *f = fields[i];
       if (current_layout_opt_level & DEAD_FIELD_ELIMINATION
-	  && !(f->field_access & READ_FIELD))
-	continue;
+	  && !(f->field_access & READ_FIELD)
+	  && !FUNCTION_POINTER_TYPE_P (f->fieldtype))
+	{
+	  /* Fields with escape risks should not be processed. */
+	  if (f->type == NULL || (f->type->escapes == does_not_escape))
+	    continue;
+	}
       f->create_new_fields (newtype, newfields, newlast);
     }
 
@@ -3815,9 +3829,17 @@ ipa_struct_reorg::maybe_mark_or_record_other_side (tree side, tree other,
       if (VOID_POINTER_P (TREE_TYPE (side))
 	  && TREE_CODE (side) == SSA_NAME)
 	{
-	  /* The type is other, the declaration is side.  */
-	  current_function->record_decl (type, side, -1,
-		isptrptr (TREE_TYPE (other)) ? TREE_TYPE (other) : NULL);
+	  tree inner = SSA_NAME_VAR (side);
+	  if (inner)
+	    {
+	      srdecl *in = find_decl (inner);
+	      if (in && !in->type->has_escaped ())
+		{
+		  /* The type is other, the declaration is side.  */
+		  current_function->record_decl (type, side, -1,
+			isptrptr (TREE_TYPE (other)) ? TREE_TYPE (other) : NULL);
+		}
+	     }
 	}
       else
 	/* *_1 = &MEM[(void *)&x + 8B].  */
@@ -3910,6 +3932,12 @@ ipa_struct_reorg::maybe_record_assign (cgraph_node *node, gassign *stmt)
 	maybe_mark_or_record_other_side (rhs, lhs, stmt);
       if (TREE_CODE (lhs) == SSA_NAME)
 	maybe_mark_or_record_other_side (lhs, rhs, stmt);
+
+      /* Handle missing ARRAY_REF cases.  */
+      if (TREE_CODE (lhs) == ARRAY_REF)
+	mark_type_as_escape (TREE_TYPE (lhs), escape_array, stmt);
+      if (TREE_CODE (rhs) == ARRAY_REF)
+	mark_type_as_escape (TREE_TYPE (rhs), escape_array, stmt);
     }
 }
 
@@ -5272,8 +5300,11 @@ ipa_struct_reorg::record_accesses (void)
 	record_function (cnode);
       else
 	{
-	  tree return_type = TREE_TYPE (TREE_TYPE (cnode->decl));
-	  mark_type_as_escape (return_type, escape_return, NULL);
+	  if (cnode->externally_visible)
+	    {
+	      tree return_type = TREE_TYPE (TREE_TYPE (cnode->decl));
+	      mark_type_as_escape (return_type, escape_return, NULL);
+	    }
 	}
 
     }
@@ -5889,6 +5920,7 @@ ipa_struct_reorg::rewrite_expr (tree expr,
   bool escape_from_base = false;
 
   tree newbase[max_split];
+  memset (newbase, 0, sizeof (tree[max_split]));
   memset (newexpr, 0, sizeof (tree[max_split]));
 
   if (TREE_CODE (expr) == CONSTRUCTOR)
@@ -6912,7 +6944,7 @@ create_bb_for_group_diff_ne_0 (basic_block new_bb, tree &phi, tree ptr,
 }
 
 tree
-ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt,
+ipa_struct_reorg::rewrite_pointer_plus_integer (gimple *stmt ATTRIBUTE_UNUSED,
 						gimple_stmt_iterator *gsi,
 						tree ptr, tree offset,
 						srtype *type)
@@ -7889,41 +7921,14 @@ ipa_struct_reorg::rewrite_cond (gcond *stmt,
    should be removed.  */
 
 bool
-ipa_struct_reorg::rewrite_debug (gimple *stmt, gimple_stmt_iterator *)
+ipa_struct_reorg::rewrite_debug (gimple *, gimple_stmt_iterator *)
 {
-  if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
-    /* Delete debug gimple now.  */
-    return true;
-  bool remove = false;
-  if (gimple_debug_bind_p (stmt))
-    {
-      tree var = gimple_debug_bind_get_var (stmt);
-      tree newvar[max_split];
-      if (rewrite_expr (var, newvar, true))
-	remove = true;
-      if (gimple_debug_bind_has_value_p (stmt))
-	{
-	  var = gimple_debug_bind_get_value (stmt);
-	  if (TREE_CODE (var) == POINTER_PLUS_EXPR)
-	    var = TREE_OPERAND (var, 0);
-	  if (rewrite_expr (var, newvar, true))
-	    remove = true;
-	}
-    }
-  else if (gimple_debug_source_bind_p (stmt))
-    {
-      tree var = gimple_debug_source_bind_get_var (stmt);
-      tree newvar[max_split];
-      if (rewrite_expr (var, newvar, true))
-	remove = true;
-      var = gimple_debug_source_bind_get_value (stmt);
-      if (TREE_CODE (var) == POINTER_PLUS_EXPR)
-	var = TREE_OPERAND (var, 0);
-      if (rewrite_expr (var, newvar, true))
-	remove = true;
-    }
-
-  return remove;
+  /* In debug statements, there might be some statements that have
+     been optimized out in gimple but left in debug gimple.  Sometimes
+     these statements need to be analyzed to escape, but in rewrite
+     stage it shouldn't happen.  It needs to care a lot to handle these
+     cases but seems useless.  So now we just delete debug gimple.  */
+  return true;
 }
 
 /* Rewrite PHI nodes, return true if the PHI was replaced.  */

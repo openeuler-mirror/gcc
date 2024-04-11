@@ -46,6 +46,8 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/rf_*.c]] \
 # -fipa-struct-reorg=3
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/dfe*.c]] \
 	"" "-fipa-struct-reorg=3 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest $srcdir/$subdir/struct_reorg-7.c \
+	"" "-fipa-struct-reorg=3 -fdump-ipa-all -flto-partition=one -fwhole-program"
 
 # -fipa-struct-reorg=4
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/pc*.c]] \
