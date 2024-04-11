@@ -8031,3 +8031,131 @@ and,
    (plus:c@4 (op2:c @0 @1)
     (plus:c@5 (double_size_mul_overflow_check_lo @0 @1 @3) (op3:c @0 @1))))
      (if (single_use (@4) && single_use (@5)))))
+
+/* MinMax pattern matching helpers.  More info on the transformation below.  */
+
+/* Match (a & 0b11..100..0) pattern.  */
+(match (minmax_cmp_arg @0 @1)
+ (bit_and @0 INTEGER_CST@1)
+ (if (wi::popcount (~wi::to_widest (@1) + 1) == 1)))
+/* Match ((unsigned) a > 0b0..01..1) pattern.  */
+(match (minmax_cmp_arg1 @0 @1)
+ (gt @0 INTEGER_CST@1)
+ (if (wi::popcount (wi::to_widest (@1) + 1) == 1)))
+
+/* Match (inversed_sign_bit >> sign_bit_pos) pattern.
+   This statement is blocking for the transformation of unsigned integers.
+   Do type check here to avoid unnecessary duplications.  */
+(match (minmax_sat_arg @0)
+ (rshift (negate @0) INTEGER_CST@1)
+ (if (!TYPE_UNSIGNED (TREE_TYPE (@0))
+      && wi::eq_p (wi::to_widest (@1), TYPE_PRECISION (TREE_TYPE (@0)) - 1))))
+
+/* Transform ((x & ~mask) ? (-x)>>31 & mask : x) to (min (max (x, 0), mask)).
+   The matched pattern can be described as saturated clipping.
+
+   The pattern supports truncation via both casts and bit_and.
+   Also there are patterns for possible inverted conditions.  */
+(if (flag_convert_minmax)
+/* Truncation via casts.  Unfortunately convert? cannot be applied here
+   because convert and cond take different number of arguments.  */
+ (simplify
+  (convert
+   (cond
+    (ne (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+    (convert? (minmax_sat_arg @0))
+    (convert? @0)))
+  (if (wi::geu_p (~wi::to_widest (@1) + 1, TYPE_PRECISION (type)))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; })))))
+ (simplify
+  (cond
+   (ne (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+   (convert? (minmax_sat_arg @0))
+   (convert? @0))
+  (if (wi::geu_p (~wi::to_widest (@1) + 1, TYPE_PRECISION (type)))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; })))))
+
+ (simplify
+  (convert
+   (cond
+    (eq (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+    (convert? @0)
+    (convert? (minmax_sat_arg @0))))
+  (if (wi::geu_p (~wi::to_widest (@1) + 1, TYPE_PRECISION (type)))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; })))))
+ (simplify
+  (cond
+   (eq (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+   (convert? @0)
+   (convert? (minmax_sat_arg @0)))
+  (if (wi::geu_p (~wi::to_widest (@1) + 1, TYPE_PRECISION (type)))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; })))))
+
+ (simplify
+  (convert
+   (cond
+    (minmax_cmp_arg1 (convert? @0) INTEGER_CST@1)
+    (convert? (minmax_sat_arg @0))
+    (convert? @0)))
+  (if (wi::geu_p (wi::to_widest (@1) + 1, TYPE_PRECISION (type)))
+   (with { tree mask = build_int_cst (integer_type_node, tree_to_shwi (@1)); }
+    (convert (min (max (convert:integer_type_node @0) { integer_zero_node; })
+		  { mask; })))))
+ (simplify
+  (cond
+   (minmax_cmp_arg1 (convert? @0) INTEGER_CST@1)
+   (convert? (minmax_sat_arg @0))
+   (convert? @0))
+  (if (wi::geu_p (wi::to_widest (@1) + 1, TYPE_PRECISION (type)))
+   (with { tree mask = build_int_cst (integer_type_node, tree_to_shwi (@1)); }
+    (convert (min (max (convert:integer_type_node @0) { integer_zero_node; })
+		  { mask; })))))
+
+ /* Truncation via bit_and with mask.  Same concerns on convert? here.  */
+ (simplify
+  (convert
+   (cond
+    (ne (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+    (convert? (bit_and (minmax_sat_arg @0) INTEGER_CST@2))
+    (convert? @0)))
+  (if (wi::to_widest (@2) == ~wi::to_widest (@1))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; })))))
+ (simplify
+  (cond
+   (ne (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+   (convert? (bit_and (minmax_sat_arg @0) INTEGER_CST@2))
+   (convert? @0))
+  (if (wi::to_widest (@2) == ~wi::to_widest (@1))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; })))))
+
+ (simplify
+  (convert
+   (cond
+    (eq (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+    (convert? @0)
+    (convert? (bit_and (minmax_sat_arg @0) INTEGER_CST@2))))
+  (if (wi::to_widest (@2) == ~wi::to_widest (@1))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; })))))
+ (simplify
+  (cond
+   (eq (minmax_cmp_arg @0 INTEGER_CST@1) integer_zerop)
+   (convert? @0)
+   (convert? (bit_and (minmax_sat_arg @0) INTEGER_CST@2)))
+  (if (wi::to_widest (@2) == ~wi::to_widest (@1))
+   (with { tree mask = build_int_cst (integer_type_node, ~tree_to_shwi (@1)); }
+    (convert (min (max @0 { integer_zero_node; })
+		  { mask; }))))))

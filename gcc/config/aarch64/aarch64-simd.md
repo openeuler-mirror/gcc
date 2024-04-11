@@ -1138,6 +1138,82 @@
   [(set_attr "type" "neon_compare<q>,neon_shift_imm<q>")]
 )
 
+;; Simplify the extension with following truncation for shift+neg operation.
+
+(define_insn_and_split "*aarch64_sshr_neg_v8hi"
+  [(set (match_operand:V8HI 0 "register_operand" "=w")
+	(vec_concat:V8HI
+	  (truncate:V4HI
+	    (ashiftrt:V4SI
+	      (neg:V4SI
+		(sign_extend:V4SI
+		  (vec_select:V4HI
+		    (match_operand:V8HI 1 "register_operand")
+		    (match_operand:V8HI 3 "vect_par_cnst_lo_half"))))
+	      (match_operand:V4SI 2 "maxmin_arith_shift_operand")))
+	  (truncate:V4HI
+	    (ashiftrt:V4SI
+	      (neg:V4SI
+		(sign_extend:V4SI
+		  (vec_select:V4HI
+		    (match_dup 1)
+		    (match_operand:V8HI 4 "vect_par_cnst_hi_half"))))
+	      (match_dup 2)))))]
+  "TARGET_SIMD"
+  "#"
+  "&& true"
+  [(set (match_operand:V8HI 0 "register_operand" "=w")
+	(ashiftrt:V8HI
+	  (neg:V8HI
+	    (match_operand:V8HI 1 "register_operand" "w"))
+	  (match_operand:V8HI 2 "aarch64_simd_imm_minus_one")))]
+  {
+    /* Reduce the shift amount to smaller mode.  */
+    int val = INTVAL (CONST_VECTOR_ENCODED_ELT (operands[2], 0))
+	      - (GET_MODE_UNIT_BITSIZE (GET_MODE (operands[2])) / 2);
+    operands[2] = aarch64_simd_gen_const_vector_dup (V8HImode, val);
+  }
+  [(set_attr "type" "multiple")]
+)
+
+;; The helper definition that allows combiner to use the previous pattern.
+
+(define_insn_and_split "*aarch64_sshr_neg_tmpv8hi"
+  [(set (match_operand:V8HI 0 "register_operand" "=w")
+	(vec_concat:V8HI
+	  (truncate:V4HI
+	    (ashiftrt:V4SI
+	      (neg:V4SI
+		(match_operand:V4SI 1 "register_operand" "w"))
+	      (match_operand:V4SI 2 "maxmin_arith_shift_operand")))
+	  (truncate:V4HI
+	    (ashiftrt:V4SI
+	      (neg:V4SI
+		(match_operand:V4SI 3 "register_operand" "w"))
+	      (match_dup 2)))))]
+  "TARGET_SIMD"
+  "#"
+  "&& true"
+  [(set (match_operand:V4SI 1 "register_operand" "=w")
+	(ashiftrt:V4SI
+	  (neg:V4SI
+	    (match_dup 1))
+	  (match_operand:V4SI 2 "maxmin_arith_shift_operand")))
+   (set (match_operand:V4SI 3 "register_operand" "=w")
+	(ashiftrt:V4SI
+	  (neg:V4SI
+	    (match_dup 3))
+	  (match_dup 2)))
+   (set (match_operand:V8HI 0 "register_operand" "=w")
+	(vec_concat:V8HI
+	  (truncate:V4HI
+	    (match_dup 1))
+	  (truncate:V4HI
+	    (match_dup 3))))]
+  ""
+  [(set_attr "type" "multiple")]
+)
+
 (define_insn "*aarch64_simd_sra<mode>"
  [(set (match_operand:VDQ_I 0 "register_operand" "=w")
 	(plus:VDQ_I
@@ -1712,6 +1788,26 @@
 						operands[hi]));
    DONE;
  }
+)
+
+(define_insn "vec_pack_trunc_shifted_<mode>"
+ [(set (match_operand:<VNARROWQ2> 0 "register_operand" "=&w")
+       (vec_concat:<VNARROWQ2>
+	 (truncate:<VNARROWQ>
+	   (ashiftrt:VQN (match_operand:VQN 1 "register_operand" "w")
+	      (match_operand:VQN 2 "half_size_operand" "w")))
+	 (truncate:<VNARROWQ>
+	   (ashiftrt:VQN (match_operand:VQN 3 "register_operand" "w")
+	      (match_operand:VQN 4 "half_size_operand" "w")))))]
+ "TARGET_SIMD"
+ {
+   if (BYTES_BIG_ENDIAN)
+     return "uzp2\\t%0.<V2ntype>, %3.<V2ntype>, %1.<V2ntype>";
+   else
+     return "uzp2\\t%0.<V2ntype>, %1.<V2ntype>, %3.<V2ntype>";
+ }
+  [(set_attr "type" "neon_permute<q>")
+   (set_attr "length" "4")]
 )
 
 (define_insn "aarch64_shrn<mode>_insn_le"
@@ -6650,6 +6746,166 @@
   "TARGET_SIMD"
   "cmtst\t%<v>0<Vmtype>, %<v>1<Vmtype>, %<v>1<Vmtype>"
   [(set_attr "type" "neon_tst<q>")]
+)
+
+;; Simplify the extension with following truncation for cmtst-like operation.
+
+(define_insn_and_split "*aarch64_cmtst_arith_v8hi"
+  [(set (match_operand:V8HI 0 "register_operand" "=w")
+	(vec_concat:V8HI
+	  (plus:V4HI
+	    (truncate:V4HI
+	      (eq:V4SI
+		(sign_extend:V4SI
+		  (vec_select:V4HI
+		    (and:V8HI
+		      (match_operand:V8HI 1 "register_operand")
+		      (match_operand:V8HI 2 "aarch64_bic_imm_for_maxmin"))
+		    (match_operand:V8HI 3 "vect_par_cnst_lo_half")))
+		(match_operand:V4SI 4 "aarch64_simd_or_scalar_imm_zero")))
+	    (match_operand:V4HI 5 "aarch64_simd_imm_minus_one"))
+	  (plus:V4HI
+	    (truncate:V4HI
+	      (eq:V4SI
+		(sign_extend:V4SI
+		  (vec_select:V4HI
+		    (and:V8HI
+		      (match_dup 1)
+		      (match_dup 2))
+		    (match_operand:V8HI 6 "vect_par_cnst_hi_half")))
+		(match_dup 4)))
+	    (match_dup 5))))]
+  "TARGET_SIMD && !reload_completed"
+  "#"
+  "&& true"
+  [(set (match_operand:V8HI 6 "register_operand" "=w")
+	(match_operand:V8HI 2 "aarch64_bic_imm_for_maxmin"))
+   (set (match_operand:V8HI 0 "register_operand" "=w")
+	(plus:V8HI
+	  (eq:V8HI
+	    (and:V8HI
+	      (match_operand:V8HI 1 "register_operand" "w")
+	      (match_dup 6))
+	    (match_operand:V8HI 4 "aarch64_simd_imm_zero"))
+	  (match_operand:V8HI 5 "aarch64_simd_imm_minus_one")))]
+  {
+    if (can_create_pseudo_p ())
+      {
+	int val = INTVAL (CONST_VECTOR_ENCODED_ELT (operands[4], 0));
+	operands[4] = aarch64_simd_gen_const_vector_dup (V8HImode, val);
+	int val2 = INTVAL (CONST_VECTOR_ENCODED_ELT (operands[5], 0));
+	operands[5] = aarch64_simd_gen_const_vector_dup (V8HImode, val2);
+
+	operands[6] = gen_reg_rtx (V8HImode);
+      }
+    else
+      FAIL;
+  }
+  [(set_attr "type" "neon_tst_q")]
+)
+
+;; Three helper definitions that allow combiner to use the previous pattern.
+
+(define_insn_and_split "*aarch64_cmtst_arith_tmp_lo_v8hi"
+  [(set (match_operand:V4SI 0 "register_operand" "=w")
+	(neg:V4SI
+	  (eq:V4SI
+	    (sign_extend:V4SI
+	      (vec_select:V4HI
+		(and:V8HI
+		  (match_operand:V8HI 1 "register_operand")
+		  (match_operand:V8HI 2 "aarch64_bic_imm_for_maxmin"))
+		(match_operand:V8HI 3 "vect_par_cnst_lo_half")))
+	    (match_operand:V4SI 4 "aarch64_simd_or_scalar_imm_zero"))))]
+  "TARGET_SIMD && !reload_completed"
+  "#"
+  "&& true"
+  [(set (match_operand:V8HI 5 "register_operand" "=w")
+	(and:V8HI
+	  (match_operand:V8HI 1 "register_operand")
+	  (match_operand:V8HI 2 "aarch64_bic_imm_for_maxmin")))
+   (set (match_operand:V4SI 0 "register_operand" "=w")
+	(sign_extend:V4SI
+	  (vec_select:V4HI
+	    (match_dup 5)
+	    (match_operand:V8HI 3 "vect_par_cnst_lo_half"))))
+   (set (match_dup 0)
+	(neg:V4SI
+	  (eq:V4SI
+	    (match_dup 0)
+	    (match_operand:V4SI 4 "aarch64_simd_or_scalar_imm_zero"))))]
+  {
+    if (can_create_pseudo_p ())
+      operands[5] = gen_reg_rtx (V8HImode);
+    else
+      FAIL;
+  }
+  [(set_attr "type" "multiple")]
+)
+
+(define_insn_and_split "*aarch64_cmtst_arith_tmp_hi_v8hi"
+  [(set (match_operand:V4SI 0 "register_operand" "=w")
+	  (neg:V4SI
+	    (eq:V4SI
+	      (sign_extend:V4SI
+		(vec_select:V4HI
+		  (and:V8HI
+		    (match_operand:V8HI 1 "register_operand")
+		    (match_operand:V8HI 2 "aarch64_bic_imm_for_maxmin"))
+		  (match_operand:V8HI 3 "vect_par_cnst_hi_half")))
+	      (match_operand:V4SI 4 "aarch64_simd_or_scalar_imm_zero"))))]
+  "TARGET_SIMD && !reload_completed"
+  "#"
+  "&& true"
+  [(set (match_operand:V8HI 5 "register_operand" "=w")
+	(and:V8HI
+	  (match_operand:V8HI 1 "register_operand")
+	  (match_operand:V8HI 2 "aarch64_bic_imm_for_maxmin")))
+   (set (match_operand:V4SI 0 "register_operand" "=w")
+	(sign_extend:V4SI
+	  (vec_select:V4HI
+	    (match_dup 5)
+	    (match_operand:V8HI 3 "vect_par_cnst_hi_half"))))
+   (set (match_dup 0)
+	  (neg:V4SI
+	    (eq:V4SI
+	      (match_dup 0)
+	      (match_operand:V4SI 4 "aarch64_simd_or_scalar_imm_zero"))))]
+  {
+    if (can_create_pseudo_p ())
+      operands[5] = gen_reg_rtx (V8HImode);
+    else
+      FAIL;
+  }
+  [(set_attr "type" "multiple")]
+)
+
+(define_insn_and_split "*aarch64_cmtst_arith_tmpv8hi"
+  [(set (match_operand:V8HI 0 "register_operand" "=w")
+	(vec_concat:V8HI
+	  (truncate:V4HI
+	    (not:V4SI
+	      (match_operand:V4SI 1 "register_operand" "w")))
+	  (truncate:V4HI
+	    (not:V4SI
+	      (match_operand:V4SI 2 "register_operand" "w")))))]
+  "TARGET_SIMD"
+  "#"
+  "&& true"
+  [(set (match_operand:V4SI 1 "register_operand" "=w")
+	(not:V4SI
+	  (match_dup 1)))
+   (set (match_operand:V4SI 2 "register_operand" "=w")
+	(not:V4SI
+	  (match_dup 2)))
+   (set (match_operand:V8HI 0 "register_operand" "=w")
+	(vec_concat:V8HI
+	  (truncate:V4HI
+	    (match_dup 1))
+	  (truncate:V4HI
+	    (match_dup 2))))]
+  ""
+  [(set_attr "type" "multiple")]
 )
 
 (define_insn_and_split "aarch64_cmtstdi"
