@@ -55,6 +55,10 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/pc*.c]] \
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/pc*.c]] \
 	"" "-fipa-struct-reorg=5 -fdump-ipa-all -flto-partition=one -fwhole-program"
 
+# -fipa-struct-reorg=6
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/semi_relayout*.c]] \
+	"" "-fipa-struct-reorg=6 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
 # All done.
 torture-finish
 dg-finish
