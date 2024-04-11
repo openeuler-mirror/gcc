@@ -2694,6 +2694,47 @@ contains post-index or pre-index operation.",
   NULL)
 
 DEFHOOK
+(get_v16qi_mode,
+ "This function get the 16 byte elements vector mode if target supports this.",
+ machine_mode, (),
+ NULL)
+
+DEFHOOK
+(gen_rev32v16qi,
+ "This function generate the byte reverse instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src),
+ NULL)
+
+DEFHOOK
+(gen_aesev16qi,
+ "This function generate the AES encryption instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src1, rtx src2),
+ NULL)
+
+DEFHOOK
+(gen_aesdv16qi,
+ "This function generate the AES decryption instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src1, rtx src2),
+ NULL)
+
+DEFHOOK
+(gen_aesmcv16qi,
+ "This function generate the AES mix columns instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src),
+ NULL)
+
+DEFHOOK
+(gen_aesimcv16qi,
+ "This function generate the AES inversed mix columns instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src),
+ NULL)
+
+DEFHOOK
 (gen_ccmp_first,
  "This function prepares to emit a comparison insn for the first compare in a\n\
  sequence of conditional comparisions.  It returns an appropriate comparison\n\

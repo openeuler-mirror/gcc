@@ -583,6 +583,7 @@ extern rtl_opt_pass *make_pass_cse2 (gcc::context *ctxt);
 extern rtl_opt_pass *make_pass_df_initialize_opt (gcc::context *ctxt);
 extern rtl_opt_pass *make_pass_df_initialize_no_opt (gcc::context *ctxt);
 extern rtl_opt_pass *make_pass_reginfo_init (gcc::context *ctxt);
+extern rtl_opt_pass *make_pass_crypto_accel (gcc::context *ctxt);
 extern rtl_opt_pass *make_pass_inc_dec (gcc::context *ctxt);
 extern rtl_opt_pass *make_pass_stack_ptr_mod (gcc::context *ctxt);
 extern rtl_opt_pass *make_pass_initialize_regs (gcc::context *ctxt);

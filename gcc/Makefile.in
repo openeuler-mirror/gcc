@@ -1332,6 +1332,7 @@ OBJS = \
 	cgraphunit.o \
 	cgraphclones.o \
 	combine.o \
+	crypto-accel.o \
 	combine-stack-adj.o \
 	compare-elim.o \
 	context.o \
