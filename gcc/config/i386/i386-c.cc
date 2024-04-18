@@ -242,6 +242,14 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
       def_or_undef (parse_in, "__sapphirerapids");
       def_or_undef (parse_in, "__sapphirerapids__");
       break;
+    case PROCESSOR_GRANITERAPIDS:
+      def_or_undef (parse_in, "__graniterapids");
+      def_or_undef (parse_in, "__graniterapids__");
+      break;
+    case PROCESSOR_GRANITERAPIDS_D:
+      def_or_undef (parse_in, "__graniterapids_d");
+      def_or_undef (parse_in, "__graniterapids_d__");
+      break;
     case PROCESSOR_ALDERLAKE:
       def_or_undef (parse_in, "__alderlake");
       def_or_undef (parse_in, "__alderlake__");
@@ -250,6 +258,7 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
       def_or_undef (parse_in, "__rocketlake");
       def_or_undef (parse_in, "__rocketlake__");
       break;
+
     /* use PROCESSOR_max to not set/unset the arch macro.  */
     case PROCESSOR_max:
       break;
@@ -418,6 +427,12 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
       break;
     case PROCESSOR_ROCKETLAKE:
       def_or_undef (parse_in, "__tune_rocketlake__");
+      break;
+    case PROCESSOR_GRANITERAPIDS:
+      def_or_undef (parse_in, "__tune_graniterapids__");
+      break;
+    case PROCESSOR_GRANITERAPIDS_D:
+      def_or_undef (parse_in, "__tune_graniterapids_d__");
       break;
     case PROCESSOR_INTEL:
     case PROCESSOR_GENERIC:
@@ -633,6 +648,12 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
     def_or_undef (parse_in, "__WIDEKL__");
   if (isa_flag2 & OPTION_MASK_ISA2_AVXVNNI)
     def_or_undef (parse_in, "__AVXVNNI__");
+  if (isa_flag2 & OPTION_MASK_ISA2_AMX_FP16)
+    def_or_undef (parse_in, "__AMX_FP16__");
+  if (isa_flag2 & OPTION_MASK_ISA2_PREFETCHI)
+    def_or_undef (parse_in, "__PREFETCHI__");
+  if (isa_flag2 & OPTION_MASK_ISA2_AMX_COMPLEX)
+    def_or_undef (parse_in, "__AMX_COMPLEX__");
   if (TARGET_IAMCU)
     {
       def_or_undef (parse_in, "__iamcu");

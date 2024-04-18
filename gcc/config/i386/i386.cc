@@ -14416,8 +14416,12 @@ ix86_avx_u128_mode_needed (rtx_insn *insn)
 	 modes wider than 256 bits.  It's only safe to issue a
 	 vzeroupper if all SSE registers are clobbered.  */
       const function_abi &abi = insn_callee_abi (insn);
-      if (!hard_reg_set_subset_p (reg_class_contents[SSE_REGS],
-				  abi.mode_clobbers (V4DImode)))
+      /* Should be safe to issue an vzeroupper before sibling_call_p.
+	 Also there not mode_exit for sibling_call, so there could be
+	 missing vzeroupper for that.  */
+      if (!(SIBLING_CALL_P (insn)
+	    || hard_reg_set_subset_p (reg_class_contents[SSE_REGS],
+				      abi.mode_clobbers (V4DImode))))
 	return AVX_U128_ANY;
 
       return AVX_U128_CLEAN;
@@ -14555,7 +14559,19 @@ ix86_avx_u128_mode_after (int mode, rtx_insn *insn)
       bool avx_upper_reg_found = false;
       note_stores (insn, ix86_check_avx_upper_stores, &avx_upper_reg_found);
 
-      return avx_upper_reg_found ? AVX_U128_DIRTY : AVX_U128_CLEAN;
+      if (avx_upper_reg_found)
+	return AVX_U128_DIRTY;
+
+      /* If the function desn't clobber any sse registers or only clobber
+	 128-bit part, Then vzeroupper isn't issued before the function exit.
+	 the status not CLEAN but ANY after the function.  */
+      const function_abi &abi = insn_callee_abi (insn);
+      if (!(SIBLING_CALL_P (insn)
+	    || hard_reg_set_subset_p (reg_class_contents[SSE_REGS],
+				      abi.mode_clobbers (V4DImode))))
+	return AVX_U128_ANY;
+
+      return  AVX_U128_CLEAN;
     }
 
   /* Otherwise, return current mode.  Remember that if insn
@@ -18396,8 +18412,10 @@ ix86_gimple_fold_builtin (gimple_stmt_iterator *gsi)
 	      tree itype = GET_MODE_INNER (TYPE_MODE (type)) == E_SFmode
 		? intSI_type_node : intDI_type_node;
 	      type = get_same_sized_vectype (itype, type);
-	      arg2 = gimple_build (&stmts, VIEW_CONVERT_EXPR, type, arg2);
 	    }
+	  else
+	    type = signed_type_for (type);
+	  arg2 = gimple_build (&stmts, VIEW_CONVERT_EXPR, type, arg2);
 	  tree zero_vec = build_zero_cst (type);
 	  tree cmp_type = truth_type_for (type);
 	  tree cmp = gimple_build (&stmts, LT_EXPR, cmp_type, arg2, zero_vec);
@@ -18935,7 +18953,7 @@ ix86_vectorize_builtin_scatter (const_tree vectype,
       ? !TARGET_USE_SCATTER_2PARTS
       : (known_eq (TYPE_VECTOR_SUBPARTS (vectype), 4u)
 	 ? !TARGET_USE_SCATTER_4PARTS
-	 : !TARGET_USE_SCATTER))
+	 : !TARGET_USE_SCATTER_8PARTS))
     return NULL_TREE;
 
   if ((TREE_CODE (index_type) != INTEGER_TYPE

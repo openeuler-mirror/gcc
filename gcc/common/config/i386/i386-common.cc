@@ -107,6 +107,10 @@ along with GCC; see the file COPYING3.  If not see
 #define OPTION_MASK_ISA2_AMX_TILE_SET OPTION_MASK_ISA2_AMX_TILE
 #define OPTION_MASK_ISA2_AMX_INT8_SET OPTION_MASK_ISA2_AMX_INT8
 #define OPTION_MASK_ISA2_AMX_BF16_SET OPTION_MASK_ISA2_AMX_BF16
+#define OPTION_MASK_ISA2_AMX_FP16_SET OPTION_MASK_ISA2_AMX_FP16
+#define OPTION_MASK_ISA2_PREFETCHI_SET OPTION_MASK_ISA2_PREFETCHI
+#define OPTION_MASK_ISA2_AMX_COMPLEX_SET \
+  (OPTION_MASK_ISA2_AMX_TILE | OPTION_MASK_ISA2_AMX_COMPLEX)
 
 /* SSE4 includes both SSE4.1 and SSE4.2. -msse4 should be the same
    as -msse4.2.  */
@@ -267,7 +271,8 @@ along with GCC; see the file COPYING3.  If not see
 #define OPTION_MASK_ISA2_SERIALIZE_UNSET OPTION_MASK_ISA2_SERIALIZE
 #define OPTION_MASK_ISA2_AVX512VP2INTERSECT_UNSET OPTION_MASK_ISA2_AVX512VP2INTERSECT
 #define OPTION_MASK_ISA2_TSXLDTRK_UNSET OPTION_MASK_ISA2_TSXLDTRK
-#define OPTION_MASK_ISA2_AMX_TILE_UNSET OPTION_MASK_ISA2_AMX_TILE
+#define OPTION_MASK_ISA2_AMX_TILE_UNSET \
+  (OPTION_MASK_ISA2_AMX_TILE | OPTION_MASK_ISA2_AMX_COMPLEX_UNSET)
 #define OPTION_MASK_ISA2_AMX_INT8_UNSET OPTION_MASK_ISA2_AMX_INT8
 #define OPTION_MASK_ISA2_AMX_BF16_UNSET OPTION_MASK_ISA2_AMX_BF16
 #define OPTION_MASK_ISA2_UINTR_UNSET OPTION_MASK_ISA2_UINTR
@@ -275,6 +280,9 @@ along with GCC; see the file COPYING3.  If not see
 #define OPTION_MASK_ISA2_KL_UNSET \
   (OPTION_MASK_ISA2_KL | OPTION_MASK_ISA2_WIDEKL_UNSET)
 #define OPTION_MASK_ISA2_WIDEKL_UNSET OPTION_MASK_ISA2_WIDEKL
+#define OPTION_MASK_ISA2_AMX_FP16_UNSET OPTION_MASK_ISA2_AMX_FP16
+#define OPTION_MASK_ISA2_PREFETCHI_UNSET OPTION_MASK_ISA2_PREFETCHI
+#define OPTION_MASK_ISA2_AMX_COMPLEX_UNSET OPTION_MASK_ISA2_AMX_COMPLEX
 
 /* SSE4 includes both SSE4.1 and SSE4.2.  -mno-sse4 should the same
    as -mno-sse4.1. */
@@ -1125,6 +1133,45 @@ ix86_handle_option (struct gcc_options *opts,
 	}
       return true;
 
+    case OPT_mamx_fp16:
+      if (value)
+	{
+	  opts->x_ix86_isa_flags2 |= OPTION_MASK_ISA2_AMX_FP16_SET;
+	  opts->x_ix86_isa_flags2_explicit |= OPTION_MASK_ISA2_AMX_FP16_SET;
+	}
+      else
+	{
+	  opts->x_ix86_isa_flags2 &= ~OPTION_MASK_ISA2_AMX_FP16_UNSET;
+	  opts->x_ix86_isa_flags2_explicit |= OPTION_MASK_ISA2_AMX_FP16_UNSET;
+	}
+      return true;
+
+    case OPT_mprefetchi:
+      if (value)
+	{
+	  opts->x_ix86_isa_flags2 |= OPTION_MASK_ISA2_PREFETCHI_SET;
+	  opts->x_ix86_isa_flags2_explicit |= OPTION_MASK_ISA2_PREFETCHI_SET;
+	}
+      else
+	{
+	  opts->x_ix86_isa_flags2 &= ~OPTION_MASK_ISA2_PREFETCHI_UNSET;
+	  opts->x_ix86_isa_flags2_explicit |= OPTION_MASK_ISA2_PREFETCHI_UNSET;
+	}
+      return true;
+
+    case OPT_mamx_complex:
+      if (value)
+	{
+	  opts->x_ix86_isa_flags2 |= OPTION_MASK_ISA2_AMX_COMPLEX_SET;
+	  opts->x_ix86_isa_flags2_explicit |= OPTION_MASK_ISA2_AMX_COMPLEX_SET;
+	}
+      else
+	{
+	  opts->x_ix86_isa_flags2 &= ~OPTION_MASK_ISA2_AMX_COMPLEX_UNSET;
+	  opts->x_ix86_isa_flags2_explicit |= OPTION_MASK_ISA2_AMX_COMPLEX_UNSET;
+	}
+      return true;
+
     case OPT_mfma:
       if (value)
 	{
@@ -1825,6 +1872,8 @@ const char *const processor_names[] =
   "sapphirerapids",
   "alderlake",
   "rocketlake",
+  "graniterapids",
+  "graniterapids-d",
   "intel",
   "geode",
   "k6",
@@ -1939,6 +1988,15 @@ const pta processor_alias_table[] =
     M_CPU_SUBTYPE (INTEL_COREI7_SAPPHIRERAPIDS), P_PROC_AVX512F},
   {"alderlake", PROCESSOR_ALDERLAKE, CPU_HASWELL, PTA_ALDERLAKE,
     M_CPU_SUBTYPE (INTEL_COREI7_ALDERLAKE), P_PROC_AVX2},
+  {"raptorlake", PROCESSOR_ALDERLAKE, CPU_HASWELL, PTA_ALDERLAKE,
+    M_CPU_SUBTYPE (INTEL_COREI7_ALDERLAKE), P_PROC_AVX2},
+  {"meteorlake", PROCESSOR_ALDERLAKE, CPU_HASWELL, PTA_ALDERLAKE,
+    M_CPU_SUBTYPE (INTEL_COREI7_ALDERLAKE), P_PROC_AVX2},
+  {"graniterapids", PROCESSOR_GRANITERAPIDS, CPU_HASWELL, PTA_GRANITERAPIDS,
+    M_CPU_SUBTYPE (INTEL_COREI7_GRANITERAPIDS), P_PROC_AVX512F},
+  {"graniterapids-d", PROCESSOR_GRANITERAPIDS_D, CPU_HASWELL,
+    PTA_GRANITERAPIDS_D, M_CPU_SUBTYPE (INTEL_COREI7_GRANITERAPIDS_D),
+    P_PROC_AVX512F},
   {"bonnell", PROCESSOR_BONNELL, CPU_ATOM, PTA_BONNELL,
     M_CPU_TYPE (INTEL_BONNELL), P_PROC_SSSE3},
   {"atom", PROCESSOR_BONNELL, CPU_ATOM, PTA_BONNELL,

@@ -124,8 +124,12 @@
 
 #include <amxbf16intrin.h>
 
+#include <amxcomplexintrin.h>
+
 #include <prfchwintrin.h>
 
 #include <keylockerintrin.h>
+
+#include <amxfp16intrin.h>
 
 #endif /* _IMMINTRIN_H_INCLUDED */

@@ -9421,6 +9421,17 @@ proc check_effective_target_avxvnni { } {
     } "-mavxvnni" ]
 }
 
+# Return 1 if amx-complex instructions can be compiled.
+proc check_effective_target_amx_complex { } {
+    return [check_no_compiler_messages amx_complex object {
+	void
+	foo ()
+	{
+	  __asm__ volatile ("tcmmimfp16ps\t%%tmm1, %%tmm2, %%tmm3" ::);
+	}
+    } "-mamx-complex" ]
+}
+
 # Return 1 if sse instructions can be compiled.
 proc check_effective_target_sse { } {
     return [check_no_compiler_messages sse object {
@@ -9970,6 +9981,17 @@ proc check_effective_target_amx_bf16 { } {
 	    __asm__ volatile ("tdpbf16ps\t%%tmm1, %%tmm2, %%tmm3" ::);
 	}
     } "-mamx-bf16" ]
+}
+
+# Return 1 if amx-fp16 instructions can be compiled.
+proc check_effective_target_amx_fp16 { } {
+    return [check_no_compiler_messages amx_fp16 object {
+	void
+	foo ()
+	{
+	    __asm__ volatile ("tdpfp16ps\t%%tmm1, %%tmm2, %%tmm3" ::);
+	}
+    } "-mamx-fp16" ]
 }
 
 # Return 1 if vpclmulqdq instructions can be compiled.

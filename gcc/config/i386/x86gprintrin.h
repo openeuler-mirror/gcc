@@ -72,6 +72,8 @@
 
 #include <pkuintrin.h>
 
+#include <prfchiintrin.h>
+
 #include <rdseedintrin.h>
 
 #include <rtmintrin.h>

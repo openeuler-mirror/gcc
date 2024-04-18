@@ -1428,7 +1428,7 @@ See RS/6000 and PowerPC Options.
 -mavx5124fmaps  -mavx512vnni  -mavx5124vnniw  -mprfchw  -mrdpid @gol
 -mrdseed  -msgx -mavx512vp2intersect -mserialize -mtsxldtrk@gol
 -mamx-tile  -mamx-int8  -mamx-bf16 -muintr -mhreset -mavxvnni@gol
--mavx512fp16 @gol
+-mavx512fp16 -mamx-fp16 -mprefetchi -mamx-complex @gol
 -mcldemote  -mms-bitfields  -mno-align-stringops  -minline-all-stringops @gol
 -minline-stringops-dynamically  -mstringop-strategy=@var{alg} @gol
 -mkl -mwidekl @gol
@@ -1437,7 +1437,7 @@ See RS/6000 and PowerPC Options.
 -m96bit-long-double  -mlong-double-64  -mlong-double-80  -mlong-double-128 @gol
 -mregparm=@var{num}  -msseregparm @gol
 -mveclibabi=@var{type}  -mvect8-ret-in-mem @gol
--mpc32  -mpc64  -mpc80  -mstackrealign @gol
+-mpc32  -mpc64  -mpc80 -mdaz-ftz -mstackrealign @gol
 -momit-leaf-frame-pointer  -mno-red-zone  -mno-tls-direct-seg-refs @gol
 -mcmodel=@var{code-model}  -mabi=@var{name}  -maddress-mode=@var{mode} @gol
 -m32  -m64  -mx32  -m16  -miamcu  -mlarge-data-threshold=@var{num} @gol
@@ -31615,6 +31615,28 @@ CLFLUSHOPT, XSAVEC, XSAVES, AVX512F, AVX512VL, AVX512BW, AVX512DQ, AVX512CD
 PKU, AVX512VBMI, AVX512IFMA, SHA, AVX512VNNI, GFNI, VAES, AVX512VBMI2,
 VPCLMULQDQ, AVX512BITALG, RDPID and AVX512VPOPCNTDQ instruction set support.
 
+@item graniterapids
+Intel graniterapids CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
+SSSE3, SSE4.1, SSE4.2, POPCNT, CX16, SAHF, FXSR, AVX, XSAVE, PCLMUL, FSGSBASE,
+RDRND, F16C, AVX2, BMI, BMI2, LZCNT, FMA, MOVBE, HLE, RDSEED, ADCX, PREFETCHW,
+AES, CLFLUSHOPT, XSAVEC, XSAVES, SGX, AVX512F, AVX512VL, AVX512BW, AVX512DQ,
+AVX512CD, PKU, AVX512VBMI, AVX512IFMA, SHA, AVX512VNNI, GFNI, VAES, AVX512VBMI2,
+VPCLMULQDQ, AVX512BITALG, RDPID, AVX512VPOPCNTDQ, PCONFIG, WBNOINVD, CLWB,
+MOVDIRI, MOVDIR64B, ENQCMD, CLDEMOTE, PTWRITE, WAITPKG, SERIALIZE, TSXLDTRK,
+UINTR, AMX-BF16, AMX-TILE, AMX-INT8, AVX-VNNI, AVX512-FP16, AVX512BF16, AMX-FP16
+and PREFETCHI instruction set support.
+
+@item graniterapids-d
+Intel graniterapids D CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
+SSSE3, SSE4.1, SSE4.2, POPCNT, CX16, SAHF, FXSR, AVX, XSAVE, PCLMUL, FSGSBASE,
+RDRND, F16C, AVX2, BMI, BMI2, LZCNT, FMA, MOVBE, HLE, RDSEED, ADCX, PREFETCHW,
+AES, CLFLUSHOPT, XSAVEC, XSAVES, SGX, AVX512F, AVX512VL, AVX512BW, AVX512DQ,
+AVX512CD, PKU, AVX512VBMI, AVX512IFMA, SHA, AVX512VNNI, GFNI, VAES, AVX512VBMI2,
+VPCLMULQDQ, AVX512BITALG, RDPID, AVX512VPOPCNTDQ, PCONFIG, WBNOINVD, CLWB,
+MOVDIRI, MOVDIR64B, ENQCMD, CLDEMOTE, PTWRITE, WAITPKG, SERIALIZE, TSXLDTRK,
+UINTR, AMX-BF16, AMX-TILE, AMX-INT8, AVX-VNNI, AVX512FP16, AVX512BF16, AMX-FP16,
+PREFETCHI and AMX-COMPLEX instruction set support.
+
 @item k6
 AMD K6 CPU with MMX instruction set support.
 
@@ -32122,6 +32144,15 @@ are enabled by default; routines in such libraries could suffer significant
 loss of accuracy, typically through so-called ``catastrophic cancellation'',
 when this option is used to set the precision to less than extended precision.
 
+@item -mdaz-ftz
+@opindex mdaz-ftz
+
+The flush-to-zero (FTZ) and denormals-are-zero (DAZ) flags in the MXCSR register
+are used to control floating-point calculations.SSE and AVX instructions
+including scalar and vector instructions could benefit from enabling the FTZ
+and DAZ flags when @option{-mdaz-ftz} is specified. Don't set FTZ/DAZ flags
+when @option{-mno-daz-ftz} is specified.
+
 @item -mstackrealign
 @opindex mstackrealign
 Realign the stack at entry.  On the x86, the @option{-mstackrealign}
@@ -32433,6 +32464,15 @@ preferred alignment to @option{-mpreferred-stack-boundary=2}.
 @need 200
 @itemx -mwidekl
 @opindex mwidekl
+@need 200
+@itemx -mamx-fp16
+@opindex mamx-fp16
+@need 200
+@itemx -mprefetchi
+@opindex mprefetchi
+@need 200
+@opindex mamx-complex
+@itemx -mamx-complex
 These switches enable the use of instructions in the MMX, SSE,
 SSE2, SSE3, SSSE3, SSE4, SSE4A, SSE4.1, SSE4.2, AVX, AVX2, AVX512F, AVX512PF,
 AVX512ER, AVX512CD, AVX512VL, AVX512BW, AVX512DQ, AVX512IFMA, AVX512VBMI, SHA,
@@ -32442,8 +32482,8 @@ WBNOINVD, FMA4, PREFETCHW, RDPID, PREFETCHWT1, RDSEED, SGX, XOP, LWP,
 XSAVEOPT, XSAVEC, XSAVES, RTM, HLE, TBM, MWAITX, CLZERO, PKU, AVX512VBMI2,
 GFNI, VAES, WAITPKG, VPCLMULQDQ, AVX512BITALG, MOVDIRI, MOVDIR64B, AVX512BF16,
 ENQCMD, AVX512VPOPCNTDQ, AVX5124FMAPS, AVX512VNNI, AVX5124VNNIW, SERIALIZE,
-UINTR, HRESET, AMXTILE, AMXINT8, AMXBF16, KL, WIDEKL, AVXVNNI, AVX512-FP16
-or CLDEMOTE extended instruction sets. Each has a corresponding
+UINTR, HRESET, AMXTILE, AMXINT8, AMXBF16, KL, WIDEKL, AVXVNNI, AVX512-FP16,
+AMX-FP16, PREFETCHI, AMX-COMPLEX or CLDEMOTE extended instruction sets. Each has a corresponding
 @option{-mno-} option to disable use of these instructions.
 
 These extensions are also available as built-in functions: see

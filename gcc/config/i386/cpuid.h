@@ -27,6 +27,7 @@
 /* %eax */
 #define bit_AVXVNNI	(1 << 4)
 #define bit_AVX512BF16	(1 << 5)
+#define bit_AMX_FP16	(1 << 21)
 #define bit_HRESET	(1 << 22)
 
 /* %ecx */
@@ -49,6 +50,7 @@
 
 /* %edx */
 #define bit_CMPXCHG8B	(1 << 8)
+#define bit_PREFETCHI	(1 << 14)
 #define bit_CMOV	(1 << 15)
 #define bit_MMX		(1 << 23)
 #define bit_FXSAVE	(1 << 24)
@@ -134,6 +136,7 @@
 #define bit_AMX_BF16    (1 << 22)
 #define bit_AMX_TILE    (1 << 24)
 #define bit_AMX_INT8    (1 << 25)
+#define bit_AMX_COMPLEX (1 << 8)
 
 /* Extended State Enumeration Sub-leaf (%eax == 0xd, %ecx == 1) */
 #define bit_XSAVEOPT	(1 << 0)

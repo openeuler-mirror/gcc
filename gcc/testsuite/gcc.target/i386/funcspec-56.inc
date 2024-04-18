@@ -80,6 +80,9 @@ extern void test_keylocker (void)		__attribute__((__target__("kl")));
 extern void test_widekl (void)			__attribute__((__target__("widekl")));
 extern void test_avxvnni (void)			__attribute__((__target__("avxvnni")));
 extern void test_avx512fp16 (void)		__attribute__((__target__("avx512fp16")));
+extern void test_amx_fp16 (void)		__attribute__((__target__("amx-fp16")));
+extern void test_prefetchi (void)               __attribute__((__target__("prefetchi")));
+extern void test_amx_complex (void)		__attribute__((__target__("amx-complex")));
 
 extern void test_no_sgx (void)			__attribute__((__target__("no-sgx")));
 extern void test_no_avx5124fmaps(void)		__attribute__((__target__("no-avx5124fmaps")));
@@ -161,6 +164,9 @@ extern void test_no_keylocker (void)		__attribute__((__target__("no-kl")));
 extern void test_no_widekl (void)		__attribute__((__target__("no-widekl")));
 extern void test_no_avxvnni (void)		__attribute__((__target__("no-avxvnni")));
 extern void test_no_avx512fp16 (void)		__attribute__((__target__("no-avx512fp16")));
+extern void test_no_amx_fp16 (void)		__attribute__((__target__("no-amx-fp16")));
+extern void test_no_prefetchi (void)            __attribute__((__target__("no-prefetchi")));
+extern void test_no_amx_complex (void)		__attribute__((__target__("no-amx-complex")));
 
 extern void test_arch_nocona (void)		__attribute__((__target__("arch=nocona")));
 extern void test_arch_core2 (void)		__attribute__((__target__("arch=core2")));
@@ -184,6 +190,8 @@ extern void test_arch_cooperlake (void)         __attribute__((__target__("arch=
 extern void test_arch_sapphirerapids (void)	__attribute__((__target__("arch=sapphirerapids")));
 extern void test_arch_alderlake (void)          __attribute__((__target__("arch=alderlake")));
 extern void test_arch_rocketlake (void)         __attribute__((__target__("arch=rocketlake")));
+extern void test_arch_graniterapids (void)	__attribute__((__target__("arch=graniterapids")));
+extern void test_arch_graniterapids_d (void)	__attribute__((__target__("arch=graniterapids-d")));
 extern void test_arch_k8 (void)			__attribute__((__target__("arch=k8")));
 extern void test_arch_k8_sse3 (void)		__attribute__((__target__("arch=k8-sse3")));
 extern void test_arch_opteron (void)		__attribute__((__target__("arch=opteron")));

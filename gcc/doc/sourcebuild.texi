@@ -2472,6 +2472,12 @@ Target supports the execution of @code{amx-int8} instructions.
 @item amx_bf16
 Target supports the execution of @code{amx-bf16} instructions.
 
+@item amx_complex
+Target supports the execution of @code{amx-complex} instructions.
+
+@item amx_fp16
+Target supports the execution of @code{amx-fp16} instructions.
+
 @item cell_hw
 Test system can execute AltiVec and Cell PPU instructions.
 
@@ -2492,6 +2498,9 @@ Target does not require strict alignment.
 
 @item pie_copyreloc
 The x86-64 target linker supports PIE with copy reloc.
+
+@item prefetchi
+Target supports the execution of @code{prefetchi} instructions.
 
 @item rdrand
 Target supports x86 @code{rdrand} instruction.
