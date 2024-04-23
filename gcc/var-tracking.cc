@@ -107,6 +107,8 @@
 #include "cfgrtl.h"
 #include "cfganal.h"
 #include "reload.h"
+#include "ira.h"
+#include "lra.h"
 #include "calls.h"
 #include "tree-dfa.h"
 #include "tree-ssa.h"
@@ -10133,7 +10135,9 @@ vt_initialize (void)
 #else
       reg = arg_pointer_rtx;
 #endif
-      elim = eliminate_regs (reg, VOIDmode, NULL_RTX);
+      elim = (ira_use_lra_p
+	      ? lra_eliminate_regs (reg, VOIDmode, NULL_RTX)
+	      : eliminate_regs (reg, VOIDmode, NULL_RTX));
       if (elim != reg)
 	{
 	  if (GET_CODE (elim) == PLUS)
@@ -10153,7 +10157,9 @@ vt_initialize (void)
       reg = arg_pointer_rtx;
       fp_cfa_offset = ARG_POINTER_CFA_OFFSET (current_function_decl);
 #endif
-      elim = eliminate_regs (reg, VOIDmode, NULL_RTX);
+      elim = (ira_use_lra_p
+	      ? lra_eliminate_regs (reg, VOIDmode, NULL_RTX)
+	      : eliminate_regs (reg, VOIDmode, NULL_RTX));
       if (elim != reg)
 	{
 	  if (GET_CODE (elim) == PLUS)
@@ -10185,7 +10191,9 @@ vt_initialize (void)
 #else
       reg = arg_pointer_rtx;
 #endif
-      elim = eliminate_regs (reg, VOIDmode, NULL_RTX);
+      elim = (ira_use_lra_p
+	      ? lra_eliminate_regs (reg, VOIDmode, NULL_RTX)
+	      : eliminate_regs (reg, VOIDmode, NULL_RTX));
       if (elim != reg)
 	{
 	  if (GET_CODE (elim) == PLUS)
