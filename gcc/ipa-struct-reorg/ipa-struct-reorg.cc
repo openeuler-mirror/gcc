@@ -7461,6 +7461,9 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	    continue;
 	  tree lhs_expr = newlhs[i] ? newlhs[i] : lhs;
 	  tree rhs_expr = newrhs[i] ? newrhs[i] : rhs;
+	  if (!useless_type_conversion_p (TREE_TYPE (lhs_expr),
+					  TREE_TYPE (rhs_expr)))
+	    rhs_expr = gimplify_build1 (gsi, NOP_EXPR, TREE_TYPE (lhs_expr), rhs_expr);  
 	  gimple *newstmt = gimple_build_assign (lhs_expr, rhs_expr);
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
