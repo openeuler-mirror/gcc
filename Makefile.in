@@ -1111,6 +1111,7 @@ configure-host:  \
     maybe-configure-c++tools \
     maybe-configure-gnattools \
     maybe-configure-lto-plugin \
+    maybe-configure-bolt-plugin \
     maybe-configure-libcc1 \
     maybe-configure-gotools \
     maybe-configure-libctf
@@ -1288,6 +1289,9 @@ all-host: maybe-all-gnattools
 @if lto-plugin-no-bootstrap
 all-host: maybe-all-lto-plugin
 @endif lto-plugin-no-bootstrap
+@if bolt-plugin-no-bootstrap
+all-host: maybe-all-bolt-plugin
+@endif bolt-plugin-no-bootstrap
 all-host: maybe-all-libcc1
 all-host: maybe-all-gotools
 @if libctf-no-bootstrap
@@ -1403,6 +1407,7 @@ info-host: maybe-info-utils
 info-host: maybe-info-c++tools
 info-host: maybe-info-gnattools
 info-host: maybe-info-lto-plugin
+info-host: maybe-info-bolt-plugin
 info-host: maybe-info-libcc1
 info-host: maybe-info-gotools
 info-host: maybe-info-libctf
@@ -1493,6 +1498,7 @@ dvi-host: maybe-dvi-utils
 dvi-host: maybe-dvi-c++tools
 dvi-host: maybe-dvi-gnattools
 dvi-host: maybe-dvi-lto-plugin
+dvi-host: maybe-dvi-bolt-plugin
 dvi-host: maybe-dvi-libcc1
 dvi-host: maybe-dvi-gotools
 dvi-host: maybe-dvi-libctf
@@ -1583,6 +1589,7 @@ pdf-host: maybe-pdf-utils
 pdf-host: maybe-pdf-c++tools
 pdf-host: maybe-pdf-gnattools
 pdf-host: maybe-pdf-lto-plugin
+pdf-host: maybe-pdf-bolt-plugin
 pdf-host: maybe-pdf-libcc1
 pdf-host: maybe-pdf-gotools
 pdf-host: maybe-pdf-libctf
@@ -1673,6 +1680,7 @@ html-host: maybe-html-utils
 html-host: maybe-html-c++tools
 html-host: maybe-html-gnattools
 html-host: maybe-html-lto-plugin
+html-host: maybe-html-bolt-plugin
 html-host: maybe-html-libcc1
 html-host: maybe-html-gotools
 html-host: maybe-html-libctf
@@ -1763,6 +1771,7 @@ TAGS-host: maybe-TAGS-utils
 TAGS-host: maybe-TAGS-c++tools
 TAGS-host: maybe-TAGS-gnattools
 TAGS-host: maybe-TAGS-lto-plugin
+TAGS-host: maybe-TAGS-bolt-plugin
 TAGS-host: maybe-TAGS-libcc1
 TAGS-host: maybe-TAGS-gotools
 TAGS-host: maybe-TAGS-libctf
@@ -1853,6 +1862,7 @@ install-info-host: maybe-install-info-utils
 install-info-host: maybe-install-info-c++tools
 install-info-host: maybe-install-info-gnattools
 install-info-host: maybe-install-info-lto-plugin
+install-info-host: maybe-install-info-bolt-plugin
 install-info-host: maybe-install-info-libcc1
 install-info-host: maybe-install-info-gotools
 install-info-host: maybe-install-info-libctf
@@ -1943,6 +1953,7 @@ install-dvi-host: maybe-install-dvi-utils
 install-dvi-host: maybe-install-dvi-c++tools
 install-dvi-host: maybe-install-dvi-gnattools
 install-dvi-host: maybe-install-dvi-lto-plugin
+install-dvi-host: maybe-install-dvi-bolt-plugin
 install-dvi-host: maybe-install-dvi-libcc1
 install-dvi-host: maybe-install-dvi-gotools
 install-dvi-host: maybe-install-dvi-libctf
@@ -2033,6 +2044,7 @@ install-pdf-host: maybe-install-pdf-utils
 install-pdf-host: maybe-install-pdf-c++tools
 install-pdf-host: maybe-install-pdf-gnattools
 install-pdf-host: maybe-install-pdf-lto-plugin
+install-pdf-host: maybe-install-pdf-bolt-plugin
 install-pdf-host: maybe-install-pdf-libcc1
 install-pdf-host: maybe-install-pdf-gotools
 install-pdf-host: maybe-install-pdf-libctf
@@ -2123,6 +2135,7 @@ install-html-host: maybe-install-html-utils
 install-html-host: maybe-install-html-c++tools
 install-html-host: maybe-install-html-gnattools
 install-html-host: maybe-install-html-lto-plugin
+install-html-host: maybe-install-html-bolt-plugin
 install-html-host: maybe-install-html-libcc1
 install-html-host: maybe-install-html-gotools
 install-html-host: maybe-install-html-libctf
@@ -2213,6 +2226,7 @@ installcheck-host: maybe-installcheck-utils
 installcheck-host: maybe-installcheck-c++tools
 installcheck-host: maybe-installcheck-gnattools
 installcheck-host: maybe-installcheck-lto-plugin
+installcheck-host: maybe-installcheck-bolt-plugin
 installcheck-host: maybe-installcheck-libcc1
 installcheck-host: maybe-installcheck-gotools
 installcheck-host: maybe-installcheck-libctf
@@ -2303,6 +2317,7 @@ mostlyclean-host: maybe-mostlyclean-utils
 mostlyclean-host: maybe-mostlyclean-c++tools
 mostlyclean-host: maybe-mostlyclean-gnattools
 mostlyclean-host: maybe-mostlyclean-lto-plugin
+mostlyclean-host: maybe-mostlyclean-bolt-plugin
 mostlyclean-host: maybe-mostlyclean-libcc1
 mostlyclean-host: maybe-mostlyclean-gotools
 mostlyclean-host: maybe-mostlyclean-libctf
@@ -2393,6 +2408,7 @@ clean-host: maybe-clean-utils
 clean-host: maybe-clean-c++tools
 clean-host: maybe-clean-gnattools
 clean-host: maybe-clean-lto-plugin
+clean-host: maybe-clean-bolt-plugin
 clean-host: maybe-clean-libcc1
 clean-host: maybe-clean-gotools
 clean-host: maybe-clean-libctf
@@ -2483,6 +2499,7 @@ distclean-host: maybe-distclean-utils
 distclean-host: maybe-distclean-c++tools
 distclean-host: maybe-distclean-gnattools
 distclean-host: maybe-distclean-lto-plugin
+distclean-host: maybe-distclean-bolt-plugin
 distclean-host: maybe-distclean-libcc1
 distclean-host: maybe-distclean-gotools
 distclean-host: maybe-distclean-libctf
@@ -2573,6 +2590,7 @@ maintainer-clean-host: maybe-maintainer-clean-utils
 maintainer-clean-host: maybe-maintainer-clean-c++tools
 maintainer-clean-host: maybe-maintainer-clean-gnattools
 maintainer-clean-host: maybe-maintainer-clean-lto-plugin
+maintainer-clean-host: maybe-maintainer-clean-bolt-plugin
 maintainer-clean-host: maybe-maintainer-clean-libcc1
 maintainer-clean-host: maybe-maintainer-clean-gotools
 maintainer-clean-host: maybe-maintainer-clean-libctf
@@ -2721,6 +2739,7 @@ check-host:  \
     maybe-check-c++tools \
     maybe-check-gnattools \
     maybe-check-lto-plugin \
+    maybe-check-bolt-plugin \
     maybe-check-libcc1 \
     maybe-check-gotools \
     maybe-check-libctf
@@ -2858,6 +2877,7 @@ install-host-nogcc:  \
     maybe-install-c++tools \
     maybe-install-gnattools \
     maybe-install-lto-plugin \
+    maybe-install-bolt-plugin \
     maybe-install-libcc1 \
     maybe-install-gotools \
     maybe-install-libctf
@@ -2913,6 +2933,7 @@ install-host:  \
     maybe-install-c++tools \
     maybe-install-gnattools \
     maybe-install-lto-plugin \
+    maybe-install-bolt-plugin \
     maybe-install-libcc1 \
     maybe-install-gotools \
     maybe-install-libctf
@@ -3023,6 +3044,7 @@ install-strip-host:  \
     maybe-install-strip-c++tools \
     maybe-install-strip-gnattools \
     maybe-install-strip-lto-plugin \
+    maybe-install-strip-bolt-plugin \
     maybe-install-strip-libcc1 \
     maybe-install-strip-gotools \
     maybe-install-strip-libctf
@@ -41493,6 +41515,1155 @@ maintainer-clean-lto-plugin:
 
 
 
+.PHONY: configure-bolt-plugin maybe-configure-bolt-plugin
+maybe-configure-bolt-plugin:
+@if gcc-bootstrap
+configure-bolt-plugin: stage_current
+@endif gcc-bootstrap
+@if bolt-plugin
+maybe-configure-bolt-plugin: configure-bolt-plugin
+configure-bolt-plugin: 
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	$(HOST_EXPORTS)  \
+	echo Configuring in $(HOST_SUBDIR)/bolt-plugin; \
+	cd "$(HOST_SUBDIR)/bolt-plugin" || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) \
+	  $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@ \
+	  || exit 1
+@endif bolt-plugin
+
+
+
+.PHONY: configure-stage1-bolt-plugin maybe-configure-stage1-bolt-plugin
+maybe-configure-stage1-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stage1-bolt-plugin: configure-stage1-bolt-plugin
+configure-stage1-bolt-plugin:
+	@[ $(current_stage) = stage1 ] || $(MAKE) stage1-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE1_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	CFLAGS="$(STAGE1_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGE1_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(LIBCFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage 1 in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	   \
+	  $(STAGE1_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stage2-bolt-plugin maybe-configure-stage2-bolt-plugin
+maybe-configure-stage2-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stage2-bolt-plugin: configure-stage2-bolt-plugin
+configure-stage2-bolt-plugin:
+	@[ $(current_stage) = stage2 ] || $(MAKE) stage2-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE2_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGE2_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGE2_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGE2_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage 2 in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGE2_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stage3-bolt-plugin maybe-configure-stage3-bolt-plugin
+maybe-configure-stage3-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stage3-bolt-plugin: configure-stage3-bolt-plugin
+configure-stage3-bolt-plugin:
+	@[ $(current_stage) = stage3 ] || $(MAKE) stage3-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE3_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGE3_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGE3_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGE3_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage 3 in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGE3_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stage4-bolt-plugin maybe-configure-stage4-bolt-plugin
+maybe-configure-stage4-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stage4-bolt-plugin: configure-stage4-bolt-plugin
+configure-stage4-bolt-plugin:
+	@[ $(current_stage) = stage4 ] || $(MAKE) stage4-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE4_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGE4_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGE4_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGE4_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage 4 in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGE4_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stageprofile-bolt-plugin maybe-configure-stageprofile-bolt-plugin
+maybe-configure-stageprofile-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stageprofile-bolt-plugin: configure-stageprofile-bolt-plugin
+configure-stageprofile-bolt-plugin:
+	@[ $(current_stage) = stageprofile ] || $(MAKE) stageprofile-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEprofile_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGEprofile_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGEprofile_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGEprofile_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage profile in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGEprofile_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stagetrain-bolt-plugin maybe-configure-stagetrain-bolt-plugin
+maybe-configure-stagetrain-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stagetrain-bolt-plugin: configure-stagetrain-bolt-plugin
+configure-stagetrain-bolt-plugin:
+	@[ $(current_stage) = stagetrain ] || $(MAKE) stagetrain-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEtrain_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGEtrain_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGEtrain_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGEtrain_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage train in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGEtrain_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stagefeedback-bolt-plugin maybe-configure-stagefeedback-bolt-plugin
+maybe-configure-stagefeedback-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stagefeedback-bolt-plugin: configure-stagefeedback-bolt-plugin
+configure-stagefeedback-bolt-plugin:
+	@[ $(current_stage) = stagefeedback ] || $(MAKE) stagefeedback-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEfeedback_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGEfeedback_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGEfeedback_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGEfeedback_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage feedback in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGEfeedback_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stageautoprofile-bolt-plugin maybe-configure-stageautoprofile-bolt-plugin
+maybe-configure-stageautoprofile-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stageautoprofile-bolt-plugin: configure-stageautoprofile-bolt-plugin
+configure-stageautoprofile-bolt-plugin:
+	@[ $(current_stage) = stageautoprofile ] || $(MAKE) stageautoprofile-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEautoprofile_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGEautoprofile_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGEautoprofile_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGEautoprofile_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage autoprofile in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGEautoprofile_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+.PHONY: configure-stageautofeedback-bolt-plugin maybe-configure-stageautofeedback-bolt-plugin
+maybe-configure-stageautofeedback-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-configure-stageautofeedback-bolt-plugin: configure-stageautofeedback-bolt-plugin
+configure-stageautofeedback-bolt-plugin:
+	@[ $(current_stage) = stageautofeedback ] || $(MAKE) stageautofeedback-start
+	@$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEautofeedback_TFLAGS)"; \
+	test ! -f $(HOST_SUBDIR)/bolt-plugin/Makefile || exit 0; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS) \
+	CFLAGS="$(STAGEautofeedback_CFLAGS)"; export CFLAGS; \
+	CXXFLAGS="$(STAGEautofeedback_CXXFLAGS)"; export CXXFLAGS; \
+	LIBCFLAGS="$(STAGEautofeedback_CFLAGS)"; export LIBCFLAGS;  \
+	echo Configuring stage autofeedback in $(HOST_SUBDIR)/bolt-plugin; \
+	$(SHELL) $(srcdir)/mkinstalldirs $(HOST_SUBDIR)/bolt-plugin; \
+	cd $(HOST_SUBDIR)/bolt-plugin || exit 1; \
+	case $(srcdir) in \
+	  /* | [A-Za-z]:[\\/]*) topdir=$(srcdir) ;; \
+	  *) topdir=`echo $(HOST_SUBDIR)/bolt-plugin/ | \
+		sed -e 's,\./,,g' -e 's,[^/]*/,../,g' `$(srcdir) ;; \
+	esac; \
+	module_srcdir=bolt-plugin; \
+	$(SHELL) $$s/$$module_srcdir/configure \
+	  --srcdir=$${topdir}/$$module_srcdir \
+	  $(HOST_CONFIGARGS) --build=${build_alias} --host=${host_alias} \
+	  --target=${target_alias} \
+	  --with-build-libsubdir=$(HOST_SUBDIR) \
+	  $(STAGEautofeedback_CONFIGURE_FLAGS) \
+	  --enable-shared @extra_linker_plugin_flags@ @extra_linker_plugin_configure_flags@
+@endif bolt-plugin-bootstrap
+
+
+
+
+
+.PHONY: all-bolt-plugin maybe-all-bolt-plugin
+maybe-all-bolt-plugin:
+@if gcc-bootstrap
+all-bolt-plugin: stage_current
+@endif gcc-bootstrap
+@if bolt-plugin
+TARGET-bolt-plugin=all
+maybe-all-bolt-plugin: all-bolt-plugin
+all-bolt-plugin: configure-bolt-plugin
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS)  \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) $(EXTRA_HOST_FLAGS) $(STAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		$(TARGET-bolt-plugin))
+@endif bolt-plugin
+
+
+
+.PHONY: all-stage1-bolt-plugin maybe-all-stage1-bolt-plugin
+.PHONY: clean-stage1-bolt-plugin maybe-clean-stage1-bolt-plugin
+maybe-all-stage1-bolt-plugin:
+maybe-clean-stage1-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stage1-bolt-plugin: all-stage1-bolt-plugin
+all-stage1: all-stage1-bolt-plugin
+TARGET-stage1-bolt-plugin = $(TARGET-bolt-plugin)
+all-stage1-bolt-plugin: configure-stage1-bolt-plugin
+	@[ $(current_stage) = stage1 ] || $(MAKE) stage1-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE1_TFLAGS)"; \
+	$(HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGE1_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGE1_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGE1_CXXFLAGS)" \
+		LIBCFLAGS="$(LIBCFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS)  \
+		$(STAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGE1_TFLAGS)"  \
+		$(TARGET-stage1-bolt-plugin)
+
+maybe-clean-stage1-bolt-plugin: clean-stage1-bolt-plugin
+clean-stage1: clean-stage1-bolt-plugin
+clean-stage1-bolt-plugin:
+	@if [ $(current_stage) = stage1 ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stage1-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stage1-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS)  \
+	$(STAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stage2-bolt-plugin maybe-all-stage2-bolt-plugin
+.PHONY: clean-stage2-bolt-plugin maybe-clean-stage2-bolt-plugin
+maybe-all-stage2-bolt-plugin:
+maybe-clean-stage2-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stage2-bolt-plugin: all-stage2-bolt-plugin
+all-stage2: all-stage2-bolt-plugin
+TARGET-stage2-bolt-plugin = $(TARGET-bolt-plugin)
+all-stage2-bolt-plugin: configure-stage2-bolt-plugin
+	@[ $(current_stage) = stage2 ] || $(MAKE) stage2-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE2_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGE2_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGE2_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGE2_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGE2_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGE2_TFLAGS)"  \
+		$(TARGET-stage2-bolt-plugin)
+
+maybe-clean-stage2-bolt-plugin: clean-stage2-bolt-plugin
+clean-stage2: clean-stage2-bolt-plugin
+clean-stage2-bolt-plugin:
+	@if [ $(current_stage) = stage2 ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stage2-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stage2-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stage3-bolt-plugin maybe-all-stage3-bolt-plugin
+.PHONY: clean-stage3-bolt-plugin maybe-clean-stage3-bolt-plugin
+maybe-all-stage3-bolt-plugin:
+maybe-clean-stage3-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stage3-bolt-plugin: all-stage3-bolt-plugin
+all-stage3: all-stage3-bolt-plugin
+TARGET-stage3-bolt-plugin = $(TARGET-bolt-plugin)
+all-stage3-bolt-plugin: configure-stage3-bolt-plugin
+	@[ $(current_stage) = stage3 ] || $(MAKE) stage3-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE3_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGE3_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGE3_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGE3_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGE3_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGE3_TFLAGS)"  \
+		$(TARGET-stage3-bolt-plugin)
+
+maybe-clean-stage3-bolt-plugin: clean-stage3-bolt-plugin
+clean-stage3: clean-stage3-bolt-plugin
+clean-stage3-bolt-plugin:
+	@if [ $(current_stage) = stage3 ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stage3-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stage3-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stage4-bolt-plugin maybe-all-stage4-bolt-plugin
+.PHONY: clean-stage4-bolt-plugin maybe-clean-stage4-bolt-plugin
+maybe-all-stage4-bolt-plugin:
+maybe-clean-stage4-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stage4-bolt-plugin: all-stage4-bolt-plugin
+all-stage4: all-stage4-bolt-plugin
+TARGET-stage4-bolt-plugin = $(TARGET-bolt-plugin)
+all-stage4-bolt-plugin: configure-stage4-bolt-plugin
+	@[ $(current_stage) = stage4 ] || $(MAKE) stage4-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGE4_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGE4_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGE4_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGE4_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGE4_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGE4_TFLAGS)"  \
+		$(TARGET-stage4-bolt-plugin)
+
+maybe-clean-stage4-bolt-plugin: clean-stage4-bolt-plugin
+clean-stage4: clean-stage4-bolt-plugin
+clean-stage4-bolt-plugin:
+	@if [ $(current_stage) = stage4 ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stage4-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stage4-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stageprofile-bolt-plugin maybe-all-stageprofile-bolt-plugin
+.PHONY: clean-stageprofile-bolt-plugin maybe-clean-stageprofile-bolt-plugin
+maybe-all-stageprofile-bolt-plugin:
+maybe-clean-stageprofile-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stageprofile-bolt-plugin: all-stageprofile-bolt-plugin
+all-stageprofile: all-stageprofile-bolt-plugin
+TARGET-stageprofile-bolt-plugin = $(TARGET-bolt-plugin)
+all-stageprofile-bolt-plugin: configure-stageprofile-bolt-plugin
+	@[ $(current_stage) = stageprofile ] || $(MAKE) stageprofile-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEprofile_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGEprofile_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGEprofile_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGEprofile_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGEprofile_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGEprofile_TFLAGS)"  \
+		$(TARGET-stageprofile-bolt-plugin)
+
+maybe-clean-stageprofile-bolt-plugin: clean-stageprofile-bolt-plugin
+clean-stageprofile: clean-stageprofile-bolt-plugin
+clean-stageprofile-bolt-plugin:
+	@if [ $(current_stage) = stageprofile ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stageprofile-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stageprofile-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stagetrain-bolt-plugin maybe-all-stagetrain-bolt-plugin
+.PHONY: clean-stagetrain-bolt-plugin maybe-clean-stagetrain-bolt-plugin
+maybe-all-stagetrain-bolt-plugin:
+maybe-clean-stagetrain-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stagetrain-bolt-plugin: all-stagetrain-bolt-plugin
+all-stagetrain: all-stagetrain-bolt-plugin
+TARGET-stagetrain-bolt-plugin = $(TARGET-bolt-plugin)
+all-stagetrain-bolt-plugin: configure-stagetrain-bolt-plugin
+	@[ $(current_stage) = stagetrain ] || $(MAKE) stagetrain-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEtrain_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGEtrain_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGEtrain_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGEtrain_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGEtrain_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGEtrain_TFLAGS)"  \
+		$(TARGET-stagetrain-bolt-plugin)
+
+maybe-clean-stagetrain-bolt-plugin: clean-stagetrain-bolt-plugin
+clean-stagetrain: clean-stagetrain-bolt-plugin
+clean-stagetrain-bolt-plugin:
+	@if [ $(current_stage) = stagetrain ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stagetrain-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stagetrain-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stagefeedback-bolt-plugin maybe-all-stagefeedback-bolt-plugin
+.PHONY: clean-stagefeedback-bolt-plugin maybe-clean-stagefeedback-bolt-plugin
+maybe-all-stagefeedback-bolt-plugin:
+maybe-clean-stagefeedback-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stagefeedback-bolt-plugin: all-stagefeedback-bolt-plugin
+all-stagefeedback: all-stagefeedback-bolt-plugin
+TARGET-stagefeedback-bolt-plugin = $(TARGET-bolt-plugin)
+all-stagefeedback-bolt-plugin: configure-stagefeedback-bolt-plugin
+	@[ $(current_stage) = stagefeedback ] || $(MAKE) stagefeedback-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEfeedback_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGEfeedback_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGEfeedback_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGEfeedback_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGEfeedback_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGEfeedback_TFLAGS)"  \
+		$(TARGET-stagefeedback-bolt-plugin)
+
+maybe-clean-stagefeedback-bolt-plugin: clean-stagefeedback-bolt-plugin
+clean-stagefeedback: clean-stagefeedback-bolt-plugin
+clean-stagefeedback-bolt-plugin:
+	@if [ $(current_stage) = stagefeedback ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stagefeedback-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stagefeedback-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stageautoprofile-bolt-plugin maybe-all-stageautoprofile-bolt-plugin
+.PHONY: clean-stageautoprofile-bolt-plugin maybe-clean-stageautoprofile-bolt-plugin
+maybe-all-stageautoprofile-bolt-plugin:
+maybe-clean-stageautoprofile-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stageautoprofile-bolt-plugin: all-stageautoprofile-bolt-plugin
+all-stageautoprofile: all-stageautoprofile-bolt-plugin
+TARGET-stageautoprofile-bolt-plugin = $(TARGET-bolt-plugin)
+all-stageautoprofile-bolt-plugin: configure-stageautoprofile-bolt-plugin
+	@[ $(current_stage) = stageautoprofile ] || $(MAKE) stageautoprofile-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEautoprofile_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$$s/gcc/config/i386/$(AUTO_PROFILE) \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGEautoprofile_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGEautoprofile_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGEautoprofile_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGEautoprofile_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGEautoprofile_TFLAGS)"  \
+		$(TARGET-stageautoprofile-bolt-plugin)
+
+maybe-clean-stageautoprofile-bolt-plugin: clean-stageautoprofile-bolt-plugin
+clean-stageautoprofile: clean-stageautoprofile-bolt-plugin
+clean-stageautoprofile-bolt-plugin:
+	@if [ $(current_stage) = stageautoprofile ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stageautoprofile-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stageautoprofile-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+.PHONY: all-stageautofeedback-bolt-plugin maybe-all-stageautofeedback-bolt-plugin
+.PHONY: clean-stageautofeedback-bolt-plugin maybe-clean-stageautofeedback-bolt-plugin
+maybe-all-stageautofeedback-bolt-plugin:
+maybe-clean-stageautofeedback-bolt-plugin:
+@if bolt-plugin-bootstrap
+maybe-all-stageautofeedback-bolt-plugin: all-stageautofeedback-bolt-plugin
+all-stageautofeedback: all-stageautofeedback-bolt-plugin
+TARGET-stageautofeedback-bolt-plugin = $(TARGET-bolt-plugin)
+all-stageautofeedback-bolt-plugin: configure-stageautofeedback-bolt-plugin
+	@[ $(current_stage) = stageautofeedback ] || $(MAKE) stageautofeedback-start
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	TFLAGS="$(STAGEautofeedback_TFLAGS)"; \
+	$(HOST_EXPORTS) \
+	$(POSTSTAGE1_HOST_EXPORTS)  \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	 \
+	$(MAKE) $(BASE_FLAGS_TO_PASS) \
+		CFLAGS="$(STAGEautofeedback_CFLAGS)" \
+		GENERATOR_CFLAGS="$(STAGEautofeedback_GENERATOR_CFLAGS)" \
+		CXXFLAGS="$(STAGEautofeedback_CXXFLAGS)" \
+		LIBCFLAGS="$(STAGEautofeedback_CFLAGS)" \
+		CFLAGS_FOR_TARGET="$(CFLAGS_FOR_TARGET)" \
+		CXXFLAGS_FOR_TARGET="$(CXXFLAGS_FOR_TARGET)" \
+		LIBCFLAGS_FOR_TARGET="$(LIBCFLAGS_FOR_TARGET)" \
+		$(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ \
+		TFLAGS="$(STAGEautofeedback_TFLAGS)" PERF_DATA=perf.data \
+		$(TARGET-stageautofeedback-bolt-plugin)
+
+maybe-clean-stageautofeedback-bolt-plugin: clean-stageautofeedback-bolt-plugin
+clean-stageautofeedback: clean-stageautofeedback-bolt-plugin
+clean-stageautofeedback-bolt-plugin:
+	@if [ $(current_stage) = stageautofeedback ]; then \
+	  [ -f $(HOST_SUBDIR)/bolt-plugin/Makefile ] || exit 0; \
+	else \
+	  [ -f $(HOST_SUBDIR)/stageautofeedback-bolt-plugin/Makefile ] || exit 0; \
+	  $(MAKE) stageautofeedback-start; \
+	fi; \
+	cd $(HOST_SUBDIR)/bolt-plugin && \
+	$(MAKE) $(EXTRA_HOST_FLAGS) $(POSTSTAGE1_FLAGS_TO_PASS) @extra_linker_plugin_flags@ clean
+@endif bolt-plugin-bootstrap
+
+
+
+
+
+.PHONY: check-bolt-plugin maybe-check-bolt-plugin
+maybe-check-bolt-plugin:
+@if bolt-plugin
+maybe-check-bolt-plugin: check-bolt-plugin
+
+check-bolt-plugin:
+	@: $(MAKE); $(unstage)
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) $(EXTRA_HOST_EXPORTS) \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(FLAGS_TO_PASS) @extra_linker_plugin_flags@ $(EXTRA_BOOTSTRAP_FLAGS) check)
+
+@endif bolt-plugin
+
+.PHONY: install-bolt-plugin maybe-install-bolt-plugin
+maybe-install-bolt-plugin:
+@if bolt-plugin
+maybe-install-bolt-plugin: install-bolt-plugin
+
+install-bolt-plugin: installdirs
+	@: $(MAKE); $(unstage)
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(FLAGS_TO_PASS) @extra_linker_plugin_flags@ install)
+
+@endif bolt-plugin
+
+.PHONY: install-strip-bolt-plugin maybe-install-strip-bolt-plugin
+maybe-install-strip-bolt-plugin:
+@if bolt-plugin
+maybe-install-strip-bolt-plugin: install-strip-bolt-plugin
+
+install-strip-bolt-plugin: installdirs
+	@: $(MAKE); $(unstage)
+	@r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(FLAGS_TO_PASS) @extra_linker_plugin_flags@ install-strip)
+
+@endif bolt-plugin
+
+# Other targets (info, dvi, pdf, etc.)
+
+.PHONY: maybe-info-bolt-plugin info-bolt-plugin
+maybe-info-bolt-plugin:
+@if bolt-plugin
+maybe-info-bolt-plugin: info-bolt-plugin
+
+info-bolt-plugin: \
+    configure-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing info in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          info) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-dvi-bolt-plugin dvi-bolt-plugin
+maybe-dvi-bolt-plugin:
+@if bolt-plugin
+maybe-dvi-bolt-plugin: dvi-bolt-plugin
+
+dvi-bolt-plugin: \
+    configure-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing dvi in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          dvi) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-pdf-bolt-plugin pdf-bolt-plugin
+maybe-pdf-bolt-plugin:
+@if bolt-plugin
+maybe-pdf-bolt-plugin: pdf-bolt-plugin
+
+pdf-bolt-plugin: \
+    configure-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing pdf in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          pdf) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-html-bolt-plugin html-bolt-plugin
+maybe-html-bolt-plugin:
+@if bolt-plugin
+maybe-html-bolt-plugin: html-bolt-plugin
+
+html-bolt-plugin: \
+    configure-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing html in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          html) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-TAGS-bolt-plugin TAGS-bolt-plugin
+maybe-TAGS-bolt-plugin:
+@if bolt-plugin
+maybe-TAGS-bolt-plugin: TAGS-bolt-plugin
+
+TAGS-bolt-plugin: \
+    configure-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing TAGS in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          TAGS) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-install-info-bolt-plugin install-info-bolt-plugin
+maybe-install-info-bolt-plugin:
+@if bolt-plugin
+maybe-install-info-bolt-plugin: install-info-bolt-plugin
+
+install-info-bolt-plugin: \
+    configure-bolt-plugin \
+    info-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing install-info in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          install-info) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-install-dvi-bolt-plugin install-dvi-bolt-plugin
+maybe-install-dvi-bolt-plugin:
+@if bolt-plugin
+maybe-install-dvi-bolt-plugin: install-dvi-bolt-plugin
+
+install-dvi-bolt-plugin: \
+    configure-bolt-plugin \
+    dvi-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing install-dvi in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          install-dvi) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-install-pdf-bolt-plugin install-pdf-bolt-plugin
+maybe-install-pdf-bolt-plugin:
+@if bolt-plugin
+maybe-install-pdf-bolt-plugin: install-pdf-bolt-plugin
+
+install-pdf-bolt-plugin: \
+    configure-bolt-plugin \
+    pdf-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing install-pdf in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          install-pdf) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-install-html-bolt-plugin install-html-bolt-plugin
+maybe-install-html-bolt-plugin:
+@if bolt-plugin
+maybe-install-html-bolt-plugin: install-html-bolt-plugin
+
+install-html-bolt-plugin: \
+    configure-bolt-plugin \
+    html-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing install-html in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          install-html) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-installcheck-bolt-plugin installcheck-bolt-plugin
+maybe-installcheck-bolt-plugin:
+@if bolt-plugin
+maybe-installcheck-bolt-plugin: installcheck-bolt-plugin
+
+installcheck-bolt-plugin: \
+    configure-bolt-plugin 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing installcheck in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          installcheck) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-mostlyclean-bolt-plugin mostlyclean-bolt-plugin
+maybe-mostlyclean-bolt-plugin:
+@if bolt-plugin
+maybe-mostlyclean-bolt-plugin: mostlyclean-bolt-plugin
+
+mostlyclean-bolt-plugin: 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing mostlyclean in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          mostlyclean) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-clean-bolt-plugin clean-bolt-plugin
+maybe-clean-bolt-plugin:
+@if bolt-plugin
+maybe-clean-bolt-plugin: clean-bolt-plugin
+
+clean-bolt-plugin: 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing clean in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          clean) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-distclean-bolt-plugin distclean-bolt-plugin
+maybe-distclean-bolt-plugin:
+@if bolt-plugin
+maybe-distclean-bolt-plugin: distclean-bolt-plugin
+
+distclean-bolt-plugin: 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing distclean in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          distclean) \
+	  || exit 1
+
+@endif bolt-plugin
+
+.PHONY: maybe-maintainer-clean-bolt-plugin maintainer-clean-bolt-plugin
+maybe-maintainer-clean-bolt-plugin:
+@if bolt-plugin
+maybe-maintainer-clean-bolt-plugin: maintainer-clean-bolt-plugin
+
+maintainer-clean-bolt-plugin: 
+	@[ -f ./bolt-plugin/Makefile ] || exit 0; \
+	r=`${PWD_COMMAND}`; export r; \
+	s=`cd $(srcdir); ${PWD_COMMAND}`; export s; \
+	$(HOST_EXPORTS) \
+	for flag in $(EXTRA_HOST_FLAGS) @extra_linker_plugin_flags@; do \
+	  eval `echo "$$flag" | sed -e "s|^\([^=]*\)=\(.*\)|\1='\2'; export \1|"`; \
+	done; \
+	echo "Doing maintainer-clean in bolt-plugin"; \
+	(cd $(HOST_SUBDIR)/bolt-plugin && \
+	  $(MAKE) $(BASE_FLAGS_TO_PASS) "AR=$${AR}" "AS=$${AS}" \
+	          "CC=$${CC}" "CXX=$${CXX}" "LD=$${LD}" "NM=$${NM}" \
+	          "RANLIB=$${RANLIB}" \
+	          "DLLTOOL=$${DLLTOOL}" "WINDRES=$${WINDRES}" "WINDMC=$${WINDMC}" \
+	          maintainer-clean) \
+	  || exit 1
+
+@endif bolt-plugin
+
+
+
 .PHONY: configure-libcc1 maybe-configure-libcc1
 maybe-configure-libcc1:
 @if gcc-bootstrap
@@ -61940,6 +63111,11 @@ stage1-start::
 	  mkdir stage1-lto-plugin; \
 	mv stage1-lto-plugin lto-plugin
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stage1-bolt-plugin ] || \
+	  mkdir stage1-bolt-plugin; \
+	mv stage1-bolt-plugin bolt-plugin
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stage1-libctf ] || \
 	  mkdir stage1-libctf; \
@@ -62065,6 +63241,11 @@ stage1-end::
 	  cd $(HOST_SUBDIR); mv lto-plugin stage1-lto-plugin; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stage1-bolt-plugin; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stage1-libctf; \
@@ -62256,6 +63437,12 @@ stage2-start::
 	mv stage2-lto-plugin lto-plugin; \
 	mv stage1-lto-plugin prev-lto-plugin || test -f stage1-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stage2-bolt-plugin ] || \
+	  mkdir stage2-bolt-plugin; \
+	mv stage2-bolt-plugin bolt-plugin; \
+	mv stage1-bolt-plugin prev-bolt-plugin || test -f stage1-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stage2-libctf ] || \
 	  mkdir stage2-libctf; \
@@ -62406,6 +63593,12 @@ stage2-end::
 	  mv prev-lto-plugin stage1-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stage2-bolt-plugin; \
+	  mv prev-bolt-plugin stage1-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stage2-libctf; \
@@ -62622,6 +63815,12 @@ stage3-start::
 	mv stage3-lto-plugin lto-plugin; \
 	mv stage2-lto-plugin prev-lto-plugin || test -f stage2-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stage3-bolt-plugin ] || \
+	  mkdir stage3-bolt-plugin; \
+	mv stage3-bolt-plugin bolt-plugin; \
+	mv stage2-bolt-plugin prev-bolt-plugin || test -f stage2-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stage3-libctf ] || \
 	  mkdir stage3-libctf; \
@@ -62772,6 +63971,12 @@ stage3-end::
 	  mv prev-lto-plugin stage2-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stage3-bolt-plugin; \
+	  mv prev-bolt-plugin stage2-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stage3-libctf; \
@@ -63044,6 +64249,12 @@ stage4-start::
 	mv stage4-lto-plugin lto-plugin; \
 	mv stage3-lto-plugin prev-lto-plugin || test -f stage3-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stage4-bolt-plugin ] || \
+	  mkdir stage4-bolt-plugin; \
+	mv stage4-bolt-plugin bolt-plugin; \
+	mv stage3-bolt-plugin prev-bolt-plugin || test -f stage3-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stage4-libctf ] || \
 	  mkdir stage4-libctf; \
@@ -63194,6 +64405,12 @@ stage4-end::
 	  mv prev-lto-plugin stage3-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stage4-bolt-plugin; \
+	  mv prev-bolt-plugin stage3-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stage4-libctf; \
@@ -63454,6 +64671,12 @@ stageprofile-start::
 	mv stageprofile-lto-plugin lto-plugin; \
 	mv stage1-lto-plugin prev-lto-plugin || test -f stage1-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stageprofile-bolt-plugin ] || \
+	  mkdir stageprofile-bolt-plugin; \
+	mv stageprofile-bolt-plugin bolt-plugin; \
+	mv stage1-bolt-plugin prev-bolt-plugin || test -f stage1-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stageprofile-libctf ] || \
 	  mkdir stageprofile-libctf; \
@@ -63604,6 +64827,12 @@ stageprofile-end::
 	  mv prev-lto-plugin stage1-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stageprofile-bolt-plugin; \
+	  mv prev-bolt-plugin stage1-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stageprofile-libctf; \
@@ -63797,6 +65026,12 @@ stagetrain-start::
 	mv stagetrain-lto-plugin lto-plugin; \
 	mv stageprofile-lto-plugin prev-lto-plugin || test -f stageprofile-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stagetrain-bolt-plugin ] || \
+	  mkdir stagetrain-bolt-plugin; \
+	mv stagetrain-bolt-plugin bolt-plugin; \
+	mv stageprofile-bolt-plugin prev-bolt-plugin || test -f stageprofile-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stagetrain-libctf ] || \
 	  mkdir stagetrain-libctf; \
@@ -63947,6 +65182,12 @@ stagetrain-end::
 	  mv prev-lto-plugin stageprofile-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stagetrain-bolt-plugin; \
+	  mv prev-bolt-plugin stageprofile-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stagetrain-libctf; \
@@ -64140,6 +65381,12 @@ stagefeedback-start::
 	mv stagefeedback-lto-plugin lto-plugin; \
 	mv stagetrain-lto-plugin prev-lto-plugin || test -f stagetrain-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stagefeedback-bolt-plugin ] || \
+	  mkdir stagefeedback-bolt-plugin; \
+	mv stagefeedback-bolt-plugin bolt-plugin; \
+	mv stagetrain-bolt-plugin prev-bolt-plugin || test -f stagetrain-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stagefeedback-libctf ] || \
 	  mkdir stagefeedback-libctf; \
@@ -64290,6 +65537,12 @@ stagefeedback-end::
 	  mv prev-lto-plugin stagetrain-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stagefeedback-bolt-plugin; \
+	  mv prev-bolt-plugin stagetrain-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stagefeedback-libctf; \
@@ -64506,6 +65759,12 @@ stageautoprofile-start::
 	mv stageautoprofile-lto-plugin lto-plugin; \
 	mv stage1-lto-plugin prev-lto-plugin || test -f stage1-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stageautoprofile-bolt-plugin ] || \
+	  mkdir stageautoprofile-bolt-plugin; \
+	mv stageautoprofile-bolt-plugin bolt-plugin; \
+	mv stage1-bolt-plugin prev-bolt-plugin || test -f stage1-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stageautoprofile-libctf ] || \
 	  mkdir stageautoprofile-libctf; \
@@ -64656,6 +65915,12 @@ stageautoprofile-end::
 	  mv prev-lto-plugin stage1-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stageautoprofile-bolt-plugin; \
+	  mv prev-bolt-plugin stage1-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stageautoprofile-libctf; \
@@ -64849,6 +66114,12 @@ stageautofeedback-start::
 	mv stageautofeedback-lto-plugin lto-plugin; \
 	mv stageautoprofile-lto-plugin prev-lto-plugin || test -f stageautoprofile-lean 
 @endif lto-plugin
+@if bolt-plugin
+	@cd $(HOST_SUBDIR); [ -d stageautofeedback-bolt-plugin ] || \
+	  mkdir stageautofeedback-bolt-plugin; \
+	mv stageautofeedback-bolt-plugin bolt-plugin; \
+	mv stageautoprofile-bolt-plugin prev-bolt-plugin || test -f stageautoprofile-lean 
+@endif bolt-plugin
 @if libctf
 	@cd $(HOST_SUBDIR); [ -d stageautofeedback-libctf ] || \
 	  mkdir stageautofeedback-libctf; \
@@ -64999,6 +66270,12 @@ stageautofeedback-end::
 	  mv prev-lto-plugin stageautoprofile-lto-plugin; : ; \
 	fi
 @endif lto-plugin
+@if bolt-plugin
+	@if test -d $(HOST_SUBDIR)/bolt-plugin; then \
+	  cd $(HOST_SUBDIR); mv bolt-plugin stageautofeedback-bolt-plugin; \
+	  mv prev-bolt-plugin stageautoprofile-bolt-plugin; : ; \
+	fi
+@endif bolt-plugin
 @if libctf
 	@if test -d $(HOST_SUBDIR)/libctf; then \
 	  cd $(HOST_SUBDIR); mv libctf stageautofeedback-libctf; \
@@ -65321,6 +66598,16 @@ configure-stagetrain-gcc: maybe-all-stagetrain-lto-plugin
 configure-stagefeedback-gcc: maybe-all-stagefeedback-lto-plugin
 configure-stageautoprofile-gcc: maybe-all-stageautoprofile-lto-plugin
 configure-stageautofeedback-gcc: maybe-all-stageautofeedback-lto-plugin
+configure-gcc: maybe-all-bolt-plugin
+configure-stage1-gcc: maybe-all-stage1-bolt-plugin
+configure-stage2-gcc: maybe-all-stage2-bolt-plugin
+configure-stage3-gcc: maybe-all-stage3-bolt-plugin
+configure-stage4-gcc: maybe-all-stage4-bolt-plugin
+configure-stageprofile-gcc: maybe-all-stageprofile-bolt-plugin
+configure-stagetrain-gcc: maybe-all-stagetrain-bolt-plugin
+configure-stagefeedback-gcc: maybe-all-stagefeedback-bolt-plugin
+configure-stageautoprofile-gcc: maybe-all-stageautoprofile-bolt-plugin
+configure-stageautofeedback-gcc: maybe-all-stageautofeedback-bolt-plugin
 configure-gcc: maybe-all-binutils
 configure-stage1-gcc: maybe-all-stage1-binutils
 configure-stage2-gcc: maybe-all-stage2-binutils
@@ -65571,6 +66858,16 @@ all-stagetrain-gcc: maybe-all-stagetrain-lto-plugin
 all-stagefeedback-gcc: maybe-all-stagefeedback-lto-plugin
 all-stageautoprofile-gcc: maybe-all-stageautoprofile-lto-plugin
 all-stageautofeedback-gcc: maybe-all-stageautofeedback-lto-plugin
+all-gcc: maybe-all-bolt-plugin
+all-stage1-gcc: maybe-all-stage1-bolt-plugin
+all-stage2-gcc: maybe-all-stage2-bolt-plugin
+all-stage3-gcc: maybe-all-stage3-bolt-plugin
+all-stage4-gcc: maybe-all-stage4-bolt-plugin
+all-stageprofile-gcc: maybe-all-stageprofile-bolt-plugin
+all-stagetrain-gcc: maybe-all-stagetrain-bolt-plugin
+all-stagefeedback-gcc: maybe-all-stagefeedback-bolt-plugin
+all-stageautoprofile-gcc: maybe-all-stageautoprofile-bolt-plugin
+all-stageautofeedback-gcc: maybe-all-stageautofeedback-bolt-plugin
 all-gcc: maybe-all-libiconv
 all-stage1-gcc: maybe-all-stage1-libiconv
 all-stage2-gcc: maybe-all-stage2-libiconv
@@ -65623,8 +66920,10 @@ html-stageautoprofile-gcc: maybe-all-build-libiberty
 html-stageautofeedback-gcc: maybe-all-build-libiberty
 install-gcc: maybe-install-fixincludes
 install-gcc: maybe-install-lto-plugin
+install-gcc: maybe-install-bolt-plugin
 install-strip-gcc: maybe-install-strip-fixincludes
 install-strip-gcc: maybe-install-strip-lto-plugin
+install-strip-gcc: maybe-install-strip-bolt-plugin
 configure-libcpp: configure-libiberty
 configure-stage1-libcpp: configure-stage1-libiberty
 configure-stage2-libcpp: configure-stage2-libiberty
@@ -65716,6 +67015,26 @@ all-stagetrain-lto-plugin: maybe-all-stagetrain-libiberty-linker-plugin
 all-stagefeedback-lto-plugin: maybe-all-stagefeedback-libiberty-linker-plugin
 all-stageautoprofile-lto-plugin: maybe-all-stageautoprofile-libiberty-linker-plugin
 all-stageautofeedback-lto-plugin: maybe-all-stageautofeedback-libiberty-linker-plugin
+all-bolt-plugin: maybe-all-libiberty
+all-stage1-bolt-plugin: maybe-all-stage1-libiberty
+all-stage2-bolt-plugin: maybe-all-stage2-libiberty
+all-stage3-bolt-plugin: maybe-all-stage3-libiberty
+all-stage4-bolt-plugin: maybe-all-stage4-libiberty
+all-stageprofile-bolt-plugin: maybe-all-stageprofile-libiberty
+all-stagetrain-bolt-plugin: maybe-all-stagetrain-libiberty
+all-stagefeedback-bolt-plugin: maybe-all-stagefeedback-libiberty
+all-stageautoprofile-bolt-plugin: maybe-all-stageautoprofile-libiberty
+all-stageautofeedback-bolt-plugin: maybe-all-stageautofeedback-libiberty
+all-bolt-plugin: maybe-all-libiberty-linker-plugin
+all-stage1-bolt-plugin: maybe-all-stage1-libiberty-linker-plugin
+all-stage2-bolt-plugin: maybe-all-stage2-libiberty-linker-plugin
+all-stage3-bolt-plugin: maybe-all-stage3-libiberty-linker-plugin
+all-stage4-bolt-plugin: maybe-all-stage4-libiberty-linker-plugin
+all-stageprofile-bolt-plugin: maybe-all-stageprofile-libiberty-linker-plugin
+all-stagetrain-bolt-plugin: maybe-all-stagetrain-libiberty-linker-plugin
+all-stagefeedback-bolt-plugin: maybe-all-stagefeedback-libiberty-linker-plugin
+all-stageautoprofile-bolt-plugin: maybe-all-stageautoprofile-libiberty-linker-plugin
+all-stageautofeedback-bolt-plugin: maybe-all-stageautofeedback-libiberty-linker-plugin
 all-gotools: maybe-all-target-libgo
 configure-intl: maybe-all-libiconv
 configure-stage1-intl: maybe-all-stage1-libiconv
