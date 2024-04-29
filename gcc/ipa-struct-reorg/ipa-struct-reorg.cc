@@ -4366,6 +4366,17 @@ ipa_struct_reorg::maybe_record_call (cgraph_node *node, gcall *stmt)
 
       argtype = argtype ? TREE_CHAIN (argtype) : NULL_TREE;
     }
+
+  /* Types escapes via a argument at empty or inlined function.  */
+  cgraph_node *callee = node->get_edge (stmt)->callee;
+  if (!gimple_call_builtin_p (stmt, BUILT_IN_FREE)
+      && gimple_call_num_args (stmt)
+      && callee && (!callee->has_gimple_body_p () || callee->inlined_to))
+    {
+      for (unsigned i = 0; i < gimple_call_num_args (stmt); i++)
+	mark_type_as_escape (TREE_TYPE (gimple_call_arg (stmt, i)),
+			      escape_var_arg_function);
+    }
 }
 
 void
@@ -8068,6 +8079,11 @@ ipa_struct_reorg::rewrite_functions (void)
 	      if (dump_file && (dump_flags & TDF_DETAILS))
 		{
 		  fprintf (dump_file, "\nNo rewrite:\n");
+		  if (current_function_decl == NULL)
+		    {
+		      fprintf (dump_file, "\ncurrent_function_decl == NULL\n");
+		      continue;
+		    }
 		  if (current_function_decl)
 		    dump_function_to_file (current_function_decl, dump_file,
 					   dump_flags | TDF_VOPS);
