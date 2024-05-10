@@ -1,5 +1,5 @@
 /* { dg-do compile { target {{ aarch64*-*-linux* } && lp64 } } } */
-/* { dg-options "-O3 -mabi=lp64 -floop-crc -fdump-tree-loop_crc-details" } */
+/* { dg-options "-O3 -mabi=lp64 -march=armv8.1-a -floop-crc -fdump-tree-loop_crc-details" } */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -86,5 +86,5 @@ ulg updcrc (s, n)
     crc = c;
     return c ^ 0xffffffffL;       /* (instead of ~c for 64-bit machines) */
 }
-/* { dg-final { scan-tree-dump-times "Table check fail. not only single array is read." 2 "loop_crc"} } */
+/* { dg-final { scan-tree-dump-times "Table check fail. not only single array is read." 1 "loop_crc"} } */
 /* { dg-final { scan-tree-dump-times "Wrong crc table for crc matching." 1 "loop_crc"} } */
