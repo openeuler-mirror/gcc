@@ -1432,8 +1432,14 @@ remap_gimple_op_r (tree *tp, int *walk_subtrees, void *data)
 	  TREE_THIS_VOLATILE (*tp) = TREE_THIS_VOLATILE (old);
 	  TREE_SIDE_EFFECTS (*tp) = TREE_SIDE_EFFECTS (old);
 	  TREE_NO_WARNING (*tp) = TREE_NO_WARNING (old);
-	  /* TODO: maybe support this case.  */
-	  gcc_assert (MR_DEPENDENCE_CLIQUE (old) == 0);
+	  if (MR_DEPENDENCE_CLIQUE (old) != 0)
+	    {
+	      MR_DEPENDENCE_CLIQUE (*tp) = MR_DEPENDENCE_CLIQUE (old);
+	      MR_DEPENDENCE_BASE (*tp) = MR_DEPENDENCE_BASE (old);
+	      if (dump_file)
+		fprintf (dump_file, "Copy clique=%d base=%d info.\n",
+			 MR_DEPENDENCE_CLIQUE (old), MR_DEPENDENCE_BASE (old));
+	    }
 	  /* We cannot propagate the TREE_THIS_NOTRAP flag if we have
 	     remapped a parameter as the property might be valid only
 	     for the parameter itself.  */
