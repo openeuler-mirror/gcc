@@ -76,7 +76,6 @@ main ()
       node->potential = i + 1;
       arc->cost = arc->head->potential;
       arc->tail = node->sibling;
-      arc->head = arc->tail;
       node = node + 1;
       arc = arc + 1;
     }
