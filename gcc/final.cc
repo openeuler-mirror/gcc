@@ -4272,9 +4272,9 @@ leaf_renumber_regs_insn (rtx in_rtx)
 
 #define ASM_FDO_CALLER_FLAG ".fdo.caller "
 #define ASM_FDO_CALLER_SIZE_FLAG ".fdo.caller.size "
-#define ASM_FDO_CALLER_BIND_FLAG ".fdo.caller.bind"
+#define ASM_FDO_CALLER_BIND_FLAG ".fdo.caller.bind "
 
-#define ASM_FDO_CALLEE_FLAG ".fdo.callee"
+#define ASM_FDO_CALLEE_FLAG ".fdo.callee "
 
 /* Return the relative offset address of the start instruction of BB,
    return -1 if it is empty instruction.    */
