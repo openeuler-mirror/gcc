@@ -9741,6 +9741,14 @@ execute_fixup_cfg (void)
   /* Same scaling is also done by ipa_merge_profiles.  */
   profile_count num = node->count;
   profile_count den = ENTRY_BLOCK_PTR_FOR_FN (cfun)->count;
+  /* When autofdo uses PMU as the sampling unit, the number of
+     node can not be obtained directly, sometimes it will be zero,
+     but the execution number for function should at least be 1. We
+     set num be den here to make sure the num will not decrease.  */
+  if (num == profile_count::zero ().afdo () && den.quality () == profile_quality::AFDO)
+    {
+      num = den;
+    }
   bool scale = num.initialized_p () && !(num == den);
   auto_bitmap dce_ssa_names;
 

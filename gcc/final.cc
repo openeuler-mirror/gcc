@@ -4604,7 +4604,7 @@ dump_profile_to_elf_sections ()
   /* Return if no feedback data.    */
   if (!flag_profile_use && !flag_auto_profile)
     {
-      error ("-fauto-bolt should use with -profile-use or -fauto-profile");
+      error ("-fauto-bolt should use with -fprofile-use or -fauto-profile");
       return;
     }
   
