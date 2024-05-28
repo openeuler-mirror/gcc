@@ -1,5 +1,5 @@
 ! { dg-do compile { target { aarch64*-*-linux* } } }
-! { dg-options "-O3 -march=armv8.2-a+sve -funroll-loops -ffast-math -static -fllc-allocate -fdump-tree-llc_allocate-details-lineno --param branch-prob-threshold=50" }
+! { dg-options "-O3 -march=armv8.2-a+sve -funroll-loops -ffast-math -static -fllc-allocate -fdump-tree-llc_allocate-details-lineno --param branch-prob-threshold=50 --param filter-mode=0" }
 
 program main
 
@@ -198,16 +198,16 @@ END SUBROUTINE calc_p_rho
 ! { dg-final { scan-tree-dump-times "\{ (?:\\d+\\(\\d+\\) ){4}\}" 1 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-not   ", size: (?!(0\.000000))" "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times ", size: 0\.000000" 28 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d p \\(0.000000, 3, 0\\) : 8" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d pm1 \\(0.000000, 2, 0\\) : 5" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d ph \\(0.000000, 2, 0\\) : 4" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d al \\(0.000000, 1, 0\\) : 3" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d alt \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d t_1 \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d t_2 \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d c2a \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d mu \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "\\d muts \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tp\\t\\(0.000000, 3, 3, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tpm1\\t\\(0.000000, 3, 2, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tph\\t\\(0.000000, 3, 2, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tal\\t\\(0.000000, 3, 1, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\talt\\t\\(0.000000, 3, 1, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tt_1\\t\\(0.000000, 3, 1, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tt_2\\t\\(0.000000, 3, 1, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tc2a\\t\\(0.000000, 3, 1, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tmu\\t\\(0.000000, 2, 1, 0\\)" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "\\d\\tmuts\\t\\(0.000000, 2, 1, 0\\)" 2 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "runtime issue" 2 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "static issue" 2 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "insert svprfd" 2 "llc_allocate" } }

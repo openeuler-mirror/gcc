@@ -1059,5 +1059,21 @@ Common Joined UInteger Var(param_outer_loop_num) Init(1) IntegerRange(1, 10) Par
 Maximum number of outer loops allowed to extend outer loops for loops that
 cannot recognize inner loop boundaries.
 
+-param=filter-mode=
+Common Joined UInteger Var(param_filter_mode) Init(1) IntegerRange(0, 1) Param
+Set kernel filtering mode. Use basic block count by default; use branch probability mode when filter mode is turned off.
+
+-param=transfer-footprint=
+Common Joined UInteger Var(param_transfer_footprint) Init(1) IntegerRange(0, 1) Param
+Allow transferring the firstly calculated footprint expression to the target memory reference
+from which it is impossible to retrieve the foortprint.
+
+-param=llc-allocate-func-topn=
+Common Joined UInteger Var(param_llc_allocate_func_topn) Init(0) Param Optimization
+TopN functions of pmu counts to be analyzed in LLC allocation.
+
+-param=llc-allocate-func-counts-threshold=
+Common Joined UInteger Var(param_llc_allocate_func_counts_threshold) Init(1) Param Optimization
+Threshold functions of pmu counts to be analyzed in LLC allocation.
 
 ; This comment is to ensure we retain the blank line above.

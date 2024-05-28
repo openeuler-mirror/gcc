@@ -2695,6 +2695,16 @@ common_handle_option (struct gcc_options *opts,
 	}
       break;
 
+    case OPT_fadditional_profile_:
+      opts->x_additional_profile_file = xstrdup (arg);
+      opts->x_flag_additional_profile = true;
+      value = true;
+      /* No break here - do -fadditional-profile processing. */
+      /* FALLTHRU */
+    case OPT_fadditional_profile:
+      opts->x_flag_ipa_extend_auto_profile = value;
+      break;
+
     case OPT_fipa_struct_reorg_:
       /* No break here - do -fipa-struct-reorg processing.  */
       /* FALLTHRU.  */
