@@ -3271,8 +3271,19 @@ issue_mask_prefetch (gimple *stmt)
     target = gimple_call_arg (stmt, 3);
   else if (gimple_call_internal_fn (stmt) == IFN_MASK_LOAD)
     target = gimple_call_lhs (stmt);
-  /* 4: PLDL3KEEP.  */
-  tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4);
+  tree prfop = NULL_TREE;
+  if (param_llc_level == 3)
+    /* for simulation, 4: PLDL3KEEP. */
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4);
+  else if (param_llc_level == 4)
+    /* 6: PLDL4KEEP.  */
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6);
+  else
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "LLC cache levels are illegal.\n");
+      return;
+    }
 
   /* add offset.  */
   gimple_stmt_iterator si = gsi_for_stmt (stmt);
@@ -3310,9 +3321,19 @@ issue_mask_gather_prefetch (gimple *stmt)
   tree scale = gimple_call_arg (stmt, 2);
   tree zero = gimple_call_arg (stmt, 3);
   tree final_mask = gimple_call_arg (stmt, 4);
-  tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4);
-  tree target = gimple_call_lhs (stmt);
+  tree prfop = NULL_TREE;
+  if (param_llc_level == 3) // for simulation
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4); // 4: PLDL3KEEP
+  else if (param_llc_level == 4)
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6); // 6: PLDL4KEEP
+  else
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "LLC cache levels are illegal.\n");
+      return;
+    }
 
+  tree target = gimple_call_lhs (stmt);
   /* add offset.  */
   gimple_stmt_iterator si = gsi_for_stmt (stmt);
   if (target == NULL_TREE)
@@ -3373,8 +3394,27 @@ issue_builtin_prefetch (data_ref &mem_ref)
   /* __builtin_prefetch (_68, 0, 1);
      1st param: *addr, 2nd param: write/read (1/0), 3rd param: temporal locality
      (high means strong locality) */
-  gcall *call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH), 3,
-				   addr, integer_zero_node, integer_one_node);
+  gcall *call = NULL;
+  if (param_llc_level == 3)
+    {
+      /* for simulation.
+         BUILT_IN_PREFETCH (addr, rw, locality).  */
+      call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
+                                3, addr, integer_zero_node, integer_one_node);
+    }
+  else if (param_llc_level == 4)
+    {
+        tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6);
+        call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH_FULL),
+				3, addr, integer_zero_node, prfop);
+    }
+  else
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "LLC cache levels are illegal.\n");
+      return;
+    }
+
   gsi_insert_after (&si, call, GSI_SAME_STMT);
   update_ssa (TODO_update_ssa_only_virtuals);
 }
@@ -3724,7 +3764,7 @@ issue_llc_hint (std::vector<ref_group> &ref_groups,
     fprintf (dump_file, "issue_llc_hint:\n");
 
   /* 1) If the issue-topn and force-issue options are available, top N var is
-	forcibly allocated and no runtime branch is generated.
+	forcibly allocated then no runtime branch is generated.
      2) If the issue-topn option is available and the size of top N var is
 	statically known, top N is statically allocated and no runtime branch
 	is generated.

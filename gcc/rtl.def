@@ -282,6 +282,15 @@ DEF_RTL_EXPR(ADDR_DIFF_VEC, "addr_diff_vec", "eEee0", RTX_EXTRA)
    whose prefetch instructions do not support them.  */
 DEF_RTL_EXPR(PREFETCH, "prefetch", "eee", RTX_EXTRA)
 
+/* Memory prefetch, with attributes supported on some targets.
+   Operand 1 is the address of the memory to fetch.
+   Operand 2 is 1 for a write access, 0 otherwise.
+   Operand 3 is the level of prfop.
+
+   The attributes specified by operands 2 and 3 are ignored for targets
+   whose prefetch instructions do not support them.  */
+DEF_RTL_EXPR(PREFETCH_FULL, "prefetch_full", "eee", RTX_EXTRA)
+
 /* ----------------------------------------------------------------------
    At the top level of an instruction (perhaps under PARALLEL).
    ---------------------------------------------------------------------- */

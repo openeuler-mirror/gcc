@@ -72,6 +72,7 @@ deletable_insn_p_1 (rtx body)
   switch (GET_CODE (body))
     {
     case PREFETCH:
+    case PREFETCH_FULL:
     case TRAP_IF:
       /* The UNSPEC case was added here because the ia-64 claims that
 	 USEs do not work after reload and generates UNSPECS rather

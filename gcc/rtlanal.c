@@ -1195,6 +1195,7 @@ reg_referenced_p (const_rtx x, const_rtx body)
       return reg_overlap_mentioned_p (x, TRAP_CONDITION (body));
 
     case PREFETCH:
+    case PREFETCH_FULL:
       return reg_overlap_mentioned_p (x, XEXP (body, 0));
 
     case UNSPEC:
@@ -2007,6 +2008,7 @@ note_uses (rtx *pbody, void (*fun) (rtx *, void *), void *data)
       return;
 
     case PREFETCH:
+    case PREFETCH_FULL:
       (*fun) (&XEXP (body, 0), data);
       return;
 
