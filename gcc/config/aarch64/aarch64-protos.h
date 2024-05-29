@@ -455,12 +455,16 @@ extern struct tune_params aarch64_tune_params;
   T (PLDL2STRM, pldl2strm, 3) \
   T (PLDL3KEEP, pldl3keep, 4) \
   T (PLDL3STRM, pldl3strm, 5) \
+  T (PLDL4KEEP, pldl4keep, 6) \
+  T (PLDL4STRM, pldl4strm, 7) \
   T (PSTL1KEEP, pstl1keep, 8) \
   T (PSTL1STRM, pstl1strm, 9) \
   T (PSTL2KEEP, pstl2keep, 10) \
   T (PSTL2STRM, pstl2strm, 11) \
   T (PSTL3KEEP, pstl3keep, 12) \
-  T (PSTL3STRM, pstl3strm, 13)
+  T (PSTL3STRM, pstl3strm, 13) \
+  T (PSTL4KEEP, pstl4keep, 14) \
+  T (PSTL4STRM, pstl4strm, 15)
 
 #define AARCH64_SVENUM(UPPER, LOWER, VALUE) AARCH64_SV_##UPPER = VALUE,
 enum aarch64_svpattern {

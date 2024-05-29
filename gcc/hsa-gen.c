@@ -5309,7 +5309,8 @@ gen_hsa_insns_for_call (gimple *stmt, hsa_bb *hbb)
 
       /* Prefetch pass can create type-mismatching prefetch builtin calls which
 	 fail the gimple_call_builtin_p test above.  Handle them here.  */
-      if (fndecl_built_in_p (function_decl, BUILT_IN_PREFETCH))
+      if (fndecl_built_in_p (function_decl, BUILT_IN_PREFETCH)
+          || fndecl_built_in_p (function_decl, BUILT_IN_PREFETCH_FULL))
 	return;
 
       if (hsa_callable_function_p (function_decl))
@@ -5723,6 +5724,7 @@ gen_hsa_insns_for_call (gimple *stmt, hsa_bb *hbb)
 	break;
       }
     case BUILT_IN_PREFETCH:
+    case BUILT_IN_PREFETCH_FULL:
       break;
     default:
       {

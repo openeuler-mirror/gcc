@@ -1,5 +1,5 @@
 /* { dg-do compile { target { aarch64*-*-linux* } } } */
-/* { dg-options "-O3 -march=armv8.2-a+sve -funroll-loops -ffast-math -static -fllc-allocate -fdump-tree-llc_allocate-details-lineno --param force-issue=1" } */
+/* { dg-options "-O3 -march=armv8.2-a+sve -funroll-loops -ffast-math -static -fllc-allocate -fdump-tree-llc_allocate-details-lineno --param force-issue=1 --param filter-mode=0" } */
 
 #include <stdio.h>
 
@@ -46,9 +46,9 @@ main (int argc, char *argv[])
 /* { dg-final { scan-tree-dump-times "\{ (?:\\d+\\(\\d+\\) ){1}\}" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-not   ", size: (?!(0\.000000))" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times ", size: 0\.000000" 6 "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "\\d x_data \\(0.000000, 1, 0\\) : 3" 2 "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "\\d A_j \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "\\d A_data \\(0.000000, 1, 0\\) : 2" 2 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "\\d\\tx_data\\t\\(0.000000, 1, 1, 0\\)" 2 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "\\d\\tA_j\\t\\(0.000000, 1, 1, 0\\)" 2 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "\\d\\tA_data\\t\\(0.000000, 1, 1, 0\\)" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-not   "runtime issue" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "static issue" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "insert svprfd_gather" 2 "llc_allocate" } } */

@@ -57,15 +57,19 @@ along with GCC; see the file COPYING3.  If not see
 #include "internal-fn.h"
 #include "tree-cfg.h"
 #include "profile-count.h"
+#include "auto-profile.h"
 
 /* Number of parallel cores.  */
 const unsigned int PARALLEL_NUM = 288;
 
 /* Indirect access weight.  */
-const unsigned int INDIRECT_ACCESS_VALUE = 2;
+const unsigned int INDIRECT_ACCESS_VALUE = 3;
 
 /* Write memory weight.  */
-const unsigned int WRITE_COST = 2;
+const unsigned int WRITE_COST = 4;
+
+/* Maximum ratio of total prefetch data size to cache size.  */
+const double PREFETCH_CACHE_SIZE_RATIO = 0.8;
 
 /* Prefetch tool input max length.  */
 #ifndef PREFETCH_TOOL_INPUT_MAX_LEN
@@ -75,6 +79,14 @@ const unsigned int WRITE_COST = 2;
 /* Prefetch tool number max length.  */
 #ifndef PREFETCH_TOOL_NUM_MAX_LEN
 #define PREFETCH_TOOL_NUM_MAX_LEN 9
+#endif
+
+#ifndef PREFETCH_FUNC_TOPN
+#define PREFETCH_FUNC_TOPN param_llc_allocate_func_topn
+#endif
+
+#ifndef PREFETCH_FUNC_COUNTS_THRESHOLD
+#define PREFETCH_FUNC_COUNTS_THRESHOLD param_llc_allocate_func_counts_threshold
 #endif
 
 namespace {
@@ -165,6 +177,15 @@ struct data_ref
   /* True if the memory reference is read.  */
   unsigned int read_p : 1;
 
+  /* loop father depth.  */
+  unsigned int loop_depth;
+
+  /* bb index.  */
+  int bb_idx;
+
+  /* loop index.  */
+  int loop_idx;
+
   data_ref ()
     {
       ref = NULL_TREE;
@@ -181,6 +202,9 @@ struct data_ref
       parallel_p = false;
       regular_p = true;
       read_p = true;
+      loop_depth = 0;
+      bb_idx = 0;
+      loop_idx = 0;
     }
 };
 
@@ -197,6 +221,9 @@ add_ref (std::vector<data_ref> &references, tree op, gimple *stmt,
   ref.stmt = stmt;
   ref.vectorize_p = vectorize_p;
   ref.read_p = read_p;
+  ref.loop_depth = loop_depth (stmt->bb->loop_father);
+  ref.bb_idx = stmt->bb->index;
+  ref.loop_idx = stmt->bb->loop_father->num;
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       print_generic_expr (dump_file, ref.ref, TDF_LINENO);
@@ -271,6 +298,51 @@ get_references_in_gimple_call (gimple *stmt, std::vector<data_ref> &references)
     }
 }
 
+/* Check whether memory reference is located exactly in main function.
+   There are some other unexpected scenarios where mem ref or function is
+   tracing failed without loc info (newly generated gimple/function).  */
+
+bool
+is_reference_in_main_p (gimple *stmt)
+{
+  expanded_location xloc = expand_location (stmt->location);
+  const char *fn_name = IDENTIFIER_POINTER (DECL_NAME (cfun->decl));
+  if (strstr (fn_name, "main") != NULL || strstr (fn_name, "MAIN") != NULL)
+    {
+      /* NEXT STEP: Check why some functions have no end_locus.  */
+      if (!(DECL_SOURCE_LOCATION (current_function_decl)
+	    && cfun->function_end_locus))
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Cannot find function start-end location.\n");
+	  return true;
+	}
+      else if (!(xloc.file && xloc.line))
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file, "Cannot find gimple statement location.\n");
+	      print_gimple_stmt (dump_file, stmt, 0, TDF_LINENO);
+	    }
+	  return false;
+	}
+      int fn_start = expand_location (
+	DECL_SOURCE_LOCATION (current_function_decl)).line;
+      int fn_end = expand_location (cfun->function_end_locus).line;
+
+      if (xloc.line >= fn_start && xloc.line <= fn_end)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file, "Memory access in main function: ");
+	      print_gimple_stmt (dump_file, stmt, 0, TDF_LINENO);
+	    }
+	  return true;
+	}
+    }
+  return false;
+}
+
 /* Stores the locations of memory references in STMT to REFERENCES.  */
 
 void
@@ -284,6 +356,12 @@ get_references_in_stmt (gimple *stmt, std::vector<data_ref> &references)
       fprintf (dump_file, "gimple_vuse: ");
       print_gimple_stmt (dump_file, stmt, 0, TDF_LINENO);
     }
+
+  /* Filter out memory references located in main function. This is a
+     experimental filtering scheme ONLY for HPC case verification as
+     some HPC cases assign values for variables (mem ref) in main function.  */
+  if (is_reference_in_main_p (stmt))
+    return;
 
   if (gimple_code (stmt) == GIMPLE_ASSIGN)
     {
@@ -350,7 +428,8 @@ bool use_ext_node_p (const std::vector<data_ref> &references,
 
 bool
 filter_out_loop_by_stmt_p (loop_filter_out_flag &loop_filter, gimple *stmt,
-		  const std::vector<data_ref> &references, unsigned int &start)
+			   const std::vector<data_ref> &references,
+			   unsigned int &start)
 {
   expanded_location xloc = expand_location (stmt->location);
   /* check use_ext_call.  */
@@ -369,7 +448,7 @@ filter_out_loop_by_stmt_p (loop_filter_out_flag &loop_filter, gimple *stmt,
   if (xloc.file && xloc.column != 1)
     loop_filter.use_macro_loop = false;
 
-  /* checke use_cond_func, VEC_COND_EXPR/MIN_EXPR/MAX_EXPR.  */
+  /* check use_cond_func, VEC_COND_EXPR/MIN_EXPR/MAX_EXPR.  */
   if (gimple_code (stmt) == GIMPLE_ASSIGN)
     {
       enum tree_code rhs_code = gimple_assign_rhs_code (stmt);
@@ -549,16 +628,16 @@ dense_memory_p (const std::vector<data_ref> &references, class loop *loop)
 
 void
 analyze_loop_dense_memory (std::vector<class loop *> &kernels,
-			   std::map<class loop *,
-				    std::vector<data_ref> > &kernels_refs,
-			   class loop *loop)
+			  std::map<class loop *,
+				   std::vector<data_ref> > &kernels_refs,
+			  class loop *loop)
 {
   std::vector<data_ref> references;
   number_of_latch_executions (loop);
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "\n========== Processing loop %d: ==========\n",
-	      loop->num);
+	       loop->num);
       loop_dump (dump_file, loop);
       flow_loop_dump (loop, dump_file, NULL, 1);
       fprintf (dump_file, "loop unroll: %d\n", loop->unroll);
@@ -567,7 +646,7 @@ analyze_loop_dense_memory (std::vector<class loop *> &kernels,
   if (get_loop_exit_edges (loop).length () != 1)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "non-dense mem access: loop_branching\n");
+	fprintf (dump_file, "non-dense mem access: loop_multiple_exits\n");
       return;
     }
 
@@ -675,6 +754,15 @@ add_worklist (std::vector<tree> &worklist, std::set<tree> &walked,
 	      walked.insert (node);
 	    }
 	}
+      else if (rhs_code == TARGET_MEM_REF || rhs_code == MEM_REF)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file, "possibly unnested indirect memory access: ");
+	      print_gimple_stmt (dump_file, def_stmt, 0, TDF_LINENO);
+	      fprintf (dump_file, "\n");
+	    }
+	}
       else
 	{
 	  /* unhandled assign rhs_code: _219 = _17 * _70;
@@ -721,6 +809,16 @@ trace_base_var_helper (tree arg, std::set<tree> &walked,
 {
   if (arg == NULL)
     return;
+
+  /* Var_decl type: base address extracted from ARRAY_REF */
+  if (TREE_CODE (TREE_TYPE (arg)) == ARRAY_TYPE && TREE_CODE (arg) == VAR_DECL
+      && generic_decl_p (arg))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "var_decl type\n");
+      base_var_candid[arg] += 1;
+      return;
+    }
 
   /* Array type.  */
   tree op0 = NULL;
@@ -774,12 +872,12 @@ trace_base_var_helper (tree arg, std::set<tree> &walked,
 
 /* Identify the base variable traced from base address of memory reference.
    We recognize that current method could detect several base variable
-    candidates and the temporary criteria for base variable determination
-    is that either one of the following statement is true:
-      1. The number of base variable candidates is 1;
-      2. The number of detected gimple statements for some variable is 1.
-    We may use other criteria or relax the current criteria
-    (e.g., criterion 2: 1 -> any odd number).    */
+   candidates and the temporary criteria for base variable determination
+   is that either one of the following statement is true:
+    1) The number of base variable candidates is 1;
+    2) The number of detected gimple statements for some variable is 1.
+   We may use other criteria or relax the current criteria
+   (e.g., criterion 2: 1 -> any odd number).  */
 
 bool
 trace_base_var (tree &var, tree arg, std::set<tree> &walked)
@@ -792,96 +890,107 @@ trace_base_var (tree &var, tree arg, std::set<tree> &walked)
   else
     {
       is_tracing_unusual = true;
-      for (const std::pair<tree, int>& base_var_count : base_var_candid)
-	if (base_var_count.second == 1)
-	  var = base_var_count.first;
+      for (std::map<tree, int>::iterator it = base_var_candid.begin ();
+	   it != base_var_candid.end (); ++it)
+	var = it->second == 1 ? it->first : var;
     }
+
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "Traced variables at ");
       print_generic_expr (dump_file, arg, TDF_SLIM);
       fprintf (dump_file, ":\n");
-      for (const std::pair<tree, int>& base_var_count : base_var_candid)
-	fprintf (dump_file, "%s:%d, ", get_name (base_var_count.first),
-		  base_var_count.second);
+      for (std::map<tree, int>::iterator it = base_var_candid.begin ();
+	   it != base_var_candid.end (); ++it)
+	fprintf (dump_file, "%s:%d, ", get_name (it->first), it->second);
       fprintf (dump_file, "\n");
 
       if (var == NULL_TREE)
 	fprintf (dump_file, "Unhandled scenario for tracing base variable.\n");
       else if (is_tracing_unusual && var != NULL_TREE)
 	fprintf (dump_file, "Tracing unusual number or occurrences of base "
-		"variables.  Choose %s.\n", get_name (var));
+			    "variables.  Choose %s.\n",
+		 get_name (var));
     }
   return var != NULL_TREE;
 }
 
-/* Tracing direct memory reference information.  */
-
-bool
-trace_direct_mem_ref (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt)
-{
-  if (TREE_CODE (mem_ref.ref) != TARGET_MEM_REF)
-    return false;
-
-  /* Direct memory access, regardless of whether it is in vectorized form,
-     can be determined through TARGET_MEM_REF.  */
-  mem_ref.base = TREE_OPERAND (mem_ref.ref, 0);
-  mem_ref.offset = TREE_OPERAND (mem_ref.ref, 1);
-  mem_ref.index = TREE_OPERAND (mem_ref.ref, 2);
-  mem_ref.step = TREE_OPERAND (mem_ref.ref, 3);
-
-  std::set<tree> walked;
-  if (mem_ref.var == NULL_TREE
-      && !trace_base_var (mem_ref.var, mem_ref.base, walked))
-    return false;
-
-  traced_ref_stmt.insert (mem_ref.stmt);
-  return true;
-}
-
 /* Recursively trace and check whether the definition stmt of the
    index operand is a recorded stmt in direct access tracing.
-   If true, it is an indirect access.  */
+   Return 0 if ref is a direct access a[].
+   Return 1 if ref is a non-nested indirect access a[b[]].
+   Return 2 if ref is a complex indirect memory access, such as a[f(b[])].  */
 
-bool
+int
 trace_indirect_operand (tree arg, std::set<gimple *> &traced_ref_stmt)
 {
+  /* Return 0 if tree `arg` is not an SSA for further tracing.  */
   if (TREE_CODE (arg) != SSA_NAME)
-    return false;
+    return 0;
 
   gimple *def_stmt = SSA_NAME_DEF_STMT (arg);
 
+  /* Return 1 if `index` has been detected as a traced direct memory access
+     before.  */
   if (traced_ref_stmt.count (def_stmt))
-    return true;
+    return 1;
 
+  /* Return 0 if def stmt of `arg` is not in gimple assign type. Stop tracing
+     index operand and currently no memory access operand is detected.  */
   if (!def_stmt || !is_gimple_assign (def_stmt))
-    return false;
+    return 0;
 
   tree_code rhs_code = gimple_assign_rhs_code (def_stmt);
   /* Collect a whitelist of gimple_assign_rhs_code for tracing pointer/array
-     type indirect memory access.  Please check examples before function
-     trace_indirect_ptr and trace_indirect_array.  */
+     type indirect memory access.  */
   if (rhs_code != MULT_EXPR && rhs_code != NOP_EXPR
-      && rhs_code != CONVERT_EXPR && rhs_code != PLUS_EXPR
-      && rhs_code != ARRAY_REF)
-    return false;
+      && rhs_code != CONVERT_EXPR && rhs_code != PLUS_EXPR)
+    {
+      /* Return 2 if tree code has any type representing references to storge,
+	 implying a complex indirect memory access scenario for future
+	 analysis.  */
+      if (rhs_code == MEM_REF || rhs_code == TARGET_MEM_REF
+	  || rhs_code == ARRAY_REF || rhs_code == ARRAY_RANGE_REF
+	  || rhs_code == COMPONENT_REF || rhs_code == ADDR_EXPR
+	  || rhs_code == INDIRECT_REF)
+	return 2;
+
+      /* Return 0 and stop tracing if tree code is not a common tracing
+	 operand, but still reflected as a non-reference type.
+	 Caveats: if we never deal with this tree code before, maybe it is
+	 more suitable to treat this scenario strictly.  */
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "unknown tracing tree code: %s\n",
+		   get_tree_code_name (rhs_code));
+	  print_gimple_stmt (dump_file, def_stmt, 0, TDF_SLIM);
+	  fprintf (dump_file, "\n");
+	}
+      return 0;
+    }
 
   tree op = NULL_TREE;
   ssa_op_iter iter;
   FOR_EACH_SSA_TREE_OPERAND (op, def_stmt, iter, SSA_OP_USE)
     {
-      if (trace_indirect_operand (op, traced_ref_stmt))
-	return true;
+      int trace_indir_p = trace_indirect_operand (op, traced_ref_stmt);
+      if (trace_indir_p != 0)
+	return trace_indir_p;
     }
-  return false;
+  return 0;
 }
 
-/* Trace the pointer of the indirect memory access:
-   1) obtain the base address of the indirect memory access.
-   2) ensure that the index has been traced in the direct memory access.
-
-   _1 = MEM[base: a_2(D), index: ivtmp.3_3, step: 4, offset: 0B]; // Traced in
-   direct access
+/* Trace the pointer of the direct/indirect memory access:
+   1) Obtain the base address of the memory access.
+   2) If index variable is formed by another memory access operation (i.e., an
+      indication of indirect memory access), ensure that the index has been
+      traced in an already discovered direct memory access.
+   3) Otherwise, the memory access is in a more complex scenario and we need to
+      postpone the analysis later. For example, the indirect memory access is
+      nested, a[b[c[...]]], or the index variable (formed in another memory
+      access) has not been recorded/traced yet.
+   e.g.,
+   _1 = MEM[base: a_2(D), index: ivtmp.3_3, step: 4, offset: 0B];
    _4 = (long unsigned int) _1;
    _5 = _4 * 8;
    _6 = p(D) + _5; // get base
@@ -889,56 +998,142 @@ trace_indirect_operand (tree arg, std::set<gimple *> &traced_ref_stmt)
 */
 
 bool
-trace_indirect_ptr (tree &base, tree &index, tree arg,
-		    std::set<gimple *> traced_ref_stmt)
+trace_ptr_mem_ref (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt,
+		   std::vector<data_ref> &unresolved_refs)
 {
-  gimple *def_stmt = SSA_NAME_DEF_STMT (arg);
+  /* Simple scenario:
+     _2208 = np.120_2207 * 8;
+     _1921 = sorted_weight$data_381 + _2208;
+     *_1921 = _2206;
 
-  if (!def_stmt || !is_gimple_assign (def_stmt))
+     Complex scenario:
+     MEM[base: _3235, index: ivtmp.2768_3189, step: 4, offset: 0B] = _105;
+     _3236 = (sizetype) _214;
+     _3237 = _3236 * 4;
+     _3238 = _857 + _3237;  // base + index * step
+     _3239 = _3238 + 4;     // offset
+     MEM[base: _3239, index: ivtmp.2768_3189, step: 4, offset: 0B] = 0.0;
+  */
+  tree pointer = TREE_OPERAND (mem_ref.ref, 0);
+  tree offset = TREE_OPERAND (mem_ref.ref, 1);
+  if (TREE_CODE (offset) != INTEGER_CST)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Unhandled scenario for non-constant offset.\n");
+      return false;
+    }
+
+  /* Tracing back base address from SSA.  */
+  gimple *ptr_def_stmt = SSA_NAME_DEF_STMT (pointer);
+  if (ptr_def_stmt == NULL || gimple_code (ptr_def_stmt) != GIMPLE_ASSIGN
+      || gimple_assign_rhs_code (ptr_def_stmt) != POINTER_PLUS_EXPR)
     return false;
+  tree base = gimple_assign_rhs1 (ptr_def_stmt);
+  /* index_offset = index * step.  */
+  tree index_offset = gimple_assign_rhs2 (ptr_def_stmt);
 
-  tree_code rhs_code = gimple_assign_rhs_code (def_stmt);
-  if (rhs_code != POINTER_PLUS_EXPR)
-    return false;
+  /* Tracing back index from SSA.  */
+  if (TREE_CODE (index_offset) != SSA_NAME)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  if (TREE_CODE (index_offset) == INTEGER_CST)
+	    fprintf (dump_file, "Constant index for memory access.\n");
+	  else
+	    fprintf (dump_file, "Unhandled scenario for index tracing.\n");
+	}
+      return false;
+    }
 
-  /* POINTER_PLUS_EXPR, The first operand is always a pointer/reference type.
-     The second operand is always an unsigned integer type compatible with
-     sizetype.  */
-  base = gimple_assign_rhs1 (def_stmt);
-  index = gimple_assign_rhs2 (def_stmt);
+  gimple *idx_def_stmt = SSA_NAME_DEF_STMT (index_offset);
+  if (idx_def_stmt == NULL || gimple_code (idx_def_stmt) != GIMPLE_ASSIGN
+      || gimple_assign_rhs_code (idx_def_stmt) != MULT_EXPR)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Unhandled scenario for index tracing.\n");
+      return false;
+    }
 
-  return trace_indirect_operand (index, traced_ref_stmt);
+  /* Split array index from total offset of index, `index * step`.  */
+  mem_ref.base = base;
+  mem_ref.offset = offset;
+  mem_ref.index = gimple_assign_rhs1 (idx_def_stmt);
+  mem_ref.step = gimple_assign_rhs2 (idx_def_stmt);
+  if (TREE_CODE (gimple_assign_rhs1 (idx_def_stmt)) == INTEGER_CST)
+    {
+      mem_ref.index = gimple_assign_rhs2 (idx_def_stmt);
+      mem_ref.step = gimple_assign_rhs1 (idx_def_stmt);
+    }
+
+  int trace_index_indir_p = trace_indirect_operand (mem_ref.index,
+						    traced_ref_stmt);
+  if (trace_index_indir_p == 0)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Direct memory access tracing succeeded.\n");
+    }
+  else if (trace_index_indir_p == 1)
+    {
+      mem_ref.regular_p = false;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Indirect memory access tracing succeeded.\n");
+    }
+  else
+    {
+      /* Record indirect memory access with complex scenarios for future
+	 analysis.  */
+      unresolved_refs.push_back (mem_ref);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Unhandled indirect memory access tracing.\n");
+      return false;
+    }
+
+  return true;
 }
 
-/* Trace the array of the indirect memory access:
-   1) obtain the base address of the indirect memory access.
-   2) ensure that the index has been traced in the direct memory access.
-
-   _1 = MEM[base: a_2(D), index: ivtmp.3_3, step: 4, offset: 0B]; // Traced in
-   direct access
-   _4 = (integer(kind=8)) _1;
-   _5 = _4 + 135;
-   _6 = p[_5];       // start tracing
-*/
+/* Tracing direct memory reference information.  */
 
 bool
-trace_indirect_array (tree &base, tree &index,
-		      std::set<gimple *> traced_ref_stmt, tree ref)
+trace_direct_mem_ref (data_ref &mem_ref)
 {
-  if (TREE_CODE (ref) != ARRAY_REF)
-    return false;
-  base = TREE_OPERAND (ref, 0);
-  index = TREE_OPERAND (ref, 1);
-  return trace_indirect_operand (index, traced_ref_stmt);
+  /* Direct memory access, regardless of whether it is in vectorized form,
+     can be determined through TARGET_MEM_REF:
+      address = base + index * step + offset.
+     MASK_LOAD example:
+      _43 = &MEM[base: _42, index: ivtmp_140, step: 8, offset: 0B];
+      vect__42.11_160 = .MASK_LOAD (_43, 64B, loop_mask_163);
+
+     In some cases (2D-array or complex-index 1D array), mem_ref's `base`
+     may actually represent `base + index * step` when `base` address updates
+     by a PHI operation, e.g.,
+      MEM[base: _51, offset: 0B]
+      _51 = (void *) ivtmp.18_11;
+      ivtmp.18_11 = PHI <ivtmp.18_43(10), ivtmp.18_52(14)>
+      ivtmp.18_43 = ivtmp.18_11 + 16;
+      ivtmp.18_52 = (unsigned long) _10;
+      _10 = arr2D_29(D) + _9;
+  */
+  mem_ref.base = TREE_OPERAND (mem_ref.ref, 0);
+  mem_ref.offset = TREE_OPERAND (mem_ref.ref, 1);
+  mem_ref.index = TREE_OPERAND (mem_ref.ref, 2);
+  mem_ref.step = TREE_OPERAND (mem_ref.ref, 3);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Direct memory access tracing succeeded.\n");
+
+  return true;
 }
 
-/* Tracing indirect memory reference information.
-   Include tracing of base addresses and source variable.
-   _x(ssa name) -> a_2(base addr) -> a(src var)  */
+/* Tracing vectorized indirect memory reference information.
+   MASK_GATHER_LOAD example:
+    vect__45.13_146 = .MASK_LOAD (_41, 32B, loop_mask_153);
+    vect__46.14_145 = (vector([2,2]) long unsigned int) vect__45.13_146;
+    vect_patt_163.15_143 = .MASK_GATHER_LOAD (_144, vect__46.14_145, 8,
+      { 0.0, ... }, loop_mask_153);  */
 
 bool
-trace_indirect_mem_ref (data_ref &mem_ref,
-			std::set<gimple *> &traced_ref_stmt)
+trace_indirect_mem_ref_vectorized (data_ref &mem_ref,
+				   std::set<gimple *> &traced_ref_stmt)
 {
   /* Processing of vectorization types.  */
   if (mem_ref.vectorize_p)
@@ -947,72 +1142,93 @@ trace_indirect_mem_ref (data_ref &mem_ref,
       if (trace_indirect_operand (op, traced_ref_stmt))
 	{
 	  mem_ref.base = gimple_call_arg (mem_ref.stmt, 0);
+	  mem_ref.index = gimple_call_arg (mem_ref.stmt, 1);
+	  mem_ref.step = gimple_call_arg (mem_ref.stmt, 2);
 	  mem_ref.regular_p = false;
-	  std::set<tree> walked;
-	  if (mem_ref.var == NULL_TREE
-	      && !trace_base_var (mem_ref.var, mem_ref.base, walked))
-	    return false;
+
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Indirect memory access tracing succeeded.\n");
 	  return true;
 	}
-      return false;
     }
+  return false;
+}
 
- /* Processing of non-vectorized types.  */
-  tree op = NULL_TREE;
-  ssa_op_iter iter;
-  FOR_EACH_SSA_TREE_OPERAND (op, mem_ref.stmt, iter, SSA_OP_USE)
+/* Trace the array of the indirect memory access:
+   1) Obtain the base address of the indirect memory access.
+   2) Ensure that the index has been traced in the direct memory access.
+   e.g.,
+   _1 = MEM[base: a_2(D), index: ivtmp.3_3, step: 4, offset: 0B];
+   _4 = (integer(kind=8)) _1;
+   _5 = _4 + 135;
+   _6 = p[_5];       // start tracing
+*/
+
+bool
+trace_indirect_array (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt)
+{
+  tree base = TREE_OPERAND (mem_ref.ref, 0);
+  tree index = TREE_OPERAND (mem_ref.ref, 1);
+  if (trace_indirect_operand (index, traced_ref_stmt))
     {
+      /* ARRAY_REF, The first operand is the array;
+		    the second is the index.  */
+      mem_ref.base = base;
+      mem_ref.index = index;
+      mem_ref.regular_p = false;
 
-      /* Array type:
-	 _1 = MEM[base: a_2(D), index: ivtmp.3_3, step: 4, offset: 0B];
-	 _4 = c[_1];
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Indirect memory access tracing succeeded.\n");
 
-	 Pointer type:
-	 _1 = MEM[base: a_2(D), index: ivtmp.3_3, step: 4, offset: 0B];
-	 _4 = (long unsigned int) _1;
-	 _5 = _4 * 8;
-	 _6 = p(D) + _5;
-	 _7 = *_6;
-      */
-      tree base = NULL_TREE;
-      tree index = NULL_TREE;
-      if (trace_indirect_array (base, index, traced_ref_stmt, mem_ref.ref)
-	  || trace_indirect_ptr (base, index, op, traced_ref_stmt))
-	{
-	  /* ARRAY_REF, The first operand is the array;
-			the second is the index.  */
-	  mem_ref.base = base;
-	  mem_ref.index = index;
-	  mem_ref.regular_p = false;
-	  std::set<tree> walked;
-	  if (mem_ref.var == NULL_TREE
-	      && !trace_base_var (mem_ref.var, mem_ref.base, walked))
-	    return false;
-	  return true;
-	}
+      return true;
     }
 
   return false;
 }
 
-/* Trace references base info:
-   1) Parallel analysis
-   2) Memory access rule analysis
-   3) Tracing base address and source variable of memory references
+/* Trace memory references base info:
+   1) Memory access rule analysis and reference info tracing
+   2) Source variable tracing, along base address of memory reference
    We will extend parallel analysis later.
 */
 
 void
-trace_ref_info (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt)
+trace_ref_info (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt,
+		std::vector<data_ref> &unresolved_refs)
 {
   enum tree_code ref_code = TREE_CODE (mem_ref.ref);
-  if (/* Vectorized and non-vectorized direct access.  */
-      ref_code != TARGET_MEM_REF
-      /* non-vectorized indirect memory access.  */
-      && ref_code != MEM_REF && ref_code != ARRAY_REF
-      /* vectorized indirect memory access.  */
-      && ref_code != SSA_NAME)
+  /* 1) Direct and indirect access traces.  */
+  switch (ref_code)
     {
+    case MEM_REF:
+      /* Non-vectorized direct/indirect access by pointer.  */
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "MEM_REF\n");
+      if (!trace_ptr_mem_ref (mem_ref, traced_ref_stmt, unresolved_refs))
+	return;
+      break;
+    case TARGET_MEM_REF:
+      /* Vectorized and non-vectorized direct access.  */
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "TARGET_MEM_REF\n");
+      if (!trace_direct_mem_ref (mem_ref))
+	return;
+      break;
+    case SSA_NAME:
+      /* Vectorized indirect memory access.  */
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "SSA_NAME\n");
+      if (!trace_indirect_mem_ref_vectorized (mem_ref, traced_ref_stmt))
+	return;
+      break;
+    case ARRAY_REF:
+      /* Non-vectorized indirect memory access.  */
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "ARRAY_REF\n");
+      if (!trace_indirect_array (mem_ref, traced_ref_stmt))
+	return;
+      break;
+    default:
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
 	  fprintf (dump_file, "ref is another tree-code: ");
@@ -1025,14 +1241,18 @@ trace_ref_info (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt)
       return;
     }
 
-  /* 1) Direct and indirect access traces and traces source variables.  */
-  if (!trace_direct_mem_ref (mem_ref, traced_ref_stmt)
-      && !trace_indirect_mem_ref (mem_ref, traced_ref_stmt))
+  /* 2) Source variable tracing.  */
+  std::set<tree> walked;
+  if (mem_ref.var == NULL_TREE
+      && !trace_base_var (mem_ref.var, mem_ref.base, walked))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "Tracing failed.\n\n");
+	fprintf (dump_file, "Source variable tracing failed.\n\n");
       return;
     }
+
+  if (mem_ref.regular_p)
+    traced_ref_stmt.insert (mem_ref.stmt);
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "Tracing succeeded.\n\n");
@@ -1043,7 +1263,8 @@ trace_ref_info (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt)
 
 void
 trace_loop_refs_info (std::vector<data_ref> &refs,
-		      std::set<gimple *> &traced_ref_stmt)
+		      std::set<gimple *> &traced_ref_stmt,
+		      std::vector<data_ref> &unresolved_refs)
 {
   for (unsigned i = 0; i < refs.size (); ++i)
     {
@@ -1053,7 +1274,7 @@ trace_loop_refs_info (std::vector<data_ref> &refs,
 	  print_generic_expr (dump_file, refs[i].ref, TDF_SLIM);
 	  fprintf (dump_file, "\n");
 	}
-      trace_ref_info (refs[i], traced_ref_stmt);
+      trace_ref_info (refs[i], traced_ref_stmt, unresolved_refs);
     }
 }
 
@@ -1061,8 +1282,10 @@ trace_loop_refs_info (std::vector<data_ref> &refs,
 
 void
 trace_data_refs_info (std::vector<class loop *> &kernels,
-		      std::map<class loop*, std::vector<data_ref> > &loop_refs,
-		      std::set<gimple *> &traced_ref_stmt)
+		      std::map<class loop *,
+			       std::vector<data_ref> > &loop_refs,
+		      std::set<gimple *> &traced_ref_stmt,
+		      std::vector<data_ref> &unresolved_refs)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 2: trace_all_references_info\n\n");
@@ -1074,7 +1297,60 @@ trace_data_refs_info (std::vector<class loop *> &kernels,
 	continue;
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "loop header %d:\n", loop->header->index);
-      trace_loop_refs_info (loop_refs[loop], traced_ref_stmt);
+      trace_loop_refs_info (loop_refs[loop], traced_ref_stmt, unresolved_refs);
+    }
+}
+
+/* Retrace references base info for complex scenarios in indirect memory access
+   after Phase 3.  */
+
+void
+retrace_ref_info_unresolved (data_ref &mem_ref,
+			     std::set<gimple *> &traced_ref_stmt)
+{
+  /* 1) Indirect access traces.  */
+  int trace_index_indir_p = trace_indirect_operand (mem_ref.index,
+						    traced_ref_stmt);
+  if (trace_index_indir_p == 1)
+    {
+      mem_ref.regular_p = false;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Indirect memory access tracing succeeded.\n");
+    }
+
+  /* 2) Source variable tracing.  */
+  std::set<tree> walked;
+  if (mem_ref.var == NULL_TREE
+      && !trace_base_var (mem_ref.var, mem_ref.base, walked))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Source variable tracing failed.\n\n");
+      return;
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Tracing succeeded.\n\n");
+  mem_ref.trace_status_p = true;
+}
+
+/* Retrace all unresolved references.  */
+
+void
+retrace_loop_refs_info_unresolved (std::vector<data_ref> &unresolved_refs,
+				   std::set<gimple *> &traced_ref_stmt)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file,
+	     "\nRetrace indirect memory access after outer loop analysis:\n");
+  for (unsigned i = 0; i < unresolved_refs.size (); ++i)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "trace_references_base_info %d:\n", i);
+	  print_generic_expr (dump_file, unresolved_refs[i].ref, TDF_SLIM);
+	  fprintf (dump_file, "\n");
+	}
+      retrace_ref_info_unresolved (unresolved_refs[i], traced_ref_stmt);
     }
 }
 
@@ -1098,9 +1374,19 @@ loop_bound_iv_p (tree t, tree &outer_loop_t)
 {
   if (t == NULL || TREE_CODE (t) != SSA_NAME
       || TREE_CODE (TREE_TYPE (t)) != INTEGER_TYPE)
-  return false;
+    return false;
 
   gimple *def_stmt = SSA_NAME_DEF_STMT (t);
+
+  /* NOP_EXPR convertion between PHI node and memory reference due to MACRO.
+    n_898 = PHI <n_907(355), 0(356)>
+    _757 = (sizetype) n_898;
+    _900 = MEM[base: _726, index: _757, step: 8, offset: 0B];
+  */
+  while (gimple_code (def_stmt) == GIMPLE_ASSIGN
+	 && gimple_assign_rhs_code (def_stmt) == NOP_EXPR)
+    def_stmt = SSA_NAME_DEF_STMT (gimple_assign_rhs1 (def_stmt));
+
   if (gimple_code (def_stmt) != GIMPLE_PHI)
     return false;
 
@@ -1208,17 +1494,27 @@ check_bound_iv_and_add_worklist (std::vector<tree> &worklist,
 bool
 trace_loop_bound_iv (data_ref &mem_ref)
 {
-  /* Indirect memory access, the size cannot be determined based on the loop
-     boundary.  */
-  if (!mem_ref.regular_p)
-    return false;
+  /* In indirect memory access, the size cannot be determined based on the
+     loop boundary. However, we can take advantage of loop bound as an upper
+     bound (unrepeated memory access) to predict the variable footprint
+     involved in the specific loop dimension.  */
 
   /* Determine and record the boundary iv of the current index,
      but do not trace it.  */
   tree outer_loop_t = NULL_TREE;
-  if (loop_bound_iv_p (mem_ref.index, outer_loop_t))
-    mem_ref.loop_bounds.push_back (
+  /* indirect access example, mem_ref.index = _64
+    _62 = MEM[symbol: uPtr, index: ivtmp.22_96, step: 4, offset: 0B];
+    _63 = (long unsigned int) _62;
+    _64 = _63 * 8;
+    _65 = [openfoam_smooth.c:28:28] &bPrimePtr + _64;
+    _66 = *_65;  */
+  if (loop_bound_iv_p (mem_ref.index, outer_loop_t) || !mem_ref.regular_p)
+    {
+      mem_ref.loop_bounds.push_back (
 	    loop_bound (mem_ref.index, SSA_NAME_DEF_STMT (mem_ref.index)));
+      if (!mem_ref.regular_p)
+	return false;
+    }
 
   std::vector<tree> worklist;
   worklist.push_back (mem_ref.base);
@@ -1236,7 +1532,7 @@ trace_loop_bound_iv (data_ref &mem_ref)
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "\nmem_ref access dimension: %ld\n",
-	      mem_ref.loop_bounds.size ());
+	       mem_ref.loop_bounds.size ());
       fprintf (dump_file, "Traced variables: ");
       print_generic_expr (dump_file, mem_ref.base, TDF_SLIM);
       fprintf (dump_file, "\n");
@@ -1263,7 +1559,7 @@ loop_bound_dump (FILE *file, loop_bound &lb)
     fprintf (file, ", latch = %d", loop->latch->index);
   fprintf (file, ", lb_niters = ");
   print_generic_expr (file, lb.niters);
-  fprintf (file, ")\n");
+  fprintf (file, ")\n\n");
 }
 
 /* static calculate data size.  */
@@ -1275,10 +1571,11 @@ static_calculate_data_size (data_ref &mem_ref)
     fprintf (dump_file, "\nstatic_calculate_data_size\n");
 
   tree size_unit = TYPE_SIZE_UNIT (inner_type (TREE_TYPE (mem_ref.var)));
-  HOST_WIDE_INT type_size = size_unit ? tree_to_uhwi (size_unit) : 0;
+  unsigned HOST_WIDE_INT type_size = size_unit ? tree_to_uhwi (size_unit) : 0;
   for (unsigned i = 0; i < mem_ref.loop_bounds.size (); ++i)
     {
-      HOST_WIDE_INT est_niter = tree_to_uhwi (mem_ref.loop_bounds[i].niters);
+      unsigned HOST_WIDE_INT est_niter = tree_to_uhwi
+					   (mem_ref.loop_bounds[i].niters);
       unsigned int unroll = mem_ref.loop_bounds[i].unroll;
       if (i == 0)
 	{
@@ -1323,8 +1620,8 @@ trace_and_create_dominate_expr (tree expr, class loop *outermost)
   enum tree_code rhs_code = gimple_assign_rhs_code (stmt);
   tree_code_class code_class = TREE_CODE_CLASS (rhs_code);
   tree type = TREE_TYPE (gimple_assign_lhs (stmt));
-  tree rhs1 = trace_and_create_dominate_expr
-		(gimple_assign_rhs1 (stmt), outermost);
+  tree rhs1 = trace_and_create_dominate_expr (gimple_assign_rhs1 (stmt),
+					      outermost);
   if (rhs1 == NULL_TREE)
     return NULL_TREE;
 
@@ -1341,8 +1638,8 @@ trace_and_create_dominate_expr (tree expr, class loop *outermost)
     }
   else if (code_class == tcc_binary)
     {
-      tree rhs2 = trace_and_create_dominate_expr
-		    (gimple_assign_rhs2 (stmt), outermost);
+      tree rhs2 = trace_and_create_dominate_expr (gimple_assign_rhs2 (stmt),
+						  outermost);
       if (rhs2 == NULL_TREE)
 	return NULL_TREE;
 
@@ -1425,8 +1722,8 @@ void
 trace_and_create_dominate_loop_bounds (data_ref &mem_ref)
 {
   /* Check whether the niters is a loop dominant.
-     If not, trace and determine whether the result is dominant.  If yes, create
-     the expr of the dominant node.
+     If not, trace and determine whether the result is dominant.  If yes,
+     create the expr of the dominant node.
   */
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "\ntrace_and_create_dominate_loop_bounds\n");
@@ -1509,6 +1806,28 @@ trace_ref_dimension_and_loop_bounds (data_ref &mem_ref)
       if ((niters == chrec_dont_know) && loop->vec_nb_iterations
 	   && (loop->vec_nb_iterations != chrec_dont_know))
 	niters = loop->vec_nb_iterations;
+
+      if (niters == chrec_dont_know)
+	{
+	  /* We derive est_loop_niters from function
+	     `estimated_loop_iterations_int`. Usually only the innermost loop is
+	     vectorized, so vec_nb_iterations can be 4 or 8 times as large as
+	     `est_loop_niters` due to vectorization. However, function
+	     `estimated_loop_iterations_int` only returns an integer instead of
+	     a tree node expression, so it cannot substitute
+	     function `number_of_latch_executions` in runtime computation.  */
+	  HOST_WIDE_INT est_loop_niters = estimated_loop_iterations_int (loop);
+	  if (est_loop_niters >= 0 && est_loop_niters < INT_MAX)
+	    /* e.g., loop iterations from `estimated_loop_iterations_int`: (-1)
+	       loop_144 (header = 519, latch = 625, niter = scev_not_known,
+	       upper_bound = 1073741823, likely_upper_bound = 1073741823,
+	       unroll = 1)  */
+	    /* variable `niters` from `loop->vec_nb_iterations`
+	       <integer_cst 0xfffff57df5d0 type
+	       <integer_type 0xfffff625a1f8> constant 34>  */
+	    niters = build_int_cst (integer_type_node, (int) est_loop_niters);
+	}
+
       if (dump_file && (dump_flags & TDF_DETAILS))
 	loop_bound_dump (dump_file, mem_ref.loop_bounds[i]);
 
@@ -1518,6 +1837,24 @@ trace_ref_dimension_and_loop_bounds (data_ref &mem_ref)
 	mem_ref.calc_by = std::min (mem_ref.calc_by, RUNTIME_CALC);
       else
 	mem_ref.calc_by = std::min (mem_ref.calc_by, STATIC_CALC);
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  if (mem_ref.calc_by == 2)
+	    {
+	      fprintf (dump_file, "\nniters: ");
+	      print_generic_expr (dump_file, niters, TDF_SLIM);
+	      fprintf (dump_file, "\nSTATIC_CALC.\n");
+	    }
+	  else if (mem_ref.calc_by == 1)
+	    {
+	      fprintf (dump_file, "\nniters: ");
+	      print_generic_expr (dump_file, niters, TDF_SLIM);
+	      fprintf (dump_file, "\nRUNTIME_CALC.\n");
+	    }
+	  else
+	    fprintf (dump_file, "\nUNHANDLE_CALC.\n");
+	}
     }
 
   if (mem_ref.calc_by == RUNTIME_CALC)
@@ -1530,8 +1867,8 @@ trace_ref_dimension_and_loop_bounds (data_ref &mem_ref)
    Return NULL_TREE if not found.  */
 
 tree
-get_cur_loop_niters (std::map<class loop*, std::vector<data_ref> > &loop_refs,
-		     class loop* loop)
+get_cur_loop_niters (std::map<class loop *, std::vector<data_ref> > &loop_refs,
+		     class loop *loop)
 {
   if (loop_refs.count (loop) == 0)
     return NULL_TREE;
@@ -1589,7 +1926,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
 	    {
 	      fprintf (dump_file, "Stop tracing the outer loop depth, ");
 	      fprintf (dump_file, "current depth: %d, current bb: %d\n",
-				  ret_depth, def_bb->index);
+		       ret_depth, def_bb->index);
 	    }
 	  return ret_depth;
 	}
@@ -1614,7 +1951,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
 		    continue;
 		  unsigned depth = trace_outer_loop_depth (subtree, \
 				   start_depth);
-		  min_depth = std::min (min_depth, depth);
+		  min_depth = MIN (min_depth, depth);
 		  }
 		return min_depth;
 	    }
@@ -1622,15 +1959,15 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
       else
 	{
 	  /* Adding termination conditions:
-	   1.  Niters is MEM variable;
-	   2.  Niters is a runtime value (smooth_uPtr), and consider \
+	   1)  Niters is MEM variable;
+	   2)  Niters is a runtime value (smooth_uPtr), and consider
 	       finding footprint in other mem_ref;
-	   3.  Niters is loop variable (i_start/i_end), and the boundary in \
+	   3)  Niters is loop variable (i_start/i_end), and the boundary in
 	       the outer loop depends on the variable j_start/j_end.  */
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
-	      fprintf (dump_file, "The loop termination condition");
-	      fprintf (dump_file, "is to be extended.\n");
+	      fprintf (dump_file, "The loop termination condition is "
+				  "extended.\n");
 	    }
 	  return start_depth;
 	}
@@ -1652,7 +1989,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
 	  if (subtree == NULL)
 	    continue;
 	  unsigned depth = trace_outer_loop_depth (subtree, start_depth);
-	  min_depth = std::min (min_depth, depth);
+	  min_depth = MIN (min_depth, depth);
 	}
       return min_depth;
     }
@@ -1660,7 +1997,7 @@ trace_outer_loop_depth (tree niters, unsigned start_depth)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
-	  fprintf (dump_file, "niters is another tree code: %s\n", \
+	  fprintf (dump_file, "niters is another tree code: %s\n",
 		   get_tree_code_name (niter_code));
 	  print_generic_expr (dump_file, niters, TDF_SLIM);
 	  fprintf (dump_file, "\n");
@@ -1687,16 +2024,18 @@ analyze_loop_refs_dimension (std::vector<data_ref> &refs)
       trace_ref_dimension_and_loop_bounds (refs[i]);
     }
 }
+
 /* analyze nested kernels
-   1. multidimension loop analyze
-   2. extended outer loop analyze
+   1) multidimension loop analyze
+   2) extended outer loop analyze
 */
 
 bool
 analyze_nested_kernels (std::vector<class loop *> &kernels,
-			std::map<class loop*,
+			std::map<class loop *,
 				 std::vector<data_ref> > &loop_refs,
-			std::set<gimple *> &traced_ref_stmt)
+			std::set<gimple *> &traced_ref_stmt,
+			std::vector<data_ref> &unresolved_refs)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 3: analyze_nested_kernels\n\n");
@@ -1706,7 +2045,7 @@ analyze_nested_kernels (std::vector<class loop *> &kernels,
   unsigned init_kernels_size = kernels.size ();
   for (unsigned i = 0; i < init_kernels_size; ++i)
     {
-      class loop* loop = kernels[i];
+      class loop *loop = kernels[i];
       if (loop_refs.count (loop) == 0)
 	continue;
 
@@ -1715,11 +2054,11 @@ analyze_nested_kernels (std::vector<class loop *> &kernels,
       analyze_loop_refs_dimension (loop_refs[loop]);
 
       unsigned depth = loop_depth (loop);
-      unsigned outer_depth = trace_outer_loop_depth (get_cur_loop_niters \
+      unsigned outer_depth = trace_outer_loop_depth (get_cur_loop_niters
 			     (loop_refs, loop), depth);
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "cur_depth: %d, outer_depth: %d\n", \
-			    depth, outer_depth);
+	fprintf (dump_file, "cur_depth: %d, outer_depth: %d\n",
+		 depth, outer_depth);
       /* param_outer_loop_num: number of loops of the extended outer loop.
 	 Outermost loop should not be extended when outer_depth = 0.
 	 `outer_depth == depth` means the current loop is the loop which
@@ -1727,19 +2066,20 @@ analyze_nested_kernels (std::vector<class loop *> &kernels,
       if (outer_depth == 0 || outer_depth == depth
 	  || depth > outer_depth + param_outer_loop_num)
 	continue;
+
       /* Extend outer loop.  */
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "\nStart extending outer loop\n");
-      /* Superloops of the loop, start from the loop closest to the \
+      /* Superloops of the loop, start from the loop closest to the
 	  current loop in the outermost loop.  */
-      for (unsigned j = 0; j < param_outer_loop_num && --depth; ++j)
+      for (int j = 0; j < param_outer_loop_num && --depth; ++j)
 	{
-	  class loop* outer_loop = (*loop->superloops)[depth];
+	  class loop *outer_loop = (*loop->superloops)[depth];
 	  /* The outer loop may be added when analyzing previous inner loops,
 	     i.e. the outer loop contains two or more inner loops.  */
 	  if (loop_refs.count (outer_loop))
 	    continue;
-	  /* phase1~phase3 analysis on the extended outer loop.  */
+	  /* phase1 ~ phase3 analysis on the extended outer loop.  */
 	  analyze_loop_dense_memory (kernels, loop_refs, outer_loop);
 	  if (loop_refs.count (outer_loop) == 0)
 	    continue;
@@ -1748,15 +2088,16 @@ analyze_nested_kernels (std::vector<class loop *> &kernels,
 	      if (dump_file && (dump_flags & TDF_DETAILS))
 		{
 		  fprintf (dump_file, "outer_analyze_nested_kernels %d: ", k);
-		  print_generic_expr (dump_file, loop_refs[outer_loop][k].ref,\
-		  TDF_SLIM);
+		  print_generic_expr (dump_file, loop_refs[outer_loop][k].ref,
+				      TDF_SLIM);
 		  fprintf (dump_file, "\n");
 		}
 	    }
-	  trace_loop_refs_info (loop_refs[outer_loop], traced_ref_stmt);
+	  trace_loop_refs_info (loop_refs[outer_loop], traced_ref_stmt,
+				unresolved_refs);
 	  analyze_loop_refs_dimension (loop_refs[outer_loop]);
-	  outer_depth = trace_outer_loop_depth (get_cur_loop_niters \
-					       (loop_refs, outer_loop), depth);
+	  outer_depth = trace_outer_loop_depth (get_cur_loop_niters
+						(loop_refs, outer_loop), depth);
 	  /* `outer_depth == depth` means the current loop is the loop which
 	   boundary is known, so there is no need to extend the outer loop.  */
 	  if (outer_depth == depth)
@@ -1817,9 +2158,9 @@ next_high_probability_bb (basic_block bb)
       if ((true_edge_prob >= (param_branch_prob_threshold / 100.0) - minimum)
 	  && flow_bb_inside_loop_p (bb->loop_father, true_edge->dest))
 	return true_edge->dest;
-      else if ((false_edge_prob >= (param_branch_prob_threshold / 100.0)
-		- minimum) && flow_bb_inside_loop_p (bb->loop_father,
-		false_edge->dest))
+      else if ((false_edge_prob
+		>= (param_branch_prob_threshold / 100.0) - minimum)
+	       && flow_bb_inside_loop_p (bb->loop_father, false_edge->dest))
 	return false_edge->dest;
       else
 	{
@@ -1848,13 +2189,13 @@ void
 dump_loop_headers (const char *name, std::vector<class loop *> &loops)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
-  {
-    fprintf (dump_file, "\n\n%s:\n", name);
-    fprintf (dump_file, "{ ");
-    for (unsigned int i = 0; i < loops.size (); i++)
-      fprintf (dump_file, "%d(%d) ", loops[i]->num, loops[i]->header->index);
-    fprintf (dump_file, "}\n\n");
-  }
+    {
+      fprintf (dump_file, "\n\n%s:\n", name);
+      fprintf (dump_file, "{ ");
+      for (unsigned int i = 0; i < loops.size (); i++)
+	fprintf (dump_file, "%d(%d) ", loops[i]->num, loops[i]->header->index);
+      fprintf (dump_file, "}\n\n");
+    }
 }
 
 /* Combine and sort candidate loops.  */
@@ -1905,7 +2246,7 @@ filter_and_sort_kernels (std::vector<class loop *> &sorted_kernels,
 		{
 		  if (dump_file && (dump_flags & TDF_DETAILS))
 		    fprintf (dump_file, "Find same-loop cycle.  "
-			     "Abort filtering process.\n");
+					"Abort filtering process.\n");
 		  return false;
 		}
 	      walked_non_header_bb_idx.insert (bb->index);
@@ -1942,6 +2283,455 @@ filter_and_sort_kernels (std::vector<class loop *> &sorted_kernels,
   return true;
 }
 
+/* Check whether the given bb is null.  */
+
+bool
+check_null_bb (basic_block bb)
+{
+  if (bb == NULL)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Unexpected error at null bb.\n");
+      return true;
+    }
+  return false;
+}
+
+/* Check whether the loop father of the given bb is null.  */
+
+bool
+check_null_loop_father (basic_block bb)
+{
+  if (check_null_bb (bb))
+    return true;
+
+  if (bb->loop_father == NULL)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "bb %d's loop father is null.\n", bb->index);
+      return true;
+    }
+  return false;
+}
+
+/* States for bb during path traversal.  */
+
+enum bb_traversal_state
+{
+  NOT_TRAVERSED = 0,
+  UNDER_TRAVERSAL,
+  FULLY_TRAVERSED
+};
+
+/* Detect abnormal revisit for bb during path traversal where bb is
+   1) fully traversed,
+   2) non-loop-header bb but currently under traversal.  */
+
+bool
+revisit_bb_abnormal_p (basic_block bb, std::vector<int> &bb_visited,
+		       const std::set<int> &header_bb_idx_set,
+		       std::set<std::pair<int, int> > &backedges,
+		       int src_bb_idx)
+{
+  /* If the header bb has been already fully traversed, early exit
+     the function.  */
+  if (bb_visited[bb->index] == FULLY_TRAVERSED)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Already visited bb index %d. Abort.\n",
+		 bb->index);
+      return true;
+    }
+
+  /* If we revisit a non-header bb during next-bb traversal, we detect
+     an inner-loop cycle and dump warning info. Record this abnormal edge
+     in `backedges` for special treatment in path weight update.  */
+  if (!header_bb_idx_set.count (bb->index)
+      && bb_visited[bb->index] == UNDER_TRAVERSAL)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Warning: Find cycle at bb index %d. Abort.\n",
+		 bb->index);
+      backedges.insert (std::make_pair (src_bb_idx, bb->index));
+      return true;
+    }
+
+  return false;
+}
+
+/* Check successor bb through edge e. Return true if successor bb is NULL or
+   out of loop.  */
+
+bool
+check_succ_bb_abnormal_p (basic_block bb, edge e)
+{
+  if (check_null_bb (e->dest))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Null bb connected to src bb %d.\n", bb->index);
+
+      return true;
+    }
+
+  /* If bb is within one loop and the edge is pointing to the
+     outer loop, skip edge processing until a backedge to header
+     bb. `loop->num = 0` represents function body.  */
+  if (bb->loop_father->num != 0
+      && !flow_bb_inside_loop_p (bb->loop_father, e->dest))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Find edges to the outer loop at bb "
+			    "index %d to bb index %d. Abort.\n",
+		 bb->index, e->dest->index);
+
+      return true;
+    }
+
+  return false;
+}
+
+/* Criteria for retrieving the next bb in modified control-flow graph, which
+   creates a topological order for the bb traversal.  */
+
+void
+get_next_toposort_bb (basic_block bb, std::vector<int> &bb_visited,
+		      std::list<basic_block> &bb_topo_order,
+		      const std::set<int> &header_bb_idx_set,
+		      std::set<std::pair<int, int> > &backedges,
+		      int src_bb_idx)
+{
+  /* 1) Before bb returns to the loop header, bb will not go to the outer loop.
+     2) After returning to the loop header, traverse all exit_bbs.
+     NEXT STEP:
+     1) If goto jumps out of 2 loops, goto has to traverse smaller jumps first.
+     2) If path length is the same => choose higher depth traversal path.  */
+  if (check_null_bb (bb) || check_null_loop_father (bb))
+    return;
+
+  /* Find last bb of function.  */
+  if (bb == EXIT_BLOCK_PTR_FOR_FN (cfun))
+    return;
+
+  if (revisit_bb_abnormal_p (bb, bb_visited, header_bb_idx_set, backedges,
+			     src_bb_idx))
+    return;
+
+  /* If we revisit the header bb of a loop, traverse all exit bbs.  */
+  if (header_bb_idx_set.count (bb->index)
+      && bb_visited[bb->index] == UNDER_TRAVERSAL)
+    {
+      unsigned i;
+      edge e;
+      vec<edge> exits = get_loop_exit_edges (bb->loop_father);
+
+      if (exits.length () > 1 && dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Detect multiple exits at loop %d.\n",
+		 bb->loop_father->num);
+
+      FOR_EACH_VEC_ELT (exits, i, e)
+	{
+	  get_next_toposort_bb (e->dest, bb_visited, bb_topo_order,
+				header_bb_idx_set, backedges, bb->index);
+	}
+      return;
+    }
+
+  /* Post-order traversal for normal bb.  */
+  bb_visited[bb->index] = UNDER_TRAVERSAL;
+  edge e;
+  edge_iterator ei;
+
+  FOR_EACH_EDGE (e, ei, bb->succs)
+    {
+      if (check_succ_bb_abnormal_p (bb, e))
+	continue;
+
+      get_next_toposort_bb (e->dest, bb_visited, bb_topo_order,
+			    header_bb_idx_set, backedges, bb->index);
+    }
+
+  /* bb is marked as fully traversed and all its descendents have been
+      fully traversed due to post-order traversal.  */
+  bb_visited[bb->index] = FULLY_TRAVERSED;
+  bb_topo_order.push_back (bb);
+}
+
+/* A struct that represents the longest path weight at each bb.  */
+
+struct weight
+{
+  /* Longest path weight at current bb.  */
+  gcov_type bb_count;
+
+  /* Prev bb from the current longest path.  */
+  int prev_bb_idx;
+};
+
+/* A helper function for checking whether overflow will occur when adding two
+   gcov_type weights.  */
+
+bool
+check_weight_overflow (gcov_type a, gcov_type b)
+{
+  if ((a > 0 && b > INT64_MAX - a) || (a < 0 && b < INT64_MIN - a))
+    return true;
+
+  return false;
+}
+
+/* A helper function that update the weight of the current longest path to
+   bb_idx_dst and a new path pointing from bb_idx_src to bb_idx_dst.  */
+
+void
+update_path_weight (std::vector<weight> &bb_weights, int bb_idx_src,
+		    int bb_idx_dst, gcov_type weight_dst)
+{
+  if (check_weight_overflow (bb_weights[bb_idx_src].bb_count, weight_dst)
+      && dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "WARNING: Path weight overflow at src bb %d "
+			  "and dest bb %d.\n",
+	       bb_idx_src, bb_idx_dst);
+    }
+  if (bb_weights[bb_idx_dst].bb_count
+      < bb_weights[bb_idx_src].bb_count + weight_dst)
+    {
+      bb_weights[bb_idx_dst].bb_count
+	= bb_weights[bb_idx_src].bb_count + weight_dst;
+      bb_weights[bb_idx_dst].prev_bb_idx = bb_idx_src;
+    }
+}
+
+/* Check whether the required bb/loop info for path update is null.  */
+
+bool
+check_null_info_in_path_update (basic_block bb, edge e)
+{
+  if (check_null_bb (e->dest))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Null bb detected for edge connected "
+			    "to src bb %d.\n",
+		 bb->index);
+      return true;
+    }
+
+  if (check_null_loop_father (bb) || check_null_loop_father (e->dest))
+    return true;
+
+  return false;
+}
+
+/* Update path weight to loop exit bbs where the current source bb is connected
+   to header bb using a backedge.  */
+
+void
+update_backedge_path_weight (std::vector<weight> &bb_weights, basic_block bb)
+{
+  unsigned i;
+  edge e_exit;
+  vec<edge> exits = get_loop_exit_edges (bb->loop_father);
+  FOR_EACH_VEC_ELT (exits, i, e_exit)
+    {
+      if (check_null_bb (e_exit->dest))
+	{
+	  if (e_exit->src != NULL && dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Null bb detected for exiting edge "
+				"connected to src bb %d.\n",
+		     e_exit->src->index);
+	  continue;
+	}
+
+      update_path_weight (bb_weights, bb->index, e_exit->dest->index,
+			  e_exit->dest->count.to_gcov_type ());
+    }
+}
+
+/* Update the longest length of the path through control flow graph.  */
+
+void
+update_max_length_of_path (std::vector<weight> &bb_weights,
+			   std::list<basic_block> &bb_topo_order,
+			   const std::set<int> &header_bb_idx_set,
+			   const std::set<std::pair<int, int> > &backedges)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Start update weight traversal:\n");
+
+  while (!bb_topo_order.empty ())
+    {
+      basic_block bb = bb_topo_order.back ();
+      bb_topo_order.pop_back ();
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "%d ", bb->index);
+
+      edge e;
+      edge_iterator ei;
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	{
+	  if (check_null_info_in_path_update (bb, e))
+	    continue;
+
+	  if (header_bb_idx_set.count (e->dest->index)
+	      && bb->loop_father == e->dest->loop_father)
+	    {
+	      /* Backedge case.  */
+	      update_backedge_path_weight (bb_weights, bb);
+	    }
+	  else if (bb->loop_father->num != 0
+		   && !flow_bb_inside_loop_p (bb->loop_father, e->dest))
+	    {
+	      /* Outer-loop edge case.  */
+	      continue;
+	    }
+	  else if (backedges.count (std::make_pair (bb->index, e->dest->index)))
+	    {
+	      /* Inner-loop-cycle backedge case.  */
+	      continue;
+	    }
+	  else
+	    {
+	      /* Normal edge case.  */
+	      update_path_weight (bb_weights, bb->index, e->dest->index,
+				  e->dest->count.to_gcov_type ());
+	    }
+	}
+    }
+}
+
+/* Collect all header bb of loops in the function beforehand.  */
+
+void
+collect_header_bb_for_fn (std::set<int> &header_bb_idx_set)
+{
+  class loop *loop = NULL;
+  FOR_EACH_LOOP (loop, LI_FROM_INNERMOST)
+    header_bb_idx_set.insert (loop->header->index);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nCheck header bbs:\n");
+      for (std::set<int>::iterator it = header_bb_idx_set.begin ();
+	   it != header_bb_idx_set.end (); ++it)
+	fprintf (dump_file, "%d ", *it);
+      fprintf (dump_file, "\n");
+    }
+}
+
+/* Record loop executing order and bb high-executing path.  */
+
+void
+record_high_execution_path (std::vector<class loop *> &sorted_kernel,
+			    std::vector<int> &bb_path, int bb_num_max)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nPATH FOR %s: ", get_name (cfun->decl));
+
+  std::set<int> loop_set;
+  for (int i = bb_path.size() - 1; i >= 0; --i)
+    {
+      int bb_idx = bb_path[i];
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "%d ", bb_idx);
+      gcc_assert (bb_idx < bb_num_max);
+
+      class loop *loop = BASIC_BLOCK_FOR_FN (cfun, bb_idx)->loop_father;
+      if (!loop_set.count (loop->num))
+	{
+	  loop_set.insert (loop->num);
+	  sorted_kernel.push_back (loop);
+	}
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\n");
+}
+
+/* Combine and sort candidate loops using feedback information.  */
+
+bool
+filter_and_sort_kernels_feedback (std::vector<class loop *> &sorted_kernel,
+				  std::set<int> &bb_pathset)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nPhase 4: filter_and_sort_kernels:\n\n");
+
+  std::set<int> header_bb_idx_set;
+  std::list<basic_block> bb_topo_order;
+
+  /* Quoted from GCC internal, Chapter 15.1, "the index for any block should
+     never be greater than `last_basic_block`." Therefore, we use this
+     variable for retrieving the max bb index of a function.  */
+  /* Since the pass does not add/remove/merge basic blocks until Phase 6
+     and previous passes will update ssa accordingly, we do not need to
+     `compact_blocks` to update bb indices currently.   */
+  int bb_num_max = last_basic_block_for_fn (cfun) + 1;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nMaximal number of possible bbs in the "
+			  "function: %d\n",
+	     bb_num_max);
+  std::vector<int> bb_visited = std::vector<int>(bb_num_max, 0);
+
+  collect_header_bb_for_fn (header_bb_idx_set);
+  basic_block bb_start = ENTRY_BLOCK_PTR_FOR_FN (cfun);
+
+  /* Step 1: Get topological order of bb during traversal.  */
+  std::set<std::pair<int, int> > backedges;
+  get_next_toposort_bb (bb_start, bb_visited, bb_topo_order, header_bb_idx_set,
+			backedges, -1);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nCheck bbs in topological order:\n");
+      for (std::list<basic_block>::iterator it = bb_topo_order.begin ();
+	   it != bb_topo_order.end (); ++it)
+	fprintf (dump_file, "%d ", (*it)->index);
+      fprintf (dump_file, "\n");
+    }
+
+  /* Step 2: Update weights of nodes and path.  */
+  weight weight_init = {-1, -1};
+  std::vector<weight> bb_weights = std::vector<weight>(bb_num_max, weight_init);
+  bb_weights[0].bb_count = 0;  /* ENTRY bb has count 0 and prev bb as -1.  */
+  update_max_length_of_path (bb_weights, bb_topo_order, header_bb_idx_set,
+			     backedges);
+
+  /* Step 3: Backtrack a path from EXIT bb to ENTRY bb.  */
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\nCheck counts for each bb:\n");
+
+  std::vector<int> bb_path;
+  int tmp_bb_idx = 1;
+  bb_pathset.insert (tmp_bb_idx);
+  bb_path.push_back (tmp_bb_idx);
+  tmp_bb_idx = bb_weights[tmp_bb_idx].prev_bb_idx;
+  while (tmp_bb_idx > 0 && tmp_bb_idx < bb_num_max)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "%d: %ld, ", tmp_bb_idx,
+		 bb_weights[tmp_bb_idx].bb_count);
+      bb_pathset.insert (tmp_bb_idx);
+      bb_path.push_back (tmp_bb_idx);
+      tmp_bb_idx = bb_weights[tmp_bb_idx].prev_bb_idx;
+    }
+  /* It is possible that the function exit code is wrapped around as an
+     variable, and thus, EXIT_BB in cfg is not connected to any bb. */
+  if (tmp_bb_idx < 0 || tmp_bb_idx >= bb_num_max)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "unhandled scenario at backtracking highly "
+			      "executed path with tmp_bb_idx %d",
+		   tmp_bb_idx);
+	}
+      return false;
+    }
+
+  record_high_execution_path (sorted_kernel, bb_path, bb_num_max);
+
+  return true;
+}
+
+
 /* ================ phase 5 record_and_sort_ref_groups ================  */
 /* Memory reference score, different aspects of one memory reference.  */
 
@@ -1957,7 +2747,6 @@ struct ref_score
   int line;
 };
 
-
 /* Memory reference group, different reference of the same variable.  */
 
 struct ref_group
@@ -1971,14 +2760,23 @@ struct ref_group
   /* first ref for insert hint.  */
   data_ref first_use;
 
+  /* first ref with the highest-order CALC.  */
+  data_ref first_calc_use;
+
   /* reuse scores of variables.  */
-  unsigned int reuse_level;
+  float reuse_level;
 
   /* method of calculating the var size.  */
   calc_type calc_by;
 
   /* memory reference index for specific variable.  */
   unsigned int mem_ref_index;
+
+  /* variable dimension.  */
+  unsigned int dim;
+
+  /* True if first_calc_use's footprint replaces that of first_use.  */
+  unsigned int transfer_ft;
 
   /* Accessing Reference Records in Different Modes (key_index):
     000: write, random, non-parallel
@@ -2002,39 +2800,138 @@ struct ref_group
       reuse_level = 0;
       calc_by = UNHANDLE_CALC;
       mem_ref_index = 0;
+      dim = 1;
+      transfer_ft = 0;
     }
 };
 
-/* calculate reuse level.  */
+/* Get the integer part for log(x) with the given base.  */
 
-unsigned int
-calculate_reuse_level (std::map<int, std::vector<data_ref> > &var_use)
+static unsigned int
+flog (float x, float base)
 {
-  unsigned int level = 0;
+  unsigned int res = 0;
+  while (x >= base)
+    {
+      ++res;
+      x /= base;
+    }
+  return res;
+}
+
+/* Calculate reuse time for a memory reference in ref_group.  */
+
+float
+calculate_reuse_times (std::vector<data_ref> &mem_refs, std::set<int> &loop_set,
+		       std::set<int> &bb_set, unsigned int var_dim)
+{
+  const float SAME_BB_REUSE_WEIGHT = 0.1;
+  const float SAME_LOOP_REUSE_WEIGHT = 0.5;
+  const float NORMAL_REUSE_WEIGHT = 1.;
+
+  float reuse_time_sum = 0.;
+  for (std::vector<data_ref>::iterator it = mem_refs.begin ();
+       it != mem_refs.end (); ++it)
+    {
+      const data_ref &mem_ref = *it;
+      float reuse_time = 0.;
+      if (bb_set.count (mem_ref.bb_idx))
+	{
+	  /* If the two mem_ref belong to the same bb, the new reuse
+	     weight will not exceed 0.1 divided by the mem_ref mode group
+	     size.
+	     NEXT STEP: The following equation may hold and cause commutative
+	     property of read and write op not holding:
+	      write + (reused) read != read + (reused) write.
+	     However, it seems that write mem_ref is always before read mem_ref,
+	     so the above comparison does not show up in calculation due to
+	     intrinsic in-order property of tree map, but this condition is
+	     quite fragile anyway.  */
+	  reuse_time = SAME_BB_REUSE_WEIGHT / mem_refs.size ();
+	}
+      else
+	{
+	  bb_set.insert (mem_ref.bb_idx);
+	  if (loop_set.count (mem_ref.loop_idx))
+	    {
+	      /* If the mem_ref belongs to a loop where any other mem_ref is in,
+		 the new reuse weight will be 0.5.  */
+	      reuse_time = SAME_LOOP_REUSE_WEIGHT;
+	    }
+	  else
+	    {
+	      /* If the mem_ref is reused but not in the same group with any
+		 other mem_ref, the new reuse weight will be 1.  */
+	      loop_set.insert (mem_ref.loop_idx);
+	      reuse_time = NORMAL_REUSE_WEIGHT;
+	    }
+	}
+      unsigned int used_dim = std::min (mem_ref.loop_depth, var_dim);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "used_dim : %u, loop_depth : %u\n", used_dim,
+		 mem_ref.loop_depth);
+      unsigned int power = flog (std::max (0u, mem_ref.loop_depth - used_dim)
+				 + 2, 2.);
+      reuse_time_sum += reuse_time * (used_dim * used_dim / 2.) * (power);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "(%f * (%u * %u / 2) * (%u) = %f\n",
+		 reuse_time, used_dim, used_dim, power,
+		 reuse_time * (used_dim * used_dim / 2.) * (power));
+    }
+  return reuse_time_sum;
+}
+
+/* Calculate reuse level.  */
+
+float
+calculate_reuse_level (std::map<int, std::vector<data_ref> > &var_use,
+		       unsigned int var_dim, double var_size)
+{
+  const float VAR_SIZE_CACHE_CAPACITY = 1 / 4.;
+  const int WITHIN_CACHE_SIZE_COST = 4;
+  const float BYTE_CONVERT_RATIO = 1024.;
+
+  float level = 0.;
+  std::set<int> loop_set;
+  std::set<int> bb_set;
+  bool has_write_op = false;
   for (std::map<int, std::vector<data_ref> >::iterator it = var_use.begin ();
        it != var_use.end (); ++it)
     {
       unsigned int parallel = 1;
       unsigned int regular = 1;
-      unsigned int cost = 1;
 
       if ((*it).second[0].parallel_p)
 	parallel = PARALLEL_NUM;
       if (!(*it).second[0].regular_p)
 	regular = INDIRECT_ACCESS_VALUE;
       if (!(*it).second[0].read_p)
-	cost = WRITE_COST;
+	has_write_op = true;
 
       /* In serial reuse, we will later check whether they are in the
 	 same cacheline.  If yes, delete the reuse.  For details, see the
 	 reuse analysis of prefetching and eliminate redundancy.  */
-      unsigned int add = parallel * ((*it).second.size () * (cost + regular));
+      float reuse_times = calculate_reuse_times ((*it).second, loop_set,
+						 bb_set, var_dim);
+      float add = parallel * reuse_times * regular;
       level += add;
       if (add && dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "%d : %d * (%ld * (%d + %d)) = %d\n",
-	      (*it).first, parallel, (*it).second.size (), cost, regular, add);
+	fprintf (dump_file, "%d : %d * %f * %d = %f\n",
+		 (*it).first, parallel, reuse_times, regular, add);
     }
-  return level;
+
+  bool within_llc_size = var_size > param_l2_cache_size / BYTE_CONVERT_RATIO
+			 && var_size < VAR_SIZE_CACHE_CAPACITY
+				       * param_llc_capacity_per_core;
+
+  float final_level = has_write_op ? (level * WRITE_COST) : level;
+  final_level = within_llc_size ? (final_level * WITHIN_CACHE_SIZE_COST)
+				: final_level;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "final level : %d * %f * %d = %f\n",
+	     has_write_op ? WRITE_COST : 1, level,
+	     within_llc_size ? WITHIN_CACHE_SIZE_COST : 1, final_level);
+  return final_level;
 }
 
 /* Comparison of reference reuse level.  */
@@ -2042,7 +2939,33 @@ calculate_reuse_level (std::map<int, std::vector<data_ref> > &var_use)
 bool
 ref_group_reuse_cmp (const ref_group &a, const ref_group &b)
 {
-  return a.reuse_level > b.reuse_level;
+  if (a.reuse_level != b.reuse_level)
+    return a.reuse_level > b.reuse_level;
+  else
+    return get_name (a.var) < get_name (b.var);
+}
+
+/* Dump key information of reference group and memory access for llc hint.  */
+
+void
+dump_key_info_for_llc_hint (std::vector<ref_group> &ref_groups)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\nLLC hint info:\n");
+      fprintf (dump_file, "rank\tvar\t(lineno, direct, vectorized, write)\n");
+      for (unsigned int i = 0; i < ref_groups.size (); ++i)
+	{
+	  fprintf (dump_file, "%d\t", i);
+	  print_generic_expr (dump_file, ref_groups[i].var, TDF_SLIM);
+	  data_ref &mem_ref = ref_groups[i].first_use;
+	  fprintf (dump_file, "\t(%d, %u, %u, %u)",
+		   expand_location (mem_ref.stmt->location).line,
+		   mem_ref.regular_p, mem_ref.vectorize_p, 1 - mem_ref.read_p);
+	  fprintf (dump_file, "\n");
+	}
+      fprintf (dump_file, "\n");
+    }
 }
 
 /* Sort reference groups.  */
@@ -2057,13 +2980,15 @@ sort_ref_groups (std::vector<ref_group> &ref_groups,
   for (std::map<tree, ref_group>::iterator it = ref_groups_map.begin ();
        it != ref_groups_map.end (); ++it)
     {
-      (*it).second.reuse_level = calculate_reuse_level ((*it).second.ref_use);
+      (*it).second.reuse_level = calculate_reuse_level ((*it).second.ref_use,
+							(*it).second.dim,
+							(*it).second.var_size);
       ref_groups.push_back ((*it).second);
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
 	  print_generic_expr (dump_file, (*it).second.var, TDF_SLIM);
-	  fprintf (dump_file, " : %d\n", (*it).second.reuse_level);
+	  fprintf (dump_file, " : %f\n\n", (*it).second.reuse_level);
 	}
     }
 
@@ -2072,16 +2997,17 @@ sort_ref_groups (std::vector<ref_group> &ref_groups,
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "\nsorted ref_groups:\n");
-      fprintf (dump_file, "rank var (data_size, num_of_mem_ref, need_tmp_name):"
-	       " reuse_level_score\n");
+      fprintf (dump_file, "rank\tvar\t(data_size, dim, num_of_mem_ref, "
+			  "need_tmp_name): reuse_level_score\n");
       for (unsigned int i = 0; i < ref_groups.size (); ++i)
 	{
-	  fprintf (dump_file, "%d ", i);
+	  fprintf (dump_file, "%d\t", i);
 	  print_generic_expr (dump_file, ref_groups[i].var, TDF_SLIM);
 	  int need_tmp_name = !get_name (ref_groups[i].var) ? 1 : 0;
-	  fprintf (dump_file, " (%lf, %lu, %d)", ref_groups[i].var_size,
-		   ref_groups[i].ref_scores.size (), need_tmp_name);
-	  fprintf (dump_file, " : %d\n", ref_groups[i].reuse_level);
+	  fprintf (dump_file, "\t(%lf, %u, %lu, %d)", ref_groups[i].var_size,
+		   ref_groups[i].dim, ref_groups[i].ref_scores.size (),
+		   need_tmp_name);
+	  fprintf (dump_file, " : %f\n", ref_groups[i].reuse_level);
 	}
       fprintf (dump_file, "\n");
 
@@ -2101,6 +3027,7 @@ sort_ref_groups (std::vector<ref_group> &ref_groups,
 	}
       fprintf (dump_file, "\n");
     }
+    dump_key_info_for_llc_hint (ref_groups);
 }
 
 /* Attributes of variable data.  */
@@ -2126,19 +3053,27 @@ record_mem_ref (std::map<tree, ref_group> &ref_groups, data_ref &mem_ref)
       ref_group ref_group;
       ref_group.var = mem_ref.var;
       ref_group.first_use = mem_ref;
+      ref_group.first_calc_use = mem_ref;
       ref_groups[mem_ref.var] = ref_group;
     }
 
-  /* Ref_groups' calc_by depends on the inserted mem_ref's calc_by.
-     Runtime issue requires the specified mem_ref's calc_by to be >= 1.
-     Temporarily modified ref_group's first_use after sorting mem_refs.  */
-  ref_groups[mem_ref.var].calc_by = std::max (ref_groups[mem_ref.var].calc_by,
-					 mem_ref.calc_by);
+  /* Ref_groups' calc_by reflects the highest order of calc_by that can be
+     achieved by all mem_ref of ref_groups. The first mem_ref that achieves
+     this order is defined to be `first_calc_use`. Later after sorting
+     mem_refs, calc_by will be replaced by the calc_by of `first_use`, and
+     even by the calc_by of `first_calc_use`.  */
+  if (mem_ref.calc_by > ref_groups[mem_ref.var].calc_by)
+    {
+      ref_groups[mem_ref.var].calc_by = mem_ref.calc_by;
+      ref_groups[mem_ref.var].first_calc_use = mem_ref;
+    }
   ref_groups[mem_ref.var].var_size = std::max (ref_groups[mem_ref.var].var_size,
-					  mem_ref.data_size);
+					       mem_ref.data_size);
+  ref_groups[mem_ref.var].dim = std::max (ref_groups[mem_ref.var].dim,
+				(unsigned int) mem_ref.loop_bounds.size ());
   ref_groups[mem_ref.var].ref_use[index].push_back (mem_ref);
 
-  ref_score ref_level{ mem_ref, ((mem_ref.stmt)->bb->count).to_gcov_type (),
+  ref_score ref_level = { mem_ref, ((mem_ref.stmt)->bb->count).to_gcov_type (),
 			   expand_location (mem_ref.stmt->location).line };
   ref_groups[mem_ref.var].ref_scores.push_back (ref_level);
 
@@ -2165,7 +3100,7 @@ record_mem_ref (std::map<tree, ref_group> &ref_groups, data_ref &mem_ref)
       fprintf (dump_file, ", offset: ");
       if (mem_ref.offset && cst_and_fits_in_hwi (mem_ref.offset))
 	fprintf (dump_file, HOST_WIDE_INT_PRINT_DEC,
-		int_cst_value (mem_ref.offset));
+		 int_cst_value (mem_ref.offset));
       else
 	print_generic_expr (dump_file, mem_ref.offset, TDF_SLIM);
       fprintf (dump_file, ", %s", mem_ref.read_p ? "read" : "write");
@@ -2175,12 +3110,30 @@ record_mem_ref (std::map<tree, ref_group> &ref_groups, data_ref &mem_ref)
     }
 }
 
-/* Rank data reference index level by the scheme of source code line number.  */
+/* Rank data reference index level.  */
 
 bool
-data_ref_reuse_cmp (const ref_score &a, const ref_score &b)
+best_insert_cmp (const ref_score &a, const ref_score &b)
 {
-  return a.line < b.line;
+  /* NEXT STEP: We can also calculate gap using static/feedback info inferred
+     from historical maximum bb count:
+	gap = hist_max_bb_ct / (alpha * max (a.bb_ct, b.bb_ct)) + 1.
+     Also, bb count needs to be smoothed and scaled as divisor can be 0.
+     history maximum bb count can be obtained in Phase 4.  */
+  const float gap = 1;
+  if (a.d_ref.loop_depth != b.d_ref.loop_depth)
+    return a.d_ref.loop_depth > b.d_ref.loop_depth;
+  else if (a.d_ref.regular_p != b.d_ref.regular_p)
+    return a.d_ref.regular_p > b.d_ref.regular_p;
+  else if (abs (double (std::max (a.bb_count, b.bb_count) + 1) /
+		double (std::min (a.bb_count, b.bb_count) + 1) - 1) > gap)
+    return a.bb_count > b.bb_count;
+  else if (a.line != b.line)
+    return a.line < b.line;
+  else if (a.d_ref.read_p != b.d_ref.read_p)
+    return a.d_ref.read_p < b.d_ref.read_p;
+  else
+    return a.d_ref.vectorize_p > b.d_ref.vectorize_p;
 }
 
 /* Sort data reference index level within one reference group in non-decreasing
@@ -2194,13 +3147,48 @@ sort_mem_ref_in_ref_group (std::map<tree, ref_group> &ref_groups_map)
   for (std::map<tree, ref_group>::iterator it = ref_groups_map.begin ();
        it != ref_groups_map.end (); ++it)
     {
-      std::vector<ref_score> &ref_scores = (*it).second.ref_scores;
+      ref_group &curr_ref_group = (*it).second;
+      std::vector<ref_score> &ref_scores = curr_ref_group.ref_scores;
       std::stable_sort (ref_scores.begin (), ref_scores.end (),
-			data_ref_reuse_cmp);
+			best_insert_cmp);
       /* Update ref_group's first_use and calc_by with the first mem_ref after
 	 sorting.  */
-      (*it).second.first_use = (*it).second.ref_scores[0].d_ref;
-      (*it).second.calc_by = (*it).second.first_use.calc_by;
+      curr_ref_group.first_use = curr_ref_group.ref_scores[0].d_ref;
+      curr_ref_group.calc_by = curr_ref_group.first_use.calc_by;
+
+      /* When transferring footprint is enabled, it is allowed to transfer
+	 the statically-calculated footprint of a mem_ref from the same
+	 ref_group to `first_use` mem_ref.  */
+      if (param_transfer_footprint
+	  && curr_ref_group.first_use.calc_by == UNHANDLE_CALC)
+	{
+	  if (curr_ref_group.first_calc_use.calc_by > RUNTIME_CALC)
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  print_generic_expr (dump_file, (*it).first, TDF_SLIM);
+		  fprintf (dump_file, "\nfirst_use: ");
+		  print_gimple_stmt (dump_file, curr_ref_group.first_use.stmt,
+				     0, TDF_LINENO);
+		  fprintf (dump_file, "first_calc_use: ");
+		  print_gimple_stmt (dump_file,
+				     curr_ref_group.first_calc_use.stmt,
+				     0, TDF_LINENO);
+		}
+
+	      curr_ref_group.calc_by = curr_ref_group.first_calc_use.calc_by;
+	      curr_ref_group.transfer_ft = 1;
+	    }
+	  else
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  print_generic_expr (dump_file, (*it).first, TDF_SLIM);
+		  fprintf (dump_file, ": cannot transfer footprint to "
+				      "first use mem_ref.\n");
+		}
+	    }
+	}
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
@@ -2211,6 +3199,9 @@ sort_mem_ref_in_ref_group (std::map<tree, ref_group> &ref_groups_map)
 	      fprintf (dump_file, "mem_ref_index %u: ", i);
 	      print_gimple_stmt (dump_file, ref_scores[i].d_ref.stmt, 0,
 				 TDF_LINENO);
+	      fprintf (dump_file, "bb-%d ",
+		       ref_scores[i].d_ref.stmt->bb->index);
+	      fprintf (dump_file, "count %ld\n", ref_scores[i].bb_count);
 	    }
 	  fprintf (dump_file, "\n\n");
 	}
@@ -2222,8 +3213,9 @@ sort_mem_ref_in_ref_group (std::map<tree, ref_group> &ref_groups_map)
 bool
 record_and_sort_ref_groups (std::vector<ref_group> &ref_groups,
 			    std::vector<class loop *> &kernels,
-			    std::map<class loop*,
-				     std::vector<data_ref> > &loop_refs)
+			    std::map<class loop *,
+				     std::vector<data_ref> > &loop_refs,
+			    std::set<int> bb_pathset)
 {
   if (dump_file)
     fprintf (dump_file, "\nPhase 5: trace_all_references_details\n\n");
@@ -2232,7 +3224,7 @@ record_and_sort_ref_groups (std::vector<ref_group> &ref_groups,
 
   for (unsigned i = 0; i < kernels.size (); ++i)
     {
-      class loop* loop = kernels[i];
+      class loop *loop = kernels[i];
       if (loop_refs.count (loop) == 0)
 	continue;
 
@@ -2240,8 +3232,13 @@ record_and_sort_ref_groups (std::vector<ref_group> &ref_groups,
 	fprintf (dump_file, "loop header %d:\n", loop->header->index);
       for (unsigned j = 0; j < loop_refs[loop].size (); ++j)
 	{
-	  if (loop_refs[loop][j].trace_status_p)
-	    record_mem_ref (ref_groups_map, loop_refs[loop][j]);
+	  data_ref &mem_ref = loop_refs[loop][j];
+	  if (mem_ref.trace_status_p)
+	    {
+	      if (!param_filter_mode || (param_filter_mode
+		  && bb_pathset.count (mem_ref.stmt->bb->index)))
+		record_mem_ref (ref_groups_map, mem_ref);
+	    }
 	}
     }
 
@@ -2274,8 +3271,19 @@ issue_mask_prefetch (gimple *stmt)
     target = gimple_call_arg (stmt, 3);
   else if (gimple_call_internal_fn (stmt) == IFN_MASK_LOAD)
     target = gimple_call_lhs (stmt);
-  /* 4: PLDL3KEEP.  */
-  tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4);
+  tree prfop = NULL_TREE;
+  if (param_llc_level == 3)
+    /* for simulation, 4: PLDL3KEEP. */
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4);
+  else if (param_llc_level == 4)
+    /* 6: PLDL4KEEP.  */
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6);
+  else
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "LLC cache levels are illegal.\n");
+      return;
+    }
 
   /* add offset.  */
   gimple_stmt_iterator si = gsi_for_stmt (stmt);
@@ -2286,14 +3294,14 @@ issue_mask_prefetch (gimple *stmt)
 	fprintf (dump_file, "unhandled scene: target vect is null");
       return;
     }
-  HOST_WIDE_INT distance = param_prefetch_offset * tree_to_uhwi
+  unsigned HOST_WIDE_INT distance = param_prefetch_offset * tree_to_uhwi
 		       (TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (target))));
   tree addr = fold_build_pointer_plus_hwi (dataref_ptr, distance);
   addr = force_gimple_operand_gsi (&si, unshare_expr (addr), true,
-				    NULL, true, GSI_SAME_STMT);
+				   NULL, true, GSI_SAME_STMT);
 
-  gcall *call = gimple_build_call_internal (IFN_MASK_PREFETCH,
-				5, addr, scale, final_mask, target, prfop);
+  gcall *call = gimple_build_call_internal (IFN_MASK_PREFETCH, 5, addr, scale,
+					    final_mask, target, prfop);
   gsi_insert_after (&si, call, GSI_SAME_STMT);
   update_ssa (TODO_update_ssa_only_virtuals);
 }
@@ -2313,9 +3321,19 @@ issue_mask_gather_prefetch (gimple *stmt)
   tree scale = gimple_call_arg (stmt, 2);
   tree zero = gimple_call_arg (stmt, 3);
   tree final_mask = gimple_call_arg (stmt, 4);
-  tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4);
-  tree target = gimple_call_lhs (stmt);
+  tree prfop = NULL_TREE;
+  if (param_llc_level == 3) // for simulation
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 4); // 4: PLDL3KEEP
+  else if (param_llc_level == 4)
+    prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6); // 6: PLDL4KEEP
+  else
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "LLC cache levels are illegal.\n");
+      return;
+    }
 
+  tree target = gimple_call_lhs (stmt);
   /* add offset.  */
   gimple_stmt_iterator si = gsi_for_stmt (stmt);
   if (target == NULL_TREE)
@@ -2324,15 +3342,15 @@ issue_mask_gather_prefetch (gimple *stmt)
 	fprintf (dump_file, "unhandled scene: target vect is null");
       return;
     }
-  HOST_WIDE_INT distance = param_prefetch_offset * tree_to_uhwi
+  unsigned HOST_WIDE_INT distance = param_prefetch_offset * tree_to_uhwi
 		       (TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (target))));
   tree addr = fold_build_pointer_plus_hwi (dataref_ptr, distance);
   addr = force_gimple_operand_gsi (&si, unshare_expr (addr), true,
 				   NULL, true, GSI_SAME_STMT);
 
-  gcall *call = gimple_build_call_internal
-		(IFN_MASK_GATHER_PREFETCH, 7, addr,
-		 vec_offset, scale, zero, final_mask, target, prfop);
+  gcall *call = gimple_build_call_internal (IFN_MASK_GATHER_PREFETCH, 7, addr,
+					    vec_offset, scale, zero,
+					    final_mask, target, prfop);
   gsi_insert_after (&si, call, GSI_SAME_STMT);
   update_ssa (TODO_update_ssa_only_virtuals);
 }
@@ -2345,12 +3363,10 @@ issue_builtin_prefetch (data_ref &mem_ref)
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "insert prfm.\n");
   /* MEM[symbol: diagPtr, index: ivtmp_102, step: 8, offset: 0B] */
-  gimple* stmt = mem_ref.stmt;
-  tree dataref_ptr = mem_ref.base;
-  tree data_idx = mem_ref.index;
+  gimple *stmt = mem_ref.stmt;
+  tree ref = mem_ref.ref;
+
   tree scale = mem_ref.step;
-  tree offset = mem_ref.offset;
-  /* add offset.  */
   gimple_stmt_iterator si = gsi_for_stmt (stmt);
   if (scale == NULL_TREE)
     {
@@ -2361,30 +3377,16 @@ issue_builtin_prefetch (data_ref &mem_ref)
 	{
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    fprintf (dump_file, "ERROR: Unknown size unit for the prefetching "
-		     "variable.  Stop builtin_prefetch.\n\n");
+				"variable.  Stop builtin_prefetch.\n\n");
 	  return;
 	}
     }
 
-  data_idx = data_idx ? data_idx : size_zero_node;
-  data_idx = build1 (NOP_EXPR, TREE_TYPE (scale), data_idx);
-  tree displacement = fold_build2 (MULT_EXPR, TREE_TYPE (scale), data_idx,
-				   scale);
-  if (offset != NULL_TREE && TREE_CODE (offset) != TREE_CODE (size_zero_node))
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "WARNING: offset's TREE_TYPE is not integer_cst: "
-		 "%s\nStop builtin_prefetch.\n",
-		 get_tree_code_name (TREE_CODE (offset)));
-      return;
-    }
-  offset = offset ? offset : size_zero_node;
-  offset = build1 (NOP_EXPR, TREE_TYPE (scale), offset);
-  dataref_ptr = fold_build2 (POINTER_PLUS_EXPR, TREE_TYPE (dataref_ptr),
-			     dataref_ptr, offset);
-  tree addr = fold_build2 (POINTER_PLUS_EXPR, TREE_TYPE (dataref_ptr),
-			   dataref_ptr, displacement);
-  HOST_WIDE_INT distance = param_prefetch_offset * tree_to_uhwi (scale);
+  tree addr = build_fold_addr_expr_with_type (ref, ptr_type_node);
+  addr = force_gimple_operand_gsi (&si, unshare_expr (addr),
+				   true, NULL, true, GSI_SAME_STMT);
+  unsigned HOST_WIDE_INT distance = param_prefetch_offset
+				      * tree_to_uhwi (scale);
 
   addr = fold_build_pointer_plus_hwi (addr, distance);
   addr = force_gimple_operand_gsi (&si, unshare_expr (addr), true,
@@ -2392,8 +3394,27 @@ issue_builtin_prefetch (data_ref &mem_ref)
   /* __builtin_prefetch (_68, 0, 1);
      1st param: *addr, 2nd param: write/read (1/0), 3rd param: temporal locality
      (high means strong locality) */
-  gcall *call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
-				3, addr, integer_zero_node, integer_one_node);
+  gcall *call = NULL;
+  if (param_llc_level == 3)
+    {
+      /* for simulation.
+         BUILT_IN_PREFETCH (addr, rw, locality).  */
+      call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
+                                3, addr, integer_zero_node, integer_one_node);
+    }
+  else if (param_llc_level == 4)
+    {
+        tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6);
+        call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH_FULL),
+				3, addr, integer_zero_node, prfop);
+    }
+  else
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "LLC cache levels are illegal.\n");
+      return;
+    }
+
   gsi_insert_after (&si, call, GSI_SAME_STMT);
   update_ssa (TODO_update_ssa_only_virtuals);
 }
@@ -2412,8 +3433,7 @@ static_issue (std::vector<ref_group> &ref_groups, int num_issue_var)
       data_ref mem_ref = ref_groups[i].first_use;
       if (mem_ref.vectorize_p)
 	{
-	  enum internal_fn ifn_code = gimple_call_internal_fn
-					(mem_ref.stmt);
+	  enum internal_fn ifn_code = gimple_call_internal_fn (mem_ref.stmt);
 	  if (ifn_code == IFN_MASK_STORE || ifn_code == IFN_MASK_LOAD)
 	    issue_mask_prefetch (mem_ref.stmt);
 	  else if (ifn_code == IFN_MASK_GATHER_LOAD)
@@ -2427,20 +3447,72 @@ static_issue (std::vector<ref_group> &ref_groups, int num_issue_var)
     }
 }
 
+/* Check whether all loop bounds (niters) used for calculating the footprints
+   of previously-executed ref_groups are defined in a dominated bb to the
+   currentbranch bb, where the conditional expression requires the loop bound
+   info.  */
+
+bool
+check_def_use_chain (std::vector<ref_group> &ref_groups,
+		     basic_block &branch_header_bb,
+		     std::vector<int> &ref_group_idx)
+{
+  for (std::vector<int>::iterator it = ref_group_idx.begin ();
+       it != ref_group_idx.end (); ++it)
+    {
+      /* Transferring mem_ref only takes place during footprint calculation.  */
+      ref_group &ref_group_curr = ref_groups[*it];
+      data_ref mem_ref = ref_group_curr.transfer_ft
+			  ? ref_group_curr.first_calc_use
+			  : ref_group_curr.first_use;
+      for (unsigned j = 0; j < mem_ref.loop_bounds.size (); ++j)
+	{
+	  tree niters = mem_ref.loop_bounds[j].niters;
+	  gimple *def_stmt = SSA_NAME_DEF_STMT (niters);
+	  basic_block def_bb = gimple_bb (def_stmt);
+	  /* Check dominator relationship of def bb and branch bb.  */
+	  /* Case 1: Check whether the def bb is the single predecessor block
+	     of header bb.  */
+	  if (single_pred_p (branch_header_bb))
+	    {
+	      basic_block branch_bb_prev = single_pred (branch_header_bb);
+	      if (branch_bb_prev->index == def_bb->index)
+		continue;
+	    }
+	  /* Case 2: Check whether the branch bb is dominated by the def
+	     bb.  */
+	  if (!dominated_by_p (CDI_DOMINATORS, branch_header_bb, def_bb))
+	    return false;
+	}
+    }
+  return true;
+}
+
 /* Generate the stmts for calculating the size.  Later we will consider nested
    multi-branches scenarios and check more information of niters when it is
    a COND_EXPR.  */
 
 tree
 calc_stmts_gen (std::vector<ref_group> &ref_groups,
-		gimple_seq &cond_expr_stmt_list, int num_issue_var)
+		gimple_seq &cond_expr_stmt_list,
+		basic_block branch_header_bb,
+		std::vector<int> &ref_group_idx_curr,
+		std::vector<int> &ref_group_idx_prev, tree &cumul_size)
 {
-  /* Accumulated keep size.  */
-  tree total_size = build_real_from_int_cst
-		      (double_type_node, integer_zero_node);
-  for (int i = 0; i < num_issue_var; ++i)
+  /* Check whether the bbs of def stmt for footprint loop bounds dominates
+     the bb of new runtime branching conditional.  */
+  if (!check_def_use_chain (ref_groups, branch_header_bb, ref_group_idx_prev))
+    return NULL_TREE;
+
+  /* Accumulated allocation size.  */
+  for (std::vector<int>::iterator it = ref_group_idx_curr.begin ();
+       it != ref_group_idx_curr.end (); ++it)
     {
-      data_ref &mem_ref = ref_groups[i].first_use;
+      /* Transferring mem_ref only takes place during footprint calculation.  */
+      ref_group &ref_group_curr = ref_groups[*it];
+      data_ref mem_ref = ref_group_curr.transfer_ft
+			  ? ref_group_curr.first_calc_use
+			  : ref_group_curr.first_use;
       tree var = mem_ref.var;
       for (unsigned j = 0; j < mem_ref.loop_bounds.size (); ++j)
 	{
@@ -2457,7 +3529,8 @@ calc_stmts_gen (std::vector<ref_group> &ref_groups,
 	      if (dump_file && (dump_flags & TDF_DETAILS))
 		{
 		  fprintf (dump_file, "WARNING: Cannot detect size unit "
-			   "(use 1 byte) for variable %s: ", get_name (var));
+				      "(use 1 byte) for variable %s: ",
+			   get_name (var));
 		  print_generic_expr (dump_file, mem_ref.ref, TDF_SLIM);
 		  fprintf (dump_file, "\n");
 		}
@@ -2466,85 +3539,215 @@ calc_stmts_gen (std::vector<ref_group> &ref_groups,
 	  unit = build1 (NOP_EXPR, TREE_TYPE (niters), unit);
 	  tree size = fold_build2 (MULT_EXPR, TREE_TYPE (niters), niters, unit);
 	  size = build1 (FLOAT_EXPR, double_type_node, size);
-	  total_size = fold_build2
-			 (PLUS_EXPR, double_type_node, total_size, size);
+	  cumul_size = fold_build2 (PLUS_EXPR, double_type_node, cumul_size,
+				    size);
 	}
+      ref_group_idx_prev.push_back (*it);
     }
   /* Create a stmt list for size calculation.  */
   tree div = build_int_cst (TREE_TYPE (integer_zero_node), 1024 * 1024);
   div = build1 (NOP_EXPR, double_type_node, div);
-  total_size = fold_build2 (RDIV_EXPR, double_type_node, total_size, div);
+  tree total_size = fold_build2 (RDIV_EXPR, double_type_node, cumul_size, div);
 
   tree threshold = build_int_cst (TREE_TYPE (integer_zero_node),
 				  param_llc_capacity_per_core / 2);
   threshold = build_real_from_int_cst (double_type_node, threshold);
-  tree cond_expr = fold_build2
-		     (LE_EXPR, boolean_type_node, total_size, threshold);
+  tree cond_expr = fold_build2 (LE_EXPR, boolean_type_node, total_size,
+				threshold);
 
   /* Convert cond_expr to stmt list.  */
   cond_expr = force_gimple_operand_1 (unshare_expr (cond_expr),
-	      &cond_expr_stmt_list, is_gimple_condexpr, NULL_TREE);
+				      &cond_expr_stmt_list, is_gimple_condexpr,
+				      NULL_TREE);
   return cond_expr;
+}
+
+/* Retrieve the least number of loops that cover all target mem_refs.
+   Try to merge loops that the mem_refs reside to a common superloop and
+   maintain a worklist which relates NEED-TO-COPY loops with the target mem
+   refs inside using the following criteria:
+   1) If loop A is a superloop of loop B in the worklist, replace loop B with
+      loop A in the worklist, and attach all target mem_refs of loop B,
+      together with loop A's, to loop A.
+   2) If loop B in the worklist is a superloop of loop A, attach loop A's
+      target mem_ref to loop B.
+   3) If loop A is not a superloop/subloop of loop B in the worklist, replace
+      loop B with their lowest common superloop C in the worklist, and attach
+      all target mem_refs of loop A and loop B to loop C.
+   4) If loop A and loop B's lowest common superloop is function body
+      (loop 0), stop merging and maintain loop independence.  */
+
+void
+get_loop_worklist (std::vector<ref_group> &ref_groups, int num_issue_var,
+		   std::map<class loop *, std::vector<int> > &loop_worklist)
+{
+  for (int i = 0; i < num_issue_var; ++i)
+    {
+      data_ref &mem_ref = ref_groups[i].first_use;
+      class loop *loop_new = mem_ref.loop_bounds.front ().loop;
+      class loop *common_superloop = loop_new;
+      bool add_loop_worklist = false;
+
+      /* Use greedy algorithm to merge loops to a common superloop that can
+	 contain the current mem_refs.  */
+      std::map<class loop *, std::vector<int> >::iterator it_tmp;
+      std::vector<int> ref_group_idx_tmp;
+      std::map<class loop *, std::vector<int> >::iterator it;
+      for (it = loop_worklist.begin (); it != loop_worklist.end (); )
+	{
+	  class loop *loop_old = it->first;
+	  common_superloop = find_common_loop (loop_new, loop_old);
+	  if (common_superloop == NULL || common_superloop->num == 0)
+	    {
+	      /* Stop merging two loops if there is no common superloop for
+		 them except function body (loop 0).  */
+	      if (common_superloop != NULL
+		  && dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "ref_group %d's loop %d has no common "
+				      "superloop with existing loop %d\n",
+			   i, loop_new->num, loop_old->num);
+		}
+	      ++it;
+	      continue;
+	    }
+
+	  if (common_superloop->num == loop_old->num)
+	    {
+	      /* If loop_old is the superloop of loop_new, add current
+		 ref_group index to loop's worklist.  */
+	      loop_worklist[common_superloop].push_back (i);
+	      ++it;
+	    }
+	  else
+	    {
+	      /* If loop_old is not a superloop of loop_new, replace
+		 loop_old with the common superloop.  */
+	      it_tmp = it;
+	      ++it_tmp;
+	      ref_group_idx_tmp = it->second;
+	      loop_worklist.erase (it);
+	      it = it_tmp;
+	      add_loop_worklist = true;
+	    }
+	}
+
+      if (loop_worklist.empty () || add_loop_worklist)
+	{
+	  /* Update the new common superloop in loop_worklist.  */
+	  std::vector<int> &ref_groups_tmp = loop_worklist[common_superloop];
+	  ref_groups_tmp.push_back (i);
+	  for (std::vector<int>::iterator it = ref_group_idx_tmp.begin ();
+	       it != ref_group_idx_tmp.end (); ++it)
+	    ref_groups_tmp.push_back (*it);
+	  std::sort (ref_groups_tmp.begin (), ref_groups_tmp.end ());
+	}
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "runtime loop list:\n");
+      std::map<class loop *, std::vector<int> >::iterator it;
+      for (it = loop_worklist.begin (); it != loop_worklist.end (); ++it)
+	{
+	  fprintf (dump_file, "loop %d:", it->first->num);
+	  for (std::vector<int>::iterator idx_it = it->second.begin ();
+	       idx_it != it->second.end (); ++idx_it)
+	    {
+	      fprintf (dump_file, " %d", *idx_it);
+	    }
+	  fprintf (dump_file, "\n");
+	}
+    }
 }
 
 /* Runtime form insertion and issue instruction.  */
 
 void
-runtime_issue (std::vector<ref_group> &ref_groups, int num_issue_var)
+runtime_issue (std::vector<ref_group> &ref_groups, int num_issue_var,
+	       std::vector<class loop *> &sorted_kernels)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "runtime issue\n");
 
-  if (ref_groups.size () == 0)
-    return;
-  data_ref &mem_ref = ref_groups[0].first_use;
-  class loop *loop = mem_ref.loop_bounds.back ().loop;
-  /* Ensure that variables are in the same loop.  */
-  for (int i = 1; i < num_issue_var; ++i)
+  /* It is possible that the loop father of some mem_ref's bb may contain the
+     loop fathers of the others. Therefore, we intend to only copy loops
+     without inclusion relationship.  */
+  std::map<class loop *, std::vector<int> > loop_worklist;
+  get_loop_worklist (ref_groups, num_issue_var, loop_worklist);
+  bool get_first_ref_group = false;
+  std::vector<int> ref_group_idx_prev;
+
+  /* NEXT STEP: Multiple loop copies (possibly nested within one loop can cost
+     front-end bound due to branching within loop), we need to set up a
+     threshold such that we may compensate this time cost by space cost
+     in binary (copying outer loop).  */
+  tree cumul_size = build_real_from_int_cst (double_type_node,
+					     integer_zero_node);
+  for (std::vector<class loop *>::iterator it = sorted_kernels.begin ();
+       it != sorted_kernels.end (); ++it)
     {
-      data_ref &mem_ref = ref_groups[i].first_use;
-      if (loop != mem_ref.loop_bounds.back ().loop)
+      /* Start runtime branching until finding the first ref_group's loop.
+	 Skip any ref_groups if their `first_use` mem_refs are executed
+	 before the mem_ref of the first ref_group.  */
+      class loop *loop = *it;
+      if (!loop_worklist.count (loop)
+	  || (!get_first_ref_group && loop_worklist[loop][0] != 0))
+	continue;
+
+      std::vector<int> ref_group_idx_curr = loop_worklist[loop];
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "copy loop num: %d\n", loop->num);
+	}
+      /* If the exit edge points to bb with multiple inputs, split the exit
+	 edge and create a new bb, make the exit edge point to bb with only
+	 single input.  */
+      edge e = single_exit (loop);
+      if (e == NULL)
+	return;
+      if (!single_pred_p (e->dest))
+	{
+	  split_loop_exit_edge (e, true);
+	  if (dump_enabled_p ())
+	    dump_printf (MSG_NOTE, "split exit edge\n");
+	}
+
+      /* After updating SSA, we are not sure whether the gimple_seq stmt list
+	 is initialized and unchanged during iterations. Therefore, we need to
+	 recreate this stmt list for every loop copy.  */
+      gimple_seq cond_expr_stmt_list = NULL;
+      tree cond_expr = calc_stmts_gen (ref_groups, cond_expr_stmt_list,
+				       loop->header, ref_group_idx_curr,
+				       ref_group_idx_prev, cumul_size);
+      if (cond_expr == NULL_TREE)
 	{
 	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "topn var are not in the same loop\n");
+	    fprintf (dump_file, "incalculable variables for conditional\n");
 	  return;
 	}
+
+      /* Use the previous cond and generate a new branch and copy loop.  */
+      basic_block condition_bb = NULL;
+      profile_probability prob = profile_probability::likely ();
+      initialize_original_copy_tables ();
+      class loop *nloop = loop_version (loop, cond_expr, &condition_bb,
+					prob, prob.invert (), prob,
+					prob.invert (), true);
+      free_original_copy_tables ();
+
+      /* Insert the generated stmt list before cond_expr.  */
+      gimple_stmt_iterator cond_exp_gsi;
+      if (cond_expr_stmt_list)
+	{
+	  /* Function `gsi_insert_seq_before` will insert `cond_expr` (1st
+	     stmt) of `condition_bb` to the end of `cond_expr_stmt_list`.  */
+	  cond_exp_gsi = gsi_last_bb (condition_bb);
+	  gsi_insert_seq_before (&cond_exp_gsi, cond_expr_stmt_list,
+				 GSI_SAME_STMT);
+	}
     }
-  if (loop == NULL)
-    return;
 
-  /* If the exit edge points to bb with multiple inputs, split the exit edge
-     and create a new bb, make the exit edge point to bb only single input.  */
-  edge e = single_exit (loop);
-  if (e == NULL)
-    return;
-  if (!single_pred_p (e->dest))
-    {
-      split_loop_exit_edge (e, true);
-      if (dump_enabled_p ())
-	dump_printf (MSG_NOTE, "split exit edge\n");
-    }
-
-  gimple_seq cond_expr_stmt_list = NULL;
-  tree cond_expr = calc_stmts_gen (ref_groups, cond_expr_stmt_list,
-				   num_issue_var);
-
-  /* Use the previous cond and generate a new branch and copy loop.  */
-  basic_block condition_bb = NULL;
-  profile_probability prob = profile_probability::likely ();
-  initialize_original_copy_tables ();
-  class loop *nloop = loop_version (loop, cond_expr, &condition_bb,
-		      prob, prob.invert (), prob, prob.invert (), true);
-  free_original_copy_tables ();
-
-  /* Insert the generated stmt list before cond_expr.  */
-  gimple_stmt_iterator cond_exp_gsi;
-  if (cond_expr_stmt_list)
-    {
-      cond_exp_gsi = gsi_last_bb (condition_bb);
-      gsi_insert_seq_before (&cond_exp_gsi, cond_expr_stmt_list,
-	  GSI_SAME_STMT);
-    }
   update_ssa (TODO_update_ssa);
 
   /* Perform hint issue for branches that meet conditions.  */
@@ -2554,33 +3757,33 @@ runtime_issue (std::vector<ref_group> &ref_groups, int num_issue_var)
 /* Issue llc hints through prefetch instructions.  */
 
 void
-issue_llc_hint (std::vector<ref_group> &ref_groups)
+issue_llc_hint (std::vector<ref_group> &ref_groups,
+		std::vector<class loop *> &sorted_kernels)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "issue_llc_hint:\n");
 
-  /* 1. If the issue-topn and force-issue options are available, top N var is
-	forcibly allocated and no runtime branch is generated.
-     2. If the issue-topn option is available and the size of top N var is
+  /* 1) If the issue-topn and force-issue options are available, top N var is
+	forcibly allocated then no runtime branch is generated.
+     2) If the issue-topn option is available and the size of top N var is
 	statically known, top N is statically allocated and no runtime branch
 	is generated.
-     3. If the issue-topn option is available and the size of the top N var is
+     3) If the issue-topn option is available and the size of the top N var is
 	unknown, but them is dynamically known, the top N is dynamically
 	allocated and generate runtime branches. (also depends on the screening
 	of the innermost variable boundary type)
-     4. If the dynamic runtime cannot know the size, such as indirect access,
+     4) If the dynamic runtime cannot know the size, such as indirect access,
 	optimization is skipped.
   */
-  if (ref_groups.size () == 0)
+  int num_issue_var = std::min (param_issue_topn, (int) ref_groups.size ());
+  if (num_issue_var == 0)
     return;
 
-  int num_issue_var = std::min (param_issue_topn,
-			   static_cast<int>(ref_groups.size ()));
   if (num_issue_var < param_issue_topn
       && dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "WARNING: Only %u (less than param_issue_topn = %d) "
-	       "ref_group(s) is found for llc hint.\n",
+			  "ref_group(s) is found for llc hint.\n",
 	       num_issue_var, param_issue_topn);
     }
   if (param_force_issue)
@@ -2599,16 +3802,20 @@ issue_llc_hint (std::vector<ref_group> &ref_groups)
       double prefetch_data_size = 0.;
       for (int i = 0; i < num_issue_var; ++i)
 	prefetch_data_size += ref_groups[i].var_size;
-      if (prefetch_data_size <= (double) param_llc_capacity_per_core * 0.8)
+
+      if (prefetch_data_size <= (double) param_llc_capacity_per_core
+				* PREFETCH_CACHE_SIZE_RATIO)
 	static_issue (ref_groups, num_issue_var);
       else
 	if (dump_file && (dump_flags & TDF_DETAILS))
 	  fprintf (dump_file, "static issue: Prefetch size exceeds LLC cache "
-		   "size: %lf > %lf.\n", prefetch_data_size,
-		   (double) param_llc_capacity_per_core * 0.8);
+			      "size: %lf > %lf.\n",
+		   prefetch_data_size,
+		   (double) param_llc_capacity_per_core
+		   * PREFETCH_CACHE_SIZE_RATIO);
     }
   else if (topn_calc_type == RUNTIME_CALC)
-    runtime_issue (ref_groups, num_issue_var);
+    runtime_issue (ref_groups, num_issue_var, sorted_kernels);
   else
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
@@ -2629,20 +3836,44 @@ llc_allocate (void)
     return;
 
   std::set<gimple *> traced_ref_stmt;
-  trace_data_refs_info (kernels, kernels_refs, traced_ref_stmt);
+  std::vector<data_ref> unresolved_refs;
+  trace_data_refs_info (kernels, kernels_refs, traced_ref_stmt,
+			unresolved_refs);
 
-  if (!analyze_nested_kernels (kernels, kernels_refs, traced_ref_stmt))
+  if (!analyze_nested_kernels (kernels, kernels_refs, traced_ref_stmt,
+			       unresolved_refs))
     return;
+
+  retrace_loop_refs_info_unresolved (unresolved_refs, traced_ref_stmt);
 
   std::vector<class loop *> sorted_kernels;
-  if (!filter_and_sort_kernels (sorted_kernels, kernels))
-    return;
-
   std::vector<ref_group> ref_groups;
-  if (!record_and_sort_ref_groups (ref_groups, sorted_kernels, kernels_refs))
-    return;
+  if (param_filter_mode)
+    {
+      /* AutoFDO mode: include ENTRY bb and EXIT bb indices.  */
+      std::set<int> bb_pathset;
+      bb_pathset.insert (0);
+      bb_pathset.insert (1);
+      if (!filter_and_sort_kernels_feedback (sorted_kernels, bb_pathset))
+	return;
 
-  issue_llc_hint (ref_groups);
+      if (!record_and_sort_ref_groups (ref_groups, kernels, kernels_refs,
+				       bb_pathset))
+	return;
+    }
+  else
+    {
+      /* static mode  */
+      std::set<int> bb_pathset;
+      if (!filter_and_sort_kernels (sorted_kernels, kernels))
+	return;
+
+      if (!record_and_sort_ref_groups (ref_groups, sorted_kernels, kernels_refs,
+				       bb_pathset))
+	return;
+    }
+
+  issue_llc_hint (ref_groups, sorted_kernels);
 }
 
 /* Check whether the function is an operator reloading function.  */
@@ -2747,6 +3978,47 @@ dump_param (void)
   }
 }
 
+/* Determine whether to analyze the function according to
+   the ordering of functions containing cycle counts.  */
+
+static bool
+should_analyze_func_p (void)
+{
+  gcov_type decl_uid = DECL_UID (current_function_decl);
+  gcov_type func_count = event_get_func_count (decl_uid, PMU_EVENT);
+  if (func_count == 0)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "function uid %ld cannot find profile data "
+			      "and skip prefetch analysis\n",
+		   decl_uid);
+	}
+      return false;
+    }
+  if (func_count < PREFETCH_FUNC_COUNTS_THRESHOLD)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "function uid %ld total counts is %lu: "
+			      "counts %lu < perf's top %d threshold %u, "
+			      "skip prefetch analysis\n",
+		   decl_uid, func_count, func_count,
+		   PREFETCH_FUNC_TOPN, PREFETCH_FUNC_COUNTS_THRESHOLD);
+	}
+      return false;
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "function uid %ld total counts is %lu: "
+			  "counts %lu >= perf's top %d threshold %u, "
+			  "continue prefetch analysis\n",
+	       decl_uid, func_count, func_count,
+	       PREFETCH_FUNC_TOPN, PREFETCH_FUNC_COUNTS_THRESHOLD);
+    }
+  return true;
+}
+
 const pass_data pass_data_llc_allocate =
 {
   GIMPLE_PASS, /* type.  */
@@ -2806,6 +4078,18 @@ pass_llc_allocate::execute (function *fn)
   if (number_of_loops (fn) <= 1  || !func_location_p (fn)
       || operator_func_p (fn))
     return ret;
+
+  /* Filter only when combined with PMU event. When the should_analyze_func_p
+     analysis fails (for example, the function without PMU-event count),
+     in order to ensure the accuracy of the LLC allocation analysis, the
+     function does not perform native allocation processing.  */
+  if (profile_exist (PMU_EVENT))
+    {
+      if (!should_analyze_func_p ())
+	{
+	  return 0;
+	}
+    }
 
   dump_function_info (fn);
 

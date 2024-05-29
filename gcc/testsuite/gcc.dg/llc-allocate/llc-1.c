@@ -1,5 +1,5 @@
 /* { dg-do compile { target { aarch64*-*-linux* } } } */
-/* { dg-options "-O3 -march=armv8.2-a+sve -funroll-loops -ffast-math -static -fllc-allocate -fdump-tree-llc_allocate-details-lineno --param issue-topn=2" } */
+/* { dg-options "-O3 -march=armv8.2-a+sve -funroll-loops -ffast-math -static -fllc-allocate -fdump-tree-llc_allocate-details-lineno --param issue-topn=2 --param filter-mode=0" } */
 
 #include <stdio.h>
 
@@ -49,13 +49,13 @@ main (int argc, char *argv[])
 /* { dg-final { scan-tree-dump-times "\{ (?:\\d+\\(\\d+\\) ){3}\}" 1 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times ", size: (?!(0\.000000))" 7 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times ", size: 0\.000000" 19 "llc_allocate" } } */
-/* { dg-final { scan-tree-dump       "\\d ApsiPtr \\(1.003952, 5, 0\\) : 17" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump       "\\d psiPtr \\(1.003952, 3, 0\\) : 8" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump       "\\d diagPtr \\(1.003952, 1, 0\\) : 2" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump       "\\d lowerPtr \\(2.933319, 1, 0\\) : 2" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump       "\\d upperPtr \\(2.933319, 1, 0\\) : 2" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump       "\\d lPtr \\(1.466660, 1, 0\\) : 2" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump       "\\d uPtr \\(1.466660, 1, 0\\) : 2" "llc_allocate" } } */
+/* { dg-final { scan-tree-dump       "\\d\\tApsiPtr\\t\\(1.003952, 1, 5, 0\\)" "llc_allocate" } } */
+/* { dg-final { scan-tree-dump       "\\d\\tpsiPtr\\t\\(1.003952, 1, 3, 0\\)" "llc_allocate" } } */
+/* { dg-final { scan-tree-dump       "\\d\\tdiagPtr\\t\\(1.003952, 1, 1, 0\\)" "llc_allocate" } } */
+/* { dg-final { scan-tree-dump       "\\d\\tlowerPtr\\t\\(2.933319, 1, 1, 0\\)" "llc_allocate" } } */
+/* { dg-final { scan-tree-dump       "\\d\\tupperPtr\\t\\(2.933319, 1, 1, 0\\)" "llc_allocate" } } */
+/* { dg-final { scan-tree-dump       "\\d\\tlPtr\\t\\(1.466660, 1, 1, 0\\)" "llc_allocate" } } */
+/* { dg-final { scan-tree-dump       "\\d\\tuPtr\\t\\(1.466660, 1, 1, 0\\)" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "runtime issue" 1 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "static issue" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "insert svprfd" 4 "llc_allocate" } } */

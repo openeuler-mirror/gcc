@@ -98,6 +98,7 @@ along with GCC; see the file COPYING3.  If not see
 
 #define DEFAULT_AUTO_PROFILE_FILE "fbdata.afdo"
 #define DEFAULT_CACHE_MISSES_PROFILE_FILE "cmsdata.gcov"
+#define DEFAULT_ADDITIONAL_PROFILE_FILE "addldata.gcov"
 #define AUTO_PROFILE_VERSION 1
 
 namespace autofdo
@@ -322,6 +323,9 @@ public:
   /* Mark LOC as annotated.  */
   void mark_annotated (location_t loc);
 
+  /* Compute total count threshold of top functions in sampled data.  */
+  void get_topn_function_total_count_thres (unsigned topn) const;
+
 private:
   /* Map from function_instance name index (in string_table) to
      function_instance.  */
@@ -354,18 +358,30 @@ static gcov_summary *afdo_profile_info;
 static bool
 get_all_profile_names (const char **event_files)
 {
-  if (!(flag_auto_profile || flag_cache_misses_profile))
+  if (!(flag_auto_profile
+        || (flag_cache_misses_profile || flag_additional_profile)))
     {
       return false;
     }
 
   event_files[INST_EXEC] = auto_profile_file;
 
-  if (cache_misses_profile_file == NULL)
+  if (flag_cache_misses_profile)
     {
-      cache_misses_profile_file = DEFAULT_CACHE_MISSES_PROFILE_FILE;
+      if (cache_misses_profile_file == NULL)
+        {
+          cache_misses_profile_file = DEFAULT_CACHE_MISSES_PROFILE_FILE;
+        }
+      event_files[CACHE_MISSES] = cache_misses_profile_file;
     }
-  event_files[CACHE_MISSES] = cache_misses_profile_file;
+  else if (flag_additional_profile)
+    {
+      if (additional_profile_file == NULL)
+        {
+          additional_profile_file = DEFAULT_ADDITIONAL_PROFILE_FILE;
+        }
+      event_files[PMU_EVENT] = additional_profile_file;
+    }
 
   return true;
 }
@@ -432,6 +448,9 @@ extend_auto_profile::auto_profile_exist (enum event_type type)
       case CACHE_MISSES:
 	return event_func_map.count (CACHE_MISSES) != 0
 	       || event_loc_map.count (CACHE_MISSES) != 0;
+      case PMU_EVENT:
+	return event_func_map.count (PMU_EVENT) != 0
+	       || event_loc_map.count (PMU_EVENT) != 0;
       default:
 	  return false;
     }
@@ -449,6 +468,9 @@ extend_auto_profile::dump_event ()
 	    break;
 	  case CACHE_MISSES:
 	    fprintf (dump_file, "Processing event cache misses.\n");
+	    break;
+          case PMU_EVENT:
+	    fprintf (dump_file, "Processing other PMU events.\n");
 	    break;
 	  default:
 	    break;
@@ -694,7 +716,7 @@ string_table::get_index (const char *name) const
   return iter->second;
 }
 
-/* Return the index of a given function DECL. Return -1 if DECL is not 
+/* Return the index of a given function DECL. Return -1 if DECL is not
    found in string table.  */
 
 int
@@ -1128,6 +1150,31 @@ autofdo_source_profile::get_function_instance_by_inline_stack (
   return s;
 }
 
+/* Compute total count threshold of top functions in sampled data.  */
+
+void
+autofdo_source_profile::get_topn_function_total_count_thres (
+    unsigned topn) const
+{
+  std::set<gcov_type> func_counts;
+  for (name_function_instance_map::const_iterator iter = map_.begin ();
+       iter != map_.end (); ++iter)
+    {
+      if (func_counts.size () < topn)
+        func_counts.insert (iter->second->total_count ());
+      else if (*func_counts.begin () < iter->second->total_count ())
+        {
+          func_counts.erase (func_counts.begin ());
+          func_counts.insert (iter->second->total_count ());
+        }
+    }
+
+  gcov_type func_counts_topn = *func_counts.begin ();
+  if (func_counts.size () == topn
+      && param_llc_allocate_func_counts_threshold < func_counts_topn)
+    param_llc_allocate_func_counts_threshold = func_counts_topn;
+}
+
 /* Module profile is only used by LIPO. Here we simply ignore it.  */
 
 static void
@@ -1187,6 +1234,12 @@ read_profile (void)
     {
       error ("cannot read function profile from %s", auto_profile_file);
       return;
+    }
+
+  if (param_llc_allocate_func_topn > 0)
+    {
+      afdo_source_profile->get_topn_function_total_count_thres (
+        param_llc_allocate_func_topn);
     }
 
   /* autofdo_module_profile.  */

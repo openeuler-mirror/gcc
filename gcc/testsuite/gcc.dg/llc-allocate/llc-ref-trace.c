@@ -24,11 +24,11 @@ referenceTrace (double *psiPtr, int *lPtr, int *uPtr, int nCells)
       sum += psiPtr[b[cell]];
       psiPtr[a[cell]] = sum;
 
-      // Multi-layer array, currently failed tracing at b[cell] and a[cell]
+      // Multi-layer array
       sum += a[b[cell]];
       c[a[cell]] = sum;
 
-      // Outer array, inner pointer, currently failed tracing at lPtr[cell]
+      // Outer array, inner pointer
       sum += a[lPtr[cell]];
       c[lPtr[cell]] = sum;
     }
@@ -57,6 +57,6 @@ main (int argc, char *argv[])
   return 0;
 }
 
-/* { dg-final { scan-tree-dump-times "Tracing succeeded" 16 "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "Tracing failed" 8 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "Tracing succeeded" 24 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-not "Tracing failed" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "unhandled issue scene" 2 "llc_allocate" } } */

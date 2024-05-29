@@ -534,6 +534,7 @@ special_builtin_state (enum pure_const_state_e *state, bool *looping,
 	*state = IPA_CONST;
 	return true;
       case BUILT_IN_PREFETCH:
+      case BUILT_IN_PREFETCH_FULL:
 	*looping = true;
 	*state = IPA_CONST;
 	return true;

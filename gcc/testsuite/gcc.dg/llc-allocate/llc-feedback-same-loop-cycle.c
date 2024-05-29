@@ -1,6 +1,9 @@
 /* { dg-do compile { target { aarch64*-*-linux* } } } */
-/* { dg-options "-O3 -fwhole-program -flto-partition=one -fllc-allocate -fdump-tree-llc_allocate-details-lineno --param filter-kernels=1 --param=branch-prob-threshold=50 -c -w --param=filter-mode=0" } */
+/* { dg-options "-O3 -fllc-allocate -fdump-tree-llc_allocate-details-lineno -c --param=force-issue=1" } */
 
+/* In this deja test case, we test how Phase 4 of llc-allocate pass deals with
+   cfg that contains a backedge not being the latch of a formal GCC loop
+   structure.  */
 typedef unsigned long size_t;
 typedef long scalar_t__;
 
@@ -122,4 +125,5 @@ calc_idoms (struct dom_info *di, enum cdi_direction reverse)
       di->dom[v] = di->dom[di->dom[v]];
 }
 
-/* { dg-final { scan-tree-dump "Find same-loop cycle." "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "Warning: Find cycle at bb index" 2 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump "static issue" "llc_allocate" } } */

@@ -25,6 +25,7 @@ enum event_type
 {
   INST_EXEC = 0,
   CACHE_MISSES,
+  PMU_EVENT,
   EVENT_NUMBER
 };
 

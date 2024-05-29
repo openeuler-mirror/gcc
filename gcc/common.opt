@@ -1097,6 +1097,16 @@ Common Joined RejectNegative Var(cache_misses_profile_file)
 Use sample profile information for source code cache miss count.  The profile
 file is specified in the argument.
 
+fadditional-profile
+Common Report Var(flag_additional_profile)
+Use additional PMU-event sample profile information for source code bb count.
+The default profile file is addldata.gcov in `pwd`.
+
+fadditional-profile=
+Common Joined RejectNegative Var(additional_profile_file)
+Use additional PMU-event sample profile information for source code bb count.
+The profile file is specified in the argument.
+
 ; -fcheck-bounds causes gcc to generate array bounds checks.
 ; For C, C++ and ObjC: defaults off.
 ; For Java: defaults to on.

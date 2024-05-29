@@ -1463,6 +1463,85 @@ expand_builtin_prefetch (tree exp)
     emit_insn (op0);
 }
 
+/* Expand a call to __builtin_prefetch_full.  */
+
+static void
+expand_builtin_prefetch_full (tree exp)
+{
+  tree arg0, arg1, arg2;
+  int nargs;
+  rtx op0, op1, op2;
+
+  if (!validate_arglist (exp, POINTER_TYPE, 0))
+    return;
+
+  arg0 = CALL_EXPR_ARG (exp, 0);
+
+  /* Arguments 1 and 2 are optional; argument 1 (read/write) defaults to
+     zero (read) and argument 2 (locality) defaults to 3 (high degree of
+     locality).  */
+  nargs = call_expr_nargs (exp);
+  if (nargs > 1)
+    arg1 = CALL_EXPR_ARG (exp, 1);
+  else
+    arg1 = integer_zero_node;
+  if (nargs > 2)
+    arg2 = CALL_EXPR_ARG (exp, 2);
+  else
+    arg2 = integer_three_node;
+
+  /* Argument 0 is an address.  */
+  op0 = expand_expr (arg0, NULL_RTX, Pmode, EXPAND_NORMAL);
+
+  /* Argument 1 (read/write flag) must be a compile-time constant int.  */
+  if (TREE_CODE (arg1) != INTEGER_CST)
+    {
+      error ("second argument to %<__builtin_prefetch_full%> must be a "
+             "constant");
+      arg1 = integer_zero_node;
+    }
+  op1 = expand_normal (arg1);
+  /* Argument 1 must be either zero or one.  */
+  if (INTVAL (op1) != 0 && INTVAL (op1) != 1)
+    {
+      warning (0, "invalid second argument to %<__builtin_prefetch_full%>;"
+	       " using zero");
+      op1 = const0_rtx;
+    }
+
+  /* Argument 2 (locality) must be a compile-time constant int.  */
+  if (TREE_CODE (arg2) != INTEGER_CST)
+    {
+      error ("third argument to %<__builtin_prefetch_full%> must be a "
+             "constant");
+      arg2 = integer_zero_node;
+    }
+  op2 = expand_normal (arg2);
+  /* Argument 2 must be 0-7.  */
+  if (INTVAL (op2) < 0 || INTVAL (op2) > 7)
+    {
+      warning (0, "invalid third argument to %<__builtin_prefetch_full%>; "
+               "using zero");
+      op2 = const0_rtx;
+    }
+
+  if (targetm.have_prefetch_full ())
+    {
+      class expand_operand ops[3];
+
+      create_address_operand (&ops[0], op0);
+      create_integer_operand (&ops[1], INTVAL (op1));
+      create_integer_operand (&ops[2], INTVAL (op2));
+      if (maybe_expand_insn (targetm.code_for_prefetch_full, 3, ops))
+	return;
+    }
+
+  /* Don't do anything with direct references to volatile memory, but
+     generate code to handle other side effects.  */
+  if (!MEM_P (op0) && side_effects_p (op0))
+    emit_insn (op0);
+}
+
 /* Get a MEM rtx for expression EXP which is the address of an operand
    to be used in a string instruction (cmpstrsi, cpymemsi, ..).  LEN is
    the maximum length of the block of memory that might be accessed or
@@ -8385,6 +8464,9 @@ expand_builtin (tree exp, rtx target, rtx subtarget, machine_mode mode,
       return expand_builtin_assume_aligned (exp, target);
     case BUILT_IN_PREFETCH:
       expand_builtin_prefetch (exp);
+      return const0_rtx;
+    case BUILT_IN_PREFETCH_FULL:
+      expand_builtin_prefetch_full (exp);
       return const0_rtx;
 
     case BUILT_IN_INIT_TRAMPOLINE:
