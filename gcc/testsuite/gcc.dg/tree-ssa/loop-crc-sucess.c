@@ -1,5 +1,5 @@
 /* { dg-do compile { target {{ aarch64*-*-linux* } && lp64 } } } */
-/* { dg-options "-O3 -mabi=lp64 -floop-crc -fdump-tree-loop_crc-details" } */
+/* { dg-options "-O3 -mabi=lp64 -march=armv8.1-a -floop-crc -fdump-tree-loop_crc-details" } */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -80,4 +80,4 @@ ulg updcrc (s, n)
     crc = c;
     return c ^ 0xffffffffL;       /* (instead of ~c for 64-bit machines) */
 }
-/* { dg-final { scan-tree-dump-times "The 1th loop form is successmatched,and the loop can be optimized." 1 "loop_crc"} } */
+/* { dg-final { scan-tree-dump-times "The 1th loop form is success matched,and the loop can be optimized." 1 "loop_crc"} } */
