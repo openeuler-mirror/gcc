@@ -30,8 +30,9 @@ f1 (svbool_t pg, svint8_t s8, svuint8_t u8,
   svprfb_gather (pg, u32, (enum svprfop) -1); /* { dg-error {passing 4294967295 to argument 3 of 'svprfb_gather', which expects a valid 'enum svprfop' value} } */
   svprfb_gather (pg, u32, (enum svprfop) 0);
   svprfb_gather (pg, u32, (enum svprfop) 5);
-  svprfb_gather (pg, u32, (enum svprfop) 6); /* { dg-error {passing 6 to argument 3 of 'svprfb_gather', which expects a valid 'enum svprfop' value} } */
-  svprfb_gather (pg, u32, (enum svprfop) 7); /* { dg-error {passing 7 to argument 3 of 'svprfb_gather', which expects a valid 'enum svprfop' value} } */
+  svprfb_gather (pg, u32, (enum svprfop) 6); 
+  svprfb_gather (pg, u32, (enum svprfop) 7);
   svprfb_gather (pg, u32, (enum svprfop) 8);
-  svprfb_gather (pg, u32, (enum svprfop) 14); /* { dg-error {passing 14 to argument 3 of 'svprfb_gather', which expects a valid 'enum svprfop' value} } */
+  svprfb_gather (pg, u32, (enum svprfop) 14);
+  svprfb_gather (pg, u32, (enum svprfop) 16); /* { dg-error {passing 16 to argument 3 of 'svprfb_gather', which expects a valid 'enum svprfop' value} } */
 }

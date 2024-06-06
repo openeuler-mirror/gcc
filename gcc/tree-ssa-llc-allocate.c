@@ -1020,6 +1020,14 @@ trace_ptr_mem_ref (data_ref &mem_ref, std::set<gimple *> &traced_ref_stmt,
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Unhandled scenario for non-constant offset.\n");
+
+      return false;
+    }
+  if (TREE_CODE (pointer) != SSA_NAME)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Unhandled scenario for non-ssa pointer.\n");
+
       return false;
     }
 
@@ -2330,7 +2338,7 @@ enum bb_traversal_state
 bool
 revisit_bb_abnormal_p (basic_block bb, std::vector<int> &bb_visited,
 		       const std::set<int> &header_bb_idx_set,
-		       std::set<std::pair<int, int> > &backedges,
+		       std::set<std::pair<int, int> > &unused_edges,
 		       int src_bb_idx)
 {
   /* If the header bb has been already fully traversed, early exit
@@ -2340,19 +2348,20 @@ revisit_bb_abnormal_p (basic_block bb, std::vector<int> &bb_visited,
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Already visited bb index %d. Abort.\n",
 		 bb->index);
+      unused_edges.insert (std::make_pair (src_bb_idx, bb->index));
       return true;
     }
 
   /* If we revisit a non-header bb during next-bb traversal, we detect
      an inner-loop cycle and dump warning info. Record this abnormal edge
-     in `backedges` for special treatment in path weight update.  */
+     in `unused_edges` for special treatment in path weight update.  */
   if (!header_bb_idx_set.count (bb->index)
       && bb_visited[bb->index] == UNDER_TRAVERSAL)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Warning: Find cycle at bb index %d. Abort.\n",
 		 bb->index);
-      backedges.insert (std::make_pair (src_bb_idx, bb->index));
+      unused_edges.insert (std::make_pair (src_bb_idx, bb->index));
       return true;
     }
 
@@ -2397,7 +2406,7 @@ void
 get_next_toposort_bb (basic_block bb, std::vector<int> &bb_visited,
 		      std::list<basic_block> &bb_topo_order,
 		      const std::set<int> &header_bb_idx_set,
-		      std::set<std::pair<int, int> > &backedges,
+		      std::set<std::pair<int, int> > &unused_edges,
 		      int src_bb_idx)
 {
   /* 1) Before bb returns to the loop header, bb will not go to the outer loop.
@@ -2412,7 +2421,7 @@ get_next_toposort_bb (basic_block bb, std::vector<int> &bb_visited,
   if (bb == EXIT_BLOCK_PTR_FOR_FN (cfun))
     return;
 
-  if (revisit_bb_abnormal_p (bb, bb_visited, header_bb_idx_set, backedges,
+  if (revisit_bb_abnormal_p (bb, bb_visited, header_bb_idx_set, unused_edges,
 			     src_bb_idx))
     return;
 
@@ -2431,7 +2440,7 @@ get_next_toposort_bb (basic_block bb, std::vector<int> &bb_visited,
       FOR_EACH_VEC_ELT (exits, i, e)
 	{
 	  get_next_toposort_bb (e->dest, bb_visited, bb_topo_order,
-				header_bb_idx_set, backedges, bb->index);
+				header_bb_idx_set, unused_edges, src_bb_idx);
 	}
       return;
     }
@@ -2447,7 +2456,7 @@ get_next_toposort_bb (basic_block bb, std::vector<int> &bb_visited,
 	continue;
 
       get_next_toposort_bb (e->dest, bb_visited, bb_topo_order,
-			    header_bb_idx_set, backedges, bb->index);
+			    header_bb_idx_set, unused_edges, bb->index);
     }
 
   /* bb is marked as fully traversed and all its descendents have been
@@ -2526,7 +2535,8 @@ check_null_info_in_path_update (basic_block bb, edge e)
    to header bb using a backedge.  */
 
 void
-update_backedge_path_weight (std::vector<weight> &bb_weights, basic_block bb)
+update_backedge_path_weight (std::vector<weight> &bb_weights, basic_block bb,
+			      const std::set<std::pair<int, int> > &unused_edges)
 {
   unsigned i;
   edge e_exit;
@@ -2542,6 +2552,11 @@ update_backedge_path_weight (std::vector<weight> &bb_weights, basic_block bb)
 	  continue;
 	}
 
+      if (unused_edges.count (std::make_pair (bb->index, e_exit->dest->index)))
+	      {
+		/* Inner-loop-cycle backedge case.  */
+		continue;
+	      }
       update_path_weight (bb_weights, bb->index, e_exit->dest->index,
 			  e_exit->dest->count.to_gcov_type ());
     }
@@ -2553,7 +2568,7 @@ void
 update_max_length_of_path (std::vector<weight> &bb_weights,
 			   std::list<basic_block> &bb_topo_order,
 			   const std::set<int> &header_bb_idx_set,
-			   const std::set<std::pair<int, int> > &backedges)
+			   const std::set<std::pair<int, int> > &unused_edges)
 {
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "Start update weight traversal:\n");
@@ -2573,22 +2588,22 @@ update_max_length_of_path (std::vector<weight> &bb_weights,
 	  if (check_null_info_in_path_update (bb, e))
 	    continue;
 
-	  if (header_bb_idx_set.count (e->dest->index)
-	      && bb->loop_father == e->dest->loop_father)
+    if (unused_edges.count (std::make_pair (bb->index, e->dest->index)))
 	    {
-	      /* Backedge case.  */
-	      update_backedge_path_weight (bb_weights, bb);
+	      /* Inner-loop-cycle backedge case.  */
+	      continue;
 	    }
-	  else if (bb->loop_father->num != 0
+    else if (bb->loop_father->num != 0
 		   && !flow_bb_inside_loop_p (bb->loop_father, e->dest))
 	    {
 	      /* Outer-loop edge case.  */
 	      continue;
 	    }
-	  else if (backedges.count (std::make_pair (bb->index, e->dest->index)))
+	  else if (header_bb_idx_set.count (e->dest->index)
+	      && bb->loop_father == e->dest->loop_father)
 	    {
-	      /* Inner-loop-cycle backedge case.  */
-	      continue;
+	      /* Backedge case.  */
+	      update_backedge_path_weight (bb_weights, bb, unused_edges);
 	    }
 	  else
 	    {
@@ -2676,9 +2691,9 @@ filter_and_sort_kernels_feedback (std::vector<class loop *> &sorted_kernel,
   basic_block bb_start = ENTRY_BLOCK_PTR_FOR_FN (cfun);
 
   /* Step 1: Get topological order of bb during traversal.  */
-  std::set<std::pair<int, int> > backedges;
+  std::set<std::pair<int, int> > unused_edges;
   get_next_toposort_bb (bb_start, bb_visited, bb_topo_order, header_bb_idx_set,
-			backedges, -1);
+			unused_edges, -1);
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "\nCheck bbs in topological order:\n");
@@ -2693,7 +2708,7 @@ filter_and_sort_kernels_feedback (std::vector<class loop *> &sorted_kernel,
   std::vector<weight> bb_weights = std::vector<weight>(bb_num_max, weight_init);
   bb_weights[0].bb_count = 0;  /* ENTRY bb has count 0 and prev bb as -1.  */
   update_max_length_of_path (bb_weights, bb_topo_order, header_bb_idx_set,
-			     backedges);
+			     unused_edges);
 
   /* Step 3: Backtrack a path from EXIT bb to ENTRY bb.  */
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -2706,6 +2721,13 @@ filter_and_sort_kernels_feedback (std::vector<class loop *> &sorted_kernel,
   tmp_bb_idx = bb_weights[tmp_bb_idx].prev_bb_idx;
   while (tmp_bb_idx > 0 && tmp_bb_idx < bb_num_max)
     {
+      if (bb_pathset.count (tmp_bb_idx))
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf(dump_file, "ERROR: already seen bb index %d\n",
+		    tmp_bb_idx);
+	  return false;
+	}
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "%d: %ld, ", tmp_bb_idx,
 		 bb_weights[tmp_bb_idx].bb_count);
@@ -3398,14 +3420,14 @@ issue_builtin_prefetch (data_ref &mem_ref)
   if (param_llc_level == 3)
     {
       /* for simulation.
-         BUILT_IN_PREFETCH (addr, rw, locality).  */
+	 BUILT_IN_PREFETCH (addr, rw, locality).  */
       call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
-                                3, addr, integer_zero_node, integer_one_node);
+				3, addr, integer_zero_node, integer_one_node);
     }
   else if (param_llc_level == 4)
     {
-        tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6);
-        call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH_FULL),
+	tree prfop = build_int_cst (TREE_TYPE (integer_zero_node), 6);
+	call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH_FULL),
 				3, addr, integer_zero_node, prfop);
     }
   else
