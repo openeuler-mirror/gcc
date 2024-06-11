@@ -40,7 +40,8 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 #endif
 #include <getopt.h>
 
-extern int gcov_profile_merge (struct gcov_info*, struct gcov_info*, int, int);
+extern int gcov_profile_merge (struct gcov_info*, struct gcov_info*,
+			       int, int, char*);
 extern int gcov_profile_overlap (struct gcov_info*, struct gcov_info*);
 extern int gcov_profile_normalize (struct gcov_info*, gcov_type);
 extern int gcov_profile_scale (struct gcov_info*, float, int, int);
@@ -137,7 +138,8 @@ gcov_output_files (const char *out, struct gcov_info *profile)
    Return 0 on success.  */
 
 static int
-profile_merge (const char *d1, const char *d2, const char *out, int w1, int w2)
+profile_merge (const char *d1, const char *d2, const char *out, int w1, int w2,
+	       char* whitelistPath)
 {
   struct gcov_info *d1_profile;
   struct gcov_info *d2_profile;
@@ -154,7 +156,7 @@ profile_merge (const char *d1, const char *d2, const char *out, int w1, int w2)
         return 1;
 
       /* The actual merge: we overwrite to d1_profile.  */
-      ret = gcov_profile_merge (d1_profile, d2_profile, w1, w2);
+      ret = gcov_profile_merge (d1_profile, d2_profile, w1, w2, whitelistPath);
 
       if (ret)
         return ret;
@@ -176,6 +178,7 @@ print_merge_usage_message (int error_p)
   fnotice (file, "    -o, --output <dir>                  Output directory\n");
   fnotice (file, "    -v, --verbose                       Verbose mode\n");
   fnotice (file, "    -w, --weight <w1,w2>                Set weights (float point values)\n");
+  fnotice (file, "    -p, --whitelistPath <dir>           Only merge the function in the whiteList\n");
 }
 
 static const struct option merge_options[] =
@@ -183,7 +186,8 @@ static const struct option merge_options[] =
   { "verbose",                no_argument,       NULL, 'v' },
   { "output",                 required_argument, NULL, 'o' },
   { "weight",                 required_argument, NULL, 'w' },
-  { 0, 0, 0, 0 }
+  { "WhitelistPath",          required_argument, NULL, 'p' },
+  { 0, 0, 0, 0 },
 };
 
 /* Print merge usage and exit.  */
@@ -204,9 +208,10 @@ do_merge (int argc, char **argv)
   int opt;
   const char *output_dir = 0;
   int w1 = 1, w2 = 1;
+  char *path = 0;
 
   optind = 0;
-  while ((opt = getopt_long (argc, argv, "vo:w:", merge_options, NULL)) != -1)
+  while ((opt = getopt_long (argc, argv, "vo:w:p:", merge_options, NULL)) != -1)
     {
       switch (opt)
         {
@@ -222,6 +227,9 @@ do_merge (int argc, char **argv)
           if (w1 < 0 || w2 < 0)
 	    fatal_error (input_location, "weights need to be non-negative");
           break;
+	case 'p':
+	  path = optarg;
+	  break;
         default:
           merge_usage ();
         }
@@ -233,7 +241,8 @@ do_merge (int argc, char **argv)
   if (argc - optind != 2)
     merge_usage ();
 
-  return profile_merge (argv[optind], argv[optind+1], output_dir, w1, w2);
+  return profile_merge (argv[optind], argv[optind+1], output_dir,
+			w1, w2, path);
 }
 
 /* If N_VAL is no-zero, normalize the profile by setting the largest counter

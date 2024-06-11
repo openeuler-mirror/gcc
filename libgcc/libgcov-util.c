@@ -516,6 +516,33 @@ merge_wrapper (gcov_merge_fn f, gcov_type *v1, gcov_unsigned_t n,
   (*f) (v1, n);
 }
 
+/*  A helper function to merge function.  It only merges the function in
+ *  whitelist.  */
+static int
+merge_whitelist (char *filePath, gcov_unsigned_t element)
+{
+  char functionIdent[20];
+  sprintf (functionIdent, "%u", element);
+  FILE *file = fopen (filePath, "r");
+  if (file == NULL)
+    {
+      fnotice (stderr, "Didn't get the whitelist we want.  Please check the path.");
+      return 0;
+    }
+
+  char line[256];
+  while (fgets (line, sizeof (line), file))
+    {
+      if (strstr (line, functionIdent) != NULL)
+	{
+	  fclose (file);
+	  return 1;
+	}
+    }
+  fclose (file);
+  return 0;
+}
+
 /* Offline tool to manipulate profile data.
    This tool targets on matched profiles. But it has some tolerance on
    unmatched profiles.
@@ -533,7 +560,8 @@ merge_wrapper (gcov_merge_fn f, gcov_type *v1, gcov_unsigned_t n,
 /* Add INFO2's counter to INFO1, multiplying by weight W.  */
 
 static int
-gcov_merge (struct gcov_info *info1, struct gcov_info *info2, int w)
+gcov_merge (struct gcov_info *info1, struct gcov_info *info2, int w,
+	    char* filePath)
 {
   unsigned f_ix;
   unsigned n_functions = info1->n_functions;
@@ -551,7 +579,17 @@ gcov_merge (struct gcov_info *info1, struct gcov_info *info2, int w)
         continue;
       if (!gfi_ptr2 || gfi_ptr2->key != info2)
         continue;
-
+ 
+      /*  Use whitelist feature here.  */
+      if (gfi_ptr1 && filePath != 0)
+	{
+	  int res = merge_whitelist (filePath, gfi_ptr1->ident);
+	  if (!res)
+	    {
+	      /*  Don't merge this function here.  */
+	      continue;
+	    }
+	}
       if (gfi_ptr1->cfg_checksum != gfi_ptr2->cfg_checksum)
         {
           fnotice (stderr, "in %s, cfg_checksum mismatch, skipping\n",
@@ -622,7 +660,7 @@ find_match_gcov_info (struct gcov_info **array, int size,
 
 int
 gcov_profile_merge (struct gcov_info *tgt_profile, struct gcov_info *src_profile,
-                    int w1, int w2)
+		    int w1, int w2, char* WhitelistPath)
 {
   struct gcov_info *gi_ptr;
   struct gcov_info **tgt_infos;
@@ -652,7 +690,7 @@ gcov_profile_merge (struct gcov_info *tgt_profile, struct gcov_info *src_profile
   if (w1 > 1)
     {
        for (i = 0; i < tgt_cnt; i++)
-         gcov_merge (tgt_infos[i], tgt_infos[i], w1-1);
+	 gcov_merge (tgt_infos[i], tgt_infos[i], w1-1, WhitelistPath);
     }
 
   /* Second pass, add src_profile to the tgt_profile.  */
@@ -666,14 +704,14 @@ gcov_profile_merge (struct gcov_info *tgt_profile, struct gcov_info *src_profile
           in_src_not_tgt[unmatch_info_cnt++] = gi_ptr;
           continue;
         }
-      gcov_merge (gi_ptr1, gi_ptr, w2);
+      gcov_merge (gi_ptr1, gi_ptr, w2, WhitelistPath);
     }
 
   /* For modules in src but not in tgt. We adjust the counter and append.  */
   for (i = 0; i < unmatch_info_cnt; i++)
     {
       gi_ptr = in_src_not_tgt[i];
-      gcov_merge (gi_ptr, gi_ptr, w2 - 1);
+      gcov_merge (gi_ptr, gi_ptr, w2 - 1, WhitelistPath);
       gi_ptr->next = NULL;
       tgt_tail->next = gi_ptr;
       tgt_tail = gi_ptr;
