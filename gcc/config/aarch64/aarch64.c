@@ -1316,7 +1316,7 @@ static const struct tune_params hip09_tunings =
   &hip09_vector_cost,
   &generic_branch_cost,
   &generic_approx_modes,
-  SVE_128, /* sve_width  */
+  SVE_256, /* sve_width  */
   4,    /* memmov_cost  */
   4,    /* issue_rate  */
   (AARCH64_FUSE_AES_AESMC | AARCH64_FUSE_ALU_BRANCH
