@@ -46,8 +46,10 @@ f1 (svbool_t pg, int32_t *s32_ptr, void *void_ptr, void **ptr_ptr,
   svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) -1); /* { dg-error {passing 4294967295 to argument 4 of 'svprfh_gather_index', which expects a valid 'enum svprfop' value} } */
   svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 0);
   svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 5);
-  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 6); /* { dg-error {passing 6 to argument 4 of 'svprfh_gather_index', which expects a valid 'enum svprfop' value} } */
-  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 7); /* { dg-error {passing 7 to argument 4 of 'svprfh_gather_index', which expects a valid 'enum svprfop' value} } */
+  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 6); 
+  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 7); 
   svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 8);
-  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 14); /* { dg-error {passing 14 to argument 4 of 'svprfh_gather_index', which expects a valid 'enum svprfop' value} } */
+  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 14); 
+  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 15);
+  svprfh_gather_index (pg, s32_ptr, s32, (enum svprfop) 16); /* { dg-error {passing 16 to argument 4 of 'svprfh_gather_index', which expects a valid 'enum svprfop' value} } */
 }
