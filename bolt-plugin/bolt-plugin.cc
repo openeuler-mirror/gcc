@@ -269,6 +269,8 @@ static string tmp_out_file_name = "a.out";
 /* Binary or dynamic file after BOLT.  */
 static string bolt_opt_target;
 
+static bool autobolt_with_lto = false;
+
 /* Format of bolt_optimize_options should be "reorder-functions=hfsort+ ...",
    command 'llvm-bolt' has been added here.  */
 static string bolt_optimize_options ("llvm-bolt ");
@@ -450,9 +452,9 @@ cleanup_handler ()
       fclose (bolt_file_fd);
     }
 
-  if (file_exist (tmp_out_file_name.c_str ())
-      && file_exist (bolt_profile_name.c_str ())
-      && is_bolt_opt_target ())
+  if (is_bolt_opt_target ()
+      && file_exist (tmp_out_file_name.c_str ())
+      && file_exist (bolt_profile_name.c_str ()))
     {
       do_bolt_opt ();
     }
@@ -552,6 +554,10 @@ dump_func_to_bolt_profile_file (const struct func_info &func)
 static enum ld_plugin_status
 all_symbols_read_handler ()
 {
+  if (autobolt_with_lto)
+    {
+      return LDPS_OK;
+    }
   for (const auto &functions: weak_functions)
     {
       /* More than one weak function.  */
@@ -748,7 +754,10 @@ claim_file_handler (const struct ld_plugin_input_file *file, int *claimed)
     }
   /* BOLT plugin does not need claimd number, so set *claimed to 0.  */
   *claimed = 0;
-
+  if (autobolt_with_lto)
+    {
+      return LDPS_OK;
+    }
   obj.file = file;
   obj.objfile = simple_object_start_read (file->fd, file->offset, NULL,
 					  &errmsg, &err);
@@ -823,9 +832,12 @@ generate_bolt_profile_name (string file_name)
     {
       if (!bolt_dir_path.empty ())
 	{
-	  file_name = concat (get_current_dir_name (),
-			      separator, file_name.c_str (), NULL);
-	  file_name = mangle_path (file_name);
+	  if (!autobolt_with_lto)
+	    {
+	      file_name = concat (get_current_dir_name (),
+		separator, file_name.c_str (), NULL);
+	      file_name = mangle_path (file_name);
+	    }
 	}
       else
 	{
@@ -1019,7 +1031,10 @@ process_output_option (const string &flag_o)
       /* bolt_profile_name may be overridden in
 	 function process_auto_bolt_option and
 	 process_bolt_use_option.  */
-      bolt_profile_name = gcc_options[o_index + 1];
+      if (autobolt_with_lto && bolt_opt_target.empty ())
+	bolt_profile_name = "default";
+      else
+	bolt_profile_name = gcc_options[o_index + 1];
       bolt_profile_name.append (DEFAULT_BOLT_OUT_NAME_SUFFIX);
     }
   else
@@ -1047,13 +1062,15 @@ process_gcc_option ()
   char *collect_gcc_option = getenv ("COLLECT_GCC_OPTIONS");
 
   get_options_from_collect_gcc_options (collect_gcc, collect_gcc_option);
+  autobolt_with_lto = (match_gcc_option (flag_auto_bolt.c_str ()) != -1
+    && match_gcc_option ("-flto") != -1);
 
+  process_bolt_target_option (flag_bolt_target);
   /* Function process_output_option should be processed before
      process_auto_bolt_option to obtain correct bolt_profile_name.  */
   process_output_option (flag_o);
   process_auto_bolt_option (flag_auto_bolt);
   process_bolt_use_option (flag_bolt_use);
-  process_bolt_target_option (flag_bolt_target);
   process_bolt_option (flag_bolt_optimize_options);
   
   if (match_gcc_option (flag_profile_use.c_str ()) != -1)

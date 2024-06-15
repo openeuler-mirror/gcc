@@ -2482,7 +2482,7 @@ Common Report Var(flag_auto_bolt)
 Generate profile from AutoFDO or PGO and do BOLT optimization after linkage.
 
 fauto-bolt=
-Common Joined RejectNegative
+Common Joined RejectNegative Var(auto_bolt)
 Specify the feedback data directory required by BOLT-plugin.  The default is the current directory.
 
 fbolt-use
@@ -2494,7 +2494,7 @@ Common Joined RejectNegative Var
 Do BOLT optimization after linkage with BOLT profile read from this option.
 
 fbolt-target=
-Common Joined RejectNegative Var
+Common Joined RejectNegative Var(bolt_target)
 Specify the BOLT optimization target binary.
 
 fbolt-option=

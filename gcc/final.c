@@ -82,6 +82,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "print-rtl.h"
 #include "function-abi.h"
 #include "insn-codes.h"
+#include <sys/file.h>
 
 #ifdef XCOFF_DEBUGGING_INFO
 #include "xcoffout.h"		/* Needed for external data declarations.  */
@@ -4650,6 +4651,10 @@ leaf_renumber_regs_insn (rtx in_rtx)
 
 #define ASM_FDO_CALLEE_FLAG ".fdo.callee "
 
+static bool autobolt_with_lto = false;
+static char *autobolt_curr_func_name;
+static FILE *bolt_file_fd = NULL;
+
 /* Return the relative offset address of the start instruction of BB,
    return -1 if it is empty instruction.  */
 
@@ -4785,6 +4790,16 @@ alias_local_functions (const char *fnname)
   return concat (fnname, "/", lbasename (dump_base_name), NULL);
 }
 
+static char*
+add_suffix (const char *str)
+{
+  if (strlen (str) == 0 || strstr (str, "/") == NULL)
+    {
+      return xstrdup (str);
+    }
+  return concat (str, "/1", NULL);
+}
+
 /* Return function bind type string.  */
 
 static const char *
@@ -4830,19 +4845,33 @@ dump_direct_callee_info_to_asm (basic_block bb, gcov_type call_count)
 
 	  if (callee)
 	    {
-	      char *func_name =
-		alias_local_functions (get_fnname_from_decl (callee));
-	      fprintf (asm_out_file, "\t.string \"%x\"\n",
-		       INSN_ADDRESSES (INSN_UID (insn)));
+	      char *func_name;
+	      if (!autobolt_with_lto)
+		{
+		  func_name = alias_local_functions (
+		    get_fnname_from_decl (callee));
+		  fprintf (asm_out_file, "\t.string \"%x\"\n",
+		    INSN_ADDRESSES (INSN_UID (insn)));
 
-	      fprintf (asm_out_file, "\t.string \"%s%s\"\n",
-		       ASM_FDO_CALLEE_FLAG,
-		       func_name);
+		  fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+		    ASM_FDO_CALLEE_FLAG,
+		    func_name);
 
-	      fprintf (asm_out_file,
-		       "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
-		       call_count);
-
+		  fprintf (asm_out_file,
+		    "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+		    call_count);
+		}
+	      else
+		{
+		  func_name = xstrdup (
+		    get_fnname_from_decl (callee));
+		  fprintf (bolt_file_fd,
+		    "1 %s %x 1 %s 0 0 " HOST_WIDE_INT_PRINT_DEC "\n",
+		    autobolt_curr_func_name,
+		    INSN_ADDRESSES (INSN_UID (insn)),
+		    func_name,
+		    call_count);
+		}
 	      if (dump_file)
 		{
 		  fprintf (dump_file, "call: %x --> %s\n",
@@ -4880,7 +4909,10 @@ dump_edge_jump_info_to_asm (basic_block bb, gcov_type bb_count)
       /* This is a reserved assert for the original design.  If this
 	 assert is found, use the address of the previous instruction
 	 as edge_start_addr.  */
-      gcc_assert (edge_start_addr != edge_end_addr);
+      if (edge_start_addr == edge_end_addr)
+	{
+	  continue;
+	}
 
       if (dump_file)
 	{
@@ -4890,10 +4922,24 @@ dump_edge_jump_info_to_asm (basic_block bb, gcov_type bb_count)
 
       if (edge_count > 0)
 	{
-	  fprintf (asm_out_file, "\t.string \"%x\"\n", edge_start_addr);
-	  fprintf (asm_out_file, "\t.string \"%x\"\n", edge_end_addr);
-	  fprintf (asm_out_file, "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
-		   edge_count);
+	  if (!autobolt_with_lto)
+	    {
+	      fprintf (asm_out_file, "\t.string \"%x\"\n", edge_start_addr);
+	      fprintf (asm_out_file, "\t.string \"%x\"\n", edge_end_addr);
+	      fprintf (asm_out_file,
+		"\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+		edge_count);
+	    }
+	  else
+	    {
+	      fprintf (bolt_file_fd,
+		"1 %s %x 1 %s %x 0 " HOST_WIDE_INT_PRINT_DEC "\n",
+		autobolt_curr_func_name,
+		edge_start_addr,
+		autobolt_curr_func_name,
+		edge_end_addr,
+		edge_count);
+	    }
 	}
     }
 
@@ -4924,12 +4970,17 @@ static void
 dump_function_info_to_asm (const char *fnname)
 {
   char *func_name = alias_local_functions (fnname);
-  fprintf (asm_out_file, "\t.string \"%s%s\"\n",
-	   ASM_FDO_CALLER_FLAG, func_name);
-  fprintf (asm_out_file, "\t.string \"%s%d\"\n",
-	   ASM_FDO_CALLER_SIZE_FLAG, get_function_end_addr ());
-  fprintf (asm_out_file, "\t.string \"%s%s\"\n",
-	   ASM_FDO_CALLER_BIND_FLAG, simple_get_function_bind ());
+  if (!autobolt_with_lto)
+    {
+      fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+	ASM_FDO_CALLER_FLAG, func_name);
+      fprintf (asm_out_file, "\t.string \"%s%d\"\n",
+	ASM_FDO_CALLER_SIZE_FLAG,
+	get_function_end_addr ());
+      fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+	ASM_FDO_CALLER_BIND_FLAG,
+	simple_get_function_bind ());
+    }
 
   if (dump_file)
     {
@@ -5041,6 +5092,90 @@ dump_profile_to_elf_sections ()
     }
 }
 
+#define DEFAULT_BOLT_OUT_NAME "default.fdata"
+static char *bolt_profile_name = DEFAULT_BOLT_OUT_NAME;
+static void
+open_bolt_profile_file ()
+{
+  char *file_path;
+
+  if (auto_bolt && strlen (auto_bolt) != 0)
+    file_path = lrealpath (auto_bolt);
+  else
+    file_path = lrealpath (dump_dir_name);
+  if (bolt_target && strlen (bolt_target) != 0)
+    bolt_profile_name = concat (
+      file_path, "/", lbasename (bolt_target), ".fdata", NULL);
+  else
+    bolt_profile_name = concat (
+      file_path, "/", DEFAULT_BOLT_OUT_NAME, NULL);
+  free (file_path);
+
+  if (bolt_file_fd == NULL)
+    {
+      bolt_file_fd = fopen (bolt_profile_name, "at");
+      if (!bolt_file_fd)
+	{
+	  error ("Failed to open the file: %s."
+	    " Please check whether the target path exists.",
+	    bolt_profile_name);
+	}
+      if (flock (fileno (bolt_file_fd), LOCK_EX) == -1)
+	{
+	  error ("Failed to lock the file: %s.",
+	    bolt_profile_name);
+	}
+    }
+  free (bolt_profile_name);
+}
+
+inline static bool
+is_bolt_opt_target ()
+{
+  bool is_target = true;
+  if (bolt_target && strlen (bolt_target) != 0)
+    {
+      char *target_name = concat (lbasename (bolt_target),
+	".ltrans", NULL);
+      if (strncmp (target_name,
+	lbasename (dump_base_name),
+	strlen (target_name)) != 0)
+	{
+	  is_target = false;
+	}
+      free (target_name);
+    }
+  return is_target;
+}
+
+static void
+dump_profile_to_bolt_file ()
+{
+  /* Avoid empty functions.  */
+  if (TREE_CODE (cfun->decl) != FUNCTION_DECL)
+    {
+      return;
+    }
+
+  if (!is_bolt_opt_target ())
+    {
+      return;
+    }
+
+  open_bolt_profile_file ();
+  const char *fnname = get_fnname_from_decl (current_function_decl);
+  autobolt_curr_func_name = add_suffix (fnname);
+  dump_fdo_info_to_asm (fnname);
+  free (autobolt_curr_func_name);
+  fflush (bolt_file_fd);
+  if (flock (fileno (bolt_file_fd), LOCK_UN) == -1)
+    {
+      error ("Failed to unlock the file: %s.", bolt_profile_name);
+    }
+  fclose (bolt_file_fd);
+  bolt_file_fd = NULL;
+}
+
 /* Turn the RTL into assembly.  */
 static unsigned int
 rest_of_handle_final (void)
@@ -5111,7 +5246,13 @@ rest_of_handle_final (void)
 
   if (flag_auto_bolt)
     {
-      dump_profile_to_elf_sections ();
+      if (flag_ltrans)
+	{
+	  autobolt_with_lto = true;
+	  dump_profile_to_bolt_file ();
+	}
+      else
+	dump_profile_to_elf_sections ();
     }
 
   return 0;
