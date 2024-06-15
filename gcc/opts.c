@@ -1166,10 +1166,6 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
   if (opts->x_flag_vtable_verify && opts->x_flag_lto)
     sorry ("vtable verification is not supported with LTO");
 
-  /* Currently -fauto-bolt is not supported for LTO.  */
-  if (opts->x_flag_auto_bolt && opts->x_flag_lto)
-    sorry ("%<-fauto-bolt%> is not supported with LTO");
-
   /* Currently -fbolt-use is not supported for LTO.  */
   if (opts->x_flag_bolt_use && opts->x_flag_lto)
     sorry ("-fbolt-use is not supported with LTO");
@@ -2970,6 +2966,7 @@ common_handle_option (struct gcc_options *opts,
 
     case OPT_fauto_bolt_:
       opts->x_flag_auto_bolt = true;
+      opts->x_auto_bolt = xstrdup (arg);
       /* FALLTHRU */
     case OPT_fauto_bolt:
       if (opts->x_flag_bolt_use)
@@ -2985,7 +2982,7 @@ common_handle_option (struct gcc_options *opts,
       break;
 
     case OPT_fbolt_target_:
-      /* Deferred.  */
+      opts->x_bolt_target = xstrdup (arg);
       break;
 
     case OPT_fbolt_option_:
