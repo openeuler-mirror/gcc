@@ -1,7 +1,7 @@
 /* { dg-do compile } */
 /* fif-conversion-gimple and fuaddsub-overflow-match-all are required for
    proper overflow detection in some cases.  */
-/* { dg-options "-O2 -fif-conversion-gimple -fuaddsub-overflow-match-all -ftree-fold-phiopt -fdump-tree-widening_mul-stats" } */
+/* { dg-options "-O2 -fif-conversion-gimple -fuaddsub-overflow-match-all -fdump-tree-widening_mul-stats" } */
 #include <stdint.h>
 
 typedef unsigned __int128 uint128_t;
