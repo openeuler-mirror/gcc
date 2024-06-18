@@ -2348,7 +2348,6 @@ revisit_bb_abnormal_p (basic_block bb, std::vector<int> &bb_visited,
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Already visited bb index %d. Abort.\n",
 		 bb->index);
-      unused_edges.insert (std::make_pair (src_bb_idx, bb->index));
       return true;
     }
 
