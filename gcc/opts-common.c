@@ -926,6 +926,158 @@ opts_concat (const char *first, ...)
   return newstr;
 }
 
+typedef int64_t (*run_ai_model_func)(int, const char **,
+				     const char *, int, int64_t *);
+#define PTR_UNION_TYPE(TOTYPE) union { void *_q; TOTYPE _nq; }
+#define PTR_UNION_AS_VOID_PTR(NAME) (NAME._q)
+#define PTR_UNION_AS_CAST_PTR(NAME) (NAME._nq)
+
+static int64_t
+ai_infer_optimization (int argc, const char **argv,
+		       const char *mcpu_option,
+		       int argc_hw, int64_t *argv_hw)
+{
+  /* Load dependent AI-framework libraries.  */
+  void *onnxruntime_lib_handle = NULL;
+  const char *onnxruntime_lib_path = "libonnxruntime.so";
+
+  onnxruntime_lib_handle = dlopen (onnxruntime_lib_path,
+				   RTLD_LAZY | RTLD_GLOBAL);
+  if (!onnxruntime_lib_handle)
+    {
+      return -1;
+    }
+
+  void *ai4c_lib_handle = NULL;
+  const char *ai4c_lib_path = "libONNXRunner.so";
+
+  ai4c_lib_handle = dlopen (ai4c_lib_path, RTLD_LAZY | RTLD_GLOBAL);
+  if (!ai4c_lib_handle)
+    {
+      return -1;
+    }
+
+  /* Clear any existing error.  */
+  dlerror ();
+
+  /* Run AI4Compiler model.  */
+  if (ai4c_lib_handle == NULL || onnxruntime_lib_handle == NULL)
+    {
+      return -1;
+    }
+
+  run_ai_model_func run_ai_model;
+  PTR_UNION_TYPE (run_ai_model_func) run_ai_model_func_union;
+  PTR_UNION_AS_VOID_PTR (run_ai_model_func_union)
+    = dlsym (ai4c_lib_handle, "runONNXModelOptimizer");
+  run_ai_model = PTR_UNION_AS_CAST_PTR (run_ai_model_func_union);
+  if (!run_ai_model)
+    {
+      dlclose (ai4c_lib_handle);
+      dlclose (onnxruntime_lib_handle);
+      return -1;
+    }
+  int64_t model_pred = (*run_ai_model) (argc, argv,
+					mcpu_option, argc_hw, argv_hw);
+
+  if (ai4c_lib_handle)
+    dlclose (ai4c_lib_handle);
+
+  if (onnxruntime_lib_handle)
+    dlclose (onnxruntime_lib_handle);
+
+  if (model_pred == 1)
+    putenv ("AI_INFER_LEVEL=1");
+  return model_pred;
+}
+
+static int
+handle_lto_option (unsigned int lang_mask,
+		   unsigned int num_decoded_options,
+		   unsigned int argc,
+		   const char **argv,
+		   struct cl_decoded_option *&opt_array)
+{
+  int ret = 0;
+  char *lan = "";
+  char *compiler = xstrdup (argv[0]);
+  lan = strrchr (compiler, '/');
+  if (lan != NULL)
+    lan ++;
+  else
+    lan = compiler;
+  if (strstr (lan, "gcc") != NULL)
+    {
+      opt_array = XRESIZEVEC (struct cl_decoded_option, opt_array, argc + 2);
+      const char* lto_flag = "-flto=8";
+      decode_cmdline_option (&lto_flag, lang_mask,
+			     &opt_array[num_decoded_options]);
+      ret++;
+      const char* ltopartition_flag = "-flto-partition=one";
+      decode_cmdline_option (&ltopartition_flag, lang_mask,
+			     &opt_array[num_decoded_options + 1]);
+      ret++;
+    }
+  else if (strstr (lan, "g++") != NULL
+	   || strstr (lan, "gfortran") != NULL)
+    {
+      opt_array = XRESIZEVEC (struct cl_decoded_option, opt_array, argc + 1);
+      const char* lto_flag = "-flto=8";
+      decode_cmdline_option (&lto_flag, lang_mask,
+			     &opt_array[num_decoded_options]);
+      ret++;
+    }
+  if (compiler)
+    free (compiler);
+  return ret;
+}
+
+static int
+handle_machine_option (unsigned int lang_mask,
+		       unsigned int num_decoded_options,
+		       unsigned int argc,
+		       const char **argv,
+		       struct cl_decoded_option *&opt_array)
+{
+  int ret = 0;
+  bool flag_Om = false;
+  bool flag_hip09 = false;
+  for (unsigned i = 1; i < argc; i ++)
+    {
+      if (strcmp (argv[i], "-Om") == 0)
+	flag_Om = true;
+      if (strstr (argv[i], "mcpu=hip09") != NULL)
+	flag_hip09 = true;
+    }
+  if (!flag_hip09 || !flag_Om)
+    {
+      return ret;
+    }
+
+  const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
+  if (ai_infer_level)
+    {
+      return ret;
+    }
+  int argc_hw = 6;
+  int64_t argv_hw[argc_hw] = {
+    global_options.x_param_simultaneous_prefetches,
+    global_options.x_param_l1_cache_size,
+    global_options.x_param_l1_cache_line_size,
+    global_options.x_param_l2_cache_size,
+    global_options.x_param_llc_capacity_per_core,
+    global_options.x_param_ipa_prefetch_distance_factor};
+  int64_t output_pred = ai_infer_optimization (
+			  argc, argv, "hip09", argc_hw, argv_hw);
+  if (output_pred != 1)
+    {
+      return ret;
+    }
+
+  return handle_lto_option (lang_mask, num_decoded_options,
+			    argc, argv, opt_array);
+}
+
 /* Decode command-line options (ARGC and ARGV being the arguments of
    main) into an array, setting *DECODED_OPTIONS to a pointer to that
    array and *DECODED_OPTIONS_COUNT to the number of entries in the
@@ -987,6 +1139,8 @@ decode_cmdline_options_to_array (unsigned int argc, const char **argv,
       num_decoded_options++;
     }
 
+  num_decoded_options += handle_machine_option (lang_mask, num_decoded_options,
+						argc, argv, opt_array);
   *decoded_options = opt_array;
   *decoded_options_count = num_decoded_options;
   prune_options (decoded_options, decoded_options_count, lang_mask);
