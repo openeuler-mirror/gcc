@@ -56,8 +56,9 @@ check_def_chain_ref (df_ref ref, rtx reg)
   if (!ref || !DF_REF_INSN_INFO (ref))
     return false;
 
-  return !global_regs[REGNO (reg)]
-    || set_of (reg, DF_REF_INSN (ref));
+  return !(REGNO (reg) < FIRST_PSEUDO_REGISTER
+	   && global_regs[REGNO (reg)])
+    || reg_set_p (reg, DF_REF_INSN (ref));
 }
 
 /* Get the single def instruction of the reg being used in the insn.  */
