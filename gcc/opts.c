@@ -632,6 +632,15 @@ default_options_optimization (struct gcc_options *opts,
 	  opts->x_optimize_debug = 1;
 	  break;
 
+	case OPT_Om:
+	  /* -Om adds flags to -O3 & -Ofast.  */
+	  opts->x_optimize_size = 0;
+	  opts->x_optimize = 3;
+	  opts->x_optimize_fast = 1;
+	  opts->x_optimize_machine = true;
+	  opts->x_optimize_debug = 0;
+	  break;
+
 	case OPT_fopenacc:
 	  if (opt->value)
 	    openacc_mode = true;
@@ -2378,6 +2387,8 @@ common_handle_option (struct gcc_options *opts,
 				   opts->x_flag_sanitize_coverage, value, true);
       break;
 
+    case OPT_Om:
+      break;
     case OPT_O:
     case OPT_Os:
     case OPT_Ofast:

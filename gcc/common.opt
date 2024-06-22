@@ -188,6 +188,9 @@ const char *main_input_basename
 Variable
 int main_input_baselength
 
+Variable
+bool optimize_machine
+
 ; Which options have been printed by --help.
 Variable
 char *help_printed
@@ -466,6 +469,10 @@ Optimize for space rather than speed.
 Ofast
 Common Optimization
 Optimize for speed disregarding exact standards compliance.
+
+Om
+Common Optimization
+Optimize for radical optimization for machines.
 
 Og
 Common Optimization
