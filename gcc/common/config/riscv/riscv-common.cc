@@ -96,6 +96,8 @@ static const riscv_implied_info_t riscv_implied_info[] =
      return subset_list->lookup ("d");
    }},
 
+  {"zabha", "zaamo"},
+
   {"b", "zba"},
   {"b", "zbb"},
   {"b", "zbs"},
@@ -317,6 +319,7 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
   {"zawrs", ISA_SPEC_CLASS_NONE, 1, 0},
   {"zaamo", ISA_SPEC_CLASS_NONE, 1, 0},
   {"zalrsc", ISA_SPEC_CLASS_NONE, 1, 0},
+  {"zabha", ISA_SPEC_CLASS_NONE, 1, 0},
 
   {"zba", ISA_SPEC_CLASS_NONE, 1, 0},
   {"zbb", ISA_SPEC_CLASS_NONE, 1, 0},
@@ -997,7 +1000,9 @@ riscv_subset_list::to_string (bool version_p) const
   skip_zifencei = true;
 #endif
 #ifndef HAVE_AS_MARCH_ZAAMO_ZALRSC
-  /* Skip since binutils 2.42 and earlier don't recognize zaamo/zalrsc.  */
+  /* Skip since binutils 2.42 and earlier don't recognize zaamo/zalrsc.
+     Expanding 'a' to zaamo/zalrsc would otherwise break compilations
+     for users with an older version of binutils.  */
   skip_zaamo_zalrsc = true;
 #endif
 #ifndef HAVE_AS_MARCH_B
@@ -1770,6 +1775,7 @@ static const riscv_ext_flag_table_t riscv_ext_flag_table[] =
   {"zawrs",   &gcc_options::x_riscv_za_subext, MASK_ZAWRS},
   {"zaamo",   &gcc_options::x_riscv_za_subext, MASK_ZAAMO},
   {"zalrsc",  &gcc_options::x_riscv_za_subext, MASK_ZALRSC},
+  {"zabha",   &gcc_options::x_riscv_za_subext, MASK_ZABHA},
 
   {"zba",    &gcc_options::x_riscv_zb_subext, MASK_ZBA},
   {"zbb",    &gcc_options::x_riscv_zb_subext, MASK_ZBB},
