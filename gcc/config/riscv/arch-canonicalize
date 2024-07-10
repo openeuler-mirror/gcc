@@ -42,6 +42,7 @@ IMPLIED_EXT = {
   "d" : ["f", "zicsr"],
   "a" : ["zaamo", "zalrsc"],
   "f" : ["zicsr"],
+  "b" : ["zba", "zbb", "zbs"],
   "zdinx" : ["zfinx", "zicsr"],
   "zfinx" : ["zicsr"],
   "zhinx" : ["zhinxmin", "zfinx", "zicsr"],

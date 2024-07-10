@@ -82,6 +82,10 @@ static const riscv_implied_info_t riscv_implied_info[] =
   {"a", "zaamo"},
   {"a", "zalrsc"},
 
+  {"b", "zba"},
+  {"b", "zbb"},
+  {"b", "zbs"},
+
   {"zdinx", "zfinx"},
   {"zfinx", "zicsr"},
   {"zdinx", "zicsr"},
@@ -240,6 +244,8 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
   {"c", ISA_SPEC_CLASS_20190608, 2, 0},
   {"c", ISA_SPEC_CLASS_2P2,      2, 0},
 
+  {"b",       ISA_SPEC_CLASS_NONE, 1, 0},
+
   {"h",       ISA_SPEC_CLASS_NONE, 1, 0},
 
   {"v",       ISA_SPEC_CLASS_NONE, 1, 0},
@@ -397,6 +403,7 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
 static const struct riscv_ext_version riscv_combine_info[] =
 {
   {"a", ISA_SPEC_CLASS_20191213, 2, 1},
+  {"b",  ISA_SPEC_CLASS_NONE, 1, 0},
   {"zk",  ISA_SPEC_CLASS_NONE, 1, 0},
   {"zkn",  ISA_SPEC_CLASS_NONE, 1, 0},
   {"zks",  ISA_SPEC_CLASS_NONE, 1, 0},
