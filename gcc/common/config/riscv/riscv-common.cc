@@ -831,6 +831,7 @@ riscv_subset_list::to_string (bool version_p) const
   bool skip_zifencei = false;
   bool skip_zaamo_zalrsc = false;
   bool skip_zicsr = false;
+  bool skip_b = false;
   bool i2p0 = false;
 
   /* For RISC-V ISA version 2.2 or earlier version, zicsr and zifencei is
@@ -861,6 +862,10 @@ riscv_subset_list::to_string (bool version_p) const
   /* Skip since binutils 2.42 and earlier don't recognize zaamo/zalrsc.  */
   skip_zaamo_zalrsc = true;
 #endif
+#ifndef HAVE_AS_MARCH_B
+  /* Skip since binutils 2.42 and earlier don't recognize b.  */
+  skip_b = true;
+#endif
 
   for (subset = m_head; subset != NULL; subset = subset->next)
     {
@@ -876,6 +881,9 @@ riscv_subset_list::to_string (bool version_p) const
 	continue;
 
       if (skip_zaamo_zalrsc && subset->name == "zalrsc")
+	continue;
+
+      if (skip_b && subset->name == "b")
 	continue;
 
       /* For !version_p, we only separate extension with underline for
