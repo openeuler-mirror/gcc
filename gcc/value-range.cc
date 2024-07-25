@@ -656,6 +656,18 @@ irange::contains_p (tree cst) const
 
   return false;
 }
+bool
+irange::nonnegative_p () const
+{
+  return wi::ge_p (lower_bound (), 0, TYPE_SIGN (type ()));
+}
+
+bool
+irange::nonpositive_p () const
+{
+  return wi::le_p (upper_bound (), 0, TYPE_SIGN (type ()));
+}
+
 
 
 /* Normalize addresses into constants.  */
