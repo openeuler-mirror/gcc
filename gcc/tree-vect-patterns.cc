@@ -5632,8 +5632,8 @@ static vect_recog_func vect_vect_recog_func_ptrs[] = {
      internal functions.  */
   { vect_recog_gather_scatter_pattern, "gather_scatter" },
   { vect_recog_mask_conversion_pattern, "mask_conversion" },
-  { vect_recog_widen_plus_pattern, "widen_plus" },
-  { vect_recog_widen_minus_pattern, "widen_minus" },
+  // { vect_recog_widen_plus_pattern, "widen_plus" },
+  // { vect_recog_widen_minus_pattern, "widen_minus" },
 };
 
 const unsigned int NUM_PATTERNS = ARRAY_SIZE (vect_vect_recog_func_ptrs);

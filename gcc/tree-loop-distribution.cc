@@ -36,6 +36,47 @@ along with GCC; see the file COPYING3.  If not see
    |   D(I) = A(I-1)*E
    |ENDDO
 
+   If an unvectorizable loop has grouped loads, and calculations from grouped
+   loads are isomorphic, build temp arrays using stmts where isomorphic
+   calculations end.  Afer distribution, the partition built from temp
+   arrays can be vectorized in pass SLP after loop unrolling.  For example,
+
+   |DO I = 1, N
+   |    A = FOO (ARG_1);
+   |    B = FOO (ARG_2);
+   |    C = BAR_0 (A);
+   |    D = BAR_1 (B);
+   |ENDDO
+
+   is transformed to
+
+   |DO I = 1, N
+   |    J = FOO (ARG_1);
+   |    K = FOO (ARG_2);
+   |    X[I] = J;
+   |    Y[I] = K;
+   |    A = X[I];
+   |    B = Y[I];
+   |    C = BAR_0 (A);
+   |    D = BAR_1 (B);
+   |ENDDO
+
+   and is then distributed to
+
+   |DO I = 1, N
+   |    J = FOO (ARG_1);
+   |    K = FOO (ARG_2);
+   |    X[I] = J;
+   |    Y[I] = K;
+   |ENDDO
+
+   |DO I = 1, N
+   |    A = X[I];
+   |    B = Y[I];
+   |    C = BAR_0 (A);
+   |    D = BAR_1 (B);
+   |ENDDO
+
    Loop distribution is the dual of loop fusion.  It separates statements
    of a loop (or loop nest) into multiple loops (or loop nests) with the
    same loop header.  The major goal is to separate statements which may
@@ -44,7 +85,9 @@ along with GCC; see the file COPYING3.  If not see
 
      1) Seed partitions with specific type statements.  For now we support
 	two types seed statements: statement defining variable used outside
-	of loop; statement storing to memory.
+	of loop; statement storing to memory.  Moreover, for unvectorizable
+	loops, we try to find isomorphic stmts from grouped load and build
+	temp arrays as new seed statements.
      2) Build reduced dependence graph (RDG) for loop to be distributed.
 	The vertices (RDG:V) model all statements in the loop and the edges
 	(RDG:E) model flow and control dependencies between statements.
@@ -90,6 +133,8 @@ along with GCC; see the file COPYING3.  If not see
 	data reuse.  */
 
 #include "config.h"
+#define INCLUDE_MAP
+#define INCLUDE_ALGORITHM
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -115,6 +160,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-vectorizer.h"
 #include "tree-eh.h"
 #include "gimple-fold.h"
+#include "optabs-tree.h"
 #include "tree-affine.h"
 #include "intl.h"
 #include "rtl.h"
@@ -187,6 +233,52 @@ struct rdg_vertex
 #define RDG_DATAREFS(RDG, I) RDGV_DATAREFS (&(RDG->vertices[I]))
 #define RDG_MEM_WRITE_STMT(RDG, I) RDGV_HAS_MEM_WRITE (&(RDG->vertices[I]))
 #define RDG_MEM_READS_STMT(RDG, I) RDGV_HAS_MEM_READS (&(RDG->vertices[I]))
+
+/* Results of isomorphic group analysis.  */
+#define UNINITIALIZED	(0)
+#define ISOMORPHIC	(1)
+#define HETEROGENEOUS	(1 << 1)
+#define UNCERTAIN	(1 << 2)
+
+/* Information of a stmt while analyzing isomorphic use in group.  */
+
+typedef struct _group_info
+{
+  gimple *stmt;
+
+  /* True if stmt can be a cut point.  */
+  bool cut_point;
+
+  /* For use_stmt with two rhses, one of which is the lhs of stmt.
+     If the other is unknown to be isomorphic, mark it uncertain.  */
+  bool uncertain;
+
+  /* Searching of isomorphic stmt reaches heterogeneous groups or reaches
+     MEM stmts.  */
+  bool done;
+
+  _group_info ()
+    {
+      stmt = NULL;
+      cut_point = false;
+      uncertain = false;
+      done = false;
+    }
+} *group_info;
+
+/* PAIR of cut points and corresponding profit.  */
+typedef std::pair<vec<gimple *> *, int> stmts_profit;
+
+/* MAP of vector factor VF and corresponding stmts_profit PAIR.  */
+typedef std::map<unsigned, stmts_profit> vf_stmts_profit_map;
+
+/* PAIR of group_num and iteration_num.  We consider rhses from the same
+   group and interation are isomorphic.  */
+typedef std::pair<unsigned, unsigned> group_iteration;
+
+/* An isomorphic stmt is detetmined by lhs of use_stmt, group_num and
+   the iteration_num when we insert this stmt to this map.  */
+typedef std::map<tree, group_iteration> isomer_stmt_lhs;
 
 /* Data dependence type.  */
 
@@ -600,13 +692,14 @@ class loop_distribution
   /* Returns true when PARTITION1 and PARTITION2 access the same memory
      object in RDG.  */
   bool share_memory_accesses (struct graph *rdg,
-			      partition *partition1, partition *partition2);
+			      partition *partition1, partition *partition2,
+			      hash_set<tree> *excluded_arrays);
 
   /* For each seed statement in STARTING_STMTS, this function builds
      partition for it by adding depended statements according to RDG.
      All partitions are recorded in PARTITIONS.  */
   void rdg_build_partitions (struct graph *rdg,
-			     vec<gimple *> starting_stmts,
+			     vec<gimple *> *starting_stmts,
 			     vec<partition *> *partitions);
 
   /* Compute partition dependence created by the data references in DRS1
@@ -643,15 +736,50 @@ class loop_distribution
 
   /* Fuse PARTITIONS of LOOP if necessary before finalizing distribution.
      ALIAS_DDRS contains ddrs which need runtime alias check.  */
-  void finalize_partitions (class loop *loop, vec<struct partition *>
-			    *partitions, vec<ddr_p> *alias_ddrs);
+  void finalize_partitions (class loop *loop,
+			    vec<struct partition *> *partitions,
+			    vec<ddr_p> *alias_ddrs, bitmap producers);
+
+  /* Analyze loop form and if it's vectorizable to decide if we need to
+     insert temp arrays to distribute it.  */
+  bool may_insert_temp_arrays (loop_p loop, struct graph *&rdg,
+			       control_dependences *cd);
+
+  /* Reset gimple_uid of GIMPLE_DEBUG and GIMPLE_LABEL to -1.  */
+  void reset_gimple_uid (loop_p loop);
+
+  bool check_loop_vectorizable (loop_p loop);
+
+  inline void rebuild_rdg (loop_p loop, struct graph *&rdg,
+			   control_dependences *cd);
+
+  /* If loop is not distributed, remove inserted temp arrays.  */
+  void remove_insertion (loop_p loop, struct graph *flow_only_rdg,
+			 bitmap producers, struct partition *partition);
+
+  /* Insert temp arrays if isomorphic computation exists.  Temp arrays will be
+     regarded as SEED_STMTS for building partitions in succeeding processes.  */
+  bool insert_temp_arrays (loop_p loop, vec<gimple *> seed_stmts,
+			   hash_set<tree> *tmp_array_vars, bitmap producers);
+
+  void build_producers (loop_p loop, bitmap producers,
+			vec<gimple *> &transformed);
+
+  void do_insertion (loop_p loop, struct graph *flow_only_rdg, tree iv,
+		     bitmap cut_points, hash_set <tree> *tmp_array_vars,
+		     bitmap producers);
+
+  /* Fuse PARTITIONS built from inserted temp arrays into one partition,
+     fuse the rest into another.  */
+  void merge_remaining_partitions (vec<struct partition *> *partitions,
+				   bitmap producers);
 
   /* Distributes the code from LOOP in such a way that producer statements
      are placed before consumer statements.  Tries to separate only the
      statements from STMTS into separate loops.  Returns the number of
      distributed loops.  Set NB_CALLS to number of generated builtin calls.
      Set *DESTROY_P to whether LOOP needs to be destroyed.  */
-  int distribute_loop (class loop *loop, const vec<gimple *> &stmts,
+  int distribute_loop (class loop *loop, vec<gimple *> &stmts,
 		       control_dependences *cd, int *nb_calls, bool *destroy_p,
 		       bool only_patterns_p);
 
@@ -1893,7 +2021,8 @@ loop_distribution::classify_partition (loop_p loop,
 
 bool
 loop_distribution::share_memory_accesses (struct graph *rdg,
-		       partition *partition1, partition *partition2)
+		       partition *partition1, partition *partition2,
+		       hash_set <tree> *excluded_arrays)
 {
   unsigned i, j;
   bitmap_iterator bi, bj;
@@ -1927,7 +2056,10 @@ loop_distribution::share_memory_accesses (struct graph *rdg,
 	  if (operand_equal_p (DR_BASE_ADDRESS (dr1), DR_BASE_ADDRESS (dr2), 0)
 	      && operand_equal_p (DR_OFFSET (dr1), DR_OFFSET (dr2), 0)
 	      && operand_equal_p (DR_INIT (dr1), DR_INIT (dr2), 0)
-	      && operand_equal_p (DR_STEP (dr1), DR_STEP (dr2), 0))
+	      && operand_equal_p (DR_STEP (dr1), DR_STEP (dr2), 0)
+	      /* An exception, if PARTITION1 and PARTITION2 contain the
+		 temp array we inserted, do not merge them.  */
+	      && !excluded_arrays->contains (DR_REF (dr1)))
 	    return true;
 	}
     }
@@ -1941,14 +2073,14 @@ loop_distribution::share_memory_accesses (struct graph *rdg,
 
 void
 loop_distribution::rdg_build_partitions (struct graph *rdg,
-					 vec<gimple *> starting_stmts,
+					 vec<gimple *> *starting_stmts,
 					 vec<partition *> *partitions)
 {
   auto_bitmap processed;
   int i;
   gimple *stmt;
 
-  FOR_EACH_VEC_ELT (starting_stmts, i, stmt)
+  FOR_EACH_VEC_ELT (*starting_stmts, i, stmt)
     {
       int v = rdg_vertex_for_stmt (rdg, stmt);
 
@@ -2913,12 +3045,46 @@ fuse_memset_builtins (vec<struct partition *> *partitions)
 }
 
 void
+loop_distribution::merge_remaining_partitions
+			(vec<struct partition *> *partitions,
+			 bitmap producers)
+{
+  struct partition *partition = NULL;
+  struct partition *p1 = NULL, *p2 = NULL;
+  for (unsigned i = 0; partitions->iterate (i, &partition); i++)
+    {
+      if (bitmap_intersect_p (producers, partition->stmts))
+	{
+	  if (p1 == NULL)
+	    {
+	      p1 = partition;
+	      continue;
+	    }
+	  partition_merge_into (NULL, p1, partition, FUSE_FINALIZE);
+	}
+      else
+	{
+	  if (p2 == NULL)
+	    {
+	      p2 = partition;
+	      continue;
+	    }
+	  partition_merge_into (NULL, p2, partition, FUSE_FINALIZE);
+	}
+      partitions->unordered_remove (i);
+      partition_free (partition);
+      i--;
+    }
+}
+
+void
 loop_distribution::finalize_partitions (class loop *loop,
 					vec<struct partition *> *partitions,
-					vec<ddr_p> *alias_ddrs)
+					vec<ddr_p> *alias_ddrs,
+					bitmap producers)
 {
   unsigned i;
-  struct partition *partition, *a;
+  struct partition *partition;
 
   if (partitions->length () == 1
       || alias_ddrs->length () > 0)
@@ -2950,19 +3116,1223 @@ loop_distribution::finalize_partitions (class loop *loop,
       || (loop->inner == NULL
 	  && i >= NUM_PARTITION_THRESHOLD && num_normal > num_builtin))
     {
-      a = (*partitions)[0];
-      for (i = 1; partitions->iterate (i, &partition); ++i)
-	{
-	  partition_merge_into (NULL, a, partition, FUSE_FINALIZE);
-	  partition_free (partition);
-	}
-      partitions->truncate (1);
+      merge_remaining_partitions (partitions, producers);
     }
 
   /* Fuse memset builtins if possible.  */
   if (partitions->length () > 1)
     fuse_memset_builtins (partitions);
 }
+
+/* Gimple uids of GIMPLE_DEBUG and GIMPLE_LABEL were changed during function
+   vect_analyze_loop, reset them to -1.  */
+
+void
+loop_distribution::reset_gimple_uid (loop_p loop)
+{
+  basic_block *bbs = get_loop_body_in_custom_order (loop, this,
+						    bb_top_order_cmp_r);
+  for (int i = 0; i < int (loop->num_nodes); i++)
+    {
+      basic_block bb = bbs[i];
+      for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
+	   gsi_next (&gsi))
+	{
+	  gimple *stmt = gsi_stmt (gsi);
+	  if (is_gimple_debug (stmt) || gimple_code (stmt) == GIMPLE_LABEL)
+	    gimple_set_uid (stmt, -1);
+	}
+    }
+  free (bbs);
+}
+
+bool
+loop_distribution::check_loop_vectorizable (loop_p loop)
+{
+  vec_info_shared shared;
+  vect_analyze_loop (loop, &shared, true);
+  loop_vec_info vinfo = loop_vec_info_for_loop (loop);
+  reset_gimple_uid (loop);
+  if (vinfo == NULL)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file,
+		 "Loop %d no temp array insertion: bad data access pattern,"
+		 " unable to generate loop_vinfo.\n", loop->num);
+      return false;
+    }
+  if (vinfo->vectorizable)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d no temp array insertion: original loop"
+			    " can be vectorized without distribution.\n",
+			    loop->num);
+      delete vinfo;
+      loop->aux = NULL;
+      return false;
+    }
+  if (vinfo->grouped_loads.length () == 0)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d no temp array insertion: original loop"
+			    " has no grouped loads.\n" , loop->num);
+      delete vinfo;
+      loop->aux = NULL;
+      return false;
+    }
+  return true;
+}
+
+inline void
+loop_distribution::rebuild_rdg (loop_p loop, struct graph *&rdg,
+				control_dependences *cd)
+{
+  free_rdg (rdg);
+  rdg = build_rdg (loop, cd);
+  gcc_checking_assert (rdg != NULL);
+}
+
+bool
+loop_distribution::may_insert_temp_arrays (loop_p loop, struct graph *&rdg,
+					   control_dependences *cd)
+{
+  if (!(flag_tree_slp_transpose_vectorize && flag_tree_loop_vectorize))
+    return false;
+
+  /* Only loops with two basic blocks HEADER and LATCH are supported.  HEADER
+     is the main body of a LOOP and LATCH is the basic block that controls the
+     LOOP execution.  Size of temp array is determined by loop execution time,
+     so it must be a const.  */
+  tree loop_extent = number_of_latch_executions (loop);
+  if (loop->inner != NULL || loop->num_nodes > 2
+      || TREE_CODE (loop_extent) != INTEGER_CST)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d: no temp array insertion: bad loop"
+			    " form.\n", loop->num);
+      return false;
+    }
+
+  if (loop->dont_vectorize)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d: no temp array insertion: this loop"
+			    " should never be vectorized.\n",
+			    loop->num);
+      return false;
+    }
+
+  /* Do not distribute a LOOP that is able to be vectorized without
+     distribution.  */
+  if (!check_loop_vectorizable (loop))
+    {
+      rebuild_rdg (loop, rdg, cd);
+      return false;
+    }
+
+  rebuild_rdg (loop, rdg, cd);
+  return true;
+}
+
+/* Return max grouped loads' length if all groupes length satisfy len = 2 ^ n.
+   Otherwise, return 0.  */
+
+static unsigned
+get_max_vf (loop_vec_info vinfo)
+{
+  unsigned size = 0;
+  unsigned max = 0;
+  stmt_vec_info stmt_info;
+  unsigned i = 0;
+  FOR_EACH_VEC_ELT (vinfo->grouped_loads, i, stmt_info)
+    {
+      size = stmt_info->size;
+      if (!pow2p_hwi (size))
+	return 0;
+      max = size > max ? size : max;
+    }
+  return max;
+}
+
+/* Convert grouped_loads from linked list to vector with length vf.  Init
+   group_info of each stmt in the same group and put then into a vector.  And
+   these vectors consist WORKLISTS.  We will re-analyze a group if it is
+   uncertain, so we regard WORKLISTS as a circular queue.  */
+
+static unsigned
+build_queue (loop_vec_info vinfo, unsigned vf,
+	     vec<vec<group_info> *> &worklists)
+{
+  stmt_vec_info stmt_info;
+  unsigned i = 0;
+  group_info ginfo = NULL;
+  vec<group_info> *worklist = NULL;
+  FOR_EACH_VEC_ELT (vinfo->grouped_loads, i, stmt_info)
+    {
+      unsigned group_size = stmt_info->size;
+      stmt_vec_info c_stmt_info = stmt_info;
+      bool succ = true;
+      while (group_size >= vf)
+	{
+	  vec_alloc (worklist, vf);
+	  for (unsigned j = 0; j < vf; ++j)
+	    {
+	      if (c_stmt_info == NULL)
+		{
+		  succ = false;
+		  break;
+		}
+	      ginfo = new _group_info ();
+	      ginfo->stmt = c_stmt_info->stmt;
+	      worklist->safe_push (ginfo);
+	      c_stmt_info = c_stmt_info->next_element;
+	    }
+	  if (!succ)
+	    {
+	      unsigned k = 0;
+	      ginfo = NULL;
+	      FOR_EACH_VEC_ELT (*worklist, k, ginfo)
+		delete ginfo;
+	      vec_free (worklist);
+	      break;
+	    }
+	  worklists.safe_push (worklist);
+	  group_size -= vf;
+	}
+    }
+  return worklists.length ();
+}
+
+static bool
+check_same_oprand_type (tree op1, tree op2)
+{
+  tree type1 = TREE_TYPE (op1);
+  tree type2 = TREE_TYPE (op2);
+  if (TREE_CODE (type1) != INTEGER_TYPE && TREE_CODE (type1) != REAL_TYPE)
+    return false;
+
+  return (TREE_CODE (type1) == TREE_CODE (type2)
+	  && TYPE_UNSIGNED (type1) == TYPE_UNSIGNED (type2)
+	  && TYPE_PRECISION (type1) == TYPE_PRECISION (type2));
+}
+
+static bool
+bit_field_p (gimple *stmt)
+{
+  unsigned i = 0;
+  auto_vec<data_reference_p, 2> datarefs_vec;
+  data_reference_p dr;
+  if (!find_data_references_in_stmt (NULL, stmt, &datarefs_vec))
+    return true;
+
+  FOR_EACH_VEC_ELT (datarefs_vec, i, dr)
+    {
+      if (TREE_CODE (DR_REF (dr)) == COMPONENT_REF
+	  && DECL_BIT_FIELD (TREE_OPERAND (DR_REF (dr), 1)))
+	return true;
+    }
+  return false;
+}
+
+static inline bool
+shift_operation (enum tree_code op)
+{
+  return op == LSHIFT_EXPR || op == RSHIFT_EXPR || op == LROTATE_EXPR
+	 || op == RROTATE_EXPR;
+}
+
+/* Return relationship between USE_STMT and the first use_stmt of the group.
+   RHS1 is the lhs of stmt recorded in group_info.  If another rhs of use_stmt
+   is not a constant, return UNCERTAIN and re-check it later.  */
+
+static unsigned
+check_isomorphic (gimple *use_stmt, gimple *first,
+		  tree rhs1, vec<tree> &hetero_lhs)
+{
+  /* Check same operation.  */
+  enum tree_code rhs_code_first = gimple_assign_rhs_code (first);
+  enum tree_code rhs_code_current = gimple_assign_rhs_code (use_stmt);
+  if (rhs_code_first != rhs_code_current)
+    return HETEROGENEOUS;
+
+  /* For shift operations, oprands should be equal.  */
+  if (shift_operation (rhs_code_current))
+    {
+      tree shift_op_first = gimple_assign_rhs2 (first);
+      tree shift_op_current = gimple_assign_rhs2 (use_stmt);
+      if (!operand_equal_p (shift_op_first, shift_op_current, 0)
+	  || !TREE_CONSTANT (shift_op_first))
+	return HETEROGENEOUS;
+
+      return ISOMORPHIC;
+    }
+  /* Type convertion expr or assignment.  */
+  if (gimple_num_ops (first) == 2)
+    return (rhs_code_first == NOP_EXPR || rhs_code_first == CONVERT_EXPR
+	      || rhs_code_first == SSA_NAME) ? ISOMORPHIC : HETEROGENEOUS;
+
+  /* We find USE_STMT from lhs of a stmt, denote it as rhs1 of USE_STMT and
+     the other one as rhs2.  Check if define-stmt of current rhs2 is isomorphic
+     with define-stmt of rhs2 in the first USE_STMT at this group.  */
+  tree rhs2_first = gimple_assign_rhs1 (use_stmt) == rhs1
+		    ? gimple_assign_rhs2 (first) : gimple_assign_rhs1 (first);
+  tree rhs2_curr = gimple_assign_rhs1 (use_stmt) == rhs1
+	      ? gimple_assign_rhs2 (use_stmt) : gimple_assign_rhs1 (use_stmt);
+
+  if (check_same_oprand_type (rhs2_first, rhs2_curr))
+    {
+      if (TREE_CONSTANT (rhs2_curr))
+	return ISOMORPHIC;
+      else if (hetero_lhs.contains (rhs2_curr))
+	return HETEROGENEOUS;
+
+      /* Provisionally set the stmt as uncertain and analyze the whole group
+	 in function CHECK_UNCERTAIN later if all use_stmts are uncertain.  */
+      return UNCERTAIN;
+    }
+  return HETEROGENEOUS;
+}
+
+static bool
+unsupported_operations (gimple *stmt)
+{
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+  return code == COND_EXPR;
+}
+
+/* Check if the single use_stmt of STMT is isomorphic with the first one's
+   use_stmt in current group.  */
+
+static unsigned
+check_use_stmt (group_info elmt, gimple *&first,
+		vec<gimple *> &tmp_stmts, vec<tree> &hetero_lhs)
+{
+  if (gimple_code (elmt->stmt) != GIMPLE_ASSIGN)
+    return HETEROGENEOUS;
+  use_operand_p dummy;
+  tree lhs = gimple_assign_lhs (elmt->stmt);
+  gimple *use_stmt = NULL;
+  single_imm_use (lhs, &dummy, &use_stmt);
+  /* STMTs with three rhs are not supported, e.g., GIMPLE_COND.  */
+  if (use_stmt == NULL || gimple_code (use_stmt) != GIMPLE_ASSIGN
+      || unsupported_operations (use_stmt) || bit_field_p (use_stmt))
+    return HETEROGENEOUS;
+  tmp_stmts.safe_push (use_stmt);
+  if (first == NULL)
+    {
+      first = use_stmt;
+      return UNINITIALIZED;
+    }
+  /* Check if current use_stmt and the first menber's use_stmt in the group
+     are of the same type.  */
+  tree first_lhs = gimple_assign_lhs (first);
+  tree curr_lhs = gimple_assign_lhs (use_stmt);
+  if (!check_same_oprand_type (first_lhs, curr_lhs))
+    return HETEROGENEOUS;
+  return check_isomorphic (use_stmt, first, lhs, hetero_lhs);
+}
+
+/* Replace stmt field in group with stmts in TMP_STMTS, and insert their
+   lhs_info to ISOMER_LHS.  */
+
+static void
+update_isomer_lhs (vec<group_info> *group, unsigned group_num,
+		   unsigned iteration, isomer_stmt_lhs &isomer_lhs,
+		   vec<gimple *> &tmp_stmts, int &profit,
+		   vec<unsigned> &merged_groups)
+{
+  group_info elmt = NULL;
+  /* Do not insert temp array if isomorphic stmts from grouped load have
+     only casting operations.  Once isomorphic calculation has 3 oprands,
+     such as plus operation, this group can be regarded as cut point.  */
+  bool operated = (gimple_num_ops (tmp_stmts[0]) == 3);
+  /* Do not insert temp arrays if search of iosomophic stmts reaches
+     MEM stmts.  */
+  bool has_vdef = gimple_vdef (tmp_stmts[0]) != NULL;
+  bool merge = false;
+  for (unsigned i = 0; i < group->length (); i++)
+    {
+      elmt = (*group)[i];
+      elmt->stmt = has_vdef ? NULL : tmp_stmts[i];
+      elmt->cut_point = has_vdef ? false : (elmt->cut_point || operated);
+      elmt->uncertain = false;
+      elmt->done = has_vdef;
+      tree lhs = gimple_assign_lhs (tmp_stmts[i]);
+      if (isomer_lhs.find (lhs) != isomer_lhs.end ())
+	{
+	  merge = true;
+	  continue;
+	}
+      isomer_lhs[lhs] = std::make_pair (group_num, iteration);
+    }
+  if (merge)
+    {
+      merged_groups.safe_push (group_num);
+      profit = 0;
+      return;
+    }
+  enum vect_cost_for_stmt kind = scalar_stmt;
+  int scalar_cost = builtin_vectorization_cost (kind, NULL_TREE, 0);
+  profit = (tmp_stmts.length () - 1) * scalar_cost;
+}
+
+/* Try to find rhs2 in ISOMER_LHS, if all rhs2 were found and their group_num
+   and iteration are same, GROUP is isomorphic.  */
+
+static unsigned
+check_isomorphic_rhs (vec<group_info> *group, vec<gimple *> &tmp_stmts,
+		      isomer_stmt_lhs &isomer_lhs)
+{
+  group_info elmt = NULL;
+  gimple *stmt = NULL;
+  unsigned j = 0;
+  unsigned group_num = -1u;
+  unsigned iteration = -1u;
+  tree rhs1 = NULL;
+  tree rhs2 = NULL;
+  unsigned status = UNINITIALIZED;
+  FOR_EACH_VEC_ELT (*group, j, elmt)
+    {
+      rhs1 = gimple_assign_lhs (elmt->stmt);
+      stmt = tmp_stmts[j];
+      rhs2 = (rhs1 == gimple_assign_rhs1 (stmt))
+	     ? gimple_assign_rhs2 (stmt) : gimple_assign_rhs1 (stmt);
+      isomer_stmt_lhs::iterator iter = isomer_lhs.find (rhs2);
+      if (iter != isomer_lhs.end ())
+	{
+	  if (group_num == -1u)
+	    {
+	      group_num = iter->second.first;
+	      iteration = iter->second.second;
+	      status |= ISOMORPHIC;
+	      continue;
+	    }
+	  if (iter->second.first == group_num
+	      && iter->second.second == iteration)
+	    {
+	      status |= ISOMORPHIC;
+	      continue;
+	    }
+	  return HETEROGENEOUS;
+	}
+      else
+	status |= UNCERTAIN;
+    }
+  return status;
+}
+
+/* Update group_info for uncertain groups.  */
+
+static void
+update_uncertain_stmts (vec<group_info> *group, unsigned group_num,
+			 unsigned iteration, vec<gimple *> &tmp_stmts)
+{
+  unsigned j = 0;
+  group_info elmt = NULL;
+  FOR_EACH_VEC_ELT (*group, j, elmt)
+    {
+      elmt->uncertain = true;
+      elmt->done = false;
+    }
+}
+
+/* Push stmts in TMP_STMTS into HETERO_LHS.  */
+
+static void
+set_hetero (vec<group_info> *group, vec<tree> &hetero_lhs,
+	    vec<gimple *> &tmp_stmts)
+{
+  group_info elmt = NULL;
+  unsigned i = 0;
+  for (i = 0; i < group->length (); i++)
+    {
+      elmt = (*group)[i];
+      elmt->uncertain = false;
+      elmt->done = true;
+    }
+  gimple *stmt = NULL;
+  FOR_EACH_VEC_ELT (tmp_stmts, i, stmt)
+    if (stmt != NULL)
+      hetero_lhs.safe_push (gimple_assign_lhs (stmt));
+}
+
+/* Given an uncertain group, TMP_STMTS are use_stmts of stmts in GROUP.
+   Rhs1 is the lhs of stmt in GROUP, rhs2 is the other rhs of USE_STMT.
+
+   Try to find rhs2 in ISOMER_LHS, if all found rhs2 have same group_num
+   and iteration, this uncertain group is isomorphic.
+
+   If no rhs matched, this GROUP remains uncertain and update group_info.
+
+   Otherwise, this GROUP is heterogeneous and return true to end analysis
+   for this group.  */
+
+static bool
+check_uncertain (vec<group_info> *group, unsigned group_num,
+		 unsigned iteration, int &profit,
+		 vec<gimple *> &tmp_stmts, isomer_stmt_lhs &isomer_lhs,
+		 vec<tree> &hetero_lhs, vec<unsigned> &merged_groups)
+{
+  unsigned status = check_isomorphic_rhs (group, tmp_stmts, isomer_lhs);
+  bool done = false;
+  switch (status)
+    {
+      case UNCERTAIN:
+	update_uncertain_stmts (group, group_num, iteration, tmp_stmts);
+	break;
+      case ISOMORPHIC:
+	update_isomer_lhs (group, group_num, iteration, isomer_lhs,
+			   tmp_stmts, profit, merged_groups);
+	break;
+      default:
+	set_hetero (group, hetero_lhs, tmp_stmts);
+	done = true;
+    }
+  return done;
+}
+
+/* Return false if analysis of this group is not finished, e.g., isomorphic or
+   uncertain.  Calculate the profit if vectorized.  */
+
+static bool
+check_group (vec<group_info> *group, unsigned group_num, unsigned iteration,
+	     int &profit, vec<unsigned> &merged_groups,
+	     isomer_stmt_lhs &isomer_lhs, vec<tree> &hetero_lhs)
+{
+  unsigned j = 0;
+  group_info elmt = NULL;
+  gimple *first = NULL;
+  unsigned res = 0;
+  /* Record single use stmts in TMP_STMTS and decide whether replace stmts in
+     ginfo in succeeding processes.  */
+  auto_vec<gimple *, 12> tmp_stmts;
+  FOR_EACH_VEC_ELT (*group, j, elmt)
+    {
+      if (merged_groups.contains (group_num))
+	return true;
+      res |= check_use_stmt (elmt, first, tmp_stmts, hetero_lhs);
+    }
+
+  /* Update each group member according to RES.  */
+  switch (res)
+    {
+      case ISOMORPHIC:
+	update_isomer_lhs (group, group_num, iteration, isomer_lhs,
+			   tmp_stmts, profit, merged_groups);
+	return false;
+      case UNCERTAIN:
+	return check_uncertain (group, group_num, iteration, profit,
+				tmp_stmts, isomer_lhs, hetero_lhs,
+				merged_groups);
+      default:
+	set_hetero (group, hetero_lhs, tmp_stmts);
+	return true;
+    }
+}
+
+/* Return true if all analysises are done except uncertain groups.  */
+
+static bool
+end_of_search (vec<vec<group_info> *> &circular_queue,
+	       vec<unsigned> &merged_groups)
+{
+  unsigned i = 0;
+  vec<group_info> *group = NULL;
+  group_info elmt = NULL;
+  FOR_EACH_VEC_ELT (circular_queue, i, group)
+    {
+      if (merged_groups.contains (i))
+	continue;
+      elmt = (*group)[0];
+      /* If there is any isomorphic use_stmts, continue analysis of isomorphic
+	 use_stmts.  */
+      if (!elmt->done && !elmt->uncertain)
+	return false;
+    }
+  return true;
+}
+
+/* Push valid stmts to STMTS as cutpoints.  */
+
+static bool
+check_any_cutpoints (vec<vec<group_info> *> &circular_queue,
+		     vec<gimple *> *&stmts, vec<unsigned> &merged_groups)
+{
+  unsigned front = 0;
+  vec<group_info> *group = NULL;
+  group_info elmt = NULL;
+  unsigned max = circular_queue.length () * circular_queue[0]->length ();
+  vec_alloc (stmts, max);
+  while (front < circular_queue.length ())
+    {
+      unsigned i = 0;
+      if (merged_groups.contains (front))
+	{
+	  front++;
+	  continue;
+	}
+      group = circular_queue[front++];
+      FOR_EACH_VEC_ELT (*group, i, elmt)
+	if (elmt->stmt != NULL && elmt->done && elmt->cut_point)
+	  stmts->safe_push (elmt->stmt);
+    }
+  return stmts->length () != 0;
+}
+
+/* Grouped loads are isomorphic.  Make pair for group number and iteration,
+   map load stmt to this pair.  We set iteration 0 here.  */
+
+static void
+init_isomer_lhs (vec<vec<group_info> *> &groups, isomer_stmt_lhs &isomer_lhs)
+{
+  vec<group_info> *group = NULL;
+  group_info elmt = NULL;
+  unsigned i = 0;
+  FOR_EACH_VEC_ELT (groups, i, group)
+    {
+      unsigned j = 0;
+      FOR_EACH_VEC_ELT (*group, j, elmt)
+	isomer_lhs[gimple_assign_lhs (elmt->stmt)] = std::make_pair (i, 0);
+    }
+}
+
+/* It's not a strict analysis of load/store profit.  Assume scalar and vector
+   load/store are of the same cost.  The result PROFIT equals profit form
+   vectorizing of scalar loads/stores minus cost of a vectorized load/store.  */
+
+static int
+load_store_profit (unsigned scalar_mem_ops, unsigned vf, unsigned new_mem_ops)
+{
+  int profit = 0;
+  enum vect_cost_for_stmt kind = scalar_load;
+  int scalar_cost = builtin_vectorization_cost (kind, NULL_TREE, 0);
+  profit += (scalar_mem_ops - (scalar_mem_ops / vf)) * scalar_cost;
+  profit -= new_mem_ops / vf * scalar_cost;
+  kind = scalar_store;
+  scalar_cost = builtin_vectorization_cost (kind, NULL_TREE, 0);
+  profit -= new_mem_ops / vf * scalar_cost;
+  return profit;
+}
+
+/* Breadth first search the graph consisting of define-use chain starting from
+   the circular queue initialized by function BUILD_QUEUE.  Find single use of
+   each stmt in group and check if they are isomorphic.  Isomorphic is defined
+   as same rhs type, same operator, and isomorphic calculation of each rhs
+   starting from load.  If another rhs is uncertain to be isomorphic, put it
+   at the end of circular queue and re-analyze it during the next iteration.
+   If a group shares the same use_stmt with another group, skip one of them in
+   succeedor prcoesses as merged.  Iterate the circular queue until all
+   remianing groups heterogeneous or reaches MEN stmts.  If all other groups
+   have finishes the analysis, and the remaining groups are uncertain,
+   return false to avoid endless loop.  */
+
+bool
+bfs_find_isomer_stmts (vec<vec<group_info> *> &circular_queue,
+		       stmts_profit &profit_pair, unsigned vf,
+		       bool &reach_vdef)
+{
+  isomer_stmt_lhs isomer_lhs;
+  auto_vec<tree> hetero_lhs;
+  auto_vec<unsigned> merged_groups;
+  vec<group_info> *group = NULL;
+  /* True if analysis finishes.  */
+  bool done = false;
+  int profit_sum = 0;
+  vec<gimple *> *stmts = NULL;
+  init_isomer_lhs (circular_queue, isomer_lhs);
+  for (unsigned i = 1; !done; ++i)
+    {
+      unsigned front = 0;
+      /* Re-initialize DONE to TRUE while a new iteration begins.  */
+      done = true;
+      while (front < circular_queue.length ())
+	{
+	  int profit = 0;
+	  group = circular_queue[front];
+	  done &= check_group (group, front, i, profit, merged_groups,
+			       isomer_lhs, hetero_lhs);
+	  profit_sum += profit;
+	  if (profit != 0 && (*group)[0]->stmt == NULL)
+	    {
+	      reach_vdef = true;
+	      return false;
+	    }
+	  ++front;
+	}
+      /* Uncertain result, return.  */
+      if (!done && end_of_search (circular_queue, merged_groups))
+	return false;
+    }
+  if (check_any_cutpoints (circular_queue, stmts, merged_groups))
+    {
+      profit_pair.first = stmts;
+      unsigned loads = circular_queue.length () * circular_queue[0]->length ();
+      profit_pair.second = profit_sum + load_store_profit (loads, vf,
+							   stmts->length ());
+      if (profit_pair.second > 0)
+	return true;
+    }
+  return false;
+}
+
+/* Free memory allocated by ginfo.  */
+
+static void
+free_ginfos (vec<vec<group_info> *> &worklists)
+{
+  vec<group_info> *worklist;
+  unsigned i = 0;
+  while (i < worklists.length ())
+    {
+      worklist = worklists[i++];
+      group_info ginfo;
+      unsigned j = 0;
+      FOR_EACH_VEC_ELT (*worklist, j, ginfo)
+	delete ginfo;
+      vec_free (worklist);
+    }
+}
+
+static void
+release_tmp_stmts (vf_stmts_profit_map &candi_stmts)
+{
+  vf_stmts_profit_map::iterator iter;
+  for (iter = candi_stmts.begin (); iter != candi_stmts.end (); ++iter)
+    iter->second.first->release ();
+}
+
+/* Choose the group of stmt with maximun profit.  */
+
+static bool
+decide_stmts_by_profit (vf_stmts_profit_map &candi_stmts, vec<gimple *> &stmts)
+{
+  vf_stmts_profit_map::iterator iter;
+  int profit = 0;
+  int max = 0;
+  vec<gimple *> *tmp = NULL;
+  for (iter = candi_stmts.begin (); iter != candi_stmts.end (); ++iter)
+    {
+      profit = iter->second.second;
+      if (profit > max)
+	{
+	  tmp = iter->second.first;
+	  max = profit;
+	}
+    }
+  if (max == 0)
+    {
+      release_tmp_stmts (candi_stmts);
+      return false;
+    }
+  unsigned i = 0;
+  gimple *stmt = NULL;
+  FOR_EACH_VEC_ELT (*tmp, i, stmt)
+    stmts.safe_push (stmt);
+  release_tmp_stmts (candi_stmts);
+  return stmts.length () != 0;
+}
+
+/* Find isomorphic stmts from grouped loads with vector factor VF.
+
+   Given source code as follows and ignore casting.
+
+   a0 = (a[0] + b[0]) + ((a[4] - b[4]) << 16);
+   a1 = (a[1] + b[1]) + ((a[5] - b[5]) << 16);
+   a2 = (a[2] + b[2]) + ((a[6] - b[6]) << 16);
+   a3 = (a[3] + b[3]) + ((a[7] - b[7]) << 16);
+
+   We get grouped loads in VINFO as
+
+   GROUP_1		GROUP_2
+   _1 = *a		_11 = *b
+   _2 = *(a + 1)	_12 = *(b + 1)
+   _3 = *(a + 2)	_13 = *(b + 2)
+   _4 = *(a + 3)	_14 = *(b + 3)
+   _5 = *(a + 4)	_15 = *(b + 4)
+   _6 = *(a + 5)	_16 = *(b + 5)
+   _7 = *(a + 6)	_17 = *(b + 6)
+   _8 = *(a + 7)	_18 = *(b + 7)
+
+   First we try VF = 8, we get two worklists
+
+   WORKLIST_1		WORKLIST_2
+   _1 = *a		_11 = *b
+   _2 = *(a + 1)	_12 = *(b + 1)
+   _3 = *(a + 2)	_13 = *(b + 2)
+   _4 = *(a + 3)	_14 = *(b + 3)
+   _5 = *(a + 4)	_15 = *(b + 4)
+   _6 = *(a + 5)	_16 = *(b + 5)
+   _7 = *(a + 6)	_17 = *(b + 6)
+   _8 = *(a + 7)	_18 = *(b + 7)
+
+   We find _111 = _1 + _11 and _115 = _5 - _15 are not isomorphic,
+   so we try VF = VF / 2.
+
+   GROUP_1		GROUP_2
+   _1 = *a		_5 = *(a + 4)
+   _2 = *(a + 1)	_6 = *(a + 5)
+   _3 = *(a + 2)	_7 = *(a + 6)
+   _4 = *(a + 3)	_8 = *(a + 7)
+
+   GROUP_3		GROUP_4
+   _11 = *b		_15 = *(b + 4)
+   _12 = *(b + 1)	_16 = *(b + 5)
+   _13 = *(b + 2)	_17 = *(b + 6)
+   _14 = *(b + 3)	_18 = *(b + 7)
+
+   We first analyze group_1, and find all operations are isomorphic, then
+   replace stmts in group_1 with their use_stmts.  Group_2 as well.
+
+   GROUP_1		GROUP_2
+   _111 = _1 + _11	_115 = _5 - _15
+   _112 = _2 + _12	_116 = _6 - _16
+   _113 = _3 + _13	_117 = _7 - _17
+   _114 = _4 + _14	_118 = _8 - _18
+
+   When analyzing group_3 and group_4, we find their use_stmts are the same
+   as group_1 and group_2.  So group_3 is regarded as being merged to group_1
+   and group_4 being merged to group_2.  In future procedures, we will skip
+   group_3 and group_4.
+
+   We repeat such processing until opreations are not isomorphic or searching
+   reaches MEM stmts.  In our given case, searching end up at a0, a1, a2 and
+   a3.  */
+
+static bool
+find_isomorphic_stmts (loop_vec_info vinfo, vec<gimple *> &stmts)
+{
+  unsigned vf = get_max_vf (vinfo);
+  if (vf == 0)
+    return false;
+  auto_vec<vec<group_info> *> circular_queue;
+  /* Map of vector factor and corresponding vectorizing profit.  */
+  stmts_profit profit_map;
+  /* Map of cut_points and vector factor.  */
+  vf_stmts_profit_map candi_stmts;
+  bool reach_vdef = false;
+  while (vf > 2)
+    {
+      if (build_queue (vinfo, vf, circular_queue) == 0)
+	return false;
+      if (!bfs_find_isomer_stmts (circular_queue, profit_map, vf, reach_vdef))
+	{
+	  if (reach_vdef)
+	    {
+	      release_tmp_stmts (candi_stmts);
+	      free_ginfos (circular_queue);
+	      circular_queue.release ();
+	      return false;
+	    }
+	  vf /= 2;
+	  free_ginfos (circular_queue);
+	  circular_queue.release ();
+	  continue;
+	}
+      candi_stmts[vf] = profit_map;
+      free_ginfos (circular_queue);
+      vf /= 2;
+      circular_queue.release ();
+    }
+  return decide_stmts_by_profit (candi_stmts, stmts);
+}
+
+/* Get iv from SEED_STMTS and make sure each seed_stmt has only one iv as index
+   and all indices are the same.  */
+
+static tree
+find_index (vec<gimple *> seed_stmts)
+{
+  if (seed_stmts.length () == 0)
+    return NULL;
+  bool found_index = false;
+  tree index = NULL;
+  unsigned ui = 0;
+  for (ui = 0; ui < seed_stmts.length (); ui++)
+    {
+      if (!gimple_vdef (seed_stmts[ui]))
+	return NULL;
+      tree lhs = gimple_assign_lhs (seed_stmts[ui]);
+      unsigned num_index = 0;
+      while (TREE_CODE (lhs) == ARRAY_REF)
+	{
+	  if (TREE_CODE (TREE_OPERAND (lhs, 1)) == SSA_NAME)
+	    {
+	      num_index++;
+	      if (num_index > 1)
+		return NULL;
+	      if (index == NULL)
+		{
+		  index = TREE_OPERAND (lhs, 1);
+		  found_index = true;
+		}
+	      else if (index != TREE_OPERAND (lhs, 1))
+		return NULL;
+	    }
+	  lhs = TREE_OPERAND (lhs, 0);
+	}
+      if (!found_index)
+	return NULL;
+    }
+  return index;
+}
+
+/* Check if expression of phi is an increament of a const.  */
+
+static void
+check_phi_inc (struct vertex *v_phi, struct graph *rdg, bool &found_inc)
+{
+  struct graph_edge *e_phi;
+  for (e_phi = v_phi->succ; e_phi; e_phi = e_phi->succ_next)
+    {
+      struct vertex *v_inc = &(rdg->vertices[e_phi->dest]);
+      if (!is_gimple_assign (RDGV_STMT (v_inc))
+	  || gimple_expr_code (RDGV_STMT (v_inc)) != PLUS_EXPR)
+	continue;
+      tree rhs1 = gimple_assign_rhs1 (RDGV_STMT (v_inc));
+      tree rhs2 = gimple_assign_rhs2 (RDGV_STMT (v_inc));
+      if (!(integer_onep (rhs1) || integer_onep (rhs2)))
+	continue;
+      struct graph_edge *e_inc;
+      /* find cycle with only two vertices inc and phi: inc <--> phi.  */
+      bool found_cycle = false;
+      for (e_inc = v_inc->succ; e_inc; e_inc = e_inc->succ_next)
+	{
+	  if (e_inc->dest == e_phi->src)
+	    {
+	      found_cycle = true;
+	      break;
+	    }
+	}
+      if (!found_cycle)
+	continue;
+      found_inc = true;
+    }
+}
+
+/* Check if phi satisfies form like PHI <0, i>.  */
+
+static inline bool
+iv_check_phi_stmt (gimple *phi_stmt)
+{
+  return gimple_phi_num_args (phi_stmt) == 2
+	 && (integer_zerop (gimple_phi_arg_def (phi_stmt, 0))
+	     || integer_zerop (gimple_phi_arg_def (phi_stmt, 1)));
+}
+
+/* Make sure the iteration varible is a phi.  */
+
+static tree
+get_iv_from_seed (struct graph *flow_only_rdg, vec<gimple *> seed_stmts)
+{
+  tree index = find_index (seed_stmts);
+  if (index == NULL)
+    return NULL;
+  for (int i = 0; i < flow_only_rdg->n_vertices; i++)
+    {
+      struct vertex *v = &(flow_only_rdg->vertices[i]);
+      if (RDGV_STMT (v) != seed_stmts[0])
+	continue;
+      struct graph_edge *e;
+      bool found_phi = false;
+      for (e = v->pred; e; e = e->pred_next)
+	{
+	  struct vertex *v_phi = &(flow_only_rdg->vertices[e->src]);
+	  gimple *phi_stmt = RDGV_STMT (v_phi);
+	  if (gimple_code (phi_stmt) != GIMPLE_PHI
+	      || gimple_phi_result (phi_stmt) != index)
+	    continue;
+	  if (!iv_check_phi_stmt (phi_stmt))
+	    return NULL;
+	  /* find inc expr in succ of phi.  */
+	  bool found_inc = false;
+	  check_phi_inc (v_phi, flow_only_rdg, found_inc);
+	  if (!found_inc)
+	    return NULL;
+	  found_phi = true;
+	  break;
+	}
+      if (!found_phi)
+	return NULL;
+      break;
+    }
+  return index;
+}
+
+/* Do not distribute loop if vertexes in ROOT_MAP have antidependence with in
+   FLOW_ONLY_RDG.  */
+
+static bool
+check_no_dependency (struct graph *flow_only_rdg, bitmap root_map)
+{
+  bitmap_iterator bi;
+  unsigned ui;
+  auto_vec<unsigned, 16> visited_nodes;
+  auto_bitmap visited_map;
+  EXECUTE_IF_SET_IN_BITMAP (root_map, 0, ui, bi)
+    visited_nodes.safe_push (ui);
+  for (ui = 0; ui < visited_nodes.length (); ui++)
+    {
+      struct vertex *v = &(flow_only_rdg->vertices[visited_nodes[ui]]);
+      struct graph_edge *e;
+      for (e = v->succ; e; e = e->succ_next)
+	{
+	  if (bitmap_bit_p (root_map, e->dest))
+	    return false;
+	  if (bitmap_bit_p (visited_map, e->dest))
+	    continue;
+	  visited_nodes.safe_push (e->dest);
+	  bitmap_set_bit (visited_map, e->dest);
+	}
+    }
+  return true;
+}
+
+/* Find isomorphic stmts from GROUPED_LOADS in VINFO and make sure
+   there is no dependency among those STMT we found.  */
+
+static unsigned
+get_cut_points (struct graph *flow_only_rdg, bitmap cut_points,
+		loop_vec_info vinfo)
+{
+  unsigned n_stmts = 0;
+
+  /* STMTS that may be CUT_POINTS.  */
+  auto_vec<gimple *> stmts;
+  if (!find_isomorphic_stmts (vinfo, stmts))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "No temp array insertion: no isomorphic stmts"
+			    " were found.\n");
+      return 0;
+    }
+
+  for (int i = 0; i < flow_only_rdg->n_vertices; i++)
+    {
+      if (stmts.contains (RDG_STMT (flow_only_rdg, i)))
+	bitmap_set_bit (cut_points, i);
+    }
+  n_stmts = bitmap_count_bits (cut_points);
+
+  bool succ = check_no_dependency (flow_only_rdg, cut_points);
+  if (!succ)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "No temp array inserted: data dependency"
+			    " among isomorphic stmts.\n");
+      return 0;
+    }
+  return n_stmts;
+}
+
+static void
+build_temp_array (struct vertex *v, gimple_stmt_iterator &gsi,
+		  poly_uint64 array_extent, tree iv,
+		  hash_set<tree> *tmp_array_vars, vec<gimple *> *transformed)
+{
+  gimple *stmt = RDGV_STMT (v);
+  tree lhs = gimple_assign_lhs (stmt);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "original stmt:\t");
+      print_gimple_stmt (dump_file, stmt, 0, TDF_VOPS|TDF_MEMSYMS);
+    }
+  tree var_ssa = duplicate_ssa_name (lhs, stmt);
+  gimple_assign_set_lhs (stmt, var_ssa);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "changed to:\t");
+      print_gimple_stmt (dump_file, stmt, 0, TDF_VOPS | TDF_MEMSYMS);
+    }
+  gimple_set_uid (gsi_stmt (gsi), -1);
+  tree vect_elt_type = TREE_TYPE (lhs);
+  tree array_type = build_array_type_nelts (vect_elt_type, array_extent);
+  tree array = create_tmp_var (array_type);
+  tree array_ssa = build4 (ARRAY_REF, vect_elt_type, array, iv, NULL, NULL);
+  tmp_array_vars->add (array_ssa);
+  gimple *store = gimple_build_assign (array_ssa, var_ssa);
+  tree new_vdef = make_ssa_name (gimple_vop (cfun), store);
+  gsi_insert_after (&gsi, store, GSI_NEW_STMT);
+  gimple_set_vdef (store, new_vdef);
+  transformed->safe_push (store);
+  gimple_set_uid (gsi_stmt (gsi), -1);
+  tree array_ssa2 = build4 (ARRAY_REF, vect_elt_type, array, iv, NULL, NULL);
+  tmp_array_vars->add (array_ssa2);
+  gimple *load = gimple_build_assign (lhs, array_ssa2);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "insert stmt:\t");
+      print_gimple_stmt (dump_file, store, 0, TDF_VOPS|TDF_MEMSYMS);
+      fprintf (dump_file, " and stmt:\t");
+      print_gimple_stmt (dump_file, load, 0, TDF_VOPS|TDF_MEMSYMS);
+    }
+  gimple_set_vuse (load, new_vdef);
+  gsi_insert_after (&gsi, load, GSI_NEW_STMT);
+  gimple_set_uid (gsi_stmt (gsi), -1);
+}
+
+/* Set bitmap PRODUCERS based on vec TRANSFORMED.  */
+
+void
+loop_distribution::build_producers (loop_p loop, bitmap producers,
+				    vec<gimple *> &transformed)
+{
+  auto_vec<gimple *, 10> stmts;
+  stmts_from_loop (loop, &stmts);
+  int i = 0;
+  gimple *stmt = NULL;
+
+  FOR_EACH_VEC_ELT (stmts, i, stmt)
+    gimple_set_uid (stmt, i);
+  i = 0;
+  FOR_EACH_VEC_ELT (transformed, i, stmt)
+    bitmap_set_bit (producers, stmt->uid);
+}
+
+/* Transform stmt
+
+   A = FOO (ARG_1);
+
+   to
+
+   STMT_1: A1 = FOO (ARG_1);
+   STMT_2: X[I] = A1;
+   STMT_3: A = X[I];
+
+   Producer is STMT_2 who defines the temp array and consumer is
+   STMT_3 who uses the temp array.  */
+
+void
+loop_distribution::do_insertion (loop_p loop, struct graph *flow_only_rdg,
+				 tree iv, bitmap cut_points,
+				 hash_set<tree> *tmp_array_vars,
+				 bitmap producers)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "=== do insertion ===\n");
+
+  auto_vec<gimple *> transformed;
+
+  /* Execution times of loop.  */
+  poly_uint64 array_extent
+    = tree_to_poly_uint64 (number_of_latch_executions (loop)) + 1;
+
+  basic_block *bbs = get_loop_body_in_custom_order (loop, this,
+						    bb_top_order_cmp_r);
+
+  for (int i = 0; i < int (loop->num_nodes); i++)
+    {
+      basic_block bb = bbs[i];
+
+      /* Find all cut points in bb and transform them.  */
+      for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
+	   gsi_next (&gsi))
+	{
+	  unsigned j = gimple_uid (gsi_stmt (gsi));
+	  if (bitmap_bit_p (cut_points, j))
+	    {
+	      struct vertex *v = &(flow_only_rdg->vertices[j]);
+	      build_temp_array (v, gsi, array_extent, iv, tmp_array_vars,
+				&transformed);
+	    }
+	}
+    }
+  build_producers (loop, producers, transformed);
+  update_ssa (TODO_update_ssa);
+  free (bbs);
+}
+
+/* After temp array insertion, given stmts
+   STMT_1: M = FOO (ARG_1);
+   STMT_2: X[I] = M;
+   STMT_3: A = X[I];
+   STMT_2 is the producer, STMT_1 is its prev and STMT_3 is its next.
+   Replace M with A, and remove STMT_2 and STMT_3.  */
+
+static void
+reset_gimple_assign (struct graph *flow_only_rdg, struct partition *partition,
+		     gimple_stmt_iterator &gsi, int j)
+{
+  struct vertex *v = &(flow_only_rdg->vertices[j]);
+  gimple *stmt = RDGV_STMT (v);
+  gimple *prev = stmt->prev;
+  gimple *next = stmt->next;
+  tree n_lhs = gimple_assign_lhs (next);
+  gimple_assign_set_lhs (prev, n_lhs);
+  unlink_stmt_vdef (stmt);
+  if (partition)
+    bitmap_clear_bit (partition->stmts, gimple_uid (gsi_stmt (gsi)));
+  gsi_remove (&gsi, true);
+  release_defs (stmt);
+  if (partition)
+    bitmap_clear_bit (partition->stmts, gimple_uid (gsi_stmt (gsi)));
+  gsi_remove (&gsi, true);
+}
+
+void
+loop_distribution::remove_insertion (loop_p loop, struct graph *flow_only_rdg,
+		  bitmap producers, struct partition *partition)
+{
+  basic_block *bbs = get_loop_body_in_custom_order (loop, this,
+						    bb_top_order_cmp_r);
+  for (int i = 0; i < int (loop->num_nodes); i++)
+    {
+      basic_block bb = bbs[i];
+      for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
+	   gsi_next (&gsi))
+	{
+	  unsigned j = gimple_uid (gsi_stmt (gsi));
+	  if (bitmap_bit_p (producers, j))
+	    reset_gimple_assign (flow_only_rdg, partition, gsi, j);
+	}
+    }
+  update_ssa (TODO_update_ssa);
+  free (bbs);
+}
+
+/* Insert temp arrays if isomorphic computation exists.  Temp arrays will be
+   regarded as SEED_STMTS for building partitions in succeeding processes.  */
+
+bool
+loop_distribution::insert_temp_arrays (loop_p loop, vec<gimple *> seed_stmts,
+			hash_set<tree> *tmp_array_vars, bitmap producers)
+{
+  struct graph *flow_only_rdg = build_rdg (loop, NULL);
+  gcc_checking_assert (flow_only_rdg != NULL);
+  tree iv = get_iv_from_seed (flow_only_rdg, seed_stmts);
+  if (iv == NULL)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d no temp array insertion: failed to get"
+			    " iteration variable.\n", loop->num);
+      free_rdg (flow_only_rdg);
+      return false;
+  }
+  auto_bitmap cut_points;
+  loop_vec_info vinfo = loop_vec_info_for_loop (loop);
+  unsigned n_cut_points = get_cut_points (flow_only_rdg, cut_points, vinfo);
+  delete vinfo;
+  loop->aux = NULL;
+  if (n_cut_points == 0)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Loop %d no temp array insertion: no cut points"
+			    " found.\n", loop->num);
+      free_rdg (flow_only_rdg);
+      return false;
+    }
+  do_insertion (loop, flow_only_rdg, iv, cut_points, tmp_array_vars, producers);
+  if (dump_enabled_p ())
+    {
+      dump_user_location_t loc = find_loop_location (loop);
+      dump_printf_loc (MSG_OPTIMIZED_LOCATIONS, loc, "Insertion done:"
+		       " %d temp arrays inserted in Loop %d.\n",
+		       n_cut_points, loop->num);
+    }
+  free_rdg (flow_only_rdg);
+  return true;
+}
+
+static bool find_seed_stmts_for_distribution (class loop *, vec<gimple *> *);
 
 /* Distributes the code from LOOP in such a way that producer statements
    are placed before consumer statements.  Tries to separate only the
@@ -2972,7 +4342,7 @@ loop_distribution::finalize_partitions (class loop *loop,
 
 int
 loop_distribution::distribute_loop (class loop *loop,
-		 const vec<gimple *> &stmts,
+		 vec<gimple *> &stmts,
 		 control_dependences *cd, int *nb_calls, bool *destroy_p,
 		 bool only_patterns_p)
 {
@@ -3021,6 +4391,33 @@ loop_distribution::distribute_loop (class loop *loop,
       return 0;
     }
 
+  /* Try to distribute LOOP if LOOP is simple enough and unable to vectorize.
+     If LOOP has grouped loads, recursively find isomorphic stmts and insert
+     temp arrays, rebuild RDG and call find_seed_stmts_for_distribution
+     to replace STMTS.  */
+
+  hash_set<tree> tmp_array_vars;
+
+  /* STMTs that define those inserted TMP_ARRAYs.  */
+  auto_bitmap producers;
+
+  /* New SEED_STMTS after insertion.  */
+  auto_vec<gimple *> work_list;
+  bool insert_success = false;
+  if (may_insert_temp_arrays (loop, rdg, cd))
+    {
+      if (insert_temp_arrays (loop, stmts, &tmp_array_vars, producers))
+	{
+	  if (find_seed_stmts_for_distribution (loop, &work_list))
+	    {
+	      insert_success = true;
+	    }
+	  else
+	    remove_insertion (loop, rdg, producers, NULL);
+	  rebuild_rdg (loop, rdg, cd);
+	}
+     }
+
   data_reference_p dref;
   for (i = 0; datarefs_vec.iterate (i, &dref); ++i)
     dref->aux = (void *) (uintptr_t) i;
@@ -3029,7 +4426,10 @@ loop_distribution::distribute_loop (class loop *loop,
     dump_rdg (dump_file, rdg);
 
   auto_vec<struct partition *, 3> partitions;
-  rdg_build_partitions (rdg, stmts, &partitions);
+  if (work_list.length() > stmts.length())
+	rdg_build_partitions (rdg, &work_list, &partitions);
+  else
+	rdg_build_partitions (rdg, &stmts, &partitions);
 
   auto_vec<ddr_p> alias_ddrs;
 
@@ -3101,7 +4501,7 @@ loop_distribution::distribute_loop (class loop *loop,
       for (int j = i + 1;
 	   partitions.iterate (j, &partition); ++j)
 	{
-	  if (share_memory_accesses (rdg, into, partition))
+	  if (share_memory_accesses (rdg, into, partition, &tmp_array_vars))
 	    {
 	      partition_merge_into (rdg, into, partition, FUSE_SHARE_REF);
 	      partitions.unordered_remove (j);
@@ -3151,7 +4551,7 @@ loop_distribution::distribute_loop (class loop *loop,
 	}
     }
 
-  finalize_partitions (loop, &partitions, &alias_ddrs);
+  finalize_partitions (loop, &partitions, &alias_ddrs, producers);
 
   /* If there is a reduction in all partitions make sure the last one
      is not classified for builtin code generation.  */
@@ -3169,6 +4569,24 @@ loop_distribution::distribute_loop (class loop *loop,
     }
 
   nbp = partitions.length ();
+
+  /* If we have inserted TMP_ARRAYs but there is only one partition left in
+     the succeeding processes, remove those inserted TMP_ARRAYs back to the
+     original version.  */
+
+  if (nbp == 1 && insert_success)
+    {
+      struct partition *partition = NULL;
+      partitions.iterate (0, &partition);
+      remove_insertion (loop, rdg, producers, partition);
+      if (dump_enabled_p ())
+	{
+	  dump_user_location_t loc = find_loop_location (loop);
+	  dump_printf_loc (MSG_OPTIMIZED_LOCATIONS, loc, "Insertion removed:"
+			   " unable to distribute loop %d.\n", loop->num);
+	}
+    }
+
   if (nbp == 0
       || (nbp == 1 && !partition_builtin_p (partitions[0]))
       || (nbp > 1 && partition_contains_all_rw (rdg, partitions)))
