@@ -366,6 +366,7 @@ typedef std::map<memref_t *, memref_t *> memref_map;
 typedef std::map<memref_t *, tree> memref_tree_map;
 
 typedef std::set<gimple *> stmt_set;
+typedef std::set<tree> tree_set;
 typedef std::map<tree, tree> tree_map;
 
 tree_memref_map *tm_map;
@@ -1125,8 +1126,21 @@ analyse_loops ()
     }
 }
 
+/* Compare memrefs by IDs; helper for qsort.  */
+
+static int
+memref_id_cmp (const void *p1, const void *p2)
+{
+  const memref_t *mr1 = *(const memref_t **) p1;
+  const memref_t *mr2 = *(const memref_t **) p2;
+
+  if ((unsigned) mr1->mr_id > (unsigned) mr2->mr_id)
+    return 1;
+  return -1;
+}
+
 /* Reduce the set filtering out memrefs with the same memory references,
-   return the result vector of memrefs.  */
+   sort and return the result vector of memrefs.  */
 
 static void
 reduce_memref_set (memref_set *set, vec<memref_t *> &vec)
@@ -1163,6 +1177,7 @@ reduce_memref_set (memref_set *set, vec<memref_t *> &vec)
 	    vec.safe_push (mr1);
 	}
     }
+  vec.qsort (memref_id_cmp);
   if (dump_file)
     {
       fprintf (dump_file, "MRs (%d) after filtering: ", vec.length ());
@@ -1664,10 +1679,15 @@ optimize_function (cgraph_node *n, function *fn)
     }
 
   /* Create other new vars.  Insert new stmts.  */
+  vec<memref_t *> used_mr_vec = vNULL;
   for (memref_set::const_iterator it = used_mrs.begin ();
        it != used_mrs.end (); it++)
+    used_mr_vec.safe_push (*it);
+  used_mr_vec.qsort (memref_id_cmp);
+
+  for (unsigned int j = 0; j < used_mr_vec.length (); j++)
     {
-      memref_t *mr = *it;
+      memref_t *mr = used_mr_vec[j];
       if (mr == comp_mr)
 	continue;
       gimple *last_stmt = gimple_copy_and_remap_memref_stmts (mr, stmts, 0,
@@ -1703,6 +1723,7 @@ optimize_function (cgraph_node *n, function *fn)
       local = integer_three_node;
       break;
     }
+  tree_set prefetched_addrs;
   for (unsigned int j = 0; j < vmrs.length (); j++)
     {
       memref_t *mr = vmrs[j];
@@ -1715,10 +1736,13 @@ optimize_function (cgraph_node *n, function *fn)
       tree addr = get_mem_ref_address_ssa_name (mr->mem, NULL_TREE);
       if (decl_map->count (addr))
 	addr = (*decl_map)[addr];
+      if (prefetched_addrs.count (addr))
+	continue;
       last_stmt = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
 				     3, addr, write_p, local);
       pcalls.safe_push (last_stmt);
       gimple_seq_add_stmt (&stmts, last_stmt);
+      prefetched_addrs.insert (addr);
       if (dump_file)
 	{
 	  fprintf (dump_file, "Insert %d prefetch stmt:\n", j);
