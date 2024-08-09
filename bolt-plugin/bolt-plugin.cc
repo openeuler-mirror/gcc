@@ -1102,9 +1102,11 @@ register_callback_function ()
 {
   enum ld_plugin_status status;
 
-  if (linker_output_set && linker_output != LDPO_EXEC)
+  if (linker_output_set && linker_output != LDPO_EXEC
+      && linker_output != LDPO_DYN && linker_output != LDPO_PIE)
     {
-      MSG_INFO ("This linker[%d] is not for exec, just skip.", linker_output);
+      MSG_INFO ("This linker[%d] is not for exec/dyn/pie, just skip.",
+	linker_output);
       return;
     }
 
