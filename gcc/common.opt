@@ -3217,6 +3217,10 @@ ftree-loop-vectorize
 Common Var(flag_tree_loop_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable loop vectorization on trees.
 
+falias-analysis-expand-ssa
+Common Var(flag_alias_analysis_expand_ssa) Init(0)
+Enable expanded SSA name analysis during alias analysis.
+
 ftree-slp-vectorize
 Common Var(flag_tree_slp_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable basic block vectorization (SLP) on trees.
