@@ -69,6 +69,8 @@ public:
   bool varying_p () const;
   bool singleton_p (tree *result = NULL) const;
   bool contains_p (tree) const;
+  bool nonnegative_p () const;
+  bool nonpositive_p () const;
 
   // In-place operators.
   void union_ (const irange &);

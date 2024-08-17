@@ -1771,6 +1771,10 @@ floop-interchange
 Common Var(flag_loop_interchange) Optimization
 Enable loop interchange on trees.
 
+fchrec-mul-fold-strict-overflow
+Common Var(flag_chrec_mul_fold_strict_overflow) Init(0)
+Enable strict overflow handling during constant folding of multiply CHRECs.
+
 floop-block
 Common Alias(floop-nest-optimize)
 Enable loop nest transforms.  Same as -floop-nest-optimize.
