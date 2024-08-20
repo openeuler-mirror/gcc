@@ -508,6 +508,7 @@ srtype::create_global_ptr_for_pc ()
   tree new_var = build_decl (UNKNOWN_LOCATION, VAR_DECL, new_name, new_type);
   set_var_attributes (new_var);
   pc_gptr = new_var;
+  varpool_node::add (pc_gptr);
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "\nType: %s has create global header for pointer"
