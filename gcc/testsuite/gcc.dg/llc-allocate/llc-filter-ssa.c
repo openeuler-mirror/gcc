@@ -27,4 +27,4 @@ lbl:
   goto lbl;
 }
 
-/* { dg-final { scan-tree-dump       "Unhandled scenario for non-ssa pointer." "llc-allocate" } } */
+/* { dg-final { scan-tree-dump       "Unhandled scenario for non-ssa pointer." "llc_allocate" } } */
