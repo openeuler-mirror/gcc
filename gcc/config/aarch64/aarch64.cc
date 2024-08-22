@@ -16422,6 +16422,134 @@ aarch64_sve_adjust_stmt_cost (class vec_info *vinfo, vect_cost_for_stmt kind,
   return stmt_cost;
 }
 
+/* Check whether in C language or LTO with only C language.  */
+extern bool lang_c_p (void);
+
+static void
+override_C_optimize_options (struct gcc_options *opts)
+{
+  opts->x_flag_ipa_reorder_fields = 1;
+  opts->x_flag_ipa_struct_reorg = 6;
+  opts->x_struct_layout_optimize_level = 6;
+  opts->x_flag_gnu89_inline = 1;
+  opts->x_flag_ccmp2 = 1;
+  opts->x_flag_array_widen_compare = 1;
+  opts->x_flag_convert_minmax = 1;
+  opts->x_flag_tree_slp_transpose_vectorize = 1;
+  opts->x_param_max_inline_insns_auto = 64;
+  opts->x_param_inline_unit_growth = 96;
+}
+
+/* Check whether in CPP language or LTO with only CPP language.  */
+static bool
+lang_cpp_p (void)
+{
+  const char *language_string = lang_hooks.name;
+  if (!language_string)
+    {
+      return false;
+    }
+  if (lang_GNU_CXX ())
+    {
+      return true;
+    }
+  else if (strcmp (language_string, "GNU GIMPLE") == 0) // for LTO check
+    {
+      unsigned i = 0;
+      tree t = NULL_TREE;
+      FOR_EACH_VEC_SAFE_ELT (all_translation_units, i, t)
+	{
+	  language_string = TRANSLATION_UNIT_LANGUAGE (t);
+	  if (language_string == NULL
+	      || strncmp (lang_hooks.name, "GNU C++", 7))
+	    {
+	      return false;
+	    }
+	}
+      return true;
+    }
+  return false;
+}
+
+static void
+override_CPP_optimize_options (struct gcc_options *opts)
+{
+  opts->x_flag_finite_loops = 1;
+  opts->x_flag_omit_frame_pointer = 1;
+  opts->x_flag_sized_deallocation = 0;
+  opts->x_flag_loop_elim = 1;
+  opts->x_flag_convert_minmax = 1;
+  opts->x_param_early_inlining_insns = 256;
+  opts->x_param_max_inline_insns_auto = 128;
+  opts->x_param_inline_unit_growth = 256;
+  opts->x_flag_cmlt_arith = 1;
+}
+
+static void
+override_optimize_options_1 (struct gcc_options *opts)
+{
+  opts->x_flag_split_ldp_stp = 1;
+  opts->x_flag_if_conversion_gimple = 1;
+  opts->x_flag_ifcvt_allow_complicated_cmps = 1;
+  opts->x_param_ifcvt_allow_register_renaming = 2;
+  opts->x_param_max_rtl_if_conversion_unpredictable_cost = 48;
+  opts->x_param_max_rtl_if_conversion_predictable_cost = 48;
+}
+
+static void
+override_Fortran_optimize_options (struct gcc_options *opts)
+{
+  opts->x_flag_unroll_loops = 1;
+  opts->x_flag_unconstrained_commons = 1;
+  opts->x_param_ipa_cp_eval_threshold = 1;
+  opts->x_param_ipa_cp_unit_growth = 80;
+  opts->x_param_ipa_cp_max_recursive_depth = 8;
+  opts->x_param_large_unit_insns = 30000;
+  opts->x_flag_ira_loop_pressure = 1;
+  opts->x_flag_inline_functions_called_once = 0;
+  opts->x_flag_ira_algorithm = IRA_ALGORITHM_PRIORITY;
+  opts->x_flag_delayed_branch = 1;
+  opts->x_flag_gcse_las = 1;
+  opts->x_flag_gcse_sm = 1;
+  opts->x_flag_ipa_pta = 1;
+  opts->x_flag_reorder_blocks_and_partition = 1;
+  opts->x_flag_reorder_blocks = 1;
+  opts->x_flag_crypto_accel_aes = 1;
+  opts->x_param_flexible_seg_len = 1;
+}
+
+/* Reset the optimize option.
+   After checking the model result, this function can
+   reset the more appropriate options.  */
+static void
+reset_machine_option (struct gcc_options *opts)
+{
+  if (!(opts->x_optimize_maximum)
+      || strstr (opts->x_aarch64_tune_string, "hip09") == NULL)
+    {
+      return;
+    }
+
+  const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
+  if (ai_infer_level)
+    {
+      override_optimize_options_1 (opts);
+      if (lang_c_p ())
+	{
+	  override_C_optimize_options (opts);
+	}
+      else if (lang_cpp_p ())
+	{
+	  override_CPP_optimize_options (opts);
+	}
+      else if (lang_GNU_Fortran ())
+	{
+	  override_Fortran_optimize_options (opts);
+	}
+    }
+}
+
+
 /* STMT_COST is the cost calculated for STMT_INFO, which has cost kind KIND
    and which when vectorized would operate on vector type VECTYPE.  Add the
    cost of any embedded operations.  */
@@ -17842,7 +17970,7 @@ aarch64_override_options_internal (struct gcc_options *opts)
     opts->x_aarch64_cpu_string = selected_cpu->name;
   if (opts->x_aarch64_tune_string == NULL)
     opts->x_aarch64_tune_string = selected_tune->name;
-
+  reset_machine_option (opts);
   aarch64_override_options_after_change_1 (opts);
 }
 

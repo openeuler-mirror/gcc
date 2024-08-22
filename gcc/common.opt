@@ -185,6 +185,9 @@ const char *main_input_basename
 Variable
 int main_input_baselength
 
+Variable
+bool optimize_maximum
+
 ; The base name used for auxiliary output files.
 ; dump_base_name minus dump_base_ext.
 
@@ -468,6 +471,10 @@ Optimize for space rather than speed.
 Ofast
 Common Optimization
 Optimize for speed disregarding exact standards compliance.
+
+Om
+Common Optimization
+Optimize for maximizing radical optimization.
 
 Og
 Common Optimization

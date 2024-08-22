@@ -1449,6 +1449,7 @@ OBJS = \
 	inchash.o \
 	incpath.o \
 	init-regs.o \
+	ipa-hardware-detection.o \
 	internal-fn.o \
 	ipa-struct-reorg/ipa-struct-reorg.o \
 	ipa-cp.o \

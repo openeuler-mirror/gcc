@@ -179,6 +179,7 @@ along with GCC; see the file COPYING3.  If not see
      passes are executed after partitioning and thus see just parts of the
      compiled unit.  */
   INSERT_PASSES_AFTER (all_late_ipa_passes)
+  NEXT_PASS (pass_ipa_hardware_detection);
   NEXT_PASS (pass_ipa_pta);
   /* FIXME: this should be a normal IP pass.  */
   NEXT_PASS (pass_ipa_struct_reorg);
