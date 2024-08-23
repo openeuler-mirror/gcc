@@ -130,6 +130,7 @@ AARCH64_CORE("a64fx", a64fx, a64fx, V8_2A,  (F16, SVE), a64fx, 0x46, 0x001, -1)
 
 /* HiSilicon ('H') cores. */
 AARCH64_CORE("tsv110",  tsv110, tsv110, V8_2A,  (CRYPTO, F16), tsv110,   0x48, 0xd01, -1)
+AARCH64_CORE("hip09", hip09, hip09, V8_5A,  (SVE, I8MM, F32MM, F64MM, PROFILE, PREDRES), hip09, 0x48, 0xd02, 0x0)
 
 /* ARMv8.3-A Architecture Processors.  */
 
@@ -171,6 +172,7 @@ AARCH64_CORE("cortex-a710",  cortexa710, cortexa57, V9A,  (SVE2_BITPERM, MEMTAG,
 AARCH64_CORE("cortex-x2",  cortexx2, cortexa57, V9A,  (SVE2_BITPERM, MEMTAG, I8MM, BF16), neoversen2, 0x41, 0xd48, -1)
 
 AARCH64_CORE("neoverse-n2", neoversen2, cortexa57, V9A, (I8MM, BF16, SVE2_BITPERM, RNG, MEMTAG, PROFILE), neoversen2, 0x41, 0xd49, -1)
+AARCH64_CORE("hip11", hip11, hip11, V8_5A,  (SVE, SVE2, F16), hip11, 0x48, 0xd22, -1)
 
 AARCH64_CORE("demeter", demeter, cortexa57, V9A, (I8MM, BF16, SVE2_BITPERM, RNG, MEMTAG, PROFILE), neoversev2, 0x41, 0xd4f, -1)
 AARCH64_CORE("neoverse-v2", neoversev2, cortexa57, V9A, (I8MM, BF16, SVE2_BITPERM, RNG, MEMTAG, PROFILE), neoversev2, 0x41, 0xd4f, -1)
