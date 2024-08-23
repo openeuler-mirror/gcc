@@ -55,6 +55,7 @@
 #define v2si_UP  E_V2SImode
 #define v2sf_UP  E_V2SFmode
 #define v1df_UP  E_V1DFmode
+#define v1di_UP  E_V1DImode
 #define di_UP    E_DImode
 #define df_UP    E_DFmode
 #define v16qi_UP E_V16QImode
@@ -1342,20 +1343,20 @@ aarch64_scalar_builtin_type_p (aarch64_simd_type t)
 /* Enable AARCH64_FL_* flags EXTRA_FLAGS on top of the base Advanced SIMD
    set.  */
 aarch64_simd_switcher::aarch64_simd_switcher (unsigned int extra_flags)
-  : m_old_isa_flags (aarch64_isa_flags),
+  : m_old_asm_isa_flags (aarch64_asm_isa_flags),
     m_old_general_regs_only (TARGET_GENERAL_REGS_ONLY)
 {
   /* Changing the ISA flags should be enough here.  We shouldn't need to
      pay the compile-time cost of a full target switch.  */
-  aarch64_isa_flags = AARCH64_FL_FP | AARCH64_FL_SIMD | extra_flags;
   global_options.x_target_flags &= ~MASK_GENERAL_REGS_ONLY;
+  aarch64_set_asm_isa_flags (AARCH64_FL_FP | AARCH64_FL_SIMD | extra_flags);
 }
 
 aarch64_simd_switcher::~aarch64_simd_switcher ()
 {
   if (m_old_general_regs_only)
     global_options.x_target_flags |= MASK_GENERAL_REGS_ONLY;
-  aarch64_isa_flags = m_old_isa_flags;
+  aarch64_set_asm_isa_flags (m_old_asm_isa_flags);
 }
 
 /* Implement #pragma GCC aarch64 "arm_neon.h".  */
@@ -2681,38 +2682,6 @@ aarch64_builtin_vectorized_function (unsigned int fn, tree type_out,
 	   : NULL_TREE)))
   switch (fn)
     {
-#undef AARCH64_CHECK_BUILTIN_MODE
-#define AARCH64_CHECK_BUILTIN_MODE(C, N) \
-  (out_mode == V##C##N##Fmode && in_mode == V##C##N##Fmode)
-    CASE_CFN_FLOOR:
-      return AARCH64_FIND_FRINT_VARIANT (floor);
-    CASE_CFN_CEIL:
-      return AARCH64_FIND_FRINT_VARIANT (ceil);
-    CASE_CFN_TRUNC:
-      return AARCH64_FIND_FRINT_VARIANT (btrunc);
-    CASE_CFN_ROUND:
-      return AARCH64_FIND_FRINT_VARIANT (round);
-    CASE_CFN_NEARBYINT:
-      return AARCH64_FIND_FRINT_VARIANT (nearbyint);
-    CASE_CFN_SQRT:
-      return AARCH64_FIND_FRINT_VARIANT (sqrt);
-#undef AARCH64_CHECK_BUILTIN_MODE
-#define AARCH64_CHECK_BUILTIN_MODE(C, N) \
-  (out_mode == V##C##SImode && in_mode == V##C##N##Imode)
-    CASE_CFN_CLZ:
-      {
-	if (AARCH64_CHECK_BUILTIN_MODE (4, S))
-	  return aarch64_builtin_decls[AARCH64_SIMD_BUILTIN_UNOP_clzv4si];
-	return NULL_TREE;
-      }
-    CASE_CFN_CTZ:
-      {
-	if (AARCH64_CHECK_BUILTIN_MODE (2, S))
-	  return aarch64_builtin_decls[AARCH64_SIMD_BUILTIN_UNOP_ctzv2si];
-	else if (AARCH64_CHECK_BUILTIN_MODE (4, S))
-	  return aarch64_builtin_decls[AARCH64_SIMD_BUILTIN_UNOP_ctzv4si];
-	return NULL_TREE;
-      }
 #undef AARCH64_CHECK_BUILTIN_MODE
 #define AARCH64_CHECK_BUILTIN_MODE(C, N) \
   (out_mode == V##C##N##Imode && in_mode == V##C##N##Fmode)

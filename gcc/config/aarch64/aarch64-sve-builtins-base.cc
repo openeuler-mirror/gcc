@@ -516,9 +516,7 @@ public:
   gimple *
   fold (gimple_folder &f) const OVERRIDE
   {
-    tree count = build_int_cstu (TREE_TYPE (f.lhs),
-				 GET_MODE_NUNITS (m_ref_mode));
-    return gimple_build_assign (f.lhs, count);
+    return f.fold_to_cstu (GET_MODE_NUNITS (m_ref_mode));
   }
 
   rtx
@@ -553,10 +551,7 @@ public:
     unsigned int elements_per_vq = 128 / GET_MODE_UNIT_BITSIZE (m_ref_mode);
     HOST_WIDE_INT value = aarch64_fold_sve_cnt_pat (pattern, elements_per_vq);
     if (value >= 0)
-      {
-	tree count = build_int_cstu (TREE_TYPE (f.lhs), value);
-	return gimple_build_assign (f.lhs, count);
-      }
+      return f.fold_to_cstu (value);
 
     return NULL;
   }
@@ -1277,7 +1272,7 @@ public:
   rtx
   expand (function_expander &e) const OVERRIDE
   {
-    machine_mode tuple_mode = TYPE_MODE (TREE_TYPE (e.call_expr));
+    machine_mode tuple_mode = e.result_mode ();
     insn_code icode = convert_optab_handler (vec_mask_load_lanes_optab,
 					     tuple_mode, e.vector_mode (0));
     return e.use_contiguous_load_insn (icode);
@@ -1933,6 +1928,9 @@ public:
   gimple *
   fold (gimple_folder &f) const OVERRIDE
   {
+    if (f.vectors_per_tuple () > 1)
+      return NULL;
+
     /* Punt to rtl if the effect of the reinterpret on registers does not
        conform to GCC's endianness model.  */
     if (!targetm.can_change_mode_class (f.vector_mode (0),
@@ -1949,7 +1947,7 @@ public:
   rtx
   expand (function_expander &e) const OVERRIDE
   {
-    machine_mode mode = e.vector_mode (0);
+    machine_mode mode = e.tuple_mode (0);
     return e.use_exact_insn (code_for_aarch64_sve_reinterpret (mode));
   }
 };

@@ -20,6 +20,13 @@ along with GCC; see the file COPYING3.  If not see
 #ifndef GCC_ATTRIBS_H
 #define GCC_ATTRIBS_H
 
+/* A set of attributes that belong to the same namespace, given by NS.  */
+struct scoped_attribute_specs
+{
+  const char *ns;
+  array_slice<const attribute_spec> attributes;
+};
+
 extern const struct attribute_spec *lookup_attribute_spec (const_tree);
 extern void free_attr_data ();
 extern void init_attributes (void);
@@ -42,9 +49,8 @@ extern tree make_attribute (const char *, const char *, tree);
 extern bool attribute_ignored_p (tree);
 extern bool attribute_ignored_p (const attribute_spec *const);
 
-extern struct scoped_attributes* register_scoped_attributes (const struct attribute_spec *,
-							     const char *,
-							     bool = false);
+extern struct scoped_attributes *
+  register_scoped_attributes (const scoped_attribute_specs &, bool = false);
 
 extern char *sorted_attr_string (tree);
 extern bool common_function_versions (tree, tree);
@@ -82,6 +88,10 @@ extern tree merge_type_attributes (tree, tree);
 
 extern tree remove_attribute (const char *, tree);
 
+/* Similarly but also with specific attribute namespace.  */
+
+extern tree remove_attribute (const char *, const char *, tree);
+
 /* Given two attributes lists, return a list of their union.  */
 
 extern tree merge_attributes (tree, tree);
@@ -112,6 +122,10 @@ extern int attribute_list_contained (const_tree, const_tree);
    The function is called from lookup_attribute in order to optimize
    for size.  */
 extern tree private_lookup_attribute (const char *attr_name, size_t attr_len,
+				      tree list);
+extern tree private_lookup_attribute (const char *attr_ns,
+				      const char *attr_name,
+				      size_t attr_ns_len, size_t attr_len,
 				      tree list);
 
 extern unsigned decls_mismatched_attributes (tree, tree, tree,
@@ -206,6 +220,36 @@ lookup_attribute (const char *attr_name, tree list)
 	 In most cases attr_name is a string constant, and the compiler
 	 will optimize the strlen() away.  */
       return private_lookup_attribute (attr_name, attr_len, list);
+    }
+}
+
+/* Similar to lookup_attribute, but also match the attribute namespace.  */
+
+static inline tree
+lookup_attribute (const char *attr_ns, const char *attr_name, tree list)
+{
+  if (CHECKING_P && attr_name[0] != '_')
+    {
+      size_t attr_len = strlen (attr_name);
+      gcc_checking_assert (!canonicalize_attr_name (attr_name, attr_len));
+    }
+  if (CHECKING_P && attr_ns && attr_ns[0] != '_')
+    {
+      size_t attr_ns_len = strlen (attr_ns);
+      gcc_checking_assert (!canonicalize_attr_name (attr_ns, attr_ns_len));
+    }
+  /* In most cases, list is NULL_TREE.  */
+  if (list == NULL_TREE)
+    return NULL_TREE;
+  else
+    {
+      size_t attr_ns_len = attr_ns ? strlen (attr_ns) : 0;
+      size_t attr_len = strlen (attr_name);
+      /* Do the strlen() before calling the out-of-line implementation.
+	 In most cases attr_name is a string constant, and the compiler
+	 will optimize the strlen() away.  */
+      return private_lookup_attribute (attr_ns, attr_name,
+				       attr_ns_len, attr_len, list);
     }
 }
 

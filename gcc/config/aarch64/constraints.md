@@ -21,6 +21,9 @@
 (define_register_constraint "k" "STACK_REG"
   "@internal The stack register.")
 
+(define_register_constraint "Ucj" "W12_W15_REGS"
+  "@internal r12-r15, which can be used to index ZA.")
+
 (define_register_constraint "Ucs" "TAILCALL_ADDR_REGS"
   "@internal Registers suitable for an indirect tail call")
 
@@ -74,6 +77,12 @@
    a single ADDVL or ADDPL."
  (match_operand 0 "aarch64_sve_addvl_addpl_immediate"))
 
+(define_constraint "UaV"
+  "@internal
+   A constraint that matches a VG-based constant that can be added by
+   a single ADDSVL or ADDSPL."
+ (match_operand 0 "aarch64_addsvl_addspl_immediate"))
+
 (define_constraint "Uat"
   "@internal
    A constraint that matches a VG-based constant that can be added by
@@ -106,6 +115,11 @@
 
 (define_constraint "N"
  "A constant that can be used with a 64-bit MOV immediate operation."
+ (and (match_code "const_int")
+      (match_test "aarch64_is_mov_xn_imm (ival)")))
+
+(define_constraint "O"
+ "A constant that can be used with a 32 or 64-bit MOV immediate operation."
  (and (match_code "const_int")
       (match_test "aarch64_move_imm (ival, DImode)")))
 
@@ -208,6 +222,18 @@
  from the MSB."
  (and (match_code "const_int")
       (match_test "aarch64_high_bits_all_ones_p (ival)")))
+
+(define_constraint "Usr"
+  "@internal
+   A constraint that matches a value produced by RDVL."
+ (and (match_code "const_poly_int")
+      (match_test "aarch64_sve_rdvl_immediate_p (op)")))
+
+(define_constraint "UsR"
+  "@internal
+   A constraint that matches a value produced by RDSVL."
+ (and (match_code "const")
+      (match_test "aarch64_rdsvl_immediate_p (op)")))
 
 (define_constraint "Usv"
   "@internal

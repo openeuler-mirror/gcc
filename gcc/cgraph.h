@@ -1660,7 +1660,7 @@ public:
   /* ECF flags determined from the caller.  */
   int ecf_flags;
   /* Vector of potential call targets determined by analysis.  */
-  vec<cgraph_node *, va_gc_atomic> *targets;
+  vec<cgraph_node *, va_gc> *targets;
 
   /* Number of speculative call targets, it's less than GCOV_TOPN_VALUES.  */
   unsigned num_speculative_call_targets : 16;

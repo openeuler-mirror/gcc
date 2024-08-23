@@ -59,15 +59,18 @@ static void
 apply_predication (const function_instance &instance, tree return_type,
 		   vec<tree> &argument_types)
 {
-  if (instance.pred != PRED_none)
+  /* There are currently no SME ZA instructions that have both merging and
+     unpredicated forms, so for simplicity, the predicates are always included
+     in the original format string.  */
+  if (instance.pred != PRED_none && instance.pred != PRED_za_m)
     {
       argument_types.quick_insert (0, get_svbool_t ());
       /* For unary merge operations, the first argument is a vector with
 	 the same type as the result.  For unary_convert_narrowt it also
 	 provides the "bottom" half of active elements, and is present
 	 for all types of predication.  */
-      if ((argument_types.length () == 2 && instance.pred == PRED_m)
-	  || instance.shape == shapes::unary_convert_narrowt)
+      auto nargs = argument_types.length () - 1;
+      if (instance.shape->has_merge_argument_p (instance, nargs))
 	argument_types.quick_insert (0, return_type);
     }
 }
@@ -275,18 +278,20 @@ parse_signature (const function_instance &instance, const char *format,
 }
 
 /* Add one function instance for GROUP, using mode suffix MODE_SUFFIX_ID,
-   the type suffixes at index TI and the predication suffix at index PI.
-   The other arguments are as for build_all.  */
+   the type suffixes at index TI, the group suffixes at index GI, and the
+   predication suffix at index PI.  The other arguments are as for
+   build_all.  */
 static void
 build_one (function_builder &b, const char *signature,
 	   const function_group_info &group, mode_suffix_index mode_suffix_id,
-	   unsigned int ti, unsigned int pi, bool force_direct_overloads)
+	   unsigned int ti, unsigned int gi, unsigned int pi,
+	   bool force_direct_overloads)
 {
   /* Byte forms of svdupq take 16 arguments.  */
   auto_vec<tree, 16> argument_types;
   function_instance instance (group.base_name, *group.base, *group.shape,
 			      mode_suffix_id, group.types[ti],
-			      group.preds[pi]);
+			      group.groups[gi], group.preds[pi]);
   tree return_type = parse_signature (instance, signature, argument_types);
   apply_predication (instance, return_type, argument_types);
   b.add_unique_function (instance, return_type, argument_types,
@@ -312,24 +317,26 @@ build_32_64 (function_builder &b, const char *signature,
 	     mode_suffix_index mode64, bool force_direct_overloads = false)
 {
   for (unsigned int pi = 0; group.preds[pi] != NUM_PREDS; ++pi)
-    if (group.types[0][0] == NUM_TYPE_SUFFIXES)
-      {
-	gcc_assert (mode32 != MODE_none && mode64 != MODE_none);
-	build_one (b, signature, group, mode32, 0, pi,
-		   force_direct_overloads);
-	build_one (b, signature, group, mode64, 0, pi,
-		   force_direct_overloads);
-      }
-    else
-      for (unsigned int ti = 0; group.types[ti][0] != NUM_TYPE_SUFFIXES; ++ti)
+    for (unsigned int gi = 0; group.groups[gi] != NUM_GROUP_SUFFIXES; ++gi)
+      if (group.types[0][0] == NUM_TYPE_SUFFIXES)
 	{
-	  unsigned int bits = type_suffixes[group.types[ti][0]].element_bits;
-	  gcc_assert (bits == 32 || bits == 64);
-	  mode_suffix_index mode = bits == 32 ? mode32 : mode64;
-	  if (mode != MODE_none)
-	    build_one (b, signature, group, mode, ti, pi,
-		       force_direct_overloads);
+	  gcc_assert (mode32 != MODE_none && mode64 != MODE_none);
+	  build_one (b, signature, group, mode32, 0, gi, pi,
+		     force_direct_overloads);
+	  build_one (b, signature, group, mode64, 0, gi, pi,
+		     force_direct_overloads);
 	}
+      else
+	for (unsigned int ti = 0; group.types[ti][0] != NUM_TYPE_SUFFIXES;
+	     ++ti)
+	  {
+	    unsigned int bits = type_suffixes[group.types[ti][0]].element_bits;
+	    gcc_assert (bits == 32 || bits == 64);
+	    mode_suffix_index mode = bits == 32 ? mode32 : mode64;
+	    if (mode != MODE_none)
+	      build_one (b, signature, group, mode, ti, gi, pi,
+			 force_direct_overloads);
+	  }
 }
 
 /* For every type and predicate combination in GROUP, add one function
@@ -423,10 +430,11 @@ build_all (function_builder &b, const char *signature,
 	   bool force_direct_overloads = false)
 {
   for (unsigned int pi = 0; group.preds[pi] != NUM_PREDS; ++pi)
-    for (unsigned int ti = 0;
-	 ti == 0 || group.types[ti][0] != NUM_TYPE_SUFFIXES; ++ti)
-      build_one (b, signature, group, mode_suffix_id, ti, pi,
-		 force_direct_overloads);
+    for (unsigned int gi = 0; group.groups[gi] != NUM_GROUP_SUFFIXES; ++gi)
+      for (unsigned int ti = 0;
+	   ti == 0 || group.types[ti][0] != NUM_TYPE_SUFFIXES; ++ti)
+	build_one (b, signature, group, mode_suffix_id, ti, gi, pi,
+		   force_direct_overloads);
 }
 
 /* TYPE is the largest type suffix associated with the arguments of R,
@@ -581,6 +589,33 @@ struct binary_imm_long_base : public overloaded_base<0>
       return res;
 
     return r.report_no_such_form (type);
+  }
+};
+
+/* Base class for binary_za_m and similar shapes.  */
+template<type_class_index TCLASS = function_resolver::SAME_TYPE_CLASS,
+	 unsigned int BITS = function_resolver::SAME_SIZE>
+struct binary_za_m_base : public overloaded_base<1>
+{
+  tree
+  resolve (function_resolver &r) const override
+  {
+    type_suffix_index type;
+    if (!r.check_num_arguments (5)
+	|| !r.require_integer_immediate (0)
+	|| !r.require_vector_type (1, VECTOR_TYPE_svbool_t)
+	|| !r.require_vector_type (2, VECTOR_TYPE_svbool_t)
+	|| (type = r.infer_vector_type (3)) == NUM_TYPE_SUFFIXES
+	|| !r.require_derived_vector_type (4, 3, type, TCLASS, BITS))
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, r.type_suffix_ids[0], type);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    return c.require_immediate_range (0, 0, c.num_za_tiles () - 1);
   }
 };
 
@@ -941,7 +976,7 @@ struct ternary_bfloat_lane_base
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return c.require_immediate_lane_index (3, N);
+    return c.require_immediate_lane_index (3, 2, N);
   }
 };
 
@@ -956,7 +991,7 @@ struct ternary_qq_lane_base
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return c.require_immediate_lane_index (3, 4);
+    return c.require_immediate_lane_index (3, 0);
   }
 };
 
@@ -1123,7 +1158,7 @@ struct binary_lane_def : public overloaded_base<0>
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return c.require_immediate_lane_index (2);
+    return c.require_immediate_lane_index (2, 1);
   }
 };
 SHAPE (binary_lane)
@@ -1148,7 +1183,7 @@ struct binary_long_lane_def : public overloaded_base<0>
     type_suffix_index type, result_type;
     if (!r.check_gp_argument (3, i, nargs)
 	|| (type = r.infer_vector_type (i)) == NUM_TYPE_SUFFIXES
-	|| !r.require_matching_vector_type (i + 1, type)
+	|| !r.require_matching_vector_type (i + 1, i, type)
 	|| !r.require_integer_immediate (i + 2)
 	|| (result_type = long_type_suffix (r, type)) == NUM_TYPE_SUFFIXES)
       return error_mark_node;
@@ -1162,7 +1197,7 @@ struct binary_long_lane_def : public overloaded_base<0>
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return c.require_immediate_lane_index (2);
+    return c.require_immediate_lane_index (2, 1);
   }
 };
 SHAPE (binary_long_lane)
@@ -1571,6 +1606,68 @@ struct binary_wide_opt_n_def : public overloaded_base<0>
 };
 SHAPE (binary_wide_opt_n)
 
+/* void svfoo_t0[_t1]_g(uint64_t, svbool_t, svbool_t, sv<t1>x<g>_t,
+			sv<t1:int>x<g>_t)
+
+   where the first argument is a ZA tile.  */
+struct binary_za_int_m_def : public binary_za_m_base<TYPE_signed>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "_,su64,vp,vp,t1,ts1", group, MODE_none);
+  }
+};
+SHAPE (binary_za_int_m)
+
+/* void svfoo_t0[_t1]_g(uint64_t, svbool_t, svbool_t, sv<t1>x<g>_t,
+			sv<t1>x<g>_t)
+
+   where the first argument is a ZA tile.  */
+struct binary_za_m_def : public binary_za_m_base<>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    /* Allow the overloaded form to be specified seperately, with just
+       a single suffix.  This is necessary for the 64-bit SME MOP intrinsics,
+       which have some forms dependent on FEAT_SME_I16I64 and some forms
+       dependent on FEAT_SME_F64F64.  The resolver needs to be defined
+       for base SME.  */
+    if (group.types[0][1] != NUM_TYPE_SUFFIXES)
+      build_all (b, "_,su64,vp,vp,t1,t1", group, MODE_none);
+  }
+};
+SHAPE (binary_za_m)
+
+/* void svfoo_t0[_t1]_g(uint64_t, svbool_t, svbool_t, sv<t1>x<g>_t,
+			sv<t1:uint>x<g>_t)
+
+   where the first argument is a ZA tile.  */
+struct binary_za_uint_m_def : public binary_za_m_base<TYPE_unsigned>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "_,su64,vp,vp,t1,tu1", group, MODE_none);
+  }
+};
+SHAPE (binary_za_uint_m)
+
+/* bool svfoo().  */
+struct bool_inherent_def : public nonoverloaded_base
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    build_all (b, "sp", group, MODE_none);
+  }
+};
+SHAPE (bool_inherent)
+
 /* sv<t0>_t svfoo[_t0](sv<t0>_t, sv<t0>_t)
    <t0>_t svfoo[_n_t0](<t0>_t, sv<t0>_t).  */
 struct clast_def : public overloaded_base<0>
@@ -1603,7 +1700,7 @@ struct clast_def : public overloaded_base<0>
       {
 	type_suffix_index type;
 	if ((type = r.infer_vector_type (i)) == NUM_TYPE_SUFFIXES
-	    || !r.require_matching_vector_type (i + 1, type))
+	    || !r.require_matching_vector_type (i + 1, i, type))
 	  return error_mark_node;
 	return r.resolve_to (MODE_none, type);
       }
@@ -1899,9 +1996,9 @@ struct get_def : public overloaded_base<0>
   resolve (function_resolver &r) const OVERRIDE
   {
     unsigned int i, nargs;
-    type_suffix_index type;
+    sve_type type;
     if (!r.check_gp_argument (2, i, nargs)
-	|| (type = r.infer_tuple_type (i)) == NUM_TYPE_SUFFIXES
+	|| !(type = r.infer_tuple_type (i))
 	|| !r.require_integer_immediate (i + 1))
       return error_mark_node;
 
@@ -2049,6 +2146,51 @@ struct inherent_b_def : public overloaded_base<0>
   }
 };
 SHAPE (inherent_b)
+
+/* void svfoo_t0().  */
+struct inherent_za_def : public nonoverloaded_base
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    build_all (b, "_", group, MODE_none);
+  }
+};
+SHAPE (inherent_za)
+
+/* void svfoo_t0(uint64_t)
+
+   where the argument is an integer constant that specifies an 8-bit mask.  */
+struct inherent_mask_za_def : public nonoverloaded_base
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    build_all (b, "_,su64", group, MODE_none);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    return c.require_immediate_range (0, 0, 255);
+  }
+};
+SHAPE (inherent_mask_za)
+
+/* void svfoo_t0(uint32_t, const void *)
+   void svfoo_vnum_t0(uint32_t, const void *, int64_t)
+
+   where the first argument is a variable ZA slice.  */
+struct ldr_za_def : public nonoverloaded_base
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    build_all (b, "_,su32,al", group, MODE_none);
+    build_all (b, "_,su32,al,ss64", group, MODE_vnum);
+  }
+};
+SHAPE (ldr_za)
 
 /* sv<t0>[xN]_t svfoo[_t0](const <t0>_t *)
    sv<t0>[xN]_t svfoo_vnum[_t0](const <t0>_t *, int64_t).  */
@@ -2260,6 +2402,27 @@ struct load_replicate_def : public load_contiguous_base
 };
 SHAPE (load_replicate)
 
+/* void svfoo_t0(uint64_t, uint32_t, svbool_t, const void *)
+   void svfoo_vnum_t0(uint64_t, uint32_t, svbool_t, const void *, int64_t)
+
+   where the first two fields form a (ZA tile, slice) pair.  */
+struct load_za_def : public nonoverloaded_base
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    build_all (b, "_,su64,su32,vp,al", group, MODE_none);
+    build_all (b, "_,su64,su32,vp,al,ss64", group, MODE_vnum);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    return c.require_immediate_range (0, 0, c.num_za_tiles () - 1);
+  }
+};
+SHAPE (load_za)
+
 /* svbool_t svfoo(enum svpattern).  */
 struct pattern_pred_def : public nonoverloaded_base
 {
@@ -2354,6 +2517,48 @@ struct rdffr_def : public nonoverloaded_base
 };
 SHAPE (rdffr)
 
+/* sv<t1>_t svfoo_t0[_t1](uint64_t, uint32_t)
+
+   where the first two fields form a (ZA tile, slice) pair.  */
+struct read_za_m_def : public overloaded_base<1>
+{
+  bool
+  has_merge_argument_p (const function_instance &, unsigned int) const override
+  {
+    return true;
+  }
+
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "t1,su64,su32", group, MODE_none);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    gcc_assert (r.pred == PRED_m);
+    type_suffix_index type;
+    if (!r.check_num_arguments (4)
+	|| (type = r.infer_vector_type (0)) == NUM_TYPE_SUFFIXES
+	|| !r.require_vector_type (1, VECTOR_TYPE_svbool_t)
+	|| !r.require_integer_immediate (2)
+	|| !r.require_scalar_type (3, "uint32_t"))
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, r.type_suffix_ids[0], type);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    gcc_assert (c.pred == PRED_m);
+    return c.require_immediate_range (1, 0, c.num_za_tiles () - 1);
+  }
+};
+SHAPE (read_za_m)
+
 /* <t0>_t svfoo[_t0](sv<t0>_t).  */
 struct reduction_def : public overloaded_base<0>
 {
@@ -2395,6 +2600,34 @@ struct reduction_wide_def : public overloaded_base<0>
 };
 SHAPE (reduction_wide)
 
+/* sv<t0>x<g>_t svfoo_t0[_t1_g](sv<t1>x<g>_t)
+
+   where the target type <t0> must be specified explicitly but the source
+   type <t1> can be inferred.  */
+struct reinterpret_def : public overloaded_base<1>
+{
+  bool explicit_group_suffix_p () const override { return false; }
+
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "t0,t1", group, MODE_none);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    sve_type type;
+    if (!r.check_num_arguments (1)
+	|| !(type = r.infer_sve_type (0)))
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, type);
+  }
+};
+SHAPE (reinterpret)
+
 /* sv<t0>xN_t svfoo[_t0](sv<t0>xN_t, uint64_t, sv<t0>_t)
 
    where the second argument is an integer constant expression in the
@@ -2412,9 +2645,9 @@ struct set_def : public overloaded_base<0>
   resolve (function_resolver &r) const OVERRIDE
   {
     unsigned int i, nargs;
-    type_suffix_index type;
+    sve_type type;
     if (!r.check_gp_argument (3, i, nargs)
-	|| (type = r.infer_tuple_type (i)) == NUM_TYPE_SUFFIXES
+	|| !(type = r.infer_tuple_type (i))
 	|| !r.require_integer_immediate (i + 1)
 	|| !r.require_derived_vector_type (i + 2, i, type))
       return error_mark_node;
@@ -2587,11 +2820,11 @@ struct store_def : public overloaded_base<0>
     gcc_assert (r.mode_suffix_id == MODE_none || vnum_p);
 
     unsigned int i, nargs;
-    type_suffix_index type;
+    sve_type type;
     if (!r.check_gp_argument (vnum_p ? 3 : 2, i, nargs)
 	|| !r.require_pointer_type (i)
 	|| (vnum_p && !r.require_scalar_type (i + 1, "int64_t"))
-	|| ((type = r.infer_tuple_type (nargs - 1)) == NUM_TYPE_SUFFIXES))
+	|| !(type = r.infer_tuple_type (nargs - 1)))
       return error_mark_node;
 
     return r.resolve_to (r.mode_suffix_id, type);
@@ -2694,6 +2927,42 @@ struct store_scatter_offset_restricted_def : public store_scatter_base
 };
 SHAPE (store_scatter_offset_restricted)
 
+/* void svfoo_t0(uint64_t, uint32_t, svbool_t, void *)
+   void svfoo_vnum_t0(uint64_t, uint32_t, svbool_t, void *, int64_t)
+
+   where the first two fields form a (ZA tile, slice) pair.  */
+struct store_za_def : public nonoverloaded_base
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    build_all (b, "_,su64,su32,vp,as", group, MODE_none);
+    build_all (b, "_,su64,su32,vp,as,ss64", group, MODE_vnum);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    return c.require_immediate_range (0, 0, c.num_za_tiles () - 1);
+  }
+};
+SHAPE (store_za)
+
+/* void svfoo_t0(uint32_t, void *)
+   void svfoo_vnum_t0(uint32_t, void *, int64_t)
+
+   where the first argument is a variable ZA slice.  */
+struct str_za_def : public nonoverloaded_base
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    build_all (b, "_,su32,as", group, MODE_none);
+    build_all (b, "_,su32,as,ss64", group, MODE_vnum);
+  }
+};
+SHAPE (str_za)
+
 /* sv<t0>_t svfoo[_t0](sv<t0>xN_t, sv<t0:uint>_t).  */
 struct tbl_tuple_def : public overloaded_base<0>
 {
@@ -2708,9 +2977,9 @@ struct tbl_tuple_def : public overloaded_base<0>
   resolve (function_resolver &r) const OVERRIDE
   {
     unsigned int i, nargs;
-    type_suffix_index type;
+    sve_type type;
     if (!r.check_gp_argument (2, i, nargs)
-	|| (type = r.infer_tuple_type (i)) == NUM_TYPE_SUFFIXES
+	|| !(type = r.infer_tuple_type (i))
 	|| !r.require_derived_vector_type (i + 1, i, type, TYPE_unsigned))
       return error_mark_node;
 
@@ -2817,7 +3086,7 @@ struct ternary_lane_def : public overloaded_base<0>
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return c.require_immediate_lane_index (3);
+    return c.require_immediate_lane_index (3, 2);
   }
 };
 SHAPE (ternary_lane)
@@ -2845,7 +3114,7 @@ struct ternary_lane_rotate_def : public overloaded_base<0>
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return (c.require_immediate_lane_index (3, 2)
+    return (c.require_immediate_lane_index (3, 2, 2)
 	    && c.require_immediate_one_of (4, 0, 90, 180, 270));
   }
 };
@@ -2868,7 +3137,7 @@ struct ternary_long_lane_def
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return c.require_immediate_lane_index (3);
+    return c.require_immediate_lane_index (3, 2);
   }
 };
 SHAPE (ternary_long_lane)
@@ -2965,7 +3234,7 @@ struct ternary_qq_lane_rotate_def : public overloaded_base<0>
   bool
   check (function_checker &c) const OVERRIDE
   {
-    return (c.require_immediate_lane_index (3, 4)
+    return (c.require_immediate_lane_index (3, 0)
 	    && c.require_immediate_one_of (4, 0, 90, 180, 270));
   }
 };
@@ -3103,7 +3372,7 @@ struct ternary_uint_def : public overloaded_base<0>
     type_suffix_index type;
     if (!r.check_gp_argument (3, i, nargs)
 	|| (type = r.infer_vector_type (i)) == NUM_TYPE_SUFFIXES
-	|| !r.require_matching_vector_type (i + 1, type)
+	|| !r.require_matching_vector_type (i + 1, i, type)
 	|| !r.require_derived_vector_type (i + 2, i, type, TYPE_unsigned))
       return error_mark_node;
 
@@ -3238,6 +3507,12 @@ SHAPE (unary_convert)
    predicate.  */
 struct unary_convert_narrowt_def : public overloaded_base<1>
 {
+  bool
+  has_merge_argument_p (const function_instance &, unsigned int) const override
+  {
+    return true;
+  }
+
   void
   build (function_builder &b, const function_group_info &group) const OVERRIDE
   {
@@ -3447,5 +3722,73 @@ struct unary_widen_def : public overloaded_base<0>
   }
 };
 SHAPE (unary_widen)
+
+/* void svfoo_t0[_t1](uint64_t, svbool_t, svbool_t, sv<t1>_t)
+
+   where the first argument is a ZA tile.  */
+struct unary_za_m_def : public overloaded_base<1>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "_,su64,vp,vp,t1", group, MODE_none);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    type_suffix_index type;
+    if (!r.check_num_arguments (4)
+	|| !r.require_integer_immediate (0)
+	|| !r.require_vector_type (1, VECTOR_TYPE_svbool_t)
+	|| !r.require_vector_type (2, VECTOR_TYPE_svbool_t)
+	|| (type = r.infer_vector_type (3)) == NUM_TYPE_SUFFIXES)
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, r.type_suffix_ids[0], type);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    return c.require_immediate_range (0, 0, c.num_za_tiles () - 1);
+  }
+};
+SHAPE (unary_za_m)
+
+/* void svfoo_t0[_t1](uint64_t, uint32_t, svbool_t, sv<t1>_t)
+
+   where the first two fields form a (ZA tile, slice) pair.  */
+struct write_za_m_def : public overloaded_base<1>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "_,su64,su32,vp,t1", group, MODE_none);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    type_suffix_index type;
+    if (!r.check_num_arguments (4)
+	|| !r.require_integer_immediate (0)
+	|| !r.require_scalar_type (1, "uint32_t")
+	|| !r.require_vector_type (2, VECTOR_TYPE_svbool_t)
+	|| (type = r.infer_vector_type (3)) == NUM_TYPE_SUFFIXES)
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, r.type_suffix_ids[0], type);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    return c.require_immediate_range (0, 0, c.num_za_tiles () - 1);
+  }
+};
+SHAPE (write_za_m)
 
 }

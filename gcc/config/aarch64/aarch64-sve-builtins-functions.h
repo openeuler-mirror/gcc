@@ -50,6 +50,27 @@ public:
   }
 };
 
+/* Wrap T, which is derived from function_base, and indicate that it
+   additionally has the call properties in PROPERTIES.  */
+template<typename T, unsigned int PROPERTIES>
+class add_call_properties : public T
+{
+public:
+  using T::T;
+
+  unsigned int
+  call_properties (const function_instance &fi) const override
+  {
+    return T::call_properties (fi) | PROPERTIES;
+  }
+};
+
+template<typename T>
+using read_write_za = add_call_properties<T, CP_READ_ZA | CP_WRITE_ZA>;
+
+template<typename T>
+using write_za = add_call_properties<T, CP_WRITE_ZA>;
+
 /* A function_base that sometimes or always operates on tuples of
    vectors.  */
 class multi_vector_function : public function_base
@@ -59,8 +80,13 @@ public:
     : m_vectors_per_tuple (vectors_per_tuple) {}
 
   unsigned int
-  vectors_per_tuple () const OVERRIDE
+  vectors_per_tuple (const function_instance &fi) const override
   {
+    if (fi.group_suffix_id != GROUP_none)
+      {
+	gcc_checking_assert (m_vectors_per_tuple == 1);
+	return fi.group_suffix ().vectors_per_tuple;
+      }
     return m_vectors_per_tuple;
   }
 
@@ -245,18 +271,21 @@ class unspec_based_function_base : public function_base
 public:
   CONSTEXPR unspec_based_function_base (int unspec_for_sint,
 					int unspec_for_uint,
-					int unspec_for_fp)
+					int unspec_for_fp,
+					unsigned int suffix_index = 0)
     : m_unspec_for_sint (unspec_for_sint),
       m_unspec_for_uint (unspec_for_uint),
-      m_unspec_for_fp (unspec_for_fp)
+      m_unspec_for_fp (unspec_for_fp),
+      m_suffix_index (suffix_index)
   {}
 
   /* Return the unspec code to use for INSTANCE, based on type suffix 0.  */
   int
   unspec_for (const function_instance &instance) const
   {
-    return (!instance.type_suffix (0).integer_p ? m_unspec_for_fp
-	    : instance.type_suffix (0).unsigned_p ? m_unspec_for_uint
+    auto &suffix = instance.type_suffix (m_suffix_index);
+    return (!suffix.integer_p ? m_unspec_for_fp
+	    : suffix.unsigned_p ? m_unspec_for_uint
 	    : m_unspec_for_sint);
   }
 
@@ -265,6 +294,9 @@ public:
   int m_unspec_for_sint;
   int m_unspec_for_uint;
   int m_unspec_for_fp;
+
+  /* Which type suffix is used to choose between the unspecs.  */
+  unsigned int m_suffix_index;
 };
 
 /* A function_base for functions that have an associated unspec code.
@@ -331,7 +363,8 @@ public:
   rtx
   expand (function_expander &e) const OVERRIDE
   {
-    return e.use_exact_insn (CODE (unspec_for (e), e.vector_mode (0)));
+    return e.use_exact_insn (CODE (unspec_for (e),
+				   e.vector_mode (m_suffix_index)));
   }
 };
 
@@ -371,6 +404,49 @@ typedef unspec_based_function_exact_insn<code_for_aarch64_sve_sub>
 typedef unspec_based_function_exact_insn<code_for_aarch64_sve_sub_lane>
   unspec_based_sub_lane_function;
 
+/* General SME unspec-based functions, parameterized on the vector mode.  */
+class sme_1mode_function : public read_write_za<unspec_based_function_base>
+{
+public:
+  using parent = read_write_za<unspec_based_function_base>;
+
+  CONSTEXPR sme_1mode_function (int unspec_for_sint, int unspec_for_uint,
+				int unspec_for_fp)
+    : parent (unspec_for_sint, unspec_for_uint, unspec_for_fp, 1)
+  {}
+
+  rtx
+  expand (function_expander &e) const override
+  {
+    auto icode = code_for_aarch64_sme (unspec_for (e), e.tuple_mode (1));
+    return e.use_exact_insn (icode);
+  }
+};
+
+/* General SME unspec-based functions, parameterized on both the ZA mode
+   and the vector mode.  */
+template<insn_code (*CODE) (int, machine_mode, machine_mode)>
+class sme_2mode_function_t : public read_write_za<unspec_based_function_base>
+{
+public:
+  using parent = read_write_za<unspec_based_function_base>;
+
+  CONSTEXPR sme_2mode_function_t (int unspec_for_sint, int unspec_for_uint,
+				  int unspec_for_fp)
+    : parent (unspec_for_sint, unspec_for_uint, unspec_for_fp, 1)
+  {}
+
+  rtx
+  expand (function_expander &e) const override
+  {
+    insn_code icode = CODE (unspec_for (e), e.vector_mode (0),
+			    e.tuple_mode (1));
+    return e.use_exact_insn (icode);
+  }
+};
+
+using sme_2mode_function = sme_2mode_function_t<code_for_aarch64_sme>;
+
 /* A function that acts like unspec_based_function_exact_insn<INT_CODE>
    when operating on integers, but that expands to an (fma ...)-style
    aarch64_sve* operation when applied to floats.  */
@@ -390,16 +466,16 @@ public:
   {
     int unspec = unspec_for (e);
     insn_code icode;
-    if (e.type_suffix (0).float_p)
+    if (e.type_suffix (m_suffix_index).float_p)
       {
 	/* Put the operands in the normal (fma ...) order, with the accumulator
 	   last.  This fits naturally since that's also the unprinted operand
 	   in the asm output.  */
 	e.rotate_inputs_left (0, e.pred != PRED_none ? 4 : 3);
-	icode = code_for_aarch64_sve (unspec, e.vector_mode (0));
+	icode = code_for_aarch64_sve (unspec, e.vector_mode (m_suffix_index));
       }
     else
-      icode = INT_CODE (unspec, e.vector_mode (0));
+      icode = INT_CODE (unspec, e.vector_mode (m_suffix_index));
     return e.use_exact_insn (icode);
   }
 };
@@ -425,16 +501,16 @@ public:
   {
     int unspec = unspec_for (e);
     insn_code icode;
-    if (e.type_suffix (0).float_p)
+    if (e.type_suffix (m_suffix_index).float_p)
       {
 	/* Put the operands in the normal (fma ...) order, with the accumulator
 	   last.  This fits naturally since that's also the unprinted operand
 	   in the asm output.  */
 	e.rotate_inputs_left (0, e.pred != PRED_none ? 5 : 4);
-	icode = code_for_aarch64_lane (unspec, e.vector_mode (0));
+	icode = code_for_aarch64_lane (unspec, e.vector_mode (m_suffix_index));
       }
     else
-      icode = INT_CODE (unspec, e.vector_mode (0));
+      icode = INT_CODE (unspec, e.vector_mode (m_suffix_index));
     return e.use_exact_insn (icode);
   }
 };

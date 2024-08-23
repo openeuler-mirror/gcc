@@ -1515,7 +1515,7 @@ static tree c_parser_simple_asm_expr (c_parser *);
 static tree c_parser_gnu_attributes (c_parser *);
 static struct c_expr c_parser_initializer (c_parser *, tree);
 static struct c_expr c_parser_braced_init (c_parser *, tree, bool,
-					   struct obstack *);
+					   struct obstack *, tree);
 static void c_parser_initelt (c_parser *, struct obstack *);
 static void c_parser_initval (c_parser *, struct c_expr *,
 			      struct obstack *);
@@ -4894,10 +4894,18 @@ c_parser_balanced_token_sequence (c_parser *parser)
      ( balanced-token-sequence[opt] )
 
    Keywords are accepted as identifiers for this purpose.
-*/
+
+   As an extension, we permit an attribute-specifier to be:
+
+     [ [ __extension__ attribute-list ] ]
+
+   Two colons are then accepted as a synonym for ::.  No attempt is made
+   to check whether the colons are immediately adjacent.  LOOSE_SCOPE_P
+   indicates whether this relaxation is in effect.  */
 
 static tree
-c_parser_std_attribute (c_parser *parser, bool for_tm)
+c_parser_std_attribute (c_parser *parser, bool for_tm,
+			bool loose_scope_p = false)
 {
   c_token *token = c_parser_peek_token (parser);
   tree ns, name, attribute;
@@ -4910,9 +4918,14 @@ c_parser_std_attribute (c_parser *parser, bool for_tm)
     }
   name = canonicalize_attr_name (token->value);
   c_parser_consume_token (parser);
-  if (c_parser_next_token_is (parser, CPP_SCOPE))
+  if (c_parser_next_token_is (parser, CPP_SCOPE)
+      || (loose_scope_p
+	  && c_parser_next_token_is (parser, CPP_COLON)
+	  && c_parser_peek_2nd_token (parser)->type == CPP_COLON))
     {
       ns = name;
+      if (c_parser_next_token_is (parser, CPP_COLON))
+	c_parser_consume_token (parser);
       c_parser_consume_token (parser);
       token = c_parser_peek_token (parser);
       if (token->type != CPP_NAME && token->type != CPP_KEYWORD)
@@ -4981,19 +4994,9 @@ c_parser_std_attribute (c_parser *parser, bool for_tm)
 }
 
 static tree
-c_parser_std_attribute_specifier (c_parser *parser, bool for_tm)
+c_parser_std_attribute_list (c_parser *parser, bool for_tm,
+			     bool loose_scope_p = false)
 {
-  location_t loc = c_parser_peek_token (parser)->location;
-  if (!c_parser_require (parser, CPP_OPEN_SQUARE, "expected %<[%>"))
-    return NULL_TREE;
-  if (!c_parser_require (parser, CPP_OPEN_SQUARE, "expected %<[%>"))
-    {
-      c_parser_skip_until_found (parser, CPP_CLOSE_SQUARE, "expected %<]%>");
-      return NULL_TREE;
-    }
-  if (!for_tm)
-    pedwarn_c11 (loc, OPT_Wpedantic,
-		 "ISO C does not support %<[[]]%> attributes before C2X");
   tree attributes = NULL_TREE;
   while (true)
     {
@@ -5005,7 +5008,7 @@ c_parser_std_attribute_specifier (c_parser *parser, bool for_tm)
 	  c_parser_consume_token (parser);
 	  continue;
 	}
-      tree attribute = c_parser_std_attribute (parser, for_tm);
+      tree attribute = c_parser_std_attribute (parser, for_tm, loose_scope_p);
       if (attribute != error_mark_node)
 	{
 	  TREE_CHAIN (attribute) = attributes;
@@ -5013,6 +5016,35 @@ c_parser_std_attribute_specifier (c_parser *parser, bool for_tm)
 	}
       if (c_parser_next_token_is_not (parser, CPP_COMMA))
 	break;
+    }
+  return attributes;
+}
+
+static tree
+c_parser_std_attribute_specifier (c_parser *parser, bool for_tm)
+{
+  location_t loc = c_parser_peek_token (parser)->location;
+  if (!c_parser_require (parser, CPP_OPEN_SQUARE, "expected %<[%>"))
+    return NULL_TREE;
+  if (!c_parser_require (parser, CPP_OPEN_SQUARE, "expected %<[%>"))
+    {
+      c_parser_skip_until_found (parser, CPP_CLOSE_SQUARE, "expected %<]%>");
+      return NULL_TREE;
+    }
+  tree attributes;
+  if (c_parser_next_token_is_keyword (parser, RID_EXTENSION))
+    {
+      auto ext = disable_extension_diagnostics ();
+      c_parser_consume_token (parser);
+      attributes = c_parser_std_attribute_list (parser, for_tm, true);
+      restore_extension_diagnostics (ext);
+    }
+  else
+    {
+      if (!for_tm)
+	pedwarn_c11 (loc, OPT_Wpedantic,
+		     "ISO C does not support %<[[]]%> attributes before C2X");
+      attributes = c_parser_std_attribute_list (parser, for_tm);
     }
   c_parser_skip_until_found (parser, CPP_CLOSE_SQUARE, "expected %<]%>");
   c_parser_skip_until_found (parser, CPP_CLOSE_SQUARE, "expected %<]%>");
@@ -5215,11 +5247,15 @@ static struct c_expr
 c_parser_initializer (c_parser *parser, tree decl)
 {
   if (c_parser_next_token_is (parser, CPP_OPEN_BRACE))
-    return c_parser_braced_init (parser, NULL_TREE, false, NULL);
+    return c_parser_braced_init (parser, NULL_TREE, false, NULL, decl);
   else
     {
       struct c_expr ret;
       location_t loc = c_parser_peek_token (parser)->location;
+      if (decl != error_mark_node && C_DECL_VARIABLE_SIZE (decl))
+	error_at (loc,
+		  "variable-sized object may not be initialized except "
+		  "with an empty initializer");
       ret = c_parser_expr_no_commas (parser, NULL);
       /* This is handled mostly by gimplify.cc, but we have to deal with
 	 not warning about int x = x; as it is a GCC extension to turn off
@@ -5246,11 +5282,12 @@ location_t last_init_list_comma;
    compound literal, and NULL_TREE for other initializers and for
    nested braced lists.  NESTED_P is true for nested braced lists,
    false for the list of a compound literal or the list that is the
-   top-level initializer in a declaration.  */
+   top-level initializer in a declaration.  DECL is the declaration for
+   the top-level initializer for a declaration, otherwise NULL_TREE.  */
 
 static struct c_expr
 c_parser_braced_init (c_parser *parser, tree type, bool nested_p,
-		      struct obstack *outer_obstack)
+		      struct obstack *outer_obstack, tree decl)
 {
   struct c_expr ret;
   struct obstack braced_init_obstack;
@@ -5268,10 +5305,15 @@ c_parser_braced_init (c_parser *parser, tree type, bool nested_p,
     really_start_incremental_init (type);
   if (c_parser_next_token_is (parser, CPP_CLOSE_BRACE))
     {
-      pedwarn (brace_loc, OPT_Wpedantic, "ISO C forbids empty initializer braces");
+      pedwarn_c11 (brace_loc, OPT_Wpedantic,
+		   "ISO C forbids empty initializer braces before C2X");
     }
   else
     {
+      if (decl && decl != error_mark_node && C_DECL_VARIABLE_SIZE (decl))
+	error_at (brace_loc,
+		  "variable-sized object may not be initialized except "
+		  "with an empty initializer");
       /* Parse a non-empty initializer list, possibly with a trailing
 	 comma.  */
       while (true)
@@ -5527,7 +5569,7 @@ c_parser_initval (c_parser *parser, struct c_expr *after,
 
   if (c_parser_next_token_is (parser, CPP_OPEN_BRACE) && !after)
     init = c_parser_braced_init (parser, NULL_TREE, true,
-				 braced_init_obstack);
+				 braced_init_obstack, NULL_TREE);
   else
     {
       init = c_parser_expr_no_commas (parser, after);
@@ -10280,7 +10322,7 @@ c_parser_postfix_expression_after_paren_type (c_parser *parser,
       error_at (type_loc, "compound literal has variable size");
       type = error_mark_node;
     }
-  init = c_parser_braced_init (parser, type, false, NULL);
+  init = c_parser_braced_init (parser, type, false, NULL, NULL_TREE);
   finish_init ();
   maybe_warn_string_init (type_loc, type, init);
 

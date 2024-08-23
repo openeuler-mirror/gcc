@@ -11,10 +11,27 @@
 #error "Please define -DTEST_OVERLOADS or -DTEST_FULL"
 #endif
 
-#ifdef __cplusplus
-#define PROTO(NAME, RET, ARGS) extern "C" RET NAME ARGS; RET NAME ARGS
+#ifdef STREAMING_COMPATIBLE
+#define SM_ATTR __arm_streaming_compatible
+#elif defined(STREAMING)
+#define SM_ATTR __arm_streaming
 #else
-#define PROTO(NAME, RET, ARGS) RET NAME ARGS
+#define SM_ATTR
+#endif
+
+#ifdef SHARED_ZA
+#define ZA_ATTR __arm_inout("za")
+#else
+#define ZA_ATTR
+#endif
+
+#define ATTR SM_ATTR ZA_ATTR
+
+#ifdef __cplusplus
+#define PROTO(NAME, RET, ARGS) \
+  extern "C" RET NAME ARGS ATTR; RET NAME ARGS ATTR
+#else
+#define PROTO(NAME, RET, ARGS) RET NAME ARGS ATTR
 #endif
 
 #define TEST_UNIFORM_Z(NAME, TYPE, CODE1, CODE2)		\
@@ -419,6 +436,20 @@
     register ZTYPE z0_res __asm ("z0");				\
     INVOKE (CODE1, CODE2);					\
     return z0_res;						\
+  }
+
+#define TEST_DUAL_XN(NAME, TTYPE1, TTYPE2, RES, CODE1, CODE2)	\
+  PROTO (NAME, void, ())					\
+  {								\
+    register TTYPE1 z0 __asm ("z0");				\
+    register TTYPE2 z4 __asm ("z4");				\
+    register TTYPE1 z18 __asm ("z18");				\
+    register TTYPE2 z23 __asm ("z23");				\
+    register TTYPE1 z28 __asm ("z28");				\
+    __asm volatile ("" : "=w" (z0), "=w" (z4), "=w" (z18),	\
+		    "=w" (z23), "=w" (z28));			\
+    INVOKE (RES = CODE1, RES = CODE2);				\
+    __asm volatile ("" :: "w" (RES));				\
   }
 
 #endif

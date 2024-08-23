@@ -252,7 +252,7 @@ public:
 	       that we can use for sensible shift amounts.  */
 	    function_instance instance ("svqshl", functions::svqshl,
 					shapes::binary_int_opt_n, MODE_n,
-					f.type_suffix_ids, f.pred);
+					f.type_suffix_ids, GROUP_none, f.pred);
 	    return f.redirect_call (instance);
 	  }
 	else
@@ -261,7 +261,7 @@ public:
 	       that we can use for sensible shift amounts.  */
 	    function_instance instance ("svrshl", functions::svrshl,
 					shapes::binary_int_opt_n, MODE_n,
-					f.type_suffix_ids, f.pred);
+					f.type_suffix_ids, GROUP_none, f.pred);
 	    return f.redirect_call (instance);
 	  }
       }
@@ -290,7 +290,7 @@ public:
 				       -wi::to_wide (amount));
 	    function_instance instance ("svasr", functions::svasr,
 					shapes::binary_uint_opt_n, MODE_n,
-					f.type_suffix_ids, f.pred);
+					f.type_suffix_ids, GROUP_none, f.pred);
 	    if (f.type_suffix (0).unsigned_p)
 	      {
 		instance.base_name = "svlsr";
@@ -322,7 +322,7 @@ public:
 	       that we can use for sensible shift amounts.  */
 	    function_instance instance ("svlsl", functions::svlsl,
 					shapes::binary_uint_opt_n, MODE_n,
-					f.type_suffix_ids, f.pred);
+					f.type_suffix_ids, GROUP_none, f.pred);
 	    gcall *call = as_a <gcall *> (f.redirect_call (instance));
 	    gimple_call_set_arg (call, 2, amount);
 	    return call;
@@ -335,7 +335,7 @@ public:
 				       -wi::to_wide (amount));
 	    function_instance instance ("svrshr", functions::svrshr,
 					shapes::shift_right_imm, MODE_n,
-					f.type_suffix_ids, f.pred);
+					f.type_suffix_ids, GROUP_none, f.pred);
 	    gcall *call = as_a <gcall *> (f.redirect_call (instance));
 	    gimple_call_set_arg (call, 2, amount);
 	    return call;

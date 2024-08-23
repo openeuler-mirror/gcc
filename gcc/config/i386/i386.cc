@@ -14522,7 +14522,7 @@ ix86_i387_mode_needed (int entity, rtx_insn *insn)
    prior to the execution of insn.  */
 
 static int
-ix86_mode_needed (int entity, rtx_insn *insn)
+ix86_mode_needed (int entity, rtx_insn *insn, HARD_REG_SET)
 {
   switch (entity)
     {
@@ -14583,7 +14583,7 @@ ix86_avx_u128_mode_after (int mode, rtx_insn *insn)
 /* Return the mode that an insn results in.  */
 
 static int
-ix86_mode_after (int entity, int mode, rtx_insn *insn)
+ix86_mode_after (int entity, int mode, rtx_insn *insn, HARD_REG_SET)
 {
   switch (entity)
     {
@@ -22252,8 +22252,9 @@ ix86_c_mode_for_suffix (char suffix)
 static rtx_insn *
 ix86_md_asm_adjust (vec<rtx> &outputs, vec<rtx> & /*inputs*/,
 		    vec<machine_mode> & /*input_modes*/,
-		    vec<const char *> &constraints, vec<rtx> &clobbers,
-		    HARD_REG_SET &clobbered_regs, location_t loc)
+		    vec<const char *> &constraints, vec<rtx> &/*uses*/,
+		    vec<rtx> &clobbers, HARD_REG_SET &clobbered_regs,
+		    location_t loc)
 {
   bool saw_asm_flag = false;
 
@@ -24291,6 +24292,11 @@ ix86_run_selftests (void)
 } // namespace selftest
 
 #endif /* CHECKING_P */
+
+static const scoped_attribute_specs *const ix86_attribute_table[] =
+{
+  &ix86_gnu_attribute_table
+};
 
 /* Initialize the GCC target structure.  */
 #undef TARGET_RETURN_IN_MEMORY
