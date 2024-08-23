@@ -1649,6 +1649,7 @@ OBJS = \
 	tree-ssa-ifcombine.o \
 	tree-ssa-live.o \
 	tree-ssa-loop-ch.o \
+	tree-ssa-loop-crc.o \
 	tree-ssa-loop-im.o \
 	tree-ssa-loop-ivcanon.o \
 	tree-ssa-loop-ivopts.o \
