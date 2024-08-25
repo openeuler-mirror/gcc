@@ -277,6 +277,10 @@ correct column numbers in warnings or errors, even if tabs appear on the
 line.  If the value is less than 1 or greater than 100, the option is
 ignored.  The default is 8.
 
+@item -fmacro-use-commandline
+@opindex fmacro-use-commandline
+Preferentially use options from the command line.
+
 @item -ftrack-macro-expansion@r{[}=@var{level}@r{]}
 @opindex ftrack-macro-expansion
 Track locations of tokens across macro expansions. This allows the

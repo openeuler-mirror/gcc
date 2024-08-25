@@ -215,6 +215,7 @@ cpp_create_reader (enum c_lang lang, cpp_hash_table *table,
      cpp_options::track_macro_expansion to learn about the other
      values.  */
   CPP_OPTION (pfile, track_macro_expansion) = 2;
+  CPP_OPTION (pfile, macro_use_commandline) = 0;
   CPP_OPTION (pfile, warn_normalize) = normalized_C;
   CPP_OPTION (pfile, warn_literal_suffix) = 1;
   CPP_OPTION (pfile, canonical_system_headers)
