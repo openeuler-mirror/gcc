@@ -471,6 +471,9 @@ struct cpp_options
      consumes the highest amount of memory.  */
   unsigned char track_macro_expansion;
 
+  /* Use the options on the command line first.  */
+  unsigned char macro_use_commandline;
+
   /* Nonzero means handle C++ alternate operator names.  */
   unsigned char operator_names;
 

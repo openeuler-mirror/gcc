@@ -3852,7 +3852,21 @@ _cpp_create_definition (cpp_reader *pfile, cpp_hashnode *node)
 				 node->value.macro->line, 0,
 			 "this is the location of the previous definition");
 	}
-      _cpp_free_definition (node);
+#define LOCATION_FROM_LINEMAP 0
+#define MIN_LINE_OF_MACRO_BEEN_OVERRIDDEN 96
+#define MAX_LINE_OF_MACRO_BEEN_OVERRIDDEN 128
+     if (CPP_OPTION (pfile, macro_use_commandline)
+	    && node->value.macro->line >= MIN_LINE_OF_MACRO_BEEN_OVERRIDDEN
+	    && node->value.macro->line <= MAX_LINE_OF_MACRO_BEEN_OVERRIDDEN
+	    && pfile->forced_token_location == LOCATION_FROM_LINEMAP)
+	{
+	  cpp_pedwarning_with_line (pfile, CPP_W_NONE,
+	    node->value.macro->line, 0,
+	    "use the previous definition from commandline");
+	    return false;
+	}
+	else
+	   _cpp_free_definition (node);
     }
 
   /* Enter definition in hash table.  */

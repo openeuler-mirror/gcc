@@ -527,6 +527,10 @@ c_common_handle_option (size_t scode, const char *arg, HOST_WIDE_INT value,
 	cpp_opts->track_macro_expansion = 2;
       break;
 
+    case OPT_fmacro_use_commandline:
+      cpp_opts->macro_use_commandline = 1;
+      break;
+
     case OPT_fexec_charset_:
       cpp_opts->narrow_charset = arg;
       break;
