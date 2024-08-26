@@ -368,6 +368,7 @@ typedef std::map<memref_t *, tree> memref_tree_map;
 typedef std::set<gimple *> stmt_set;
 typedef std::set<tree> tree_set;
 typedef std::map<tree, tree> tree_map;
+typedef std::map<tree, poly_offset_int> tree_poly_offset_map;
 
 tree_memref_map *tm_map;
 funct_mrs_map *fmrs_map;
@@ -711,6 +712,20 @@ get_mem_ref_address_ssa_name (tree mem, tree base)
 }
 
 static void
+dump_base_addr (tree base_addr)
+{
+  if (base_addr)
+    {
+      fprintf (dump_file, "Base addr (%s): ",
+	      get_tree_code_name (TREE_CODE (base_addr)));
+      print_generic_expr (dump_file, base_addr);
+    }
+  else
+    fprintf (dump_file, "Base addr (%s): ", "null");
+  fprintf (dump_file, "\n");
+}
+
+static void
 analyse_mem_ref (gimple *stmt, tree mem, memref_t* mr)
 {
   tree base = get_base_address (mem);
@@ -736,14 +751,7 @@ analyse_mem_ref (gimple *stmt, tree mem, memref_t* mr)
       {
 	tree base_addr = get_mem_ref_address_ssa_name (mem, base);
 	if (dump_file)
-	  {
-	    fprintf (dump_file, "Base addr (%s): ",
-		     base_addr ? get_tree_code_name (TREE_CODE (base_addr))
-			       : "null");
-	    if (base_addr)
-	      print_generic_expr (dump_file, base_addr);
-	    fprintf (dump_file, "\n");
-	  }
+	  dump_base_addr (base_addr);
 	if (base_addr)
 	  {
 	    mr->base = analyse_addr_eval (base_addr, mr);
@@ -1187,7 +1195,7 @@ reduce_memref_set (memref_set *set, vec<memref_t *> &vec)
 }
 
 static void
-find_nearest_common_dominator (memref_t *mr, basic_block &dom)
+find_nearest_common_post_dominator (memref_t *mr, basic_block &dom)
 {
   for (unsigned int i = 0; i < mr->stmts.length (); i++)
     {
@@ -1196,7 +1204,7 @@ find_nearest_common_dominator (memref_t *mr, basic_block &dom)
       if (dom == bb)
 	continue;
       if (dom)
-	dom = nearest_common_dominator (CDI_DOMINATORS, dom, bb);
+	dom = nearest_common_dominator (CDI_POST_DOMINATORS, dom, bb);
       else
 	dom = bb;
     }
@@ -1495,10 +1503,13 @@ gimple_copy_and_remap (gimple *stmt)
 
 static gimple *
 gimple_copy_and_remap_memref_stmts (memref_t *mr, gimple_seq &stmts,
-				    int last_idx, stmt_set &processed)
+				    int first_idx, int last_idx,
+				    stmt_set &processed)
 {
   gimple *last_stmt = NULL;
-  for (int i = mr->stmts.length () - 1; i >= last_idx ; i--)
+  if (first_idx == 0)
+    first_idx = mr->stmts.length () - 1;
+  for (int i = first_idx; i >= last_idx; i--)
     {
       if (processed.count (mr->stmts[i]))
 	continue;
@@ -1515,6 +1526,436 @@ gimple_copy_and_remap_memref_stmts (memref_t *mr, gimple_seq &stmts,
   return last_stmt;
 }
 
+/* Check if prefetch insertion may be always unsafe in this case.  For now
+   reject cases with access to arrays with no domain or with no elements.  */
+
+static bool
+check_prefetch_safety (vec<memref_t *> &mrs, memref_t *cmr)
+{
+  for (unsigned int i = 0; i < mrs.length (); i++)
+    {
+      memref_t *mr = mrs[i];
+      if (mr == cmr || mr->used_mrs.empty ())
+	continue;
+      bool is_store;
+      tree *mem = simple_mem_ref_in_stmt (mr->stmts[0], &is_store);
+      if (mem == NULL || TREE_CODE (*mem) != ARRAY_REF)
+	continue;
+      tree array = TREE_OPERAND (*mem, 0);
+      tree atype = TREE_TYPE (array);
+      gcc_assert (atype);
+      tree domain = TYPE_DOMAIN (atype);
+      if (!domain || !tree_fits_uhwi_p (TYPE_MIN_VALUE (domain))
+	  || !tree_fits_uhwi_p (TYPE_MAX_VALUE (domain)))
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, "Unsupported array type: ");
+	      print_generic_expr (dump_file, atype);
+	      fprintf (dump_file, "\n");
+	    }
+	  return false;
+	}
+      unsigned HOST_WIDE_INT min_val = tree_to_uhwi (TYPE_MIN_VALUE (domain));
+      unsigned HOST_WIDE_INT max_val = tree_to_uhwi (TYPE_MAX_VALUE (domain));
+      if (min_val == 0 && max_val == 0)
+	{
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, "Unsupported array type's bounds: ");
+	      print_generic_expr (dump_file, atype);
+	      fprintf (dump_file, "\n");
+	    }
+	  return false;
+	}
+    }
+  return true;
+}
+
+/* Collect base addresses which we need to check.  */
+
+static void
+collect_base_addresses (vec<memref_t *> &used_mr_vec, HOST_WIDE_INT dist_val,
+			memref_t *comp_mr, tree_poly_offset_map &offset_map)
+{
+  if (dump_file)
+    fprintf (dump_file, "Collect base addresses which we need to check.\n");
+  for (unsigned int i = 0; i < used_mr_vec.length (); i++)
+    {
+      memref_t *mr = used_mr_vec[i];
+      if (mr == comp_mr || mr->used_mrs.empty ())
+	continue;
+      bool is_store;
+      tree *mem = simple_mem_ref_in_stmt (mr->stmts[0], &is_store);
+      if (mem == NULL || TREE_CODE (*mem) != MEM_REF)
+	continue;
+      tree base = get_base_address (*mem);
+      tree base_addr = get_mem_ref_address_ssa_name (*mem, base);
+      if (!base_addr)
+	continue;
+      if (dump_file)
+	{
+	  dump_base_addr (base_addr);
+	  if (base)
+	    {
+	      fprintf (dump_file, "Base:");
+	      print_generic_expr (dump_file, base);
+	      fprintf (dump_file, "\n");
+	    }
+	}
+      if (!TREE_OPERAND (base, 1))
+	continue;
+      poly_offset_int curr_offset = mem_ref_offset (base);
+      poly_offset_int saved_offset = 0;
+      if (offset_map.count (base_addr))
+	{
+	  saved_offset = offset_map[base_addr];
+	  if ((dist_val > 0 && known_gt (curr_offset, saved_offset))
+	      || (dist_val < 0 && known_lt (curr_offset, saved_offset)))
+	    offset_map[base_addr] = curr_offset;
+	  else if (dump_file)
+	    fprintf (dump_file, "Off: step=%ld gt=%d lt=%d\n", dist_val,
+		     known_gt (curr_offset, saved_offset),
+		     known_lt (curr_offset, saved_offset));
+	}
+      else
+	offset_map[base_addr] = curr_offset;
+    }
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Final list of base addresses:\n");
+      for (tree_poly_offset_map::iterator it1 = offset_map.begin ();
+	   it1 != offset_map.end (); ++it1)
+	{
+	  tree base_addr = it1->first;
+	  poly_offset_int off = it1->second;
+	  fprintf (dump_file, "Base:");
+	  print_generic_expr (dump_file, base_addr);
+	  HOST_WIDE_INT val = estimated_poly_value (off.force_shwi (),
+						    POLY_VALUE_LIKELY);
+	  fprintf (dump_file, "\nOff: %ld\n", val);
+	}
+      fprintf (dump_file, "Finish collecting base addresses.\n");
+    }
+}
+
+/* Return true if we need page check to access memory at this address.  */
+
+static bool
+need_page_check (tree base_addr, tree_set &checked_base_addrs)
+{
+  if (dump_file)
+    dump_base_addr (base_addr);
+  if (base_addr == NULL)
+    {
+      if (dump_file)
+	fprintf (dump_file, "Base address not found\n");
+      return false;
+    }
+  if (checked_base_addrs.count (base_addr))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Base address is already checked\n");
+      return false;
+    }
+  return true;
+}
+
+/* Insert instructions to check the original address and newly evaluated
+   adress for prefetch correspond the same page.  */
+
+static gimple *
+insert_page_check (tree addr, tree_poly_offset_map &offset_map,
+		   gimple_seq &stmts)
+{
+  poly_offset_int offset = 0;
+  if (offset_map.count (addr))
+    offset = offset_map[addr];
+  tree addr_type = TREE_TYPE (addr);
+  tree utype = unsigned_type_for (addr_type);
+  tree new_addr = build_int_cst (addr_type, 0);
+  if (decl_map->count (addr))
+    new_addr = (*decl_map)[addr];
+  tree t1 = make_ssa_name (utype);
+  tree t2 = make_ssa_name (utype);
+  unsigned long long pmask = ~(param_ipa_prefetch_pagesize - 1);
+  tree pmask_cst = build_int_cst (utype, pmask);
+  tree off_tree = wide_int_to_tree (sizetype, offset);
+  gcc_assert (TREE_CODE (addr_type) == POINTER_TYPE);
+  tree addr_with_offset = gimple_build (&stmts, POINTER_PLUS_EXPR,
+					addr_type, addr, off_tree);
+  tree conv_addr = make_ssa_name (utype);
+  tree conv_new_addr = make_ssa_name (utype);
+  gimple *conv1 = gimple_build_assign (conv_addr,
+				       fold_convert (utype, addr_with_offset));
+  gimple *conv2 = gimple_build_assign (conv_new_addr,
+				       fold_convert (utype, new_addr));
+  gimple *paddr = gimple_build_assign (t1, BIT_AND_EXPR,
+				       conv_addr, pmask_cst);
+  gimple *new_paddr = gimple_build_assign (t2, BIT_AND_EXPR,
+					   conv_new_addr, pmask_cst);
+  gcond *cond = gimple_build_cond (EQ_EXPR, t1, t2, NULL, NULL);
+  gimple_seq_add_stmt (&stmts, conv1);
+  gimple_seq_add_stmt (&stmts, paddr);
+  gimple_seq_add_stmt (&stmts, conv2);
+  gimple_seq_add_stmt (&stmts, new_paddr);
+  gimple_seq_add_stmt (&stmts, cond);
+  return cond;
+}
+
+/* Check if this array access needs dynamic address verification.  Support only
+   arrays with 1-d indexing.  */
+
+static bool
+need_array_index_check (tree mem)
+{
+  /* Check pattern: t1 = (type) t0; ld/st array[t1].  If any index of type (t0)
+     does not go beyond the bounds of the array, we don't need the check.  */
+  tree array = TREE_OPERAND (mem, 0);
+  tree atype = TREE_TYPE (array);
+  tree index = TREE_OPERAND (mem, 1);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Array ind: ");
+      print_generic_expr (dump_file, index);
+      fprintf (dump_file, "\nMem: ");
+      print_generic_expr (dump_file, array);
+      fprintf (dump_file, "\nInd type: ");
+      print_generic_expr (dump_file, TREE_TYPE (index));
+      fprintf (dump_file, "\nMem type: ");
+      print_generic_expr (dump_file, atype);
+      fprintf (dump_file, "\n");
+    }
+  tree domain = TYPE_DOMAIN (atype);
+  if (!domain || !tree_fits_uhwi_p (TYPE_MIN_VALUE (domain))
+      || !tree_fits_uhwi_p (TYPE_MAX_VALUE (domain)))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Unsupported array type domain.\n");
+      return true;
+    }
+  unsigned HOST_WIDE_INT min_val = tree_to_uhwi (TYPE_MIN_VALUE (domain));
+  unsigned HOST_WIDE_INT max_val = tree_to_uhwi (TYPE_MAX_VALUE (domain));
+  if (dump_file)
+    fprintf (dump_file, "Array bounds (%ld, %ld)\n", min_val, max_val);
+  if (TREE_CODE (index) != SSA_NAME)
+    return true;
+
+  gimple *stmt = SSA_NAME_DEF_STMT (index);
+  if (!is_gimple_assign (stmt))
+    {
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Is not assign, stop analysis: ");
+	  print_gimple_stmt (dump_file, stmt, 3, TDF_DETAILS);
+	}
+      return true;
+    }
+  tree *lhs = gimple_assign_lhs_ptr (stmt);
+  tree *rhs = gimple_assign_rhs1_ptr (stmt);
+  tree lhs_type = TREE_TYPE (*lhs);
+  tree rhs_type = TREE_TYPE (*rhs);
+  tree ind_type = (TYPE_PRECISION (lhs_type) < TYPE_PRECISION (rhs_type))
+		  ? lhs_type : rhs_type;
+  if (!ind_type || !tree_fits_uhwi_p (TYPE_MIN_VALUE (ind_type))
+      || !tree_fits_uhwi_p (TYPE_MAX_VALUE (ind_type)))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Unsupported index type.\n");
+      return true;
+    }
+  int prec = tree_to_uhwi (TYPE_SIZE (ind_type));
+  unsigned HOST_WIDE_INT t_max_val = tree_to_uhwi (TYPE_MAX_VALUE (ind_type));
+  unsigned HOST_WIDE_INT t_min_val = tree_to_uhwi (TYPE_MIN_VALUE (ind_type));
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Index type (%d, %ld, %ld): ", prec,
+	       t_min_val, t_max_val);
+      print_generic_expr (dump_file, ind_type);
+      fprintf (dump_file, "\n");
+    }
+  return !((t_max_val <= max_val) && (t_min_val >= min_val));
+}
+
+/* Insert instructions to check the new index is within the array bounds.  */
+
+static gimple *
+insert_index_check (tree mem, gimple_seq &stmts)
+{
+  if (dump_file)
+    fprintf (dump_file, "Insert array index check\n");
+  tree atype = TREE_TYPE (TREE_OPERAND (mem, 0));
+  tree ind = TREE_OPERAND (mem, 1);
+  if (decl_map->count (ind))
+    ind = (*decl_map)[ind];
+  tree domain = TYPE_DOMAIN (atype);
+  gcc_assert (domain && tree_fits_uhwi_p (TYPE_MIN_VALUE (domain))
+	      && tree_fits_uhwi_p (TYPE_MAX_VALUE (domain)));
+
+  tree ind_min_val = TYPE_MIN_VALUE (domain);
+  tree ind_max_val = TYPE_MAX_VALUE (domain);
+  tree t1 = make_ssa_name (boolean_type_node);
+  tree t2 = make_ssa_name (boolean_type_node);
+  tree t3 = make_ssa_name (boolean_type_node);
+  t1 = fold_build2 (LE_EXPR, boolean_type_node, ind, ind_max_val);
+  t2 = fold_build2 (GE_EXPR, boolean_type_node, ind, ind_min_val);
+  t3 = fold_build2 (TRUTH_ANDIF_EXPR, boolean_type_node, t1, t2);
+  gcond *cond = gimple_build_cond (EQ_EXPR, t3, boolean_true_node, NULL, NULL);
+  gimple_seq_add_stmt (&stmts, cond);
+  return cond;
+}
+
+/* Insert safety checks for memory access stmts newly created to evaluate
+   prefetch addresses.  */
+
+static void
+process_used_mr (memref_t *mr, tree_poly_offset_map &offset_map,
+		 tree_set &checked_base_addrs, gimple_seq &stmts,
+		 vec<gimple *> &bbends)
+{
+  bool is_store;
+  tree *mem = simple_mem_ref_in_stmt (mr->stmts[0], &is_store);
+  if (mem == NULL)
+    return;
+  if (dump_file)
+    {
+      fprintf (dump_file, "MR (%d) maybe need to insert address check: ",
+	       mr->mr_id);
+      print_generic_expr (dump_file, *mem);
+      fprintf (dump_file, "\n");
+    }
+  gimple *bbend = NULL;
+  if (TREE_CODE (*mem) == MEM_REF)
+    {
+      tree base = get_base_address (*mem);
+      tree base_addr = get_mem_ref_address_ssa_name (*mem, base);
+      if (!need_page_check (base_addr, checked_base_addrs))
+	return;
+      bbend = insert_page_check (base_addr, offset_map, stmts);
+      checked_base_addrs.insert (base_addr);
+    }
+  else if (TREE_CODE (*mem) == ARRAY_REF && need_array_index_check (*mem))
+    bbend = insert_index_check (*mem, stmts);
+  if (bbend)
+    bbends.safe_push (bbend);
+}
+
+/* Create new variables and insert new stmts to evaluate prefetch addresses.  */
+
+static void
+create_stmts_for_used_mrs (vec<memref_t *> &used_mr_vec, vec<gimple *> &bbends,
+			   gimple_seq &stmts, stmt_set &processed_stmts,
+			   HOST_WIDE_INT dist_val, memref_t *comp_mr)
+{
+  tree_poly_offset_map offset_map;
+  collect_base_addresses (used_mr_vec, dist_val, comp_mr, offset_map);
+
+  /* Insert stmts to evaluate prefetch addresses.  */
+  tree_set checked_base_addrs;
+  for (unsigned int i = 0; i < used_mr_vec.length (); i++)
+    {
+      memref_t *mr = used_mr_vec[i];
+      if (mr == comp_mr)
+	continue;
+      gimple *last_stmt = gimple_copy_and_remap_memref_stmts (mr, stmts, 0, 1,
+							      processed_stmts);
+      if (last_stmt && dump_file)
+	{
+	  fprintf (dump_file, "MR (%d) new mem: ", mr->mr_id);
+	  print_generic_expr (dump_file, gimple_assign_lhs (last_stmt));
+	  fprintf (dump_file, "\n");
+	}
+      if (!mr->used_mrs.empty ())
+	process_used_mr (mr, offset_map, checked_base_addrs, stmts, bbends);
+      last_stmt = gimple_copy_and_remap_memref_stmts (mr, stmts, 0, 0,
+						      processed_stmts);
+    }
+}
+
+/* Insert prefetch instructions.  */
+
+static void
+insert_prefetch_stmts (vec<gimple *> &pcalls, gimple_seq &stmts,
+		       gimple *&last_pref, vec<memref_t *> &vmrs,
+		       stmt_set &processed_stmts)
+{
+  if (dump_file)
+    fprintf (dump_file, "Evaluate addresses and insert prefetch insns.\n");
+
+  tree local;
+  switch (param_ipa_prefetch_locality)
+    {
+    case 0:
+      local = integer_zero_node;
+      break;
+    case 1:
+      local = integer_one_node;
+      break;
+    case 2:
+      local = build_int_cst (integer_type_node, 2);
+      break;
+    default:
+    case 3:
+      local = integer_three_node;
+      break;
+    }
+  tree_set prefetched_addrs;
+  for (unsigned int i = 0; i < vmrs.length (); i++)
+    {
+      memref_t *mr = vmrs[i];
+      /* Don't need to copy the last stmt, since we insert prefetch insn
+	 instead of it.  */
+      gimple_copy_and_remap_memref_stmts (mr, stmts, 0, 1, processed_stmts);
+      gimple *last_stmt = mr->stmts[0];
+      gcc_assert (last_stmt);
+
+      tree old_addr = get_mem_ref_address_ssa_name (mr->mem, NULL_TREE);
+      tree new_addr = old_addr;
+      if (decl_map->count (old_addr))
+	new_addr = (*decl_map)[old_addr];
+      if (prefetched_addrs.count (new_addr))
+	continue;
+      /* Insert prefetch intrinsic call.  */
+      tree write_p = mr->is_store ? integer_one_node : integer_zero_node;
+      last_pref = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
+				     3, new_addr, write_p, local);
+      pcalls.safe_push (last_pref);
+      gimple_seq_add_stmt (&stmts, last_pref);
+      prefetched_addrs.insert (new_addr);
+
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Insert %d prefetch stmt:\n", i);
+	  print_gimple_stmt (dump_file, last_pref, 0);
+	}
+    }
+}
+
+/* Split bbs after condition stmts and fix control flow graph.  */
+
+static void
+correct_cfg (vec<gimple *> &bbends, gimple *last_pref, basic_block &dom_bb)
+{
+  edge e_last = split_block (dom_bb, last_pref);
+  if (!bbends.length () || last_pref == NULL)
+    return;
+  for (int i = bbends.length () - 1; i >= 0; i--)
+    {
+      gimple *bbend = bbends[i];
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Split dom_bb after condition stmts:\n");
+	  print_gimple_stmt (dump_file, bbend, 0);
+	}
+      basic_block last_bb = e_last->dest;
+      edge e = split_block (dom_bb, bbend);
+      e->flags &= ~EDGE_FALLTHRU;
+      e->flags |= EDGE_TRUE_VALUE;
+      edge e_false = make_edge (dom_bb, last_bb, EDGE_FALSE_VALUE);
+      e_false->probability = profile_probability::never ();
+    }
+}
+
 static void
 create_cgraph_edge (cgraph_node *n, gimple *stmt)
 {
@@ -1527,6 +1968,17 @@ create_cgraph_edge (cgraph_node *n, gimple *stmt)
 					  call_stmt, bb->count);
   /* TODO: maybe we need to store ipa_call_summary result.  */
   ipa_call_summaries->get_create (e);
+}
+
+/* Modify cgraph inserting calls to prefetch intrinsics.  */
+
+static void
+modify_ipa_info (cgraph_node *n, vec<gimple *> &pcalls)
+{
+  for (unsigned i = 0; i < pcalls.length (); i++)
+    create_cgraph_edge (n, pcalls[i]);
+  ipa_update_overall_fn_summary (n);
+  renumber_gimple_stmt_uids (DECL_STRUCT_FUNCTION (n->decl));
 }
 
 /* Insert prefetch intrinsics in this function, return nonzero on success.  */
@@ -1607,6 +2059,18 @@ optimize_function (cgraph_node *n, function *fn)
       return 0;
     }
 
+  vec<memref_t *> used_mr_vec = vNULL;
+  for (memref_set::const_iterator it = used_mrs.begin ();
+       it != used_mrs.end (); it++)
+    used_mr_vec.safe_push (*it);
+  used_mr_vec.qsort (memref_id_cmp);
+  if (!check_prefetch_safety (used_mr_vec, comp_mr))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Prefetching may be unsafe.  Skip the case.\n");
+      return 0;
+    }
+
   /* Filter out memrefs with the same memory references.
      TODO: maybe do the same with used mrs.  */
   vec<memref_t *> vmrs = vNULL;
@@ -1616,18 +2080,18 @@ optimize_function (cgraph_node *n, function *fn)
   /* TODO: maybe it is useful to process also used_mrs.  */
   basic_block dom_bb = NULL;
   for (unsigned int i = 0; i < vmrs.length (); i++)
-    find_nearest_common_dominator (vmrs[i], dom_bb);
+    find_nearest_common_post_dominator (vmrs[i], dom_bb);
 
   if (!dom_bb)
     {
       if (dump_file)
-	fprintf (dump_file, "Dominator bb for MRs is not found.  "
+	fprintf (dump_file, "Post dominator bb for MRs is not found.  "
 		 "Skip the case.\n");
       return 0;
     }
   else if (dump_file)
     {
-      fprintf (dump_file, "Dominator bb %d for MRs:\n", dom_bb->index);
+      fprintf (dump_file, "Post dominator bb %d for MRs:\n", dom_bb->index);
       gimple_dump_bb (dump_file, dom_bb, 0, dump_flags);
       fprintf (dump_file, "\n");
     }
@@ -1636,19 +2100,33 @@ optimize_function (cgraph_node *n, function *fn)
   gimple *last_used = NULL;
   for (gimple_stmt_iterator si = gsi_last_bb (dom_bb); !gsi_end_p (si);
        gsi_prev (&si))
-    if (comp_mr->stmts[0] == gsi_stmt (si))
-      {
-	last_used = gsi_stmt (si);
-	if (dump_file)
+    {
+      bool found = false;
+      for (unsigned int i = 0; i < vmrs.length (); i++)
+	/* TODO: take into account only those MRs that should be
+	   checked memory.  */
+	if (vmrs[i]->stmts[0] == gsi_stmt (si))
 	  {
-	    fprintf (dump_file, "Last used stmt in dominator bb:\n");
-	    print_gimple_stmt (dump_file, last_used, 0);
+	    found = true;
+	    break;
 	  }
-	break;
-      }
+      if (found || comp_mr->stmts[0] == gsi_stmt (si))
+	{
+	  last_used = gsi_stmt (si);
+	  if (dump_file)
+	    {
+	      fprintf (dump_file, "Last used stmt in post dominator bb:\n");
+	      print_gimple_stmt (dump_file, last_used, 0);
+	    }
+	  break;
+	}
+    }
 
-  split_block (dom_bb, last_used);
-  gimple_stmt_iterator gsi = gsi_last_bb (dom_bb);
+  gimple_stmt_iterator gsi;
+  if (last_used)
+    gsi = gsi_for_stmt (last_used);
+  else
+    gsi = gsi_last_bb (dom_bb);
 
   /* Create new inc var.  Insert new_var = old_var + step * factor.  */
   decl_map = new tree_map;
@@ -1660,7 +2138,7 @@ optimize_function (cgraph_node *n, function *fn)
   stmt_set processed_stmts;
   if (!dominated_by_p (CDI_DOMINATORS, dom_bb, gimple_bb (comp_mr->stmts[0])))
     {
-      gimple *tmp = gimple_copy_and_remap_memref_stmts (comp_mr, stmts, 0,
+      gimple *tmp = gimple_copy_and_remap_memref_stmts (comp_mr, stmts, 0, 0,
 							processed_stmts);
       inc_var = gimple_assign_lhs (tmp);
     }
@@ -1683,86 +2161,26 @@ optimize_function (cgraph_node *n, function *fn)
       fprintf (dump_file, "\n");
     }
 
-  /* Create other new vars.  Insert new stmts.  */
-  vec<memref_t *> used_mr_vec = vNULL;
-  for (memref_set::const_iterator it = used_mrs.begin ();
-       it != used_mrs.end (); it++)
-    used_mr_vec.safe_push (*it);
-  used_mr_vec.qsort (memref_id_cmp);
-
-  for (unsigned int j = 0; j < used_mr_vec.length (); j++)
-    {
-      memref_t *mr = used_mr_vec[j];
-      if (mr == comp_mr)
-	continue;
-      gimple *last_stmt = gimple_copy_and_remap_memref_stmts (mr, stmts, 0,
-							      processed_stmts);
-      gcc_assert (last_stmt);
-      if (dump_file)
-	{
-	  fprintf (dump_file, "MR (%d) new mem: ", mr->mr_id);
-	  print_generic_expr (dump_file, gimple_assign_lhs (last_stmt));
-	  fprintf (dump_file, "\n");
-	}
-    }
-  /* On new load check page fault.  */
-  /* Insert prefetch instructions.  */
-  if (dump_file)
-    fprintf (dump_file, "Evaluate addresses and insert prefetch insn.\n");
+  vec<gimple *> bbends = vNULL;
+  create_stmts_for_used_mrs (used_mr_vec, bbends, stmts, processed_stmts,
+			     dist_val, comp_mr);
 
   vec<gimple *> pcalls = vNULL;
-  tree local;
-  switch (param_ipa_prefetch_locality)
-    {
-    case 0:
-      local = integer_zero_node;
-      break;
-    case 1:
-      local = integer_one_node;
-      break;
-    case 2:
-      local = build_int_cst (integer_type_node, 2);
-      break;
-    default:
-    case 3:
-      local = integer_three_node;
-      break;
-    }
-  tree_set prefetched_addrs;
-  for (unsigned int j = 0; j < vmrs.length (); j++)
-    {
-      memref_t *mr = vmrs[j];
-      /* Don't need to copy the last stmt, since we insert prefetch insn
-	 instead of it.  */
-      gimple_copy_and_remap_memref_stmts (mr, stmts, 1, processed_stmts);
-      gimple *last_stmt = mr->stmts[0];
-      gcc_assert (last_stmt);
-      tree write_p = mr->is_store ? integer_one_node : integer_zero_node;
-      tree addr = get_mem_ref_address_ssa_name (mr->mem, NULL_TREE);
-      if (decl_map->count (addr))
-	addr = (*decl_map)[addr];
-      if (prefetched_addrs.count (addr))
-	continue;
-      last_stmt = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
-				     3, addr, write_p, local);
-      pcalls.safe_push (last_stmt);
-      gimple_seq_add_stmt (&stmts, last_stmt);
-      prefetched_addrs.insert (addr);
-      if (dump_file)
-	{
-	  fprintf (dump_file, "Insert %d prefetch stmt:\n", j);
-	  print_gimple_stmt (dump_file, last_stmt, 0);
-	}
-    }
-
+  gimple *last_pref = NULL;
+  insert_prefetch_stmts (pcalls, stmts, last_pref, vmrs, processed_stmts);
   gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
+
+  correct_cfg (bbends, last_pref, dom_bb);
+
   delete decl_map;
 
-  /* Modify cgraph inserting calls to prefetch intrinsics.  */
-  for (unsigned i = 0; i < pcalls.length (); i++)
-    create_cgraph_edge (n, pcalls[i]);
-  ipa_update_overall_fn_summary (n);
-  renumber_gimple_stmt_uids (DECL_STRUCT_FUNCTION (n->decl));
+  modify_ipa_info (n, pcalls);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "After optimization:\n");
+      dump_function_to_file (cfun->decl, dump_file, (dump_flags_t)0);
+    }
 
   return 1;
 }
@@ -1781,8 +2199,10 @@ insert_prefetch ()
 	fprintf (dump_file, "Optimize function %s\n", n->dump_name ());
       push_cfun (DECL_STRUCT_FUNCTION (n->decl));
       calculate_dominance_info (CDI_DOMINATORS);
+      calculate_dominance_info (CDI_POST_DOMINATORS);
       res |= optimize_function (n, fn);
       free_dominance_info (CDI_DOMINATORS);
+      free_dominance_info (CDI_POST_DOMINATORS);
       pop_cfun ();
     }
   return res;
