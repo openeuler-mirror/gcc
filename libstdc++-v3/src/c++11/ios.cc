@@ -33,6 +33,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
+#ifndef _GLIBCXX_NONSHARED_CXX11
   // Definitions for static const members of ios_base.
   const ios_base::fmtflags ios_base::boolalpha;
   const ios_base::fmtflags ios_base::dec;
@@ -184,6 +185,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       }
     _M_callbacks = 0;
   }
+#endif
 
   void
   ios_base::_M_move(ios_base& __rhs) noexcept

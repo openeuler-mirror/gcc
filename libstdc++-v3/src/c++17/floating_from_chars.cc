@@ -1225,6 +1225,7 @@ namespace
 
 #if USE_LIB_FAST_FLOAT || USE_STRTOD_FOR_FROM_CHARS
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_110
 from_chars_result
 from_chars(const char* first, const char* last, float& value,
 	   chars_format fmt) noexcept
@@ -1274,6 +1275,7 @@ from_chars(const char* first, const char* last, long double& value,
   return from_chars_strtod(first, last, value, fmt);
 #endif
 }
+#endif
 
 #if USE_LIB_FAST_FLOAT
 // Entrypoints for 16-bit floats.
@@ -1300,6 +1302,7 @@ __from_chars_bfloat16_t(const char* first, const char* last, float& value,
 }
 #endif
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_110
 #ifdef _GLIBCXX_LONG_DOUBLE_COMPAT
 // Make std::from_chars for 64-bit long double an alias for the overload
 // for double.
@@ -1308,6 +1311,7 @@ _ZSt10from_charsPKcS0_ReSt12chars_format(const char* first, const char* last,
 					 long double& value,
 					 chars_format fmt) noexcept
 __attribute__((alias ("_ZSt10from_charsPKcS0_RdSt12chars_format")));
+#endif
 #endif
 
 #ifdef _GLIBCXX_LONG_DOUBLE_ALT128_COMPAT

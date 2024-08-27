@@ -49,7 +49,7 @@ AC_DEFUN([GLIBCXX_CONFIGURE], [
   # Keep these sync'd with the list in Makefile.am.  The first provides an
   # expandable list at autoconf time; the second provides an expandable list
   # (i.e., shell variable) at configure time.
-  m4_define([glibcxx_SUBDIRS],[include libsupc++ src src/c++98 src/c++11 src/c++17 src/c++20 src/c++23 src/c++26 src/filesystem src/libbacktrace src/experimental doc po testsuite python])
+  m4_define([glibcxx_SUBDIRS],[include libsupc++ src src/c++98 src/c++11 src/c++17 src/c++20 src/c++23 src/c++26 src/nonshared98 src/nonshared11 src/nonshared17 src/nonshared20 src/nonshared23 src/nonshared26 src/filesystem src/libbacktrace src/experimental doc po testsuite python])
   SUBDIRS='glibcxx_SUBDIRS'
 
   # These need to be absolute paths, yet at the same time need to

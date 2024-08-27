@@ -124,9 +124,11 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
   using __ios_failure = ios::failure;
 #endif
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
   void
   __throw_ios_failure(const char* __s __attribute__((unused)))
   { _GLIBCXX_THROW_OR_ABORT(__ios_failure(_(__s))); }
+#endif
 
   void
   __throw_ios_failure(const char* str __attribute__((unused)),

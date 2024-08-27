@@ -688,6 +688,11 @@ GLIBCXX_EXPORT_FLAGS
 # Determine what GCC version number to use in filesystem paths.
 GCC_BASE_VER
 
+CCAS='$(CXX)'
+CCASFLAGS='$(CXXFLAGS)'
+AC_SUBST(CCAS)
+AC_SUBST(CCASFLAGS)
+
 dnl In autoconf 2.5x, AC_OUTPUT is replaced by four AC_CONFIG_* macros,
 dnl which can all be called multiple times as needed, plus one (different)
 dnl AC_OUTPUT macro.  This one lists the files to be created:

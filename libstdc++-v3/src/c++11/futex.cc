@@ -55,7 +55,9 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
 namespace
 {
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
   std::atomic<bool> futex_clock_realtime_unavailable;
+#endif
   std::atomic<bool> futex_clock_monotonic_unavailable;
 
 #if defined(SYS_futex_time64) && SYS_futex_time64 != SYS_futex
@@ -108,6 +110,7 @@ namespace
   }
 } // namespace
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
   bool
   __atomic_futex_unsigned_base::
   _M_futex_wait_until(unsigned *__addr, unsigned __val, bool __has_timeout,
@@ -182,6 +185,7 @@ namespace
 	return true;
       }
   }
+#endif
 
   bool
   __atomic_futex_unsigned_base::
@@ -261,6 +265,7 @@ namespace
       }
   }
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
   void
   __atomic_futex_unsigned_base::_M_futex_notify_all(unsigned* __addr)
   {
@@ -269,6 +274,7 @@ namespace
     // the error codes.  See the futex documentation and glibc for background.
     syscall (SYS_futex, __addr, futex_wake_op, INT_MAX);
   }
+#endif
 
 _GLIBCXX_END_NAMESPACE_VERSION
 }

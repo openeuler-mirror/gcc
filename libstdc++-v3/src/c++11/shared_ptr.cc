@@ -53,6 +53,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
   bad_weak_ptr::~bad_weak_ptr() noexcept = default;
 
   char const*
@@ -102,6 +103,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 	  __gnu_internal::get_mutex(_M_key2).unlock();
       }
   }
+#endif
 #endif
 
   bool

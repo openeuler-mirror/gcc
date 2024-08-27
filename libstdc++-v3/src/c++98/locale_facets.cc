@@ -27,6 +27,8 @@ namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
+#ifndef _GLIBCXX_NONSHARED_CXX11
   // Definitions for static const data members of time_base.
   template<>
     const char*
@@ -97,6 +99,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       *__fptr++ = (__flags & ios_base::uppercase) ? 'G' : 'g';
     *__fptr = '\0';
   }
+#endif
 
   // This function is not exported but is needed internally, by the versions
   // of __verify_grouping below and in src/c++11/cxx11-locale-inst.cc
@@ -125,6 +128,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     return __test;
   }
 
+#ifndef _GLIBCXX_NONSHARED_CXX11
   bool
   __verify_grouping(const char* __grouping, size_t __grouping_size,
 		    const string& __grouping_tmp) throw()
@@ -133,6 +137,8 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
                                   __grouping_tmp.c_str(),
                                   __grouping_tmp.size());
   }
+#endif
+#endif
 
   namespace
   {

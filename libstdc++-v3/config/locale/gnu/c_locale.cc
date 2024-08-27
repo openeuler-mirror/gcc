@@ -41,6 +41,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
+#ifndef _GLIBCXX_NONSHARED_CXX98
   template<>
     void
     __convert_to_v(const char* __s, float& __v, ios_base::iostate& __err,
@@ -172,6 +173,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
       }
     return __changed;
   }
+#endif
 
   struct _CatalogIdComp
   {
@@ -255,6 +257,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
 _GLIBCXX_END_NAMESPACE_VERSION
 } // namespace
 
+#ifndef _GLIBCXX_NONSHARED_CXX98
 namespace __gnu_cxx _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
@@ -294,3 +297,4 @@ _GLIBCXX_END_NAMESPACE_VERSION
   extern "C" void ldbl (void) __attribute__ ((alias (#dbl)))
 _GLIBCXX_LDBL_COMPAT(_ZSt14__convert_to_vIdEvPKcRT_RSt12_Ios_IostateRKP15__locale_struct, _ZSt14__convert_to_vIeEvPKcRT_RSt12_Ios_IostateRKP15__locale_struct);
 #endif // _GLIBCXX_LONG_DOUBLE_COMPAT
+#endif

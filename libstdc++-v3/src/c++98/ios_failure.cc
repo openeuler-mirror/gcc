@@ -45,6 +45,7 @@ namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
   ios_base::failure::failure(const string& __str) throw()
   : _M_msg(__str) { }
 
@@ -54,6 +55,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
   const char*
   ios_base::failure::what() const throw()
   { return _M_msg.c_str(); }
+#endif
 
 #if _GLIBCXX_USE_DUAL_ABI
   // When the dual ABI is enabled __throw_ios_failure() is defined in

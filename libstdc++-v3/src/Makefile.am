@@ -44,7 +44,8 @@ endif
 
 ## Keep this list sync'd with acinclude.m4:GLIBCXX_CONFIGURE.
 SUBDIRS = c++98 c++11 c++17 c++20 c++23 c++26 \
-	$(filesystem_dir) $(backtrace_dir) $(experimental_dir)
+	$(filesystem_dir) $(backtrace_dir) $(experimental_dir) \
+	nonshared98 nonshared11 nonshared17 nonshared20 nonshared23 nonshared26
 
 # Cross compiler support.
 if VTV_CYGMIN
@@ -52,6 +53,9 @@ toolexeclib_LTLIBRARIES = libvtv.la libstdc++.la
 else
 toolexeclib_LTLIBRARIES = libstdc++.la
 endif
+
+noinst_LTLIBRARIES = libstdc++_nonshared80.la \
+		     libstdc++_nonshared110.la
 
 if VTV_CYGMIN
 vtv_stubs.cc:
@@ -120,6 +124,33 @@ endif
 parallel_compat_sources = \
 	compatibility-parallel_list.cc  compatibility-parallel_list-2.cc
 
+libstdc___nonshared80_la_SOURCES =
+
+libstdc___nonshared80_la_LIBADD = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience80.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience80.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience80.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience80.la
+
+libstdc___nonshared80_la_DEPENDENCIES = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience80.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience80.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience80.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience80.la
+
+libstdc___nonshared110_la_SOURCES =
+
+libstdc___nonshared110_la_LIBADD = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience110.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience110.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience110.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience110.la
+
+libstdc___nonshared110_la_DEPENDENCIES = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience110.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience110.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience110.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience110.la
 
 cxx98_sources = \
 	compatibility.cc \
