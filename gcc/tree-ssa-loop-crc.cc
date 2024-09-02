@@ -1227,6 +1227,9 @@ convert_to_new_loop (class loop *loop)
 static unsigned int
 tree_ssa_loop_crc ()
 {
+#ifndef TARGET_CRC32
+  return 0;
+#else
   if (TARGET_CRC32 == false)
     {
       warning (OPT____,"The loop-crc optimization is not working." \
@@ -1269,6 +1272,7 @@ tree_ssa_loop_crc ()
       }
   }
   return todo;
+#endif
 }
 
 /* Loop crc.  */
