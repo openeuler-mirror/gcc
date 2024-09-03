@@ -1,7 +1,8 @@
-/* { dg-do compile } */
+/* { dg-do compile { target aarch64*-*-* x86_64*-*-*} } */
 /* fif-conversion-gimple and fuaddsub-overflow-match-all are required for
    proper overflow detection in some cases.  */
-/* { dg-options "-O2 -fif-conversion-gimple -march=armv8.2-a -fuaddsub-overflow-match-all -fdump-tree-widening_mul-stats" } */
+/* { dg-options "-O2 -fif-conversion-gimple -fuaddsub-overflow-match-all -fdump-tree-widening_mul-stats" } */
+/* { dg-additional-options "-march=armv8.2-a" { target aarch64*-*-* } } */
 #include <stdint.h>
 
 typedef unsigned __int128 uint128_t;
@@ -138,4 +139,5 @@ uint128_t mul128_perm (uint64_t a, uint64_t b)
   return res;
 }
 
-/* { dg-final { scan-tree-dump-times "double sized mul optimized: 1" 6 "widening_mul" } } */
+/* { dg-final { scan-tree-dump-times "double sized mul optimized: 1" 6 "widening_mul" { target aarch64*-*-* } } } */
+/* { dg-final { scan-tree-dump-times "double sized mul optimized: 1" 4 "widening_mul" { target x86_64*-*-* } } } */
