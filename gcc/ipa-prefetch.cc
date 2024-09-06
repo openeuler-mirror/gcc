@@ -1668,6 +1668,8 @@ static gimple *
 insert_page_check (tree addr, tree_poly_offset_map &offset_map,
 		   gimple_seq &stmts)
 {
+  if (dump_file)
+    fprintf (dump_file, "Insert page check.\n");
   poly_offset_int offset = 0;
   if (offset_map.count (addr))
     offset = offset_map[addr];
@@ -1783,7 +1785,7 @@ static gimple *
 insert_index_check (tree mem, gimple_seq &stmts)
 {
   if (dump_file)
-    fprintf (dump_file, "Insert array index check\n");
+    fprintf (dump_file, "Insert array index check.\n");
   tree atype = TREE_TYPE (TREE_OPERAND (mem, 0));
   tree ind = TREE_OPERAND (mem, 1);
   if (decl_map->count (ind))
