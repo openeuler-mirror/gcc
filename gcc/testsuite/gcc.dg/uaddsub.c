@@ -1,5 +1,6 @@
-/* { dg-do compile } */
+/* { dg-do compile { target aarch64*-*-* x86_64-*-* } } */
 /* { dg-options "-O2 -fuaddsub-overflow-match-all -fdump-tree-optimized" } */
+/* { dg-additional-options "-march=armv8.2-a" { target aarch64*-*-* } } */
 #include <stdint.h>
 
 typedef unsigned __int128 uint128_t;
@@ -140,4 +141,5 @@ uint256_t sub256 (uint128_t a, uint128_t b)
 }
 
 /* { dg-final { scan-tree-dump-times "= .ADD_OVERFLOW \\(a_\[0-9\]+\\(D\\), b_\[0-9\]+\\(D\\)\\)" 5 "optimized" } } */
-/* { dg-final { scan-tree-dump-times "= .SUB_OVERFLOW \\(a_\[0-9\]+\\(D\\), b_\[0-9\]+\\(D\\)\\)" 5 "optimized" } } */
+/* { dg-final { scan-tree-dump-times "= .SUB_OVERFLOW \\(a_\[0-9\]+\\(D\\), b_\[0-9\]+\\(D\\)\\)" 5 "optimized" { target aarch64*-*-* } } } */
+/* { dg-final { scan-tree-dump-times "= .SUB_OVERFLOW \\(a_\[0-9\]+\\(D\\), b_\[0-9\]+\\(D\\)\\)" 4 "optimized" { target x86_64*-*-* } } } */

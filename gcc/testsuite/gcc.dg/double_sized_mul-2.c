@@ -1,7 +1,8 @@
-/* { dg-do compile } */
-/* fif-conversion-gimple is required for proper overflow detection
-   in some cases.  */
-/* { dg-options "-O2 -fif-conversion-gimple -march=armv8.2-a -fuaddsub-overflow-match-all -fdump-tree-widening_mul-stats" } */
+/* { dg-do compile { target aarch64*-*-* x86_64*-*-*} } */
+/* fif-conversion-gimple and fuaddsub-overflow-match-all are required for
+   proper overflow detection in some cases.  */
+/* { dg-options "-O2 -fif-conversion-gimple -fuaddsub-overflow-match-all -fdump-tree-widening_mul-stats" } */
+/* { dg-additional-options "-march=armv8.2-a" { target aarch64*-*-* } } */
 #include <stdint.h>
 
 typedef unsigned __int128 uint128_t;
