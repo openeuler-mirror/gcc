@@ -1162,7 +1162,50 @@ decode_cmdline_options_to_array (unsigned int argc, const char **argv,
   struct cl_decoded_option *opt_array;
   unsigned int num_decoded_options;
 
-  int opt_array_len = argc;
+  enum LTO_SKIP_STAT
+    {
+      NO_NEED_TO_SKIP,
+      NEED_TO_SKIP,
+      ALREADY_SKIP,
+    };
+  LTO_SKIP_STAT lto_skip_stat = NO_NEED_TO_SKIP;
+  bool try_use_lto = false;
+  const char* lto_option_conflict = NULL;
+  const char* wrap_option = "-Wl,--wrap=";
+  const char* start_lib_option = "-Wl,--start-lib";
+  for (i = 1; i < argc; i += 1)
+    {
+      if (startswith (argv[i], "-flto-try"))
+	{
+	  try_use_lto = true;
+	}
+
+      if (startswith (argv[i], wrap_option)
+      	  && (lto_skip_stat == NO_NEED_TO_SKIP))
+	{
+	  lto_option_conflict = wrap_option;
+	  lto_skip_stat = NEED_TO_SKIP;
+	}
+      else if (startswith (argv[i], start_lib_option)
+	       && (lto_skip_stat == NO_NEED_TO_SKIP))
+	{
+	  lto_option_conflict = start_lib_option;
+	  lto_skip_stat = NEED_TO_SKIP;
+	}
+      else if (startswith (argv[i], "-fno-lto"))
+	{
+	  lto_option_conflict = NULL;
+	  lto_skip_stat = ALREADY_SKIP;
+	  break;
+	}
+    }
+  if (!try_use_lto)
+    {
+      lto_skip_stat = NO_NEED_TO_SKIP;
+      lto_option_conflict = NULL;
+    }
+
+  int opt_array_len = lto_skip_stat == NEED_TO_SKIP ? argc + 1 : argc;
   opt_array = XNEWVEC (struct cl_decoded_option, opt_array_len);
 
   opt_array[0].opt_index = OPT_SPECIAL_program_name;
@@ -1243,6 +1286,15 @@ decode_cmdline_options_to_array (unsigned int argc, const char **argv,
 
   num_decoded_options += handle_machine_option (lang_mask, num_decoded_options,
 						argc, argv, opt_array);
+
+  if (lto_skip_stat == NEED_TO_SKIP)
+    {
+      const char * nolto = "-fno-lto";
+      fprintf (stderr, "skip lto for %s\n", lto_option_conflict);
+      decode_cmdline_option (&nolto, lang_mask,
+      			     &opt_array[num_decoded_options]);
+      num_decoded_options++;
+    }
 
   *decoded_options = opt_array;
   *decoded_options_count = num_decoded_options;

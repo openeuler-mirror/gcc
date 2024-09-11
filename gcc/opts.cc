@@ -1143,6 +1143,26 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
       SET_OPTION_IF_UNSET (opts, opts_set, param_stack_frame_growth, 40);
     }
 
+  if (opts->x_flag_lto_try)
+    {
+#ifdef ENABLE_LTO
+      if (opts_set->x_flag_lto && opts->x_flag_lto)
+	{
+	  inform (loc, "%<-flto-try%> don't guarantee that lto "
+	  	  "will be enabled.");
+	}
+      opts->x_flag_lto = "";
+      if (opts_set->x_flag_fat_lto_objects && !opts->x_flag_fat_lto_objects)
+	{
+	  error_at (loc, "%<-flto-try%> are not supported with "
+	  	    "-fno-fat-lto-objects");
+	}
+      opts->x_flag_fat_lto_objects = 1;
+#else
+      error_at (loc, "LTO support has not been enabled in this configuration");
+#endif
+    }
+
   if (opts->x_flag_lto)
     {
 #ifdef ENABLE_LTO

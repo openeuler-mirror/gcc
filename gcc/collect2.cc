@@ -200,6 +200,7 @@ static enum lto_mode_d lto_mode = LTO_MODE_WHOPR;
 #else
 static enum lto_mode_d lto_mode = LTO_MODE_NONE;
 #endif
+static bool maybe_relink_without_lto = false;
 
 bool helpflag;			/* true if --help */
 
@@ -751,7 +752,53 @@ do_link (char **ld_argv, const char *atsuffix)
 			 PEX_LAST | PEX_SEARCH,
 			 HAVE_GNU_LD && at_file_supplied, atsuffix);
   int ret = collect_wait (prog, pex);
-  if (ret)
+  if (ret && maybe_relink_without_lto)
+    {
+      bool link_with_lto_plugin_before = false;
+      for (int i = 0, j = -1; ld_argv[i]; ++i)
+	{
+	  if (endswith (ld_argv[i], "liblto_plugin.so"))
+	    {
+	      link_with_lto_plugin_before = true;
+	      for (j = i + 1; ld_argv[j]; ++j)
+		{
+		  if (!startswith (ld_argv[j], "-plugin-opt="))
+		    break;
+		}
+	      for (i = i - 1; ; ++i, ++j)
+		{
+		  ld_argv[i] = ld_argv[j];
+		  if (ld_argv[j] == NULL)
+		    break;
+		}
+	      break;
+	    }
+	}
+      int ret2 = 0;
+      if (link_with_lto_plugin_before)
+	{
+	  fprintf (stderr, "lto link fail, relinking without lto");
+	  lto_mode = LTO_MODE_NONE;
+	  pex = collect_execute (prog, ld_argv, NULL, NULL,
+				 PEX_LAST | PEX_SEARCH,
+				 HAVE_GNU_LD && at_file_supplied, atsuffix);
+	  ret2 = collect_wait (prog, pex);
+	}
+      else
+	  ret2 = ret;
+      if (ret2)
+	{
+	  error ("ld returned %d exit status", ret);
+	  exit (ret);
+	}
+      else
+	{
+	  /* We have just successfully produced an output file, so assume that
+	   we may unlink it if need be for now on.  */
+	  may_unlink_output_file = true;
+	}
+    }
+  else if (ret)
     {
       error ("ld returned %d exit status", ret);
       exit (ret);
@@ -1009,6 +1056,8 @@ main (int argc, char **argv)
 	  num_c_args++;
 	if (startswith (q, "-flto-partition=none"))
 	  no_partition = true;
+	else if (startswith (q, "-flto-try"))
+	  maybe_relink_without_lto = true;
 	else if (startswith (q, "-fno-lto"))
 	  lto_mode = LTO_MODE_NONE;
 	else if (startswith (q, "-save-temps"))

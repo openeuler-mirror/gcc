@@ -70,6 +70,10 @@ bool flag_warn_unused_result = false
 Variable
 int flag_generate_lto
 
+; Nonzero if we should write GIMPLE bytecode for link-time optimization.
+Variable
+int flag_relink_whthout_lto = 0
+
 ; Nonzero if we should write GIMPLE bytecode for offload compilation.
 Variable
 int flag_generate_offload = 0
@@ -2160,6 +2164,10 @@ Do CFG-sensitive rematerialization in LRA.
 flto
 Common
 Enable link-time optimization.
+
+flto-try
+Common Var(flag_lto_try) Init(0)
+Do link-time optimization as much as possible.
 
 flto=
 Common RejectNegative Joined Var(flag_lto)
