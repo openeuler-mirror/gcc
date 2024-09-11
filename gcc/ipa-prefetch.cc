@@ -2099,7 +2099,7 @@ optimize_function (cgraph_node *n, function *fn)
       fprintf (dump_file, "\n");
     }
 
-  /* Try to find comp_mr's stmt in the dominator bb.  */
+  /* Try to find comp_mr's stmt in the post dominator bb.  */
   gimple *last_used = NULL;
   for (gimple_stmt_iterator si = gsi_last_bb (dom_bb); !gsi_end_p (si);
        gsi_prev (&si))
@@ -2171,7 +2171,22 @@ optimize_function (cgraph_node *n, function *fn)
   vec<gimple *> pcalls = vNULL;
   gimple *last_pref = NULL;
   insert_prefetch_stmts (pcalls, stmts, last_pref, vmrs, processed_stmts);
-  gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
+
+  gimple *gstmt = gsi_stmt (gsi);
+  bool insert_after = last_used || gstmt == NULL || !is_ctrl_stmt (gstmt);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Insert prefetch sequence %s stmt:\n",
+	       insert_after ? "after": "before");
+      if (gstmt)
+	print_gimple_stmt (dump_file, gstmt, 0);
+      else
+	fprintf (dump_file, "(no stmts)\n");
+    }
+  if (insert_after)
+    gsi_insert_seq_after (&gsi, stmts, GSI_NEW_STMT);
+  else
+    gsi_insert_seq_before (&gsi, stmts, GSI_NEW_STMT);
 
   correct_cfg (bbends, last_pref, dom_bb);
 
