@@ -3807,7 +3807,11 @@ vect_slp_grouped_load_find (bb_vec_info bb_vinfo, vec<bool> &visited,
 	 these two grouped loads need to be merged.  */
       tree opb = get_op_base_address (first_element);
       unsigned int grp_size_b = DR_GROUP_SIZE (first_element);
-      if (opa == opb && grp_size_a == grp_size_b)
+      /* Ensure that the elements merge to load group meet the alignment condition (dr_misalignment) */
+      HOST_WIDE_INT diff = 0;
+      diff = (TREE_INT_CST_LOW (DR_INIT (first_element->dr_aux.dr))
+	      - TREE_INT_CST_LOW (DR_INIT (merge_first_element->dr_aux.dr)));
+      if (opa == opb && grp_size_a == grp_size_b && diff >= 0)
 	{
 	  res.safe_push (first_element);
 	  visited[i] = true;
