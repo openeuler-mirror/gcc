@@ -2099,6 +2099,18 @@ optimize_function (cgraph_node *n, function *fn)
       fprintf (dump_file, "\n");
     }
 
+  /* Check that all used mrs dominate found post dominator bb.  This case
+     may be supported later by copying MR evaluation to the bb.  */
+  for (unsigned int i = 0; i < used_mr_vec.length (); i++)
+    if (!dominated_by_p (CDI_DOMINATORS, dom_bb,
+			 gimple_bb (used_mr_vec[i]->stmts[0])))
+      {
+	if (dump_file)
+	  fprintf (dump_file, "MR's (%d) bb is not dominate the found bb %d.  "
+		   "Skip the case.\n", used_mr_vec[i]->mr_id, dom_bb->index);
+	return 0;
+      }
+
   /* Try to find comp_mr's stmt in the post dominator bb.  */
   gimple *last_used = NULL;
   for (gimple_stmt_iterator si = gsi_last_bb (dom_bb); !gsi_end_p (si);
@@ -2133,17 +2145,29 @@ optimize_function (cgraph_node *n, function *fn)
 
   /* Create new inc var.  Insert new_var = old_var + step * factor.  */
   decl_map = new tree_map;
-  gcc_assert (comp_mr->stmts[0] && gimple_assign_single_p (comp_mr->stmts[0]));
-  tree inc_var = gimple_assign_lhs (comp_mr->stmts[0]);
+  gimple *old_inc_stmt = comp_mr->stmts[0];
+  gcc_assert (old_inc_stmt && gimple_assign_single_p (old_inc_stmt));
+  tree inc_var = gimple_assign_lhs (old_inc_stmt);
+  if (dump_file)
+    {
+      fprintf (dump_file, "Old inc stmt: ");
+      print_gimple_stmt (dump_file, old_inc_stmt, 0);
+    }
   /* If old_var definition dominates the current use, just use it, otherwise
      evaluate it just before new inc var evaluation.  */
   gimple_seq stmts = NULL;
   stmt_set processed_stmts;
-  if (!dominated_by_p (CDI_DOMINATORS, dom_bb, gimple_bb (comp_mr->stmts[0])))
+  tree local_inc_var = inc_var;
+  if (!dominated_by_p (CDI_DOMINATORS, dom_bb, gimple_bb (old_inc_stmt)))
     {
       gimple *tmp = gimple_copy_and_remap_memref_stmts (comp_mr, stmts, 0, 0,
 							processed_stmts);
-      inc_var = gimple_assign_lhs (tmp);
+      local_inc_var = gimple_assign_lhs (tmp);
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Localized old inc stmt: ");
+	  print_gimple_stmt (dump_file, tmp, 0);
+	}
     }
   tree var_type = TREE_TYPE (inc_var);
   enum tree_code inc_code;
@@ -2155,7 +2179,8 @@ optimize_function (cgraph_node *n, function *fn)
   HOST_WIDE_INT dist_val = tree_to_shwi (step)
 			   * param_ipa_prefetch_distance_factor;
   tree dist = build_int_cst (TREE_TYPE (step), dist_val);
-  tree new_inc_var = gimple_build (&stmts, inc_code, var_type, inc_var, dist);
+  tree new_inc_var = gimple_build (&stmts, inc_code, var_type, local_inc_var,
+				   dist);
   (*decl_map)[inc_var] = new_inc_var;
   if (dump_file)
     {
