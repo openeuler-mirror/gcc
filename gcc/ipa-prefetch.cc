@@ -1683,7 +1683,8 @@ insert_page_check (tree addr, tree_poly_offset_map &offset_map,
   unsigned long long pmask = ~(param_ipa_prefetch_pagesize - 1);
   tree pmask_cst = build_int_cst (utype, pmask);
   tree off_tree = wide_int_to_tree (sizetype, offset);
-  gcc_assert (TREE_CODE (addr_type) == POINTER_TYPE);
+  gcc_assert (TREE_CODE (addr_type) == POINTER_TYPE
+	      || TREE_CODE (addr_type) == REFERENCE_TYPE);
   tree addr_with_offset = gimple_build (&stmts, POINTER_PLUS_EXPR,
 					addr_type, addr, off_tree);
   tree conv_addr = make_ssa_name (utype);
@@ -2084,11 +2085,11 @@ optimize_function (cgraph_node *n, function *fn)
   for (unsigned int i = 0; i < vmrs.length (); i++)
     find_nearest_common_post_dominator (vmrs[i], dom_bb);
 
-  if (!dom_bb)
+  if (!dom_bb || dom_bb->index == ENTRY_BLOCK || dom_bb->index == EXIT_BLOCK)
     {
       if (dump_file)
-	fprintf (dump_file, "Post dominator bb for MRs is not found.  "
-		 "Skip the case.\n");
+	fprintf (dump_file, "Post dominator bb for MRs is not found or "
+		 "it's an entry/exit block.  Skip the case.\n");
       return 0;
     }
   else if (dump_file)
