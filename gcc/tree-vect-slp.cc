@@ -3811,7 +3811,10 @@ vect_slp_grouped_load_find (bb_vec_info bb_vinfo, vec<bool> &visited,
       HOST_WIDE_INT diff = 0;
       diff = (TREE_INT_CST_LOW (DR_INIT (first_element->dr_aux.dr))
 	      - TREE_INT_CST_LOW (DR_INIT (merge_first_element->dr_aux.dr)));
-      if (opa == opb && grp_size_a == grp_size_b && diff >= 0)
+      if (opa == opb
+	  && grp_size_a == grp_size_b
+	  && diff >= 0
+	  && check_same_bb (first_element, merge_first_element))
 	{
 	  res.safe_push (first_element);
 	  visited[i] = true;
