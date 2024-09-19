@@ -76,8 +76,7 @@ along with GCC; see the file COPYING3.  If not see
    match the then and else basic-blocks to make the pattern match.
    Returns true if the pattern matched, false otherwise.  */
 
-static bool
-recognize_if_then_else (basic_block cond_bb,
+bool recognize_if_then_else (basic_block cond_bb,
 			basic_block *then_bb, basic_block *else_bb)
 {
   edge t, e;
@@ -168,8 +167,7 @@ forwarder_block_to (basic_block bb, basic_block to_bb)
    BB2 to DEST are the same.  This makes the CFG merge point
    free from side-effects.  Return true in this case, else false.  */
 
-static bool
-same_phi_args_p (basic_block bb1, basic_block bb2, basic_block dest)
+bool same_phi_args_p (basic_block bb1, basic_block bb2, basic_block dest)
 {
   edge e1 = find_edge (bb1, dest);
   edge e2 = find_edge (bb2, dest);
