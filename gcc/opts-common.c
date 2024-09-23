@@ -1009,12 +1009,12 @@ handle_lto_option (unsigned int lang_mask,
   if (strstr (lan, "gcc") != NULL)
     {
       opt_array = XRESIZEVEC (struct cl_decoded_option, opt_array, argc + 2);
-      const char* lto_flag = "-flto=8";
+      const char* lto_flag = "-flto=auto";
       decode_cmdline_option (&lto_flag, lang_mask,
 			     &opt_array[num_decoded_options]);
       ret++;
-      const char* ltopartition_flag = "-flto-partition=one";
-      decode_cmdline_option (&ltopartition_flag, lang_mask,
+      const char* fat_lto_objects_flag = "-ffat-lto-objects";
+      decode_cmdline_option (&fat_lto_objects_flag, lang_mask,
 			     &opt_array[num_decoded_options + 1]);
       ret++;
     }
@@ -1022,7 +1022,7 @@ handle_lto_option (unsigned int lang_mask,
 	   || strstr (lan, "gfortran") != NULL)
     {
       opt_array = XRESIZEVEC (struct cl_decoded_option, opt_array, argc + 1);
-      const char* lto_flag = "-flto=8";
+      const char* lto_flag = "-flto=auto";
       decode_cmdline_option (&lto_flag, lang_mask,
 			     &opt_array[num_decoded_options]);
       ret++;
@@ -1040,25 +1040,42 @@ handle_machine_option (unsigned int lang_mask,
 		       struct cl_decoded_option *&opt_array)
 {
   int ret = 0;
-  bool flag_Om = false;
   bool flag_hip09 = false;
   for (unsigned i = 1; i < argc; i ++)
     {
-      if (strcmp (argv[i], "-Om") == 0)
-	flag_Om = true;
-      if (strstr (argv[i], "mcpu=hip09") != NULL)
-	flag_hip09 = true;
+      if (strstr(argv[i], "mcpu=native") != NULL)
+        {
+	  FILE *f = fopen("/proc/cpuinfo", "r");
+	  if (f == NULL) 
+	    {
+	      perror("Failed to open /proc/cpuinfo");
+              return -1; 
+            }
+
+          char buf[256];
+
+          while (fgets(buf, sizeof(buf), f) != NULL)
+            {
+              buf[strcspn(buf, "\n")] = 0;
+              if (strstr(buf, "CPU implementer") != NULL)
+                {
+                  if (strstr(buf, "0x48") != NULL)
+                    {
+                      flag_hip09 = true;
+                      break; 
+                    }
+                }
+            }
+          fclose(f);
+        }
     }
-  if (!flag_hip09 || !flag_Om)
-    {
+  if (!flag_hip09)
       return ret;
-    }
 
   const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
   if (ai_infer_level)
-    {
-      return ret;
-    }
+    return ret;
+
   int argc_hw = 6;
   int64_t argv_hw[argc_hw] = {
     global_options.x_param_simultaneous_prefetches,

@@ -14514,14 +14514,26 @@ override_Fortran_optimize_options (struct gcc_options *opts)
   opts->x_param_flexible_seg_len = 1;
 }
 
+static void
+override_lto_option (struct gcc_options *opts)
+{
+  opts->x_flag_lto = "auto";
+  opts->x_flag_fat_lto_objects = 1;
+}
+
 /* Reset the optimize option.
    After checking the model result, this function can
    reset the more appropriate options.  */
+
 static void
 reset_machine_option (struct gcc_options *opts)
 {
+  /* Parsing mcpu=native will have extra info after, then length
+     would greater than 6.  */
   if (!(opts->x_optimize_machine)
-      || strstr (opts->x_aarch64_tune_string, "hip09") == NULL)
+      || !(strstr (opts->x_aarch64_cpu_string, "hip09") != NULL 
+	   || strstr (opts->x_aarch64_cpu_string, "tsv110") != NULL) 
+	   && (strlen (opts->x_aarch64_cpu_string) > 6))
     {
       return;
     }
@@ -14541,6 +14553,16 @@ reset_machine_option (struct gcc_options *opts)
       else if (lang_GNU_Fortran ())
 	{
 	  override_Fortran_optimize_options (opts);
+	}
+    }
+  else
+    {
+      override_lto_option (opts);
+      FILE *file = fopen ("/tmp/ai_flag.txt", "w");
+      if (file)
+        {
+	  fprintf (file, "Do the link time optimization.\n");
+	  fclose (file);
 	}
     }
 }

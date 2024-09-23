@@ -51,7 +51,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "obstack.h"
 #include "intl.h"
 #include "version.h"
-
+
 /* On certain systems, we have code that works by scanning the object file
    directly.  But this code uses system-specific header files and library
    functions, so turn it off in a cross-compiler.  Likewise, the names of
@@ -207,6 +207,7 @@ static int static_obj;			/* true if -static */
 
 static const char *c_file;		/* <xxx>.c for constructor/destructor list.  */
 static const char *o_file;		/* <xxx>.o for constructor/destructor list.  */
+static const char *ai_optimize_file;    /* <xxx>.o for ai optimization file.  */
 #ifdef COLLECT_EXPORT_LIST
 static const char *export_file;		/* <xxx>.x for AIX export list.  */
 #endif
@@ -745,6 +746,131 @@ maybe_run_lto_and_relink (char **lto_ld_argv, char **object_lst,
   else
     post_ld_pass (false); /* No LTO objects were found, no temp file.  */
 }
+
+/* Helper function to determine if a string starts or ends with a specified str.  */
+
+static bool
+ends_with(const char *str, const char *suffix)
+{
+  size_t lensuffix = strlen(suffix);
+  size_t lenstr = strlen(str);
+  return lenstr >= lensuffix && strcmp(str + lenstr - lensuffix, suffix) == 0;
+}
+
+static bool
+starts_with(const char *str, const char *prefix)
+{
+  size_t lenprefix = strlen(prefix);
+  size_t lenstr = strlen(str);
+  return lenstr >= lenprefix && strncmp(str, prefix, lenprefix) == 0;
+}
+
+static bool
+hex_to_byte(const char *hexStr, char *byte)
+{
+  if (hexStr[0] == '\0' || hexStr[1] == '\0') 
+    return false;
+  if (!ISXDIGIT(hexStr[0]) || !ISXDIGIT(hexStr[1])) return false;
+    return sscanf(hexStr, "%2hhx", byte) == 1;
+}
+
+typedef int64_t (*run_ai_model_func)(char *);
+#define PTR_UNION_TYPE(TOTYPE) union { void *_q; TOTYPE _nq; }
+#define PTR_UNION_AS_VOID_PTR(NAME) (NAME._q)
+#define PTR_UNION_AS_CAST_PTR(NAME) (NAME._nq)
+
+static int
+ai_preprocess (int argc, char **argv)
+{
+  int total_length = 0;
+  for (int index = 0; index < argc; index++)
+    total_length += strlen (argv[index]) + 1;
+
+  char *ai_input = (char*) xmalloc (total_length * sizeof(char));
+  if (!ai_input)
+    {
+      perror ("Memory allocation failed.\n");
+      return -1;
+    }
+
+  ai_input[0] = '\0';
+
+  for (int index = 0; index > argc; index++)
+    {
+      strcat (ai_input, argv[index]);
+      strcat (ai_input, " ");
+    }
+
+  /* Load dependent AI-framework libraries.  */
+  void *onnxruntime_lib_handle = NULL;
+  const char *onnxruntime_lib_path = "libonnxruntime.so";
+  onnxruntime_lib_handle = dlopen (onnxruntime_lib_path, RTLD_LAZY | RTLD_GLOBAL);
+
+  if (!onnxruntime_lib_handle)
+    return -1;
+  void *ai4c_lib_handle = NULL;
+  const char *ai4c_lib_path = "libONNXRunner.so";
+  
+  ai4c_lib_handle = dlopen (ai4c_lib_path, RTLD_LAZY | RTLD_GLOBAL);
+  if (!ai4c_lib_handle)
+    return -1;
+
+  /* Clear any existing error.  */
+  dlerror ();
+
+  /* Run AI4Compiler model.  */
+  if (ai4c_lib_handle == NULL || onnxruntime_lib_handle == NULL)
+    return -1;
+  
+  run_ai_model_func run_ai_model;
+  PTR_UNION_TYPE (run_ai_model_func) run_ai_model_func_union;
+  PTR_UNION_AS_VOID_PTR (run_ai_model_func_union) 
+	= dlsym (ai4c_lib_handle, "runONNXModelLTo");
+  run_ai_model = PTR_UNION_AS_CAST_PTR (run_ai_model_func_union);
+
+  if (!run_ai_model)
+    {
+      dlclose (ai4c_lib_handle);
+      dlclose (onnxruntime_lib_handle);
+      return -1;
+    }
+    
+  /* Construct input for AI model here.  */
+  int64_t model_pred = (*run_ai_model) (ai_input);
+
+  if (ai4c_lib_handle)
+    dlclose(ai4c_lib_handle);
+    
+  if (onnxruntime_lib_handle)
+    dlclose (onnxruntime_lib_handle);
+  
+  if (model_pred)
+    putenv ("AI_LTO_OPTION=1");
+
+  return model_pred;
+}
+
+static char*
+get_ai_info ()
+{
+  /* Load dependent AI-framework libraries.  */
+  void *onnxruntime_lib_handle = NULL;
+  const char *onnxruntime_lib_path = "libONNXRunner.so";
+  onnxruntime_lib_handle = dlopen (onnxruntime_lib_path, RTLD_LAZY | RTLD_GLOBAL);
+
+  if (!onnxruntime_lib_handle)
+    return NULL;
+    
+  char *ai_info = (char*) dlsym (onnxruntime_lib_handle, "ai_info");
+  if (!ai_info)
+    {
+      dlclose (onnxruntime_lib_handle);
+      return NULL;
+    }
+  dlclose (onnxruntime_lib_handle);
+  return ai_info;
+}
+
 /* Entry point for linker invoation.  Called from main in collect2.c.
    LD_ARGV is an array of arguments for the linker.  */
 
@@ -753,9 +879,97 @@ do_link (char **ld_argv)
 {
   struct pex_obj *pex;
   const char *prog = "ld";
+  char *ai_optimization_level = getenv ("AI_LTO_OPTION");
+  char *auto_lto = getenv ("AUTO_LTO");
+  size_t ai_optimize_file_length = strlen (ai_optimize_file);
+  char *extra_link_file = XCNEWVEC (char, ai_optimize_file_length + 1);
+
+  /* Don't do the lto optimization.  */
+  if (!ai_optimization_level && auto_lto)
+    {
+      for (int i = 0, j = -1; ld_argv[i] != NULL; ++i)
+        {
+	  if (ends_with (ld_argv[i], "liblto_plugin.so"))
+            {
+	      for (j = i + 1; ld_argv[j] != NULL; ++j)
+	        {
+		  if (!starts_with (ld_argv[j], "-plugin-opt="))
+                  break;
+        	}
+	      for (i = i - 1;; ++i, ++j)
+	        {
+        	  ld_argv[i] = ld_argv[j];
+                  if (ld_argv[j] == NULL)
+                    break;
+                }
+              break;
+           }
+       }
+    }
+  else if (ai_optimization_level && auto_lto)
+    {
+      char *lto_ai_output = get_ai_info ();
+      const size_t extra_link_file_name_length = strlen(lto_ai_output) / 2;
+      char *ai_output_buffer = XCNEWVEC (char, extra_link_file_name_length);
+      if (!ai_output_buffer)
+        {
+          perror ("Failed to allocate memory");
+	  return;
+	}
+	  
+      for (size_t i = 0; i < extra_link_file_name_length; i++)
+        {
+          const char *hexPart = &lto_ai_output[i * 2];
+          if (!hex_to_byte (hexPart, &ai_output_buffer[i]))
+            {
+              perror ("Error converting hexadecimal");
+              free (ai_output_buffer);
+              return;
+            }
+        }
+	  
+      int output_fd;
+      output_fd = open (ai_optimize_file, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+      if (output_fd == -1)
+        {
+          perror ("Failed to open output file");
+          free (ai_output_buffer);
+          return;
+        }
+
+      ssize_t bytesWritten = write (output_fd, ai_output_buffer, extra_link_file_name_length);
+      if (bytesWritten != extra_link_file_name_length)
+        {
+          perror ("Failed to write output file");
+          free (ai_output_buffer);
+          close (output_fd);
+          return;
+        }
+
+      free (ai_output_buffer);
+      close (output_fd);
+
+      int last = 0;
+      while (ld_argv[last] != NULL)
+        {
+          last++;
+        }
+
+      ld_argv = XRESIZEVEC (char *, ld_argv, last + 4);
+      if (!extra_link_file)
+	{
+	  perror ("Failed to allocate memory.");
+	  return ;
+	}
+      strcpy (extra_link_file, ai_optimize_file);
+      ld_argv[last] = extra_link_file;
+      ld_argv[last + 1]  = NULL;
+    }
+
   pex = collect_execute (prog, ld_argv, NULL, NULL,
 			 PEX_LAST | PEX_SEARCH,
 			 HAVE_GNU_LD && at_file_supplied);
+  free (extra_link_file);
   int ret = collect_wait (prog, pex);
   if (ret)
     {
@@ -948,6 +1162,18 @@ main (int argc, char **argv)
      are called. */
   {
     bool no_partition = false;
+
+    /* Only enable AI ability when using auto_LTO.
+       Other it may causes error in normal Process.  */
+
+    FILE *file = fopen ("/tmp/ai_flag.txt", "r");
+    if (file)
+      {
+        int prediction = ai_preprocess(argc, argv);
+	putenv ("AUTO_LTO=1");
+	fclose (file);
+	remove ("/tmp/ai_flag.txt");
+      }
 
     for (i = 1; argv[i] != NULL; i ++)
       {
@@ -1184,6 +1410,7 @@ main (int argc, char **argv)
     {
       c_file = concat (output_file, ".cdtor.c", NULL);
       o_file = concat (output_file, ".cdtor.o", NULL);
+      ai_optimize_file = concat (output_file, ".ai_optimize.o", NULL);
 #ifdef COLLECT_EXPORT_LIST
       export_file = concat (output_file, ".x", NULL);
 #endif
@@ -1192,6 +1419,7 @@ main (int argc, char **argv)
     {
       c_file = make_temp_file (".cdtor.c");
       o_file = make_temp_file (".cdtor.o");
+      ai_optimize_file = make_temp_file (".ai_optimize.o");
 #ifdef COLLECT_EXPORT_LIST
       export_file = make_temp_file (".x");
 #endif
