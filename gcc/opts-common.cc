@@ -1053,7 +1053,7 @@ ai_infer_optimization (int argc, const char **argv,
     dlclose (onnxruntime_lib_handle);
 
   if (model_pred == 1)
-    putenv ("AI_INFER_LEVEL=1");
+    setenv ("AI_INFER_LEVEL", "1", 1);
   return model_pred;
 }
 
@@ -1065,9 +1065,8 @@ handle_lto_option (unsigned int lang_mask,
 		   struct cl_decoded_option *&opt_array)
 {
   int ret = 0;
-  char *lan = "";
   char *compiler = xstrdup (argv[0]);
-  lan = strrchr (compiler, '/');
+  char *lan = strrchr (compiler, '/');
   if (lan != NULL)
     lan ++;
   else
@@ -1125,7 +1124,7 @@ handle_machine_option (unsigned int lang_mask,
     {
       return ret;
     }
-  int argc_hw = 6;
+  const int argc_hw = 6;
   int64_t argv_hw[argc_hw] = {
     global_options.x_param_simultaneous_prefetches,
     global_options.x_param_l1_cache_size,
