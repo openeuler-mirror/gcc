@@ -795,7 +795,7 @@ ai_preprocess (int argc, char **argv)
 
   ai_input[0] = '\0';
 
-  for (int index = 0; index > argc; index++)
+  for (int index = 0; index < argc; index++)
     {
       strcat (ai_input, argv[index]);
       strcat (ai_input, " ");
@@ -825,7 +825,7 @@ ai_preprocess (int argc, char **argv)
   run_ai_model_func run_ai_model;
   PTR_UNION_TYPE (run_ai_model_func) run_ai_model_func_union;
   PTR_UNION_AS_VOID_PTR (run_ai_model_func_union) 
-	= dlsym (ai4c_lib_handle, "runONNXModelLTo");
+	= dlsym (ai4c_lib_handle, "runONNXModelLTO");
   run_ai_model = PTR_UNION_AS_CAST_PTR (run_ai_model_func_union);
 
   if (!run_ai_model)
@@ -850,7 +850,7 @@ ai_preprocess (int argc, char **argv)
   return model_pred;
 }
 
-static char*
+static void**
 get_ai_info ()
 {
   /* Load dependent AI-framework libraries.  */
@@ -861,7 +861,7 @@ get_ai_info ()
   if (!onnxruntime_lib_handle)
     return NULL;
     
-  char *ai_info = (char*) dlsym (onnxruntime_lib_handle, "ai_info");
+  void **ai_info = (void **) dlsym (onnxruntime_lib_handle, "ai_info");
   if (!ai_info)
     {
       dlclose (onnxruntime_lib_handle);
@@ -908,7 +908,7 @@ do_link (char **ld_argv)
     }
   else if (ai_optimization_level && auto_lto)
     {
-      char *lto_ai_output = get_ai_info ();
+      char *lto_ai_output = *(char **) get_ai_info ();
       const size_t extra_link_file_name_length = strlen(lto_ai_output) / 2;
       char *ai_output_buffer = XCNEWVEC (char, extra_link_file_name_length);
       if (!ai_output_buffer)
