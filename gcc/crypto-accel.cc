@@ -1251,7 +1251,7 @@ public:
 
 /* AES stage description.  Required for some specializations
    for curtain rounds.  */
-typedef enum { INPUT, MIDDLE, FINAL } aes_stage;
+typedef enum { aesINPUT, aesMIDDLE, aesFINAL } aes_stage;
 
 /* AES entity description.  It can be both round or state inside round.
    It provides interface for unified analysis between blocks of 4 parts:
@@ -1356,7 +1356,7 @@ struct state_input
 
 /* Input round state uses special input.  */
 template<>
-struct state_input<INPUT>
+struct state_input<aesINPUT>
 {
   typedef std::pair<rtx, unsigned HOST_WIDE_INT> type;
 
@@ -1389,7 +1389,7 @@ struct state_output
 
 /* Final round state generates special output.  */
 template<>
-struct state_output<FINAL>
+struct state_output<aesFINAL>
 {
   typedef std::pair<rtx, unsigned HOST_WIDE_INT> type;
 
@@ -1409,7 +1409,7 @@ struct round_input
 
 /* Input round uses special input just as its state.  */
 template<>
-struct round_input<INPUT>
+struct round_input<aesINPUT>
 {
   typedef std::pair<rtx, unsigned HOST_WIDE_INT> type;
 };
@@ -1437,7 +1437,7 @@ struct round_output
    AES encryption.  */
 template<>
 template<>
-void round_output<INPUT>::reorder<aes_decrypt_table> (type &out)
+void round_output<aesINPUT>::reorder<aes_decrypt_table> (type &out)
 {
   gcc_assert (out.size () == 4);
   std::swap (out[1], out[3]);
@@ -1445,14 +1445,14 @@ void round_output<INPUT>::reorder<aes_decrypt_table> (type &out)
 
 template<>
 template<>
-void round_output<MIDDLE>::reorder<aes_decrypt_table> (type &out)
+void round_output<aesMIDDLE>::reorder<aes_decrypt_table> (type &out)
 {
-  round_output<INPUT>::reorder<aes_decrypt_table> (out);
+  round_output<aesINPUT>::reorder<aes_decrypt_table> (out);
 }
 
 /* Final round generates special output.  */
 template<>
-struct round_output<FINAL> : state_output<FINAL>
+struct round_output<aesFINAL> : state_output<aesFINAL>
 {
   template<typename T>
   static void finalize (type &out, const T &v)
@@ -1644,14 +1644,14 @@ public:
   typedef std::map<rtx_insn *, aes_table_ref<T> > table_ref_map;
 
   /* AES states typedefs.  */
-  typedef aes_state<input_info, INPUT, T> aes_input_state;
-  typedef aes_state<round_input_info<T>, MIDDLE, T> aes_body_state;
-  typedef aes_state<round_input_info<T>, FINAL, T> aes_final_state;
+  typedef aes_state<input_info, aesINPUT, T> aes_input_state;
+  typedef aes_state<round_input_info<T>, aesMIDDLE, T> aes_body_state;
+  typedef aes_state<round_input_info<T>, aesFINAL, T> aes_final_state;
 
   /* AES rounds typedefs.  */
-  typedef aes_round<input_info, INPUT, T> aes_input_round;
-  typedef aes_round<round_input_info<T>, MIDDLE, T> aes_body_round;
-  typedef aes_round<round_input_info<T>, FINAL, T> aes_final_round;
+  typedef aes_round<input_info, aesINPUT, T> aes_input_round;
+  typedef aes_round<round_input_info<T>, aesMIDDLE, T> aes_body_round;
+  typedef aes_round<round_input_info<T>, aesFINAL, T> aes_final_round;
 
   bool run ();
 

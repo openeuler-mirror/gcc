@@ -18598,6 +18598,9 @@ if test "$GCC" = yes; then
   # and add multilib dir if necessary.
   lt_tmp_lt_search_path_spec=
   lt_multi_os_dir=`$CC $CPPFLAGS $CFLAGS $LDFLAGS -print-multi-os-directory 2>/dev/null`
+  if [ -z "$lt_multi_os_dir" ];then
+    lt_multi_os_dir=../lib64
+  fi
   for lt_sys_path in $lt_search_path_spec; do
     if test -d "$lt_sys_path/$lt_multi_os_dir"; then
       lt_tmp_lt_search_path_spec="$lt_tmp_lt_search_path_spec $lt_sys_path/$lt_multi_os_dir"

@@ -72,6 +72,9 @@ libsuffix=
 if test "$GXX" = yes; then
   libsuffix=`$CXX -print-multi-os-directory`
 fi
+if [ -z "$libsuffix" ];then
+  libsuffix=../lib64
+fi
 AC_SUBST(libsuffix)
 
 dnl Test for -lsocket and -lnsl.  Copied from libgo/configure.ac.
