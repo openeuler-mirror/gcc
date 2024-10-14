@@ -2453,6 +2453,9 @@ riscv*-*-linux*)
 	xyes) tmake_file="${tmake_file} riscv/t-linux-multilib" ;;
 	*) echo "Unknown value for enable_multilib"; exit 1
 	esac
+	case "x${target_vendor}" in
+	xopenEuler) tmake_file="${tmake_file} riscv/t-openEuler"
+	esac
 	tmake_file="${tmake_file} riscv/t-riscv riscv/t-linux"
 	gnu_ld=yes
 	gas=yes
