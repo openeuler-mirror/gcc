@@ -3853,7 +3853,7 @@ ovce_extract_ops (tree var, gassign **rets, bool *reti, tree *type,
     return ERROR_MARK;
 
   gassign *assign = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (cond));
-  if (assign == NULL
+  if (stmt == NULL
       || TREE_CODE_CLASS (gimple_assign_rhs_code (assign)) != tcc_comparison)
     return ERROR_MARK;
 
