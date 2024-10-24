@@ -3266,7 +3266,7 @@ vect_get_data_ptr_increment (dr_vec_info *dr_info, tree aggr_type,
   return iv_step;
 }
 
-/* Check and perform vectorization of BUILT_IN_BSWAP{16,32,64,128}.  */
+/* Check and perform vectorization of BUILT_IN_BSWAP{16,32,64}.  */
 
 static bool
 vectorizable_bswap (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
@@ -3635,8 +3635,7 @@ vectorizable_call (stmt_vec_info stmt_info, gimple_stmt_iterator *gsi,
       else if (modifier == NONE
 	       && (gimple_call_builtin_p (stmt, BUILT_IN_BSWAP16)
 		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP32)
-		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP64)
-		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP128)))
+		   || gimple_call_builtin_p (stmt, BUILT_IN_BSWAP64)))
 	return vectorizable_bswap (stmt_info, gsi, vec_stmt, slp_node,
 				   vectype_in, cost_vec);
       else
