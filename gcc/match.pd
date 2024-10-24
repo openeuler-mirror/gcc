@@ -3393,8 +3393,7 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
     (if (integer_onep (@1))
      (convert (convert:boolean_type_node @0)))
     /* a ? powerof2cst : 0 -> a << (log2(powerof2cst)) */
-    (if (INTEGRAL_TYPE_P (type) && TYPE_UNSIGNED (TREE_TYPE (@1))
-         && integer_pow2p (@1))
+    (if (INTEGRAL_TYPE_P (type) && integer_pow2p (@1))
      (with {
        tree shift = build_int_cst (integer_type_node, tree_log2 (@1));
       }
