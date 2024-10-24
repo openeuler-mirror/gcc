@@ -66,9 +66,9 @@ static bool abs_replacement (basic_block, basic_block,
 			     edge, edge, gphi *, tree, tree);
 static bool spaceship_replacement (basic_block, basic_block,
 				   edge, edge, gphi *, tree, tree);
-static bool cond_removal_in_builtin_zero_pattern (basic_block, basic_block,
-						  edge, edge, gphi *,
-						  tree, tree);
+static bool cond_removal_in_popcount_clz_ctz_pattern (basic_block, basic_block,
+						      edge, edge, gphi *,
+						      tree, tree);
 static bool cond_store_replacement (basic_block, basic_block, edge, edge,
 				    hash_set<tree> *);
 static bool cond_if_else_store_replacement (basic_block, basic_block, basic_block);
@@ -355,8 +355,9 @@ tree_ssa_phiopt_worker (bool do_store_elim, bool do_hoist_loads, bool early_p)
 	  else if (abs_replacement (bb, bb1, e1, e2, phi, arg0, arg1))
 	    cfgchanged = true;
 	  else if (!early_p
-		   && cond_removal_in_builtin_zero_pattern (bb, bb1, e1, e2,
-							    phi, arg0, arg1))
+		   && cond_removal_in_popcount_clz_ctz_pattern (bb, bb1, e1,
+								e2, phi, arg0,
+								arg1))
 	    cfgchanged = true;
 	  else if (minmax_replacement (bb, bb1, e1, e2, phi, arg0, arg1))
 	    cfgchanged = true;
@@ -2203,8 +2204,7 @@ spaceship_replacement (basic_block cond_bb, basic_block middle_bb,
   return true;
 }
 
-/* Optimize x ? __builtin_fun (x) : C, where C is __builtin_fun (0).
-   Convert
+/* Convert
 
    <bb 2>
    if (b_4(D) != 0)
@@ -2236,10 +2236,10 @@ spaceship_replacement (basic_block cond_bb, basic_block middle_bb,
    instead of 0 above it uses the value from that macro.  */
 
 static bool
-cond_removal_in_builtin_zero_pattern (basic_block cond_bb,
-				      basic_block middle_bb,
-				      edge e1, edge e2, gphi *phi,
-				      tree arg0, tree arg1)
+cond_removal_in_popcount_clz_ctz_pattern (basic_block cond_bb,
+					  basic_block middle_bb,
+					  edge e1, edge e2, gphi *phi,
+					  tree arg0, tree arg1)
 {
   gimple *cond;
   gimple_stmt_iterator gsi, gsi_from;
@@ -2287,12 +2287,6 @@ cond_removal_in_builtin_zero_pattern (basic_block cond_bb,
   int val = 0;
   switch (cfn)
     {
-    case CFN_BUILT_IN_BSWAP16:
-    case CFN_BUILT_IN_BSWAP32:
-    case CFN_BUILT_IN_BSWAP64:
-    case CFN_BUILT_IN_BSWAP128:
-    CASE_CFN_FFS:
-    CASE_CFN_PARITY:
     CASE_CFN_POPCOUNT:
       break;
     CASE_CFN_CLZ:
@@ -2321,15 +2315,6 @@ cond_removal_in_builtin_zero_pattern (basic_block cond_bb,
 	    }
 	}
       return false;
-    case BUILT_IN_CLRSB:
-      val = TYPE_PRECISION (integer_type_node) - 1;
-      break;
-    case BUILT_IN_CLRSBL:
-      val = TYPE_PRECISION (long_integer_type_node) - 1;
-      break;
-    case BUILT_IN_CLRSBLL:
-      val = TYPE_PRECISION (long_long_integer_type_node) - 1;
-      break;
     default:
       return false;
     }
