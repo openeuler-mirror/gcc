@@ -2121,10 +2121,6 @@ fmerge-debug-strings
 Common Report Var(flag_merge_debug_strings) Init(1)
 Attempt to merge identical debug strings across compilation units.
 
-fmerge-mull
-Common Report Var(flag_merge_mull) Init(0) Optimization
-Attempt to merge series instructions into mul.
-
 fmessage-length=
 Common RejectNegative Joined UInteger
 -fmessage-length=<number>	Limit diagnostics to <number> characters per line.  0 suppresses line-wrapping.
