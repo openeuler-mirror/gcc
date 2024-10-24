@@ -3,7 +3,7 @@
    May be the same as uninit-1.c.  */
 
 /* { dg-do compile } */
-/* { dg-options "-O -ftree-fold-phiopt -Wuninitialized" } */
+/* { dg-options "-O -Wuninitialized" } */
 
 #include <limits.h>
 

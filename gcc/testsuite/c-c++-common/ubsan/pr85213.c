@@ -1,6 +1,6 @@
 /* PR sanitizer/85213 */
 /* { dg-do compile } */
-/* { dg-options "-O1 -ftree-fold-phiopt -fsanitize=undefined -fcompare-debug" } */
+/* { dg-options "-O1 -fsanitize=undefined -fcompare-debug" } */
 
 int
 foo (int x)
