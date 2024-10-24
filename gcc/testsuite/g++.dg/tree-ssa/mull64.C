@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -Wno-psabi -fdump-tree-forwprop1-details -fdump-tree-forwprop4-details" } */
+/* { dg-options "-O2 -Wno-psabi -fmerge-mull -fdump-tree-forwprop1-details" } */
 
 #  define BN_BITS4        32
 #  define BN_MASK2        (0xffffffffffffffffL)
@@ -31,5 +31,4 @@ void mul64(unsigned long in0, unsigned long in1,
     retHi  = m11;
 }
 
-/* { dg-final { scan-tree-dump "gimple_simplified to" "forwprop1" } } */
-/* { dg-final { scan-tree-dump-times "gimple_simplified to" 1 "forwprop4" } } */
+/* { dg-final { scan-tree-dump "gimple_simplified to low_18 = in0_4" "forwprop1" } } */
