@@ -2849,10 +2849,6 @@ ftree-store-ccp
 Common Ignore
 Does nothing.  Preserved for backward compatibility.
 
-ftree-fold-phiopt
-Common Report Var(flag_fold_phiopt) Init(0) Optimization
-Attempt to simply the phi node with ssa form.
-
 ftree-ch
 Common Report Var(flag_tree_ch) Optimization
 Enable loop header copying on trees.

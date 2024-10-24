@@ -838,9 +838,6 @@ match_simplify_replacement (basic_block cond_bb, basic_block middle_bb,
   tree result;
   gimple *stmt_to_move = NULL;
 
-  if (!flag_fold_phiopt)
-    return false;
-
   /* Special case A ? B : B as this will always simplify to B. */
   if (operand_equal_for_phi_arg_p (arg0, arg1))
     return false;
