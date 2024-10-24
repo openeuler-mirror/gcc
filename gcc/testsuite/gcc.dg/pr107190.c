@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fmerge-mull -fexpensive-optimizations -fdump-tree-phiopt2-details" } */
+/* { dg-options "-O2 -fexpensive-optimizations -fdump-tree-phiopt2-details" } */
 
 #  define BN_BITS4        32
 #  define BN_MASK2        (0xffffffffffffffffL)
