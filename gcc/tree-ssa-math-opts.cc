@@ -4938,8 +4938,13 @@ convert_double_size_mul (gimple_stmt_iterator *gsi, gimple *stmt)
 
   /* Find the mult low part getter.  */
   FOR_EACH_IMM_USE_STMT (use_stmt, use_iter, match[3])
-    if (gimple_assign_rhs_code (use_stmt) == REALPART_EXPR)
-      break;
+    {
+      if (!is_gimple_assign (use_stmt))
+	continue;
+
+      if (gimple_assign_rhs_code (use_stmt) == REALPART_EXPR)
+	break;
+    }
 
   /* Create high and low (if needed) parts extractors.  */
   /* Low part.  */
