@@ -4276,7 +4276,7 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
 )
 
 (if (flag_if_conversion_gimple)
- (for simple_op (plus minus bit_and bit_ior bit_xor)
+ (for simple_op (plus minus bit_ior bit_xor)
   (simplify
    (cond @0 (simple_op @1 INTEGER_CST@2) @1)
    (switch
