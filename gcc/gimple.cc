@@ -2998,6 +2998,36 @@ nonbarrier_call_p (gimple *call)
   return false;
 }
 
+static inline bool
+will_return_builtin_p (gimple *call)
+{
+  if (!flag_builtin_will_return)
+    return false;
+
+  if (!gimple_call_builtin_p (call, BUILT_IN_NORMAL))
+    return false;
+
+  switch (DECL_FUNCTION_CODE (gimple_call_fndecl (call)))
+    {
+    case BUILT_IN_PREFETCH:
+      return true;
+    default:
+      return false;
+    }
+}
+
+bool
+will_return_call_p (gimple *call, function *fun)
+{
+  int flags = gimple_call_flags (call);
+  if (!(flags & (ECF_CONST|ECF_PURE))
+      || (flags & ECF_LOOPING_CONST_OR_PURE)
+      || stmt_can_throw_external (fun, call))
+    return will_return_builtin_p (call);
+
+  return true;
+}
+
 /* Callback for walk_stmt_load_store_ops.
  
    Return TRUE if OP will dereference the tree stored in DATA, FALSE

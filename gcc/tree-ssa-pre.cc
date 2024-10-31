@@ -3988,9 +3988,7 @@ compute_avail (function *fun)
 		 that forbids hoisting possibly trapping expressions
 		 before it.  */
 	      int flags = gimple_call_flags (stmt);
-	      if (!(flags & (ECF_CONST|ECF_PURE))
-		  || (flags & ECF_LOOPING_CONST_OR_PURE)
-		  || stmt_can_throw_external (fun, stmt))
+	      if (!will_return_call_p (stmt, fun))
 		/* Defer setting of BB_MAY_NOTRETURN to avoid it
 		   influencing the processing of the call itself.  */
 		set_bb_may_notreturn = true;
