@@ -1628,6 +1628,7 @@ extern bool gimple_asm_clobbers_memory_p (const gasm *);
 extern void dump_decl_set (FILE *, bitmap);
 extern bool nonfreeing_call_p (gimple *);
 extern bool nonbarrier_call_p (gimple *);
+extern bool will_return_call_p (gimple *, function *);
 extern bool infer_nonnull_range (gimple *, tree);
 extern bool infer_nonnull_range_by_dereference (gimple *, tree);
 extern bool infer_nonnull_range_by_attribute (gimple *, tree);
