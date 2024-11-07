@@ -224,6 +224,10 @@ DEF_TUNE (X86_TUNE_FOUR_JUMP_LIMIT, "four_jump_limit",
           m_PPRO | m_P4_NOCONA | m_BONNELL | m_SILVERMONT | m_KNL | m_KNM
 	  | m_GOLDMONT | m_GOLDMONT_PLUS | m_INTEL | m_ATHLON_K8 | m_AMDFAM10)
 
+/* X86_TUNE_ALIGN_TIGHT_LOOPS: if false, tight loops are not aligned.  */
+DEF_TUNE (X86_TUNE_ALIGN_TIGHT_LOOPS, "align_tight_loops",
+	 ~(m_ZHAOXIN | m_CASCADELAKE | m_SKYLAKE_AVX512))
+
 /*****************************************************************************/
 /* Integer instruction selection tuning                                      */
 /*****************************************************************************/
