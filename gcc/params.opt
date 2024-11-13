@@ -789,6 +789,10 @@ Maximum number of VALUEs handled during a single find_base_term call.
 Common Joined UInteger Var(param_max_vrp_switch_assertions) Init(10) Param Optimization
 Maximum number of assertions to add along the default edge of a switch statement during VRP.
 
+-param=merge-assign-stmts-ifcombine=
+Common Joined UInteger Var(param_merge_assign_stmts_ifcombine) Init(0) IntegerRange(0, 1) Param Optimization
+Whether bb's with cheap gimple_assign stmts should be merged in the ifcombine pass.
+
 -param=min-crossjump-insns=
 Common Joined UInteger Var(param_min_crossjump_insns) Init(5) IntegerRange(1, 65536) Param Optimization
 The minimum number of matching instructions to consider for crossjumping.

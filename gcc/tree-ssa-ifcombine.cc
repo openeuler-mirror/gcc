@@ -110,6 +110,18 @@ recognize_if_then_else (basic_block cond_bb,
   return true;
 }
 
+/* Verify if gimple insn cheap for param=merge-assign-stmts-ifcombine
+   optimization.  */
+
+bool is_insn_cheap (enum tree_code t)
+{
+  static enum tree_code cheap_insns[] = {MULT_EXPR, PLUS_EXPR, MINUS_EXPR};
+  for (int i = 0; i < sizeof (cheap_insns)/sizeof (enum tree_code); i++)
+    if (t == cheap_insns[i])
+      return 1;
+  return 0;
+}
+
 /* Verify if the basic block BB does not have side-effects.  Return
    true in this case, else false.  */
 
@@ -572,9 +584,38 @@ ifcombine_ifandif (basic_block inner_cond_bb, bool inner_inv,
 	      = param_logical_op_non_short_circuit;
 	  if (!logical_op_non_short_circuit || sanitize_coverage_p ())
 	    return false;
-	  /* Only do this optimization if the inner bb contains only the conditional. */
-	  if (!gsi_one_before_end_p (gsi_start_nondebug_after_labels_bb (inner_cond_bb)))
-	    return false;
+	  if (param_merge_assign_stmts_ifcombine)
+	    {
+	      int number_cheap_insns = 0;
+	      int number_conds = 0;
+	      for (auto i = gsi_start_nondebug_after_labels_bb
+	           (outer_cond_bb); !gsi_end_p (i); gsi_next_nondebug (&i))
+	        if (gimple_code (gsi_stmt (i)) == GIMPLE_ASSIGN
+	            && is_insn_cheap (gimple_assign_rhs_code (gsi_stmt (i))))
+	          number_cheap_insns++;
+	        else if (gimple_code (gsi_stmt (i)) == GIMPLE_COND)
+	          number_conds++;
+	      for (auto i = gsi_start_nondebug_after_labels_bb
+	           (inner_cond_bb); !gsi_end_p (i); gsi_next_nondebug (&i))
+	        if (gimple_code (gsi_stmt (i)) == GIMPLE_ASSIGN
+	            && is_insn_cheap (gimple_assign_rhs_code (gsi_stmt (i))))
+	          number_cheap_insns++;
+	        else if (gimple_code (gsi_stmt (i)) == GIMPLE_COND)
+	          number_conds++;
+	      if (!(number_cheap_insns == 1 && number_conds == 2)
+	          && !gsi_one_before_end_p (gsi_start_nondebug_after_labels_bb
+	          (inner_cond_bb)))
+	        return false;
+	    }
+	  else
+	    {
+	    /* Only do this optimization if the inner bb contains
+	    only the conditional.  */
+	      if (!gsi_one_before_end_p (gsi_start_nondebug_after_labels_bb
+	          (inner_cond_bb)))
+	        return false;
+	    }
+
 	  t1 = fold_build2_loc (gimple_location (inner_cond),
 				inner_cond_code,
 				boolean_type_node,
