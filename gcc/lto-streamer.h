@@ -943,12 +943,18 @@ void cl_target_option_stream_in (class data_in *,
 				 struct bitpack_d *,
 				 struct cl_target_option *);
 
+void cl_target_option_stream_in_prev (class data_in *,
+				 struct bitpack_d *,
+				 struct cl_target_option *);
+
 void cl_optimization_stream_out (struct output_block *,
 				 struct bitpack_d *, struct cl_optimization *);
 
 void cl_optimization_stream_in (class data_in *,
 				struct bitpack_d *, struct cl_optimization *);
 
+void cl_optimization_stream_in_prev (class data_in *,
+				struct bitpack_d *, struct cl_optimization *);
 
 
 /* In lto-opts.cc.  */

@@ -174,6 +174,8 @@ print "  unsigned HOST_WIDE_INT mask = 0;";
 j = 0;
 k = 0;
 for (i = 0; i < n_opt_other; i++) {
+	var_opt_other_j[var_opt_other[i]] = j;
+	var_opt_other_k[var_opt_other[i]] = k;
 	print "  if (opts_set->x_" var_opt_other[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -185,6 +187,8 @@ for (i = 0; i < n_opt_other; i++) {
 }
 
 for (i = 0; i < n_opt_int; i++) {
+	var_opt_int_j[var_opt_int[i]] = j;
+	var_opt_int_k[var_opt_int[i]] = k;
 	print "  if (opts_set->x_" var_opt_int[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -196,6 +200,8 @@ for (i = 0; i < n_opt_int; i++) {
 }
 
 for (i = 0; i < n_opt_enum; i++) {
+	var_opt_enum_j[var_opt_enum[i]] = j;
+	var_opt_enum_k[var_opt_enum[i]] = k;
 	print "  if (opts_set->x_" var_opt_enum[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -207,6 +213,8 @@ for (i = 0; i < n_opt_enum; i++) {
 }
 
 for (i = 0; i < n_opt_short; i++) {
+	var_opt_short_j[var_opt_short[i]] = j;
+	var_opt_short_k[var_opt_short[i]] = k;
 	print "  if (opts_set->x_" var_opt_short[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -218,6 +226,8 @@ for (i = 0; i < n_opt_short; i++) {
 }
 
 for (i = 0; i < n_opt_char; i++) {
+	var_opt_char_j[var_opt_char[i]] = j;
+	var_opt_char_k[var_opt_char[i]] = k;
 	print "  if (opts_set->x_" var_opt_char[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -229,6 +239,8 @@ for (i = 0; i < n_opt_char; i++) {
 }
 
 for (i = 0; i < n_opt_string; i++) {
+	var_opt_string_j[var_opt_string[i]] = j;
+	var_opt_string_k[var_opt_string[i]] = k;
 	print "  if (opts_set->x_" var_opt_string[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -604,6 +616,8 @@ for (i = 0; i < n_extra_target_vars; i++) {
 	if (j == 0 && k == 0) {
 		print "  unsigned HOST_WIDE_INT mask = 0;";
 	}
+	extra_target_vars_j[extra_target_vars[i]] = j;
+	extra_target_vars_k[extra_target_vars[i]] = k;
 	print "  if (opts_set->x_" extra_target_vars[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -622,6 +636,8 @@ for (i = 0; i < n_target_other; i++) {
 	if (j == 0 && k == 0) {
 		print "  unsigned HOST_WIDE_INT mask = 0;";
 	}
+	var_target_other_j[var_target_other[i]] = j;
+	var_target_other_k[var_target_other[i]] = k;
 	print "  if (opts_set->x_" var_target_other[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -636,6 +652,8 @@ for (i = 0; i < n_target_enum; i++) {
 	if (j == 0 && k == 0) {
 		print "  unsigned HOST_WIDE_INT mask = 0;";
 	}
+	var_target_enum_j[var_target_enum[i]] = j;
+	var_target_enum_k[var_target_enum[i]] = k;
 	print "  if (opts_set->x_" var_target_enum[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -654,6 +672,8 @@ for (i = 0; i < n_target_int; i++) {
 	if (j == 0 && k == 0) {
 		print "  unsigned HOST_WIDE_INT mask = 0;";
 	}
+	var_target_int_j[var_target_int[i]] = j;
+	var_target_int_k[var_target_int[i]] = k;
 	print "  if (opts_set->x_" var_target_int[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -668,6 +688,8 @@ for (i = 0; i < n_target_short; i++) {
 	if (j == 0 && k == 0) {
 		print "  unsigned HOST_WIDE_INT mask = 0;";
 	}
+	var_target_short_j[var_target_short[i]] = j;
+	var_target_short_k[var_target_short[i]] = k;
 	print "  if (opts_set->x_" var_target_short[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -682,6 +704,8 @@ for (i = 0; i < n_target_char; i++) {
 	if (j == 0 && k == 0) {
 		print "  unsigned HOST_WIDE_INT mask = 0;";
 	}
+	var_target_char_j[var_target_char[i]] = j;
+	var_target_char_k[var_target_char[i]] = k;
 	print "  if (opts_set->x_" var_target_char[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -696,6 +720,8 @@ for (i = 0; i < n_target_string; i++) {
 	if (j == 0 && k == 0) {
 		print "  unsigned HOST_WIDE_INT mask = 0;";
 	}
+	var_target_string_j[var_target_string[i]] = j;
+	var_target_string_k[var_target_string[i]] = k;
 	print "  if (opts_set->x_" var_target_string[i] ") mask |= HOST_WIDE_INT_1U << " j ";";
 	j++;
 	if (j == 64) {
@@ -1038,6 +1064,7 @@ for (i = 0; i < n_target_save; i++) {
 	sub(" *" name "$", "", type)
 	if (target_save_decl[i] ~ "^const char \\*+[_" alnum "]+$") {
 		var_target_str[n_target_str++] = name;
+		var_target_str_set[name] = 1;
 		string_options_names[name]++
 	}
 	else {
@@ -1048,12 +1075,14 @@ for (i = 0; i < n_target_save; i++) {
 			sub("\\[.+", "", name)
 			sub(" [^ ]+$", "", type)
 			var_target_array[n_target_array] = name
+			var_target_array_set[name] = 1
 			var_target_array_type[n_target_array] = type
 			var_target_array_size[n_target_array++] = size
 		}
 		else {
 			var_target_val_type[n_target_val] = type;
 			var_target_val[n_target_val++] = name;
+			var_target_val_set[name] = 1;
 		}
 	}
 }
@@ -1069,17 +1098,21 @@ if (have_save) {
 
 			var_list_seen[name]++;
 			otype = var_type_struct(flags[i])
-			if (otype ~ "^const char \\**$")
+			if (otype ~ "^const char \\**$") {
 				var_target_str[n_target_str++] = "x_" name;
+				var_target_str_set["x_" name] = 1;
+			}
 			else {
 				var_target_val_type[n_target_val] = otype;
 				var_target_val[n_target_val++] = "x_" name;
+				var_target_val_set["x_" name];
 			}
 		}
 	}
 } else {
 	var_target_val_type[n_target_val] = "int";
 	var_target_val[n_target_val++] = "x_target_flags";
+	var_target_val_set["x_target_flags"] = 1;
 }
 
 for (i = 0; i < n_target_str; i++) {
@@ -1253,6 +1286,224 @@ for (i = 0; i < n_target_int; i++) {
 
 print "}";
 
+print "";
+print "/* Stream in target options  */";
+print "void";
+print "cl_target_option_stream_in_prev (struct data_in *data_in ATTRIBUTE_UNUSED,";
+print "                                 struct bitpack_d *bp ATTRIBUTE_UNUSED,";
+print "                                 struct cl_target_option *ptr ATTRIBUTE_UNUSED)";
+print "{";
+if ("x_aarch64_branch_protection_string" in var_target_str_set) {
+  print "  ptr->x_aarch64_branch_protection_string = bp_unpack_string (data_in, bp);"
+  print "  if (ptr->x_aarch64_branch_protection_string)"
+  print "  ptr->x_aarch64_branch_protection_string = xstrdup (ptr->x_aarch64_branch_protection_string);"
+}
+else {
+  print "  bp_unpack_string (data_in, bp);"
+}
+if ("x_aarch64_override_tune_string" in var_target_str_set) {
+  print "  ptr->x_aarch64_override_tune_string = bp_unpack_string (data_in, bp);"
+  print "  if (ptr->x_aarch64_override_tune_string)"
+  print "  ptr->x_aarch64_override_tune_string = xstrdup (ptr->x_aarch64_override_tune_string);"
+}
+else {
+  print "  bp_unpack_string (data_in, bp);"
+}
+if ("x_aarch64_asm_isa_flags" in var_target_val_set) {
+  print "  ptr->x_aarch64_asm_isa_flags = (aarch64_feature_flags) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_isa_flags" in var_target_val_set) {
+  print "  ptr->x_aarch64_isa_flags = (aarch64_feature_flags) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_selected_arch" in var_target_val_set) {
+  print "  ptr->x_selected_arch = (enum aarch64_arch) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_ra_sign_key" in var_target_val_set) {
+  print "  ptr->x_aarch64_ra_sign_key = (enum aarch64_key_type) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_selected_tune" in var_target_val_set) {
+  print "  ptr->x_selected_tune = (enum aarch64_processor) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_stack_protector_guard_offset" in var_target_val_set) {
+  print "  ptr->x_aarch64_stack_protector_guard_offset = (long) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_enable_bti" in var_target_val_set) {
+  print "  ptr->x_aarch64_enable_bti = (unsigned) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_cmodel_var" in var_target_val_set) {
+  print "  ptr->x_aarch64_cmodel_var = (enum aarch64_code_model ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_fix_a53_err835769" in var_target_val_set) {
+  print "  ptr->x_aarch64_fix_a53_err835769 = (signed char ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_fix_a53_err843419" in var_target_val_set) {
+  print "  ptr->x_aarch64_fix_a53_err843419 = (signed char ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_target_flags" in var_target_val_set) {
+  print "  ptr->x_target_flags = (/* - */ int ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_flag_omit_leaf_frame_pointer" in var_target_val_set) {
+  print "  ptr->x_flag_omit_leaf_frame_pointer = (signed char ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_flag_outline_atomics" in var_target_val_set) {
+  print "  ptr->x_aarch64_flag_outline_atomics = (signed char ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_pcrelative_literal_loads" in var_target_val_set) {
+  print "  ptr->x_pcrelative_literal_loads = (signed char ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_ra_sign_scope" in var_target_val_set) {
+  print "  ptr->x_aarch64_ra_sign_scope = (enum aarch64_function_type ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+if ("x_aarch64_tls_dialect" in var_target_val_set) {
+  print "  ptr->x_aarch64_tls_dialect = (enum aarch64_tls_type ) bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+print "  unsigned HOST_WIDE_INT explicit_mask_prev[1];"
+print "  for (size_t i = 0; i < 1; i++)"
+print "    explicit_mask_prev[i] = bp_unpack_value (bp, 64);"
+print "  for (size_t i = 0; i < sizeof (ptr->explicit_mask) / sizeof (ptr->explicit_mask[0]); i++)"
+print "    ptr->explicit_mask[i] = 0;"
+if ("aarch64_asm_isa_flags" in extra_target_vars_k) {
+  k = extra_target_vars_k["aarch64_asm_isa_flags"]
+  j = extra_target_vars_j["aarch64_asm_isa_flags"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_isa_flags" in extra_target_vars_k) {
+  k = extra_target_vars_k["aarch64_isa_flags"]
+  j = extra_target_vars_j["aarch64_isa_flags"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("selected_arch" in extra_target_vars_k) {
+  k = extra_target_vars_k["selected_arch"]
+  j = extra_target_vars_j["selected_arch"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_ra_sign_key" in extra_target_vars_k) {
+  k = extra_target_vars_k["aarch64_ra_sign_key"]
+  j = extra_target_vars_j["aarch64_ra_sign_key"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("selected_tune" in extra_target_vars_k) {
+  k = extra_target_vars_k["selected_tune"]
+  j = extra_target_vars_j["selected_tune"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_stack_protector_guard_offset" in extra_target_vars_k) {
+  k = extra_target_vars_k["aarch64_stack_protector_guard_offset"]
+  j = extra_target_vars_j["aarch64_stack_protector_guard_offset"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_enable_bti" in extra_target_vars_k) {
+  k = extra_target_vars_k["aarch64_enable_bti"]
+  j = extra_target_vars_j["aarch64_enable_bti"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_cmodel_var" in var_target_enum_k) {
+  k = var_target_enum_k["aarch64_cmodel_var"]
+  j = var_target_enum_j["aarch64_cmodel_var"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_ra_sign_scope" in var_target_enum_k) {
+  k = var_target_enum_k["aarch64_ra_sign_scope"]
+  j = var_target_enum_j["aarch64_ra_sign_scope"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_tls_dialect" in var_target_enum_k) {
+  k = var_target_enum_k["aarch64_tls_dialect"]
+  j = var_target_enum_j["aarch64_tls_dialect"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_fix_a53_err835769" in var_target_char_k) {
+  k = var_target_char_k["aarch64_fix_a53_err835769"]
+  j = var_target_char_j["aarch64_fix_a53_err835769"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_fix_a53_err843419" in var_target_char_k) {
+  k = var_target_char_k["aarch64_fix_a53_err843419"]
+  j = var_target_char_j["aarch64_fix_a53_err843419"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_omit_leaf_frame_pointer" in var_target_char_k) {
+  k = var_target_char_k["flag_omit_leaf_frame_pointer"]
+  j = var_target_char_j["flag_omit_leaf_frame_pointer"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_flag_outline_atomics" in var_target_char_k) {
+  k = var_target_char_k["aarch64_flag_outline_atomics"]
+  j = var_target_char_j["aarch64_flag_outline_atomics"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("pcrelative_literal_loads" in var_target_char_k) {
+  k = var_target_char_k["pcrelative_literal_loads"]
+  j = var_target_char_j["pcrelative_literal_loads"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_branch_protection_string" in var_target_string_k) {
+  k = var_target_string_k["aarch64_branch_protection_string"]
+  j = var_target_string_j["aarch64_branch_protection_string"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("aarch64_override_tune_string" in var_target_string_k) {
+  k = var_target_string_k["aarch64_override_tune_string"]
+  j = var_target_string_j["aarch64_override_tune_string"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("target_flags" in var_target_explicit_mask) {
+  print "  ptr->explicit_mask_target_flags = bp_unpack_value (bp, 64);"
+}
+else {
+  print "  bp_unpack_value (bp, 64);"
+}
+print "}";
+print "";
+
 print "/* free heap memory used by target options  */";
 print "void";
 print "cl_target_option_free (struct cl_target_option *ptr ATTRIBUTE_UNUSED)";
@@ -1266,15 +1517,19 @@ print "}";
 
 n_opt_val = 4;
 var_opt_val[0] = "x_optimize"
+var_opt_val_set["x_optimize"] = 1
 var_opt_val_type[0] = "char "
 var_opt_hash[0] = 1;
 var_opt_val[1] = "x_optimize_size"
+var_opt_val_set["x_optimize_size"] = 1
 var_opt_val_type[1] = "char "
 var_opt_hash[1] = 1;
 var_opt_val[2] = "x_optimize_debug"
+var_opt_val_set["x_optimize_debug"] = 1
 var_opt_val_type[2] = "char "
 var_opt_hash[2] = 1;
 var_opt_val[3] = "x_optimize_fast"
+var_opt_val_set["x_optimize_fast"] = 1
 var_opt_val_type[3] = "char "
 var_opt_hash[3] = 1;
 for (i = 0; i < n_opts; i++) {
@@ -1291,6 +1546,7 @@ for (i = 0; i < n_opts; i++) {
 		otype = var_type_struct(flags[i])
 		var_opt_val_type[n_opt_val] = otype;
 		var_opt_val[n_opt_val] = "x_" name;
+		var_opt_val_set["x_" name] = 1;
 		var_opt_hash[n_opt_val] = flag_set_p("Optimization", flags[i]);
 		var_opt_init[n_opt_val] = opt_args("Init", flags[i]);
 		n_opt_val++;
@@ -1415,6 +1671,5792 @@ for (i = 0; i < n_opt_val; i++) {
 print "  for (size_t i = 0; i < sizeof (ptr->explicit_mask) / sizeof (ptr->explicit_mask[0]); i++)";
 print "    ptr->explicit_mask[i] = bp_unpack_value (bp, 64);";
 print "}";
+
+print "";
+print "/* Stream in optimization options  */";
+print "void";
+print "cl_optimization_stream_in_prev (struct data_in *data_in ATTRIBUTE_UNUSED,";
+print "                                struct bitpack_d *bp ATTRIBUTE_UNUSED,";
+print "                                struct cl_optimization *ptr ATTRIBUTE_UNUSED)";
+print "{";
+if ("x_optimize" in var_opt_val_set) {
+  print "  ptr->x_optimize = (char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_optimize_size" in var_opt_val_set) {
+  print "  ptr->x_optimize_size = (char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_optimize_debug" in var_opt_val_set) {
+  print "  ptr->x_optimize_debug = (char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_optimize_fast" in var_opt_val_set) {
+  print "  ptr->x_optimize_fast = (char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_align_loop_iterations" in var_opt_val_set) {
+  print "  ptr->x_param_align_loop_iterations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4 > (int ) 10)"
+  print "    ptr->x_param_align_loop_iterations ^= 4;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_align_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_align_threshold = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_align_threshold ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_asan_protect_allocas" in var_opt_val_set) {
+  print "  ptr->x_param_asan_protect_allocas = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_asan_protect_allocas ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_asan_instrument_reads" in var_opt_val_set) {
+  print "  ptr->x_param_asan_instrument_reads = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_asan_instrument_reads ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_asan_instrument_writes" in var_opt_val_set) {
+  print "  ptr->x_param_asan_instrument_writes = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_asan_instrument_writes ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_asan_instrumentation_with_call_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_asan_instrumentation_with_call_threshold = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (7000 > (int ) 10)"
+  print "    ptr->x_param_asan_instrumentation_with_call_threshold ^= 7000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_asan_memintrin" in var_opt_val_set) {
+  print "  ptr->x_param_asan_memintrin = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_asan_memintrin ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_asan_stack" in var_opt_val_set) {
+  print "  ptr->x_param_asan_stack = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_asan_stack ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_asan_use_after_return" in var_opt_val_set) {
+  print "  ptr->x_param_asan_use_after_return = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_asan_use_after_return ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_avg_loop_niter" in var_opt_val_set) {
+  print "  ptr->x_param_avg_loop_niter = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_avg_loop_niter ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_avoid_fma_max_bits" in var_opt_val_set) {
+  print "  ptr->x_param_avoid_fma_max_bits = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_builtin_expect_probability" in var_opt_val_set) {
+  print "  ptr->x_param_builtin_expect_probability = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (90 > (int ) 10)"
+  print "    ptr->x_param_builtin_expect_probability ^= 90;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_builtin_string_cmp_inline_length" in var_opt_val_set) {
+  print "  ptr->x_param_builtin_string_cmp_inline_length = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_builtin_string_cmp_inline_length ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_case_values_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_case_values_threshold = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_comdat_sharing_probability" in var_opt_val_set) {
+  print "  ptr->x_param_comdat_sharing_probability = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (20 > (int ) 10)"
+  print "    ptr->x_param_comdat_sharing_probability ^= 20;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_pointer_compression_size" in var_opt_val_set) {
+  print "  ptr->x_param_pointer_compression_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (32 > (int ) 10)"
+  print "    ptr->x_param_pointer_compression_size ^= 32;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_construct_interfere_size" in var_opt_val_set) {
+  print "  ptr->x_param_construct_interfere_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (0 > (int ) 10)"
+  print "    ptr->x_param_construct_interfere_size ^= 0;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_destruct_interfere_size" in var_opt_val_set) {
+  print "  ptr->x_param_destruct_interfere_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (0 > (int ) 10)"
+  print "    ptr->x_param_destruct_interfere_size ^= 0;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_dse_max_alias_queries_per_store" in var_opt_val_set) {
+  print "  ptr->x_param_dse_max_alias_queries_per_store = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (256 > (int ) 10)"
+  print "    ptr->x_param_dse_max_alias_queries_per_store ^= 256;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_dse_max_object_size" in var_opt_val_set) {
+  print "  ptr->x_param_dse_max_object_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (256 > (int ) 10)"
+  print "    ptr->x_param_dse_max_object_size ^= 256;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_early_inlining_insns" in var_opt_val_set) {
+  print "  ptr->x_param_early_inlining_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (6 > (int ) 10)"
+  print "    ptr->x_param_early_inlining_insns ^= 6;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_evrp_mode" in var_opt_val_set) {
+  print "  ptr->x_param_evrp_mode = (enum evrp_mode ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_evrp_sparse_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_evrp_sparse_threshold = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (800 > (int ) 10)"
+  print "    ptr->x_param_evrp_sparse_threshold ^= 800;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_evrp_switch_limit" in var_opt_val_set) {
+  print "  ptr->x_param_evrp_switch_limit = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_evrp_switch_limit ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_fsm_scale_path_blocks" in var_opt_val_set) {
+  print "  ptr->x_param_fsm_scale_path_blocks = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_fsm_scale_path_blocks ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_fsm_scale_path_stmts" in var_opt_val_set) {
+  print "  ptr->x_param_fsm_scale_path_stmts = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_fsm_scale_path_stmts ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_gcse_after_reload_critical_fraction" in var_opt_val_set) {
+  print "  ptr->x_param_gcse_after_reload_critical_fraction = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_gcse_after_reload_critical_fraction ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_gcse_after_reload_partial_fraction" in var_opt_val_set) {
+  print "  ptr->x_param_gcse_after_reload_partial_fraction = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_gcse_after_reload_partial_fraction ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_gcse_cost_distance_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_gcse_cost_distance_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_gcse_cost_distance_ratio ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_gcse_unrestricted_cost" in var_opt_val_set) {
+  print "  ptr->x_param_gcse_unrestricted_cost = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_gcse_unrestricted_cost ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_graphite_max_arrays_per_scop" in var_opt_val_set) {
+  print "  ptr->x_param_graphite_max_arrays_per_scop = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_graphite_max_arrays_per_scop ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_graphite_max_nb_scop_params" in var_opt_val_set) {
+  print "  ptr->x_param_graphite_max_nb_scop_params = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_graphite_max_nb_scop_params ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_hwasan_instrument_allocas" in var_opt_val_set) {
+  print "  ptr->x_param_hwasan_instrument_allocas = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_hwasan_instrument_allocas ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_hwasan_instrument_mem_intrinsics" in var_opt_val_set) {
+  print "  ptr->x_param_hwasan_instrument_mem_intrinsics = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_hwasan_instrument_mem_intrinsics ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_hwasan_instrument_reads" in var_opt_val_set) {
+  print "  ptr->x_param_hwasan_instrument_reads = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_hwasan_instrument_reads ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_hwasan_instrument_stack" in var_opt_val_set) {
+  print "  ptr->x_param_hwasan_instrument_stack = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_hwasan_instrument_stack ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_hwasan_instrument_writes" in var_opt_val_set) {
+  print "  ptr->x_param_hwasan_instrument_writes = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_hwasan_instrument_writes ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_hwasan_random_frame_tag" in var_opt_val_set) {
+  print "  ptr->x_param_hwasan_random_frame_tag = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_hwasan_random_frame_tag ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ifcvt_allow_register_renaming" in var_opt_val_set) {
+  print "  ptr->x_param_ifcvt_allow_register_renaming = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_inline_heuristics_hint_percent" in var_opt_val_set) {
+  print "  ptr->x_param_inline_heuristics_hint_percent = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_inline_heuristics_hint_percent ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_inline_min_speedup" in var_opt_val_set) {
+  print "  ptr->x_param_inline_min_speedup = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (30 > (int ) 10)"
+  print "    ptr->x_param_inline_min_speedup ^= 30;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_inline_unit_growth" in var_opt_val_set) {
+  print "  ptr->x_param_inline_unit_growth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_inline_unit_growth ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_eval_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_eval_threshold = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (500 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_eval_threshold ^= 500;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_large_unit_insns" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_large_unit_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16000 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_large_unit_insns ^= 16000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_loop_hint_bonus" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_loop_hint_bonus = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (64 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_loop_hint_bonus ^= 64;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_max_recursive_depth" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_max_recursive_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_max_recursive_depth ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_min_recursive_probability" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_min_recursive_probability = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_min_recursive_probability ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_profile_count_base" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_profile_count_base = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_profile_count_base ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_recursion_penalty" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_recursion_penalty = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_recursion_penalty ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_recursive_freq_factor" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_recursive_freq_factor = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (6 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_recursive_freq_factor ^= 6;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_single_call_penalty" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_single_call_penalty = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (15 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_single_call_penalty ^= 15;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_unit_growth" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_unit_growth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_unit_growth ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_cp_value_list_size" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_cp_value_list_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_ipa_cp_value_list_size ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_jump_function_lookups" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_jump_function_lookups = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_ipa_jump_function_lookups ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_max_aa_steps" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_max_aa_steps = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (25000 > (int ) 10)"
+  print "    ptr->x_param_ipa_max_aa_steps ^= 25000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_max_agg_items" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_max_agg_items = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16 > (int ) 10)"
+  print "    ptr->x_param_ipa_max_agg_items ^= 16;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_max_loop_predicates" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_max_loop_predicates = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16 > (int ) 10)"
+  print "    ptr->x_param_ipa_max_loop_predicates ^= 16;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_max_param_expr_ops" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_max_param_expr_ops = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_ipa_max_param_expr_ops ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_max_switch_predicate_bounds" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_max_switch_predicate_bounds = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (5 > (int ) 10)"
+  print "    ptr->x_param_ipa_max_switch_predicate_bounds ^= 5;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_prefetch_distance_factor" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_prefetch_distance_factor = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4 > (int ) 10)"
+  print "    ptr->x_param_ipa_prefetch_distance_factor ^= 4;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_prefetch_locality" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_prefetch_locality = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_ipa_prefetch_locality ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_prefetch_pagesize" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_prefetch_pagesize = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4096 > (int ) 10)"
+  print "    ptr->x_param_ipa_prefetch_pagesize ^= 4096;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_sra_max_replacements" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_sra_max_replacements = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_ipa_sra_max_replacements ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ipa_sra_ptr_growth_factor" in var_opt_val_set) {
+  print "  ptr->x_param_ipa_sra_ptr_growth_factor = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_ipa_sra_ptr_growth_factor ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ira_consider_dup_in_all_alts" in var_opt_val_set) {
+  print "  ptr->x_param_ira_consider_dup_in_all_alts = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_ira_consider_dup_in_all_alts ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ira_loop_reserved_regs" in var_opt_val_set) {
+  print "  ptr->x_param_ira_loop_reserved_regs = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_ira_loop_reserved_regs ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ira_max_conflict_table_size" in var_opt_val_set) {
+  print "  ptr->x_param_ira_max_conflict_table_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1000 > (int ) 10)"
+  print "    ptr->x_param_ira_max_conflict_table_size ^= 1000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ira_max_loops_num" in var_opt_val_set) {
+  print "  ptr->x_param_ira_max_loops_num = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_ira_max_loops_num ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_iv_always_prune_cand_set_bound" in var_opt_val_set) {
+  print "  ptr->x_param_iv_always_prune_cand_set_bound = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_iv_always_prune_cand_set_bound ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_iv_consider_all_candidates_bound" in var_opt_val_set) {
+  print "  ptr->x_param_iv_consider_all_candidates_bound = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_iv_consider_all_candidates_bound ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_iv_max_considered_uses" in var_opt_val_set) {
+  print "  ptr->x_param_iv_max_considered_uses = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (250 > (int ) 10)"
+  print "    ptr->x_param_iv_max_considered_uses ^= 250;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_jump_table_max_growth_ratio_for_size" in var_opt_val_set) {
+  print "  ptr->x_param_jump_table_max_growth_ratio_for_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (300 > (int ) 10)"
+  print "    ptr->x_param_jump_table_max_growth_ratio_for_size ^= 300;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_jump_table_max_growth_ratio_for_speed" in var_opt_val_set) {
+  print "  ptr->x_param_jump_table_max_growth_ratio_for_speed = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (800 > (int ) 10)"
+  print "    ptr->x_param_jump_table_max_growth_ratio_for_speed ^= 800;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_l1_cache_line_size" in var_opt_val_set) {
+  print "  ptr->x_param_l1_cache_line_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (32 > (int ) 10)"
+  print "    ptr->x_param_l1_cache_line_size ^= 32;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_l1_cache_size" in var_opt_val_set) {
+  print "  ptr->x_param_l1_cache_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (64 > (int ) 10)"
+  print "    ptr->x_param_l1_cache_size ^= 64;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_l2_cache_size" in var_opt_val_set) {
+  print "  ptr->x_param_l2_cache_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (512 > (int ) 10)"
+  print "    ptr->x_param_l2_cache_size ^= 512;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_large_function_growth" in var_opt_val_set) {
+  print "  ptr->x_param_large_function_growth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_large_function_growth ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_large_function_insns" in var_opt_val_set) {
+  print "  ptr->x_param_large_function_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2700 > (int ) 10)"
+  print "    ptr->x_param_large_function_insns ^= 2700;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_stack_frame_growth" in var_opt_val_set) {
+  print "  ptr->x_param_stack_frame_growth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1000 > (int ) 10)"
+  print "    ptr->x_param_stack_frame_growth ^= 1000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_large_stack_frame" in var_opt_val_set) {
+  print "  ptr->x_param_large_stack_frame = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (256 > (int ) 10)"
+  print "    ptr->x_param_large_stack_frame ^= 256;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_large_unit_insns" in var_opt_val_set) {
+  print "  ptr->x_param_large_unit_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10000 > (int ) 10)"
+  print "    ptr->x_param_large_unit_insns ^= 10000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_lim_expensive" in var_opt_val_set) {
+  print "  ptr->x_param_lim_expensive = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (20 > (int ) 10)"
+  print "    ptr->x_param_lim_expensive ^= 20;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_loop_block_tile_size" in var_opt_val_set) {
+  print "  ptr->x_param_loop_block_tile_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (51 > (int ) 10)"
+  print "    ptr->x_param_loop_block_tile_size ^= 51;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_loop_interchange_max_num_stmts" in var_opt_val_set) {
+  print "  ptr->x_param_loop_interchange_max_num_stmts = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (64 > (int ) 10)"
+  print "    ptr->x_param_loop_interchange_max_num_stmts ^= 64;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_loop_interchange_stride_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_loop_interchange_stride_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_loop_interchange_stride_ratio ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_loop_invariant_max_bbs_in_loop" in var_opt_val_set) {
+  print "  ptr->x_param_loop_invariant_max_bbs_in_loop = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10000 > (int ) 10)"
+  print "    ptr->x_param_loop_invariant_max_bbs_in_loop ^= 10000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_loop_max_datarefs_for_datadeps" in var_opt_val_set) {
+  print "  ptr->x_param_loop_max_datarefs_for_datadeps = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1000 > (int ) 10)"
+  print "    ptr->x_param_loop_max_datarefs_for_datadeps ^= 1000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_loop_versioning_max_inner_insns" in var_opt_val_set) {
+  print "  ptr->x_param_loop_versioning_max_inner_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_loop_versioning_max_inner_insns ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_loop_versioning_max_outer_insns" in var_opt_val_set) {
+  print "  ptr->x_param_loop_versioning_max_outer_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_loop_versioning_max_outer_insns ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_lra_inheritance_ebb_probability_cutoff" in var_opt_val_set) {
+  print "  ptr->x_param_lra_inheritance_ebb_probability_cutoff = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_lra_inheritance_ebb_probability_cutoff ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_lra_max_considered_reload_pseudos" in var_opt_val_set) {
+  print "  ptr->x_param_lra_max_considered_reload_pseudos = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (500 > (int ) 10)"
+  print "    ptr->x_param_lra_max_considered_reload_pseudos ^= 500;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_average_unrolled_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_average_unrolled_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (80 > (int ) 10)"
+  print "    ptr->x_param_max_average_unrolled_insns ^= 80;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_combine_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_combine_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4 > (int ) 10)"
+  print "    ptr->x_param_max_combine_insns ^= 4;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_unroll_iterations" in var_opt_val_set) {
+  print "  ptr->x_param_max_unroll_iterations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_max_unroll_iterations ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_completely_peel_times" in var_opt_val_set) {
+  print "  ptr->x_param_max_completely_peel_times = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16 > (int ) 10)"
+  print "    ptr->x_param_max_completely_peel_times ^= 16;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_completely_peeled_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_completely_peeled_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_max_completely_peeled_insns ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_crossjump_edges" in var_opt_val_set) {
+  print "  ptr->x_param_max_crossjump_edges = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_crossjump_edges ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_cse_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_cse_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1000 > (int ) 10)"
+  print "    ptr->x_param_max_cse_insns ^= 1000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_cse_path_length" in var_opt_val_set) {
+  print "  ptr->x_param_max_cse_path_length = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_max_cse_path_length ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_cselib_memory_locations" in var_opt_val_set) {
+  print "  ptr->x_param_max_cselib_memory_locations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (500 > (int ) 10)"
+  print "    ptr->x_param_max_cselib_memory_locations ^= 500;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_debug_marker_count" in var_opt_val_set) {
+  print "  ptr->x_param_max_debug_marker_count = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100000 > (int ) 10)"
+  print "    ptr->x_param_max_debug_marker_count ^= 100000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_delay_slot_insn_search" in var_opt_val_set) {
+  print "  ptr->x_param_max_delay_slot_insn_search = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_delay_slot_insn_search ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_delay_slot_live_search" in var_opt_val_set) {
+  print "  ptr->x_param_max_delay_slot_live_search = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (333 > (int ) 10)"
+  print "    ptr->x_param_max_delay_slot_live_search ^= 333;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_dse_active_local_stores" in var_opt_val_set) {
+  print "  ptr->x_param_max_dse_active_local_stores = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (5000 > (int ) 10)"
+  print "    ptr->x_param_max_dse_active_local_stores ^= 5000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_early_inliner_max_iterations" in var_opt_val_set) {
+  print "  ptr->x_param_early_inliner_max_iterations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_early_inliner_max_iterations ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_find_base_term_values" in var_opt_val_set) {
+  print "  ptr->x_param_max_find_base_term_values = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_max_find_base_term_values ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_fsm_thread_length" in var_opt_val_set) {
+  print "  ptr->x_param_max_fsm_thread_length = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_max_fsm_thread_length ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_fsm_thread_path_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_fsm_thread_path_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_fsm_thread_path_insns ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_gcse_insertion_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_max_gcse_insertion_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (20 > (int ) 10)"
+  print "    ptr->x_param_max_gcse_insertion_ratio ^= 20;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_gcse_memory" in var_opt_val_set) {
+  print "  ptr->x_param_max_gcse_memory = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (131072 > (int ) 10)"
+  print "    ptr->x_param_max_gcse_memory ^= 131072;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_goto_duplication_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_goto_duplication_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_max_goto_duplication_insns ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_grow_copy_bb_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_grow_copy_bb_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_max_grow_copy_bb_insns ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_hoist_depth" in var_opt_val_set) {
+  print "  ptr->x_param_max_hoist_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (30 > (int ) 10)"
+  print "    ptr->x_param_max_hoist_depth ^= 30;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_inline_functions_called_once_insns" in var_opt_val_set) {
+  print "  ptr->x_param_inline_functions_called_once_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4000 > (int ) 10)"
+  print "    ptr->x_param_inline_functions_called_once_insns ^= 4000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_inline_functions_called_once_loop_depth" in var_opt_val_set) {
+  print "  ptr->x_param_inline_functions_called_once_loop_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (6 > (int ) 10)"
+  print "    ptr->x_param_inline_functions_called_once_loop_depth ^= 6;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_insns_auto" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_insns_auto = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (15 > (int ) 10)"
+  print "    ptr->x_param_max_inline_insns_auto ^= 15;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_insns_recursive_auto" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_insns_recursive_auto = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (450 > (int ) 10)"
+  print "    ptr->x_param_max_inline_insns_recursive_auto ^= 450;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_insns_recursive" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_insns_recursive = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (450 > (int ) 10)"
+  print "    ptr->x_param_max_inline_insns_recursive ^= 450;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_insns_single" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_insns_single = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (70 > (int ) 10)"
+  print "    ptr->x_param_max_inline_insns_single ^= 70;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_insns_size" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_insns_size = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_insns_small" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_insns_small = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_recursive_depth_auto" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_recursive_depth_auto = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_max_inline_recursive_depth_auto ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_inline_recursive_depth" in var_opt_val_set) {
+  print "  ptr->x_param_max_inline_recursive_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_max_inline_recursive_depth ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_isl_operations" in var_opt_val_set) {
+  print "  ptr->x_param_max_isl_operations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (350000 > (int ) 10)"
+  print "    ptr->x_param_max_isl_operations ^= 350000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_iterations_computation_cost" in var_opt_val_set) {
+  print "  ptr->x_param_max_iterations_computation_cost = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_max_iterations_computation_cost ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_iterations_to_track" in var_opt_val_set) {
+  print "  ptr->x_param_max_iterations_to_track = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1000 > (int ) 10)"
+  print "    ptr->x_param_max_iterations_to_track ^= 1000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_jump_thread_duplication_stmts" in var_opt_val_set) {
+  print "  ptr->x_param_max_jump_thread_duplication_stmts = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (15 > (int ) 10)"
+  print "    ptr->x_param_max_jump_thread_duplication_stmts ^= 15;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_last_value_rtl" in var_opt_val_set) {
+  print "  ptr->x_param_max_last_value_rtl = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10000 > (int ) 10)"
+  print "    ptr->x_param_max_last_value_rtl ^= 10000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_loop_header_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_loop_header_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (20 > (int ) 10)"
+  print "    ptr->x_param_max_loop_header_insns ^= 20;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_modulo_backtrack_attempts" in var_opt_val_set) {
+  print "  ptr->x_param_max_modulo_backtrack_attempts = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_max_modulo_backtrack_attempts ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_partial_antic_length" in var_opt_val_set) {
+  print "  ptr->x_param_max_partial_antic_length = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_partial_antic_length ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_peel_branches" in var_opt_val_set) {
+  print "  ptr->x_param_max_peel_branches = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (32 > (int ) 10)"
+  print "    ptr->x_param_max_peel_branches ^= 32;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_peel_times" in var_opt_val_set) {
+  print "  ptr->x_param_max_peel_times = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16 > (int ) 10)"
+  print "    ptr->x_param_max_peel_times ^= 16;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_peeled_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_peeled_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_peeled_insns ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_pending_list_length" in var_opt_val_set) {
+  print "  ptr->x_param_max_pending_list_length = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (32 > (int ) 10)"
+  print "    ptr->x_param_max_pending_list_length ^= 32;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_pipeline_region_blocks" in var_opt_val_set) {
+  print "  ptr->x_param_max_pipeline_region_blocks = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (15 > (int ) 10)"
+  print "    ptr->x_param_max_pipeline_region_blocks ^= 15;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_pipeline_region_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_pipeline_region_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_max_pipeline_region_insns ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_pow_sqrt_depth" in var_opt_val_set) {
+  print "  ptr->x_param_max_pow_sqrt_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (5 > (int ) 10)"
+  print "    ptr->x_param_max_pow_sqrt_depth ^= 5;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_predicted_iterations" in var_opt_val_set) {
+  print "  ptr->x_param_max_predicted_iterations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_predicted_iterations ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_reload_search_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_reload_search_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_reload_search_insns ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_rtl_if_conversion_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_rtl_if_conversion_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_max_rtl_if_conversion_insns ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_rtl_if_conversion_predictable_cost" in var_opt_val_set) {
+  print "  ptr->x_param_max_rtl_if_conversion_predictable_cost = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (20 > (int ) 10)"
+  print "    ptr->x_param_max_rtl_if_conversion_predictable_cost ^= 20;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_rtl_if_conversion_unpredictable_cost" in var_opt_val_set) {
+  print "  ptr->x_param_max_rtl_if_conversion_unpredictable_cost = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_max_rtl_if_conversion_unpredictable_cost ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_sched_extend_regions_iters" in var_opt_val_set) {
+  print "  ptr->x_param_max_sched_extend_regions_iters = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_sched_insn_conflict_delay" in var_opt_val_set) {
+  print "  ptr->x_param_max_sched_insn_conflict_delay = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_max_sched_insn_conflict_delay ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_sched_ready_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_sched_ready_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_sched_ready_insns ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_sched_region_blocks" in var_opt_val_set) {
+  print "  ptr->x_param_max_sched_region_blocks = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_max_sched_region_blocks ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_sched_region_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_sched_region_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_max_sched_region_insns ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_slsr_candidate_scan" in var_opt_val_set) {
+  print "  ptr->x_param_max_slsr_candidate_scan = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_max_slsr_candidate_scan ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_speculative_devirt_maydefs" in var_opt_val_set) {
+  print "  ptr->x_param_max_speculative_devirt_maydefs = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_max_speculative_devirt_maydefs ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_stores_to_merge" in var_opt_val_set) {
+  print "  ptr->x_param_max_stores_to_merge = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (64 > (int ) 10)"
+  print "    ptr->x_param_max_stores_to_merge ^= 64;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_stores_to_sink" in var_opt_val_set) {
+  print "  ptr->x_param_max_stores_to_sink = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_max_stores_to_sink ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_tail_merge_comparisons" in var_opt_val_set) {
+  print "  ptr->x_param_max_tail_merge_comparisons = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_max_tail_merge_comparisons ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_tail_merge_iterations" in var_opt_val_set) {
+  print "  ptr->x_param_max_tail_merge_iterations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_max_tail_merge_iterations ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_tracked_strlens" in var_opt_val_set) {
+  print "  ptr->x_param_max_tracked_strlens = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10000 > (int ) 10)"
+  print "    ptr->x_param_max_tracked_strlens ^= 10000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_tree_if_conversion_phi_args" in var_opt_val_set) {
+  print "  ptr->x_param_max_tree_if_conversion_phi_args = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4 > (int ) 10)"
+  print "    ptr->x_param_max_tree_if_conversion_phi_args ^= 4;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_unroll_times" in var_opt_val_set) {
+  print "  ptr->x_param_max_unroll_times = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_max_unroll_times ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_unrolled_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_unrolled_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_max_unrolled_insns ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_unswitch_insns" in var_opt_val_set) {
+  print "  ptr->x_param_max_unswitch_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_max_unswitch_insns ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_unswitch_level" in var_opt_val_set) {
+  print "  ptr->x_param_max_unswitch_level = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_max_unswitch_level ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_variable_expansions" in var_opt_val_set) {
+  print "  ptr->x_param_max_variable_expansions = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_max_variable_expansions ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_vartrack_expr_depth" in var_opt_val_set) {
+  print "  ptr->x_param_max_vartrack_expr_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (12 > (int ) 10)"
+  print "    ptr->x_param_max_vartrack_expr_depth ^= 12;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_vartrack_reverse_op_size" in var_opt_val_set) {
+  print "  ptr->x_param_max_vartrack_reverse_op_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_max_vartrack_reverse_op_size ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_vartrack_size" in var_opt_val_set) {
+  print "  ptr->x_param_max_vartrack_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50000000 > (int ) 10)"
+  print "    ptr->x_param_max_vartrack_size ^= 50000000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_max_vrp_switch_assertions" in var_opt_val_set) {
+  print "  ptr->x_param_max_vrp_switch_assertions = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_max_vrp_switch_assertions ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_crossjump_insns" in var_opt_val_set) {
+  print "  ptr->x_param_min_crossjump_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (5 > (int ) 10)"
+  print "    ptr->x_param_min_crossjump_insns ^= 5;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_inline_recursive_probability" in var_opt_val_set) {
+  print "  ptr->x_param_min_inline_recursive_probability = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_min_inline_recursive_probability ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_insn_to_prefetch_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_min_insn_to_prefetch_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (9 > (int ) 10)"
+  print "    ptr->x_param_min_insn_to_prefetch_ratio ^= 9;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_loop_cond_split_prob" in var_opt_val_set) {
+  print "  ptr->x_param_min_loop_cond_split_prob = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (30 > (int ) 10)"
+  print "    ptr->x_param_min_loop_cond_split_prob ^= 30;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_pagesize" in var_opt_val_set) {
+  print "  ptr->x_param_min_pagesize = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4096 > (int ) 10)"
+  print "    ptr->x_param_min_pagesize ^= 4096;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_size_for_stack_sharing" in var_opt_val_set) {
+  print "  ptr->x_param_min_size_for_stack_sharing = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (32 > (int ) 10)"
+  print "    ptr->x_param_min_size_for_stack_sharing ^= 32;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_spec_prob" in var_opt_val_set) {
+  print "  ptr->x_param_min_spec_prob = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_min_spec_prob ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_min_vect_loop_bound" in var_opt_val_set) {
+  print "  ptr->x_param_min_vect_loop_bound = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_modref_max_accesses" in var_opt_val_set) {
+  print "  ptr->x_param_modref_max_accesses = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16 > (int ) 10)"
+  print "    ptr->x_param_modref_max_accesses ^= 16;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_modref_max_adjustments" in var_opt_val_set) {
+  print "  ptr->x_param_modref_max_adjustments = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_modref_max_adjustments ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_modref_max_bases" in var_opt_val_set) {
+  print "  ptr->x_param_modref_max_bases = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (32 > (int ) 10)"
+  print "    ptr->x_param_modref_max_bases ^= 32;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_modref_max_depth" in var_opt_val_set) {
+  print "  ptr->x_param_modref_max_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (256 > (int ) 10)"
+  print "    ptr->x_param_modref_max_depth ^= 256;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_modref_max_escape_points" in var_opt_val_set) {
+  print "  ptr->x_param_modref_max_escape_points = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (256 > (int ) 10)"
+  print "    ptr->x_param_modref_max_escape_points ^= 256;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_modref_max_refs" in var_opt_val_set) {
+  print "  ptr->x_param_modref_max_refs = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16 > (int ) 10)"
+  print "    ptr->x_param_modref_max_refs ^= 16;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_modref_max_tests" in var_opt_val_set) {
+  print "  ptr->x_param_modref_max_tests = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (64 > (int ) 10)"
+  print "    ptr->x_param_modref_max_tests ^= 64;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ldp_dependency_search_range" in var_opt_val_set) {
+  print "  ptr->x_param_ldp_dependency_search_range = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (16 > (int ) 10)"
+  print "    ptr->x_param_ldp_dependency_search_range ^= 16;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_parloops_chunk_size" in var_opt_val_set) {
+  print "  ptr->x_param_parloops_chunk_size = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_parloops_min_per_thread" in var_opt_val_set) {
+  print "  ptr->x_param_parloops_min_per_thread = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_parloops_min_per_thread ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_parloops_schedule" in var_opt_val_set) {
+  print "  ptr->x_param_parloops_schedule = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_partial_inlining_entry_probability" in var_opt_val_set) {
+  print "  ptr->x_param_partial_inlining_entry_probability = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (70 > (int ) 10)"
+  print "    ptr->x_param_partial_inlining_entry_probability ^= 70;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_predictable_branch_outcome" in var_opt_val_set) {
+  print "  ptr->x_param_predictable_branch_outcome = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_predictable_branch_outcome ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_prefetch_dynamic_strides" in var_opt_val_set) {
+  print "  ptr->x_param_prefetch_dynamic_strides = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_prefetch_dynamic_strides ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_prefetch_latency" in var_opt_val_set) {
+  print "  ptr->x_param_prefetch_latency = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_prefetch_latency ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_prefetch_min_insn_to_mem_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_prefetch_min_insn_to_mem_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_prefetch_min_insn_to_mem_ratio ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_prefetch_minimum_stride" in var_opt_val_set) {
+  print "  ptr->x_param_prefetch_minimum_stride = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (-1 > (int ) 10)"
+  print "    ptr->x_param_prefetch_minimum_stride ^= -1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ranger_debug" in var_opt_val_set) {
+  print "  ptr->x_param_ranger_debug = (enum ranger_debug ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ranger_logical_depth" in var_opt_val_set) {
+  print "  ptr->x_param_ranger_logical_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (6 > (int ) 10)"
+  print "    ptr->x_param_ranger_logical_depth ^= 6;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_relation_block_limit" in var_opt_val_set) {
+  print "  ptr->x_param_relation_block_limit = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (200 > (int ) 10)"
+  print "    ptr->x_param_relation_block_limit ^= 200;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_rpo_vn_max_loop_depth" in var_opt_val_set) {
+  print "  ptr->x_param_rpo_vn_max_loop_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (7 > (int ) 10)"
+  print "    ptr->x_param_rpo_vn_max_loop_depth ^= 7;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sccvn_max_alias_queries_per_access" in var_opt_val_set) {
+  print "  ptr->x_param_sccvn_max_alias_queries_per_access = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1000 > (int ) 10)"
+  print "    ptr->x_param_sccvn_max_alias_queries_per_access ^= 1000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_scev_max_expr_complexity" in var_opt_val_set) {
+  print "  ptr->x_param_scev_max_expr_complexity = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_scev_max_expr_complexity ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_scev_max_expr_size" in var_opt_val_set) {
+  print "  ptr->x_param_scev_max_expr_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_scev_max_expr_size ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sched_autopref_queue_depth" in var_opt_val_set) {
+  print "  ptr->x_param_sched_autopref_queue_depth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (-1 > (int ) 10)"
+  print "    ptr->x_param_sched_autopref_queue_depth ^= -1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sched_mem_true_dep_cost" in var_opt_val_set) {
+  print "  ptr->x_param_sched_mem_true_dep_cost = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_sched_mem_true_dep_cost ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sched_pressure_algorithm" in var_opt_val_set) {
+  print "  ptr->x_param_sched_pressure_algorithm = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_sched_pressure_algorithm ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sched_spec_prob_cutoff" in var_opt_val_set) {
+  print "  ptr->x_param_sched_spec_prob_cutoff = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (40 > (int ) 10)"
+  print "    ptr->x_param_sched_spec_prob_cutoff ^= 40;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sched_state_edge_prob_cutoff" in var_opt_val_set) {
+  print "  ptr->x_param_sched_state_edge_prob_cutoff = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_sched_state_edge_prob_cutoff ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_selsched_insns_to_rename" in var_opt_val_set) {
+  print "  ptr->x_param_selsched_insns_to_rename = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_selsched_insns_to_rename ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_selsched_max_lookahead" in var_opt_val_set) {
+  print "  ptr->x_param_selsched_max_lookahead = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_selsched_max_lookahead ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_selsched_max_sched_times" in var_opt_val_set) {
+  print "  ptr->x_param_selsched_max_sched_times = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_selsched_max_sched_times ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_semi_relayout_level" in var_opt_val_set) {
+  print "  ptr->x_semi_relayout_level = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_simultaneous_prefetches" in var_opt_val_set) {
+  print "  ptr->x_param_simultaneous_prefetches = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (3 > (int ) 10)"
+  print "    ptr->x_param_simultaneous_prefetches ^= 3;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sink_frequency_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_sink_frequency_threshold = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (75 > (int ) 10)"
+  print "    ptr->x_param_sink_frequency_threshold ^= 75;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sms_dfa_history" in var_opt_val_set) {
+  print "  ptr->x_param_sms_dfa_history = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sms_loop_average_count_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_sms_loop_average_count_threshold = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sms_max_ii_factor" in var_opt_val_set) {
+  print "  ptr->x_param_sms_max_ii_factor = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_sms_max_ii_factor ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sms_min_sc" in var_opt_val_set) {
+  print "  ptr->x_param_sms_min_sc = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_sms_min_sc ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sra_max_propagations" in var_opt_val_set) {
+  print "  ptr->x_param_sra_max_propagations = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (32 > (int ) 10)"
+  print "    ptr->x_param_sra_max_propagations ^= 32;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sra_max_scalarization_size_size" in var_opt_val_set) {
+  print "  ptr->x_param_sra_max_scalarization_size_size = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_sra_max_scalarization_size_speed" in var_opt_val_set) {
+  print "  ptr->x_param_sra_max_scalarization_size_speed = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ssa_name_def_chain_limit" in var_opt_val_set) {
+  print "  ptr->x_param_ssa_name_def_chain_limit = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (512 > (int ) 10)"
+  print "    ptr->x_param_ssa_name_def_chain_limit ^= 512;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_ssp_buffer_size" in var_opt_val_set) {
+  print "  ptr->x_param_ssp_buffer_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_ssp_buffer_size ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_stack_clash_protection_guard_size" in var_opt_val_set) {
+  print "  ptr->x_param_stack_clash_protection_guard_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (12 > (int ) 10)"
+  print "    ptr->x_param_stack_clash_protection_guard_size ^= 12;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_stack_clash_protection_probe_interval" in var_opt_val_set) {
+  print "  ptr->x_param_stack_clash_protection_probe_interval = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (12 > (int ) 10)"
+  print "    ptr->x_param_stack_clash_protection_probe_interval ^= 12;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_store_merging_allow_unaligned" in var_opt_val_set) {
+  print "  ptr->x_param_store_merging_allow_unaligned = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_store_merging_allow_unaligned ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_store_merging_max_size" in var_opt_val_set) {
+  print "  ptr->x_param_store_merging_max_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (65536 > (int ) 10)"
+  print "    ptr->x_param_store_merging_max_size ^= 65536;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_struct_reorg_cold_struct_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_struct_reorg_cold_struct_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_struct_reorg_cold_struct_ratio ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_switch_conversion_branch_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_switch_conversion_branch_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (8 > (int ) 10)"
+  print "    ptr->x_param_switch_conversion_branch_ratio ^= 8;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_threader_debug" in var_opt_val_set) {
+  print "  ptr->x_param_threader_debug = (enum threader_debug ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tm_max_aggregate_size" in var_opt_val_set) {
+  print "  ptr->x_param_tm_max_aggregate_size = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (9 > (int ) 10)"
+  print "    ptr->x_param_tm_max_aggregate_size ^= 9;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tracer_dynamic_coverage_feedback" in var_opt_val_set) {
+  print "  ptr->x_param_tracer_dynamic_coverage_feedback = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (95 > (int ) 10)"
+  print "    ptr->x_param_tracer_dynamic_coverage_feedback ^= 95;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tracer_dynamic_coverage" in var_opt_val_set) {
+  print "  ptr->x_param_tracer_dynamic_coverage = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (75 > (int ) 10)"
+  print "    ptr->x_param_tracer_dynamic_coverage ^= 75;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tracer_max_code_growth" in var_opt_val_set) {
+  print "  ptr->x_param_tracer_max_code_growth = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (100 > (int ) 10)"
+  print "    ptr->x_param_tracer_max_code_growth ^= 100;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tracer_min_branch_probability_feedback" in var_opt_val_set) {
+  print "  ptr->x_param_tracer_min_branch_probability_feedback = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (80 > (int ) 10)"
+  print "    ptr->x_param_tracer_min_branch_probability_feedback ^= 80;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tracer_min_branch_probability" in var_opt_val_set) {
+  print "  ptr->x_param_tracer_min_branch_probability = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_tracer_min_branch_probability ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tracer_min_branch_ratio" in var_opt_val_set) {
+  print "  ptr->x_param_tracer_min_branch_ratio = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_tracer_min_branch_ratio ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_tree_reassoc_width" in var_opt_val_set) {
+  print "  ptr->x_param_tree_reassoc_width = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_uninit_control_dep_attempts" in var_opt_val_set) {
+  print "  ptr->x_param_uninit_control_dep_attempts = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1000 > (int ) 10)"
+  print "    ptr->x_param_uninit_control_dep_attempts ^= 1000;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_uninlined_function_insns" in var_opt_val_set) {
+  print "  ptr->x_param_uninlined_function_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_uninlined_function_insns ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_uninlined_function_time" in var_opt_val_set) {
+  print "  ptr->x_param_uninlined_function_time = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_uninlined_function_thunk_insns" in var_opt_val_set) {
+  print "  ptr->x_param_uninlined_function_thunk_insns = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_uninlined_function_thunk_insns ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_uninlined_function_thunk_time" in var_opt_val_set) {
+  print "  ptr->x_param_uninlined_function_thunk_time = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_uninlined_function_thunk_time ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_unlikely_bb_count_fraction" in var_opt_val_set) {
+  print "  ptr->x_param_unlikely_bb_count_fraction = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (20 > (int ) 10)"
+  print "    ptr->x_param_unlikely_bb_count_fraction ^= 20;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_unroll_jam_max_unroll" in var_opt_val_set) {
+  print "  ptr->x_param_unroll_jam_max_unroll = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (4 > (int ) 10)"
+  print "    ptr->x_param_unroll_jam_max_unroll ^= 4;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_unroll_jam_min_percent" in var_opt_val_set) {
+  print "  ptr->x_param_unroll_jam_min_percent = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_unroll_jam_min_percent ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_use_after_scope_direct_emission_threshold" in var_opt_val_set) {
+  print "  ptr->x_param_use_after_scope_direct_emission_threshold = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (256 > (int ) 10)"
+  print "    ptr->x_param_use_after_scope_direct_emission_threshold ^= 256;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_flexible_seg_len" in var_opt_val_set) {
+  print "  ptr->x_param_flexible_seg_len = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (0 > (int ) 10)"
+  print "    ptr->x_param_flexible_seg_len ^= 0;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vect_epilogues_nomask" in var_opt_val_set) {
+  print "  ptr->x_param_vect_epilogues_nomask = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_vect_epilogues_nomask ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vect_induction_float" in var_opt_val_set) {
+  print "  ptr->x_param_vect_induction_float = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (1 > (int ) 10)"
+  print "    ptr->x_param_vect_induction_float ^= 1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vect_inner_loop_cost_factor" in var_opt_val_set) {
+  print "  ptr->x_param_vect_inner_loop_cost_factor = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (50 > (int ) 10)"
+  print "    ptr->x_param_vect_inner_loop_cost_factor ^= 50;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vect_max_peeling_for_alignment" in var_opt_val_set) {
+  print "  ptr->x_param_vect_max_peeling_for_alignment = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (-1 > (int ) 10)"
+  print "    ptr->x_param_vect_max_peeling_for_alignment ^= -1;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vect_max_version_for_alias_checks" in var_opt_val_set) {
+  print "  ptr->x_param_vect_max_version_for_alias_checks = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (10 > (int ) 10)"
+  print "    ptr->x_param_vect_max_version_for_alias_checks ^= 10;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vect_max_version_for_alignment_checks" in var_opt_val_set) {
+  print "  ptr->x_param_vect_max_version_for_alignment_checks = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (6 > (int ) 10)"
+  print "    ptr->x_param_vect_max_version_for_alignment_checks ^= 6;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vect_partial_vector_usage" in var_opt_val_set) {
+  print "  ptr->x_param_vect_partial_vector_usage = (int ) bp_unpack_var_len_int (bp);"
+  print "  if (2 > (int ) 10)"
+  print "    ptr->x_param_vect_partial_vector_usage ^= 2;"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vrp1_mode" in var_opt_val_set) {
+  print "  ptr->x_param_vrp1_mode = (enum vrp_mode ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_param_vrp2_mode" in var_opt_val_set) {
+  print "  ptr->x_param_vrp2_mode = (enum vrp_mode ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_warn_inline" in var_opt_val_set) {
+  print "  ptr->x_warn_inline = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_aggressive_loop_optimizations" in var_opt_val_set) {
+  print "  ptr->x_flag_aggressive_loop_optimizations = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_align_functions" in var_opt_val_set) {
+  print "  ptr->x_flag_align_functions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_str_align_functions" in var_opt_val_set) {
+  print "  ptr->x_str_align_functions = bp_unpack_string (data_in, bp);"
+  print "  if (ptr->x_str_align_functions)"
+  print "    ptr->x_str_align_functions = xstrdup (ptr->x_str_align_functions);"
+}
+else
+  print "  bp_unpack_string (data_in, bp);"
+if ("x_flag_align_jumps" in var_opt_val_set) {
+  print "  ptr->x_flag_align_jumps = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_str_align_jumps" in var_opt_val_set) {
+  print "  ptr->x_str_align_jumps = bp_unpack_string (data_in, bp);"
+  print "  if (ptr->x_str_align_jumps)"
+  print "    ptr->x_str_align_jumps = xstrdup (ptr->x_str_align_jumps);"
+}
+else
+  print "  bp_unpack_string (data_in, bp);"
+if ("x_flag_align_labels" in var_opt_val_set) {
+  print "  ptr->x_flag_align_labels = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_str_align_labels" in var_opt_val_set) {
+  print "  ptr->x_str_align_labels = bp_unpack_string (data_in, bp);"
+  print "  if (ptr->x_str_align_labels)"
+  print "    ptr->x_str_align_labels = xstrdup (ptr->x_str_align_labels);"
+}
+else
+  print "  bp_unpack_string (data_in, bp);"
+if ("x_flag_align_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_align_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_str_align_loops" in var_opt_val_set) {
+  print "  ptr->x_str_align_loops = bp_unpack_string (data_in, bp);"
+  print "  if (ptr->x_str_align_loops)"
+  print "    ptr->x_str_align_loops = xstrdup (ptr->x_str_align_loops);"
+}
+else
+  print "  bp_unpack_string (data_in, bp);"
+if ("x_flag_allocation_dce" in var_opt_val_set) {
+  print "  ptr->x_flag_allocation_dce = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_store_data_races" in var_opt_val_set) {
+  print "  ptr->x_flag_store_data_races = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_array_widen_compare" in var_opt_val_set) {
+  print "  ptr->x_flag_array_widen_compare = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_associative_math" in var_opt_val_set) {
+  print "  ptr->x_flag_associative_math = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_asynchronous_unwind_tables" in var_opt_val_set) {
+  print "  ptr->x_flag_asynchronous_unwind_tables = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_auto_inc_dec" in var_opt_val_set) {
+  print "  ptr->x_flag_auto_inc_dec = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_bit_tests" in var_opt_val_set) {
+  print "  ptr->x_flag_bit_tests = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_branch_on_count_reg" in var_opt_val_set) {
+  print "  ptr->x_flag_branch_on_count_reg = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_branch_probabilities" in var_opt_val_set) {
+  print "  ptr->x_flag_branch_probabilities = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_caller_saves" in var_opt_val_set) {
+  print "  ptr->x_flag_caller_saves = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ccmp2" in var_opt_val_set) {
+  print "  ptr->x_flag_ccmp2 = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_code_hoisting" in var_opt_val_set) {
+  print "  ptr->x_flag_code_hoisting = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_combine_stack_adjustments" in var_opt_val_set) {
+  print "  ptr->x_flag_combine_stack_adjustments = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_compare_elim_after_reload" in var_opt_val_set) {
+  print "  ptr->x_flag_compare_elim_after_reload = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_conserve_stack" in var_opt_val_set) {
+  print "  ptr->x_flag_conserve_stack = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_convert_minmax" in var_opt_val_set) {
+  print "  ptr->x_flag_convert_minmax = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_cprop_registers" in var_opt_val_set) {
+  print "  ptr->x_flag_cprop_registers = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_crossjumping" in var_opt_val_set) {
+  print "  ptr->x_flag_crossjumping = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_crypto_accel_aes" in var_opt_val_set) {
+  print "  ptr->x_flag_crypto_accel_aes = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_cse_follow_jumps" in var_opt_val_set) {
+  print "  ptr->x_flag_cse_follow_jumps = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_cx_fortran_rules" in var_opt_val_set) {
+  print "  ptr->x_flag_cx_fortran_rules = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_cx_limited_range" in var_opt_val_set) {
+  print "  ptr->x_flag_cx_limited_range = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_dce" in var_opt_val_set) {
+  print "  ptr->x_flag_dce = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_defer_pop" in var_opt_val_set) {
+  print "  ptr->x_flag_defer_pop = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_delayed_branch" in var_opt_val_set) {
+  print "  ptr->x_flag_delayed_branch = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_delete_dead_exceptions" in var_opt_val_set) {
+  print "  ptr->x_flag_delete_dead_exceptions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_delete_null_pointer_checks" in var_opt_val_set) {
+  print "  ptr->x_flag_delete_null_pointer_checks = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_devirtualize" in var_opt_val_set) {
+  print "  ptr->x_flag_devirtualize = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_devirtualize_speculatively" in var_opt_val_set) {
+  print "  ptr->x_flag_devirtualize_speculatively = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_dse" in var_opt_val_set) {
+  print "  ptr->x_flag_dse = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_early_inlining" in var_opt_val_set) {
+  print "  ptr->x_flag_early_inlining = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_exceptions" in var_opt_val_set) {
+  print "  ptr->x_flag_exceptions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_excess_precision" in var_opt_val_set) {
+  print "  ptr->x_flag_excess_precision = (enum excess_precision ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_expensive_optimizations" in var_opt_val_set) {
+  print "  ptr->x_flag_expensive_optimizations = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_finite_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_finite_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_finite_math_only" in var_opt_val_set) {
+  print "  ptr->x_flag_finite_math_only = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_float_store" in var_opt_val_set) {
+  print "  ptr->x_flag_float_store = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_fold_simple_inlines" in var_opt_val_set) {
+  print "  ptr->x_flag_fold_simple_inlines = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_forward_propagate" in var_opt_val_set) {
+  print "  ptr->x_flag_forward_propagate = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_fp_contract_mode" in var_opt_val_set) {
+  print "  ptr->x_flag_fp_contract_mode = (enum fp_contract_mode ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_fp_int_builtin_inexact" in var_opt_val_set) {
+  print "  ptr->x_flag_fp_int_builtin_inexact = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ftz" in var_opt_val_set) {
+  print "  ptr->x_flag_ftz = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_no_function_cse" in var_opt_val_set) {
+  print "  ptr->x_flag_no_function_cse = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_gcse" in var_opt_val_set) {
+  print "  ptr->x_flag_gcse = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_gcse_after_reload" in var_opt_val_set) {
+  print "  ptr->x_flag_gcse_after_reload = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_gcse_las" in var_opt_val_set) {
+  print "  ptr->x_flag_gcse_las = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_gcse_lm" in var_opt_val_set) {
+  print "  ptr->x_flag_gcse_lm = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_gcse_sm" in var_opt_val_set) {
+  print "  ptr->x_flag_gcse_sm = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_graphite" in var_opt_val_set) {
+  print "  ptr->x_flag_graphite = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_graphite_identity" in var_opt_val_set) {
+  print "  ptr->x_flag_graphite_identity = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_guess_branch_prob" in var_opt_val_set) {
+  print "  ptr->x_flag_guess_branch_prob = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_harden_compares" in var_opt_val_set) {
+  print "  ptr->x_flag_harden_compares = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_harden_conditional_branches" in var_opt_val_set) {
+  print "  ptr->x_flag_harden_conditional_branches = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_hoist_adjacent_loads" in var_opt_val_set) {
+  print "  ptr->x_flag_hoist_adjacent_loads = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_icp" in var_opt_val_set) {
+  print "  ptr->x_flag_icp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_icp_speculatively" in var_opt_val_set) {
+  print "  ptr->x_flag_icp_speculatively = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_if_conversion" in var_opt_val_set) {
+  print "  ptr->x_flag_if_conversion = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_if_conversion_gimple" in var_opt_val_set) {
+  print "  ptr->x_flag_if_conversion_gimple = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_if_conversion2" in var_opt_val_set) {
+  print "  ptr->x_flag_if_conversion2 = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ifcvt_allow_complicated_cmps" in var_opt_val_set) {
+  print "  ptr->x_flag_ifcvt_allow_complicated_cmps = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_indirect_inlining" in var_opt_val_set) {
+  print "  ptr->x_flag_indirect_inlining = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_no_inline" in var_opt_val_set) {
+  print "  ptr->x_flag_no_inline = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_inline_atomics" in var_opt_val_set) {
+  print "  ptr->x_flag_inline_atomics = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_inline_functions" in var_opt_val_set) {
+  print "  ptr->x_flag_inline_functions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_inline_functions_called_once" in var_opt_val_set) {
+  print "  ptr->x_flag_inline_functions_called_once = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_inline_small_functions" in var_opt_val_set) {
+  print "  ptr->x_flag_inline_small_functions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_bit_cp" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_bit_cp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_cp" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_cp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_cp_clone" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_cp_clone = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_ic" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_ic = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_icf" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_icf = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_icf_functions" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_icf_functions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_icf_variables" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_icf_variables = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_modref" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_modref = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_prefetch" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_prefetch = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_profile" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_profile = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_pta" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_pta = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_pure_const" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_pure_const = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_ra" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_ra = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_reference" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_reference = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_reference_addressable" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_reference_addressable = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_reorder_fields" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_reorder_fields = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_sra" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_sra = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_stack_alignment" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_stack_alignment = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_strict_aliasing" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_strict_aliasing = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_struct_reorg" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_struct_reorg = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ipa_vrp" in var_opt_val_set) {
+  print "  ptr->x_flag_ipa_vrp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ira_algorithm" in var_opt_val_set) {
+  print "  ptr->x_flag_ira_algorithm = (enum ira_algorithm ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ira_hoist_pressure" in var_opt_val_set) {
+  print "  ptr->x_flag_ira_hoist_pressure = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ira_loop_pressure" in var_opt_val_set) {
+  print "  ptr->x_flag_ira_loop_pressure = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ira_region" in var_opt_val_set) {
+  print "  ptr->x_flag_ira_region = (enum ira_region ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ira_share_save_slots" in var_opt_val_set) {
+  print "  ptr->x_flag_ira_share_save_slots = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ira_share_spill_slots" in var_opt_val_set) {
+  print "  ptr->x_flag_ira_share_spill_slots = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_isolate_erroneous_paths_attribute" in var_opt_val_set) {
+  print "  ptr->x_flag_isolate_erroneous_paths_attribute = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_isolate_erroneous_paths_dereference" in var_opt_val_set) {
+  print "  ptr->x_flag_isolate_erroneous_paths_dereference = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ivopts" in var_opt_val_set) {
+  print "  ptr->x_flag_ivopts = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_jump_tables" in var_opt_val_set) {
+  print "  ptr->x_flag_jump_tables = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_keep_gc_roots_live" in var_opt_val_set) {
+  print "  ptr->x_flag_keep_gc_roots_live = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_kernel_pgo" in var_opt_val_set) {
+  print "  ptr->x_flag_kernel_pgo = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_lifetime_dse" in var_opt_val_set) {
+  print "  ptr->x_flag_lifetime_dse = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_limit_function_alignment" in var_opt_val_set) {
+  print "  ptr->x_flag_limit_function_alignment = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_live_patching" in var_opt_val_set) {
+  print "  ptr->x_flag_live_patching = (enum live_patching_level ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_live_range_shrinkage" in var_opt_val_set) {
+  print "  ptr->x_flag_live_range_shrinkage = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_loop_crc" in var_opt_val_set) {
+  print "  ptr->x_flag_loop_crc = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_loop_elim" in var_opt_val_set) {
+  print "  ptr->x_flag_loop_elim = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_loop_interchange" in var_opt_val_set) {
+  print "  ptr->x_flag_loop_interchange = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_loop_nest_optimize" in var_opt_val_set) {
+  print "  ptr->x_flag_loop_nest_optimize = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_loop_parallelize_all" in var_opt_val_set) {
+  print "  ptr->x_flag_loop_parallelize_all = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_unroll_jam" in var_opt_val_set) {
+  print "  ptr->x_flag_unroll_jam = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_lra_remat" in var_opt_val_set) {
+  print "  ptr->x_flag_lra_remat = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_errno_math" in var_opt_val_set) {
+  print "  ptr->x_flag_errno_math = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_merge_mull" in var_opt_val_set) {
+  print "  ptr->x_flag_merge_mull = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_modulo_sched" in var_opt_val_set) {
+  print "  ptr->x_flag_modulo_sched = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_modulo_sched_allow_regmoves" in var_opt_val_set) {
+  print "  ptr->x_flag_modulo_sched_allow_regmoves = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_move_loop_invariants" in var_opt_val_set) {
+  print "  ptr->x_flag_move_loop_invariants = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_move_loop_stores" in var_opt_val_set) {
+  print "  ptr->x_flag_move_loop_stores = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_non_call_exceptions" in var_opt_val_set) {
+  print "  ptr->x_flag_non_call_exceptions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_nothrow_opt" in var_opt_val_set) {
+  print "  ptr->x_flag_nothrow_opt = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_omit_frame_pointer" in var_opt_val_set) {
+  print "  ptr->x_flag_omit_frame_pointer = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_opt_info" in var_opt_val_set) {
+  print "  ptr->x_flag_opt_info = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_optimize_sibling_calls" in var_opt_val_set) {
+  print "  ptr->x_flag_optimize_sibling_calls = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_optimize_strlen" in var_opt_val_set) {
+  print "  ptr->x_flag_optimize_strlen = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_fp_model" in var_opt_val_set) {
+  print "  ptr->x_flag_fp_model = (enum fp_model ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_pack_struct" in var_opt_val_set) {
+  print "  ptr->x_flag_pack_struct = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_partial_inlining" in var_opt_val_set) {
+  print "  ptr->x_flag_partial_inlining = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_patchable_function_entry" in var_opt_val_set) {
+  print "  ptr->x_flag_patchable_function_entry = bp_unpack_string (data_in, bp);"
+  print "  if (ptr->x_flag_patchable_function_entry)"
+  print "    ptr->x_flag_patchable_function_entry = xstrdup (ptr->x_flag_patchable_function_entry);"
+}
+else
+  print "  bp_unpack_string (data_in, bp);"
+if ("x_flag_peel_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_peel_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_no_peephole" in var_opt_val_set) {
+  print "  ptr->x_flag_no_peephole = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_peephole2" in var_opt_val_set) {
+  print "  ptr->x_flag_peephole2 = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_plt" in var_opt_val_set) {
+  print "  ptr->x_flag_plt = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_predictive_commoning" in var_opt_val_set) {
+  print "  ptr->x_flag_predictive_commoning = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_prefetch_loop_arrays" in var_opt_val_set) {
+  print "  ptr->x_flag_prefetch_loop_arrays = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_printf_return_value" in var_opt_val_set) {
+  print "  ptr->x_flag_printf_return_value = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_profile_partial_training" in var_opt_val_set) {
+  print "  ptr->x_flag_profile_partial_training = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_profile_reorder_functions" in var_opt_val_set) {
+  print "  ptr->x_flag_profile_reorder_functions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_reciprocal_math" in var_opt_val_set) {
+  print "  ptr->x_flag_reciprocal_math = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ree" in var_opt_val_set) {
+  print "  ptr->x_flag_ree = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_pcc_struct_return" in var_opt_val_set) {
+  print "  ptr->x_flag_pcc_struct_return = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_rename_registers" in var_opt_val_set) {
+  print "  ptr->x_flag_rename_registers = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_reorder_blocks" in var_opt_val_set) {
+  print "  ptr->x_flag_reorder_blocks = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_reorder_blocks_algorithm" in var_opt_val_set) {
+  print "  ptr->x_flag_reorder_blocks_algorithm = (enum reorder_blocks_algorithm ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_reorder_blocks_and_partition" in var_opt_val_set) {
+  print "  ptr->x_flag_reorder_blocks_and_partition = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_reorder_functions" in var_opt_val_set) {
+  print "  ptr->x_flag_reorder_functions = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_rerun_cse_after_loop" in var_opt_val_set) {
+  print "  ptr->x_flag_rerun_cse_after_loop = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_resched_modulo_sched" in var_opt_val_set) {
+  print "  ptr->x_flag_resched_modulo_sched = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_rounding_math" in var_opt_val_set) {
+  print "  ptr->x_flag_rounding_math = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_rtti" in var_opt_val_set) {
+  print "  ptr->x_flag_rtti = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_save_optimization_record" in var_opt_val_set) {
+  print "  ptr->x_flag_save_optimization_record = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_critical_path_heuristic" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_critical_path_heuristic = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_dep_count_heuristic" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_dep_count_heuristic = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_group_heuristic" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_group_heuristic = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_schedule_interblock" in var_opt_val_set) {
+  print "  ptr->x_flag_schedule_interblock = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_last_insn_heuristic" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_last_insn_heuristic = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_pressure" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_pressure = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_rank_heuristic" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_rank_heuristic = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_schedule_speculative" in var_opt_val_set) {
+  print "  ptr->x_flag_schedule_speculative = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_spec_insn_heuristic" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_spec_insn_heuristic = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_schedule_speculative_load" in var_opt_val_set) {
+  print "  ptr->x_flag_schedule_speculative_load = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_schedule_speculative_load_dangerous" in var_opt_val_set) {
+  print "  ptr->x_flag_schedule_speculative_load_dangerous = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_stalled_insns" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_stalled_insns = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched_stalled_insns_dep" in var_opt_val_set) {
+  print "  ptr->x_flag_sched_stalled_insns_dep = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sched2_use_superblocks" in var_opt_val_set) {
+  print "  ptr->x_flag_sched2_use_superblocks = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_schedule_fusion" in var_opt_val_set) {
+  print "  ptr->x_flag_schedule_fusion = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_schedule_insns" in var_opt_val_set) {
+  print "  ptr->x_flag_schedule_insns = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_schedule_insns_after_reload" in var_opt_val_set) {
+  print "  ptr->x_flag_schedule_insns_after_reload = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_section_anchors" in var_opt_val_set) {
+  print "  ptr->x_flag_section_anchors = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sel_sched_pipelining" in var_opt_val_set) {
+  print "  ptr->x_flag_sel_sched_pipelining = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sel_sched_pipelining_outer_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_sel_sched_pipelining_outer_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_sel_sched_reschedule_pipelined" in var_opt_val_set) {
+  print "  ptr->x_flag_sel_sched_reschedule_pipelined = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_selective_scheduling" in var_opt_val_set) {
+  print "  ptr->x_flag_selective_scheduling = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_selective_scheduling2" in var_opt_val_set) {
+  print "  ptr->x_flag_selective_scheduling2 = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_semantic_interposition" in var_opt_val_set) {
+  print "  ptr->x_flag_semantic_interposition = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_short_enums" in var_opt_val_set) {
+  print "  ptr->x_flag_short_enums = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_short_wchar" in var_opt_val_set) {
+  print "  ptr->x_flag_short_wchar = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_shrink_wrap" in var_opt_val_set) {
+  print "  ptr->x_flag_shrink_wrap = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_shrink_wrap_separate" in var_opt_val_set) {
+  print "  ptr->x_flag_shrink_wrap_separate = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_signaling_nans" in var_opt_val_set) {
+  print "  ptr->x_flag_signaling_nans = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_signed_zeros" in var_opt_val_set) {
+  print "  ptr->x_flag_signed_zeros = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_simd_cost_model" in var_opt_val_set) {
+  print "  ptr->x_flag_simd_cost_model = (enum vect_cost_model ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_simdmath" in var_opt_val_set) {
+  print "  ptr->x_flag_simdmath = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_single_precision_constant" in var_opt_val_set) {
+  print "  ptr->x_flag_single_precision_constant = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_split_ivs_in_unroller" in var_opt_val_set) {
+  print "  ptr->x_flag_split_ivs_in_unroller = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_split_ldp_stp" in var_opt_val_set) {
+  print "  ptr->x_flag_split_ldp_stp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_split_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_split_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_split_paths" in var_opt_val_set) {
+  print "  ptr->x_flag_split_paths = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_split_wide_types" in var_opt_val_set) {
+  print "  ptr->x_flag_split_wide_types = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_split_wide_types_early" in var_opt_val_set) {
+  print "  ptr->x_flag_split_wide_types_early = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ssa_backprop" in var_opt_val_set) {
+  print "  ptr->x_flag_ssa_backprop = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_ssa_phiopt" in var_opt_val_set) {
+  print "  ptr->x_flag_ssa_phiopt = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_stack_clash_protection" in var_opt_val_set) {
+  print "  ptr->x_flag_stack_clash_protection = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_stack_protect" in var_opt_val_set) {
+  print "  ptr->x_flag_stack_protect = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_stack_reuse" in var_opt_val_set) {
+  print "  ptr->x_flag_stack_reuse = (enum stack_reuse_level ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_stdarg_opt" in var_opt_val_set) {
+  print "  ptr->x_flag_stdarg_opt = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_store_merging" in var_opt_val_set) {
+  print "  ptr->x_flag_store_merging = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_strict_aliasing" in var_opt_val_set) {
+  print "  ptr->x_flag_strict_aliasing = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_strict_enums" in var_opt_val_set) {
+  print "  ptr->x_flag_strict_enums = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_strict_volatile_bitfields" in var_opt_val_set) {
+  print "  ptr->x_flag_strict_volatile_bitfields = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_thread_jumps" in var_opt_val_set) {
+  print "  ptr->x_flag_thread_jumps = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_threadsafe_statics" in var_opt_val_set) {
+  print "  ptr->x_flag_threadsafe_statics = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_toplevel_reorder" in var_opt_val_set) {
+  print "  ptr->x_flag_toplevel_reorder = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tracer" in var_opt_val_set) {
+  print "  ptr->x_flag_tracer = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_trapping_math" in var_opt_val_set) {
+  print "  ptr->x_flag_trapping_math = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_trapv" in var_opt_val_set) {
+  print "  ptr->x_flag_trapv = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_bit_ccp" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_bit_ccp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_builtin_call_dce" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_builtin_call_dce = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_ccp" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_ccp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_ch" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_ch = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_coalesce_vars" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_coalesce_vars = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_copy_prop" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_copy_prop = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_cselim" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_cselim = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_dce" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_dce = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_dom" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_dom = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_dse" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_dse = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_forwprop" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_forwprop = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_fre" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_fre = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_loop_distribute_patterns" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_loop_distribute_patterns = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_loop_distribution" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_loop_distribution = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_loop_if_convert" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_loop_if_convert = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_loop_im" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_loop_im = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_loop_ivcanon" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_loop_ivcanon = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_loop_optimize" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_loop_optimize = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_loop_vectorize" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_loop_vectorize = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_live_range_split" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_live_range_split = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_parallelize_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_parallelize_loops = (int ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_partial_pre" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_partial_pre = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_phiprop" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_phiprop = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_pre" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_pre = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_pta" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_pta = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_reassoc" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_reassoc = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_scev_cprop" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_scev_cprop = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_sink" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_sink = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_slp_transpose_vectorize" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_slp_transpose_vectorize = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_slp_vectorize" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_slp_vectorize = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_slsr" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_slsr = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_sra" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_sra = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_switch_conversion" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_switch_conversion = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_tail_merge" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_tail_merge = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_ter" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_ter = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_vectorize" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_vectorize = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_tree_vrp" in var_opt_val_set) {
+  print "  ptr->x_flag_tree_vrp = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_auto_var_init" in var_opt_val_set) {
+  print "  ptr->x_flag_auto_var_init = (enum auto_init_type ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_unconstrained_commons" in var_opt_val_set) {
+  print "  ptr->x_flag_unconstrained_commons = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_unroll_all_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_unroll_all_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_cunroll_grow_size" in var_opt_val_set) {
+  print "  ptr->x_flag_cunroll_grow_size = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_unroll_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_unroll_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_unsafe_math_optimizations" in var_opt_val_set) {
+  print "  ptr->x_flag_unsafe_math_optimizations = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_unswitch_loops" in var_opt_val_set) {
+  print "  ptr->x_flag_unswitch_loops = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_unwind_tables" in var_opt_val_set) {
+  print "  ptr->x_flag_unwind_tables = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_var_tracking" in var_opt_val_set) {
+  print "  ptr->x_flag_var_tracking = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_var_tracking_assignments" in var_opt_val_set) {
+  print "  ptr->x_flag_var_tracking_assignments = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_var_tracking_assignments_toggle" in var_opt_val_set) {
+  print "  ptr->x_flag_var_tracking_assignments_toggle = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_var_tracking_uninit" in var_opt_val_set) {
+  print "  ptr->x_flag_var_tracking_uninit = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_variable_expansion_in_unroller" in var_opt_val_set) {
+  print "  ptr->x_flag_variable_expansion_in_unroller = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_vect_cost_model" in var_opt_val_set) {
+  print "  ptr->x_flag_vect_cost_model = (enum vect_cost_model ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_version_loops_for_strides" in var_opt_val_set) {
+  print "  ptr->x_flag_version_loops_for_strides = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_value_profile_transformations" in var_opt_val_set) {
+  print "  ptr->x_flag_value_profile_transformations = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_web" in var_opt_val_set) {
+  print "  ptr->x_flag_web = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_wrapv" in var_opt_val_set) {
+  print "  ptr->x_flag_wrapv = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_wrapv_pointer" in var_opt_val_set) {
+  print "  ptr->x_flag_wrapv_pointer = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_debug_nonbind_markers_p" in var_opt_val_set) {
+  print "  ptr->x_debug_nonbind_markers_p = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_cmlt_arith" in var_opt_val_set) {
+  print "  ptr->x_flag_cmlt_arith = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_mlow_precision_div" in var_opt_val_set) {
+  print "  ptr->x_flag_mlow_precision_div = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_mrecip_low_precision_sqrt" in var_opt_val_set) {
+  print "  ptr->x_flag_mrecip_low_precision_sqrt = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_mlow_precision_sqrt" in var_opt_val_set) {
+  print "  ptr->x_flag_mlow_precision_sqrt = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+if ("x_flag_simdmath_64" in var_opt_val_set) {
+  print "  ptr->x_flag_simdmath_64 = (signed char ) bp_unpack_var_len_int (bp);"
+}
+else
+  print "  bp_unpack_var_len_int (bp);"
+print "  unsigned HOST_WIDE_INT explicit_mask_prev[9];"
+print "  for (size_t i = 0; i < 9; i++)"
+print "    explicit_mask_prev[i] = bp_unpack_value (bp, 64);"
+print "  for (size_t i = 0; i < sizeof (ptr->explicit_mask) / sizeof (ptr->explicit_mask[0]); i++)"
+print "    ptr->explicit_mask[i] = 0;"
+if ("param_align_loop_iterations" in var_opt_int_k) {
+  k = var_opt_int_k["param_align_loop_iterations"]
+  j = var_opt_int_j["param_align_loop_iterations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_align_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_align_threshold"]
+  j = var_opt_int_j["param_align_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_asan_protect_allocas" in var_opt_int_k) {
+  k = var_opt_int_k["param_asan_protect_allocas"]
+  j = var_opt_int_j["param_asan_protect_allocas"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_asan_instrument_reads" in var_opt_int_k) {
+  k = var_opt_int_k["param_asan_instrument_reads"]
+  j = var_opt_int_j["param_asan_instrument_reads"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_asan_instrument_writes" in var_opt_int_k) {
+  k = var_opt_int_k["param_asan_instrument_writes"]
+  j = var_opt_int_j["param_asan_instrument_writes"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_asan_instrumentation_with_call_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_asan_instrumentation_with_call_threshold"]
+  j = var_opt_int_j["param_asan_instrumentation_with_call_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_asan_memintrin" in var_opt_int_k) {
+  k = var_opt_int_k["param_asan_memintrin"]
+  j = var_opt_int_j["param_asan_memintrin"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_asan_stack" in var_opt_int_k) {
+  k = var_opt_int_k["param_asan_stack"]
+  j = var_opt_int_j["param_asan_stack"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_asan_use_after_return" in var_opt_int_k) {
+  k = var_opt_int_k["param_asan_use_after_return"]
+  j = var_opt_int_j["param_asan_use_after_return"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_avg_loop_niter" in var_opt_int_k) {
+  k = var_opt_int_k["param_avg_loop_niter"]
+  j = var_opt_int_j["param_avg_loop_niter"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_avoid_fma_max_bits" in var_opt_int_k) {
+  k = var_opt_int_k["param_avoid_fma_max_bits"]
+  j = var_opt_int_j["param_avoid_fma_max_bits"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_builtin_expect_probability" in var_opt_int_k) {
+  k = var_opt_int_k["param_builtin_expect_probability"]
+  j = var_opt_int_j["param_builtin_expect_probability"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_builtin_string_cmp_inline_length" in var_opt_int_k) {
+  k = var_opt_int_k["param_builtin_string_cmp_inline_length"]
+  j = var_opt_int_j["param_builtin_string_cmp_inline_length"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_case_values_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_case_values_threshold"]
+  j = var_opt_int_j["param_case_values_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_comdat_sharing_probability" in var_opt_int_k) {
+  k = var_opt_int_k["param_comdat_sharing_probability"]
+  j = var_opt_int_j["param_comdat_sharing_probability"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_pointer_compression_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_pointer_compression_size"]
+  j = var_opt_int_j["param_pointer_compression_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_construct_interfere_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_construct_interfere_size"]
+  j = var_opt_int_j["param_construct_interfere_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_destruct_interfere_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_destruct_interfere_size"]
+  j = var_opt_int_j["param_destruct_interfere_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_dse_max_alias_queries_per_store" in var_opt_int_k) {
+  k = var_opt_int_k["param_dse_max_alias_queries_per_store"]
+  j = var_opt_int_j["param_dse_max_alias_queries_per_store"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_dse_max_object_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_dse_max_object_size"]
+  j = var_opt_int_j["param_dse_max_object_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_early_inlining_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_early_inlining_insns"]
+  j = var_opt_int_j["param_early_inlining_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_evrp_sparse_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_evrp_sparse_threshold"]
+  j = var_opt_int_j["param_evrp_sparse_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_evrp_switch_limit" in var_opt_int_k) {
+  k = var_opt_int_k["param_evrp_switch_limit"]
+  j = var_opt_int_j["param_evrp_switch_limit"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_fsm_scale_path_blocks" in var_opt_int_k) {
+  k = var_opt_int_k["param_fsm_scale_path_blocks"]
+  j = var_opt_int_j["param_fsm_scale_path_blocks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_fsm_scale_path_stmts" in var_opt_int_k) {
+  k = var_opt_int_k["param_fsm_scale_path_stmts"]
+  j = var_opt_int_j["param_fsm_scale_path_stmts"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_gcse_after_reload_critical_fraction" in var_opt_int_k) {
+  k = var_opt_int_k["param_gcse_after_reload_critical_fraction"]
+  j = var_opt_int_j["param_gcse_after_reload_critical_fraction"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_gcse_after_reload_partial_fraction" in var_opt_int_k) {
+  k = var_opt_int_k["param_gcse_after_reload_partial_fraction"]
+  j = var_opt_int_j["param_gcse_after_reload_partial_fraction"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_gcse_cost_distance_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_gcse_cost_distance_ratio"]
+  j = var_opt_int_j["param_gcse_cost_distance_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_gcse_unrestricted_cost" in var_opt_int_k) {
+  k = var_opt_int_k["param_gcse_unrestricted_cost"]
+  j = var_opt_int_j["param_gcse_unrestricted_cost"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_graphite_max_arrays_per_scop" in var_opt_int_k) {
+  k = var_opt_int_k["param_graphite_max_arrays_per_scop"]
+  j = var_opt_int_j["param_graphite_max_arrays_per_scop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_graphite_max_nb_scop_params" in var_opt_int_k) {
+  k = var_opt_int_k["param_graphite_max_nb_scop_params"]
+  j = var_opt_int_j["param_graphite_max_nb_scop_params"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_hwasan_instrument_allocas" in var_opt_int_k) {
+  k = var_opt_int_k["param_hwasan_instrument_allocas"]
+  j = var_opt_int_j["param_hwasan_instrument_allocas"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_hwasan_instrument_mem_intrinsics" in var_opt_int_k) {
+  k = var_opt_int_k["param_hwasan_instrument_mem_intrinsics"]
+  j = var_opt_int_j["param_hwasan_instrument_mem_intrinsics"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_hwasan_instrument_reads" in var_opt_int_k) {
+  k = var_opt_int_k["param_hwasan_instrument_reads"]
+  j = var_opt_int_j["param_hwasan_instrument_reads"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_hwasan_instrument_stack" in var_opt_int_k) {
+  k = var_opt_int_k["param_hwasan_instrument_stack"]
+  j = var_opt_int_j["param_hwasan_instrument_stack"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_hwasan_instrument_writes" in var_opt_int_k) {
+  k = var_opt_int_k["param_hwasan_instrument_writes"]
+  j = var_opt_int_j["param_hwasan_instrument_writes"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_hwasan_random_frame_tag" in var_opt_int_k) {
+  k = var_opt_int_k["param_hwasan_random_frame_tag"]
+  j = var_opt_int_j["param_hwasan_random_frame_tag"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ifcvt_allow_register_renaming" in var_opt_int_k) {
+  k = var_opt_int_k["param_ifcvt_allow_register_renaming"]
+  j = var_opt_int_j["param_ifcvt_allow_register_renaming"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_inline_heuristics_hint_percent" in var_opt_int_k) {
+  k = var_opt_int_k["param_inline_heuristics_hint_percent"]
+  j = var_opt_int_j["param_inline_heuristics_hint_percent"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_inline_min_speedup" in var_opt_int_k) {
+  k = var_opt_int_k["param_inline_min_speedup"]
+  j = var_opt_int_j["param_inline_min_speedup"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_inline_unit_growth" in var_opt_int_k) {
+  k = var_opt_int_k["param_inline_unit_growth"]
+  j = var_opt_int_j["param_inline_unit_growth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_eval_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_eval_threshold"]
+  j = var_opt_int_j["param_ipa_cp_eval_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_large_unit_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_large_unit_insns"]
+  j = var_opt_int_j["param_ipa_cp_large_unit_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_loop_hint_bonus" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_loop_hint_bonus"]
+  j = var_opt_int_j["param_ipa_cp_loop_hint_bonus"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_max_recursive_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_max_recursive_depth"]
+  j = var_opt_int_j["param_ipa_cp_max_recursive_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_min_recursive_probability" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_min_recursive_probability"]
+  j = var_opt_int_j["param_ipa_cp_min_recursive_probability"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_profile_count_base" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_profile_count_base"]
+  j = var_opt_int_j["param_ipa_cp_profile_count_base"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_recursion_penalty" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_recursion_penalty"]
+  j = var_opt_int_j["param_ipa_cp_recursion_penalty"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_recursive_freq_factor" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_recursive_freq_factor"]
+  j = var_opt_int_j["param_ipa_cp_recursive_freq_factor"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_single_call_penalty" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_single_call_penalty"]
+  j = var_opt_int_j["param_ipa_cp_single_call_penalty"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_unit_growth" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_unit_growth"]
+  j = var_opt_int_j["param_ipa_cp_unit_growth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_cp_value_list_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_cp_value_list_size"]
+  j = var_opt_int_j["param_ipa_cp_value_list_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_jump_function_lookups" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_jump_function_lookups"]
+  j = var_opt_int_j["param_ipa_jump_function_lookups"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_max_aa_steps" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_max_aa_steps"]
+  j = var_opt_int_j["param_ipa_max_aa_steps"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_max_agg_items" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_max_agg_items"]
+  j = var_opt_int_j["param_ipa_max_agg_items"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_max_loop_predicates" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_max_loop_predicates"]
+  j = var_opt_int_j["param_ipa_max_loop_predicates"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_max_param_expr_ops" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_max_param_expr_ops"]
+  j = var_opt_int_j["param_ipa_max_param_expr_ops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_max_switch_predicate_bounds" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_max_switch_predicate_bounds"]
+  j = var_opt_int_j["param_ipa_max_switch_predicate_bounds"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_prefetch_distance_factor" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_prefetch_distance_factor"]
+  j = var_opt_int_j["param_ipa_prefetch_distance_factor"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_prefetch_locality" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_prefetch_locality"]
+  j = var_opt_int_j["param_ipa_prefetch_locality"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_prefetch_pagesize" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_prefetch_pagesize"]
+  j = var_opt_int_j["param_ipa_prefetch_pagesize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_sra_max_replacements" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_sra_max_replacements"]
+  j = var_opt_int_j["param_ipa_sra_max_replacements"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ipa_sra_ptr_growth_factor" in var_opt_int_k) {
+  k = var_opt_int_k["param_ipa_sra_ptr_growth_factor"]
+  j = var_opt_int_j["param_ipa_sra_ptr_growth_factor"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ira_consider_dup_in_all_alts" in var_opt_int_k) {
+  k = var_opt_int_k["param_ira_consider_dup_in_all_alts"]
+  j = var_opt_int_j["param_ira_consider_dup_in_all_alts"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[0] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ira_loop_reserved_regs" in var_opt_int_k) {
+  k = var_opt_int_k["param_ira_loop_reserved_regs"]
+  j = var_opt_int_j["param_ira_loop_reserved_regs"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ira_max_conflict_table_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_ira_max_conflict_table_size"]
+  j = var_opt_int_j["param_ira_max_conflict_table_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ira_max_loops_num" in var_opt_int_k) {
+  k = var_opt_int_k["param_ira_max_loops_num"]
+  j = var_opt_int_j["param_ira_max_loops_num"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_iv_always_prune_cand_set_bound" in var_opt_int_k) {
+  k = var_opt_int_k["param_iv_always_prune_cand_set_bound"]
+  j = var_opt_int_j["param_iv_always_prune_cand_set_bound"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_iv_consider_all_candidates_bound" in var_opt_int_k) {
+  k = var_opt_int_k["param_iv_consider_all_candidates_bound"]
+  j = var_opt_int_j["param_iv_consider_all_candidates_bound"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_iv_max_considered_uses" in var_opt_int_k) {
+  k = var_opt_int_k["param_iv_max_considered_uses"]
+  j = var_opt_int_j["param_iv_max_considered_uses"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_jump_table_max_growth_ratio_for_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_jump_table_max_growth_ratio_for_size"]
+  j = var_opt_int_j["param_jump_table_max_growth_ratio_for_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_jump_table_max_growth_ratio_for_speed" in var_opt_int_k) {
+  k = var_opt_int_k["param_jump_table_max_growth_ratio_for_speed"]
+  j = var_opt_int_j["param_jump_table_max_growth_ratio_for_speed"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_l1_cache_line_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_l1_cache_line_size"]
+  j = var_opt_int_j["param_l1_cache_line_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_l1_cache_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_l1_cache_size"]
+  j = var_opt_int_j["param_l1_cache_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_l2_cache_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_l2_cache_size"]
+  j = var_opt_int_j["param_l2_cache_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_large_function_growth" in var_opt_int_k) {
+  k = var_opt_int_k["param_large_function_growth"]
+  j = var_opt_int_j["param_large_function_growth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_large_function_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_large_function_insns"]
+  j = var_opt_int_j["param_large_function_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_stack_frame_growth" in var_opt_int_k) {
+  k = var_opt_int_k["param_stack_frame_growth"]
+  j = var_opt_int_j["param_stack_frame_growth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_large_stack_frame" in var_opt_int_k) {
+  k = var_opt_int_k["param_large_stack_frame"]
+  j = var_opt_int_j["param_large_stack_frame"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_large_unit_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_large_unit_insns"]
+  j = var_opt_int_j["param_large_unit_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_lim_expensive" in var_opt_int_k) {
+  k = var_opt_int_k["param_lim_expensive"]
+  j = var_opt_int_j["param_lim_expensive"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_loop_block_tile_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_loop_block_tile_size"]
+  j = var_opt_int_j["param_loop_block_tile_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_loop_interchange_max_num_stmts" in var_opt_int_k) {
+  k = var_opt_int_k["param_loop_interchange_max_num_stmts"]
+  j = var_opt_int_j["param_loop_interchange_max_num_stmts"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_loop_interchange_stride_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_loop_interchange_stride_ratio"]
+  j = var_opt_int_j["param_loop_interchange_stride_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_loop_invariant_max_bbs_in_loop" in var_opt_int_k) {
+  k = var_opt_int_k["param_loop_invariant_max_bbs_in_loop"]
+  j = var_opt_int_j["param_loop_invariant_max_bbs_in_loop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_loop_max_datarefs_for_datadeps" in var_opt_int_k) {
+  k = var_opt_int_k["param_loop_max_datarefs_for_datadeps"]
+  j = var_opt_int_j["param_loop_max_datarefs_for_datadeps"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_loop_versioning_max_inner_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_loop_versioning_max_inner_insns"]
+  j = var_opt_int_j["param_loop_versioning_max_inner_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_loop_versioning_max_outer_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_loop_versioning_max_outer_insns"]
+  j = var_opt_int_j["param_loop_versioning_max_outer_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_lra_inheritance_ebb_probability_cutoff" in var_opt_int_k) {
+  k = var_opt_int_k["param_lra_inheritance_ebb_probability_cutoff"]
+  j = var_opt_int_j["param_lra_inheritance_ebb_probability_cutoff"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_lra_max_considered_reload_pseudos" in var_opt_int_k) {
+  k = var_opt_int_k["param_lra_max_considered_reload_pseudos"]
+  j = var_opt_int_j["param_lra_max_considered_reload_pseudos"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_average_unrolled_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_average_unrolled_insns"]
+  j = var_opt_int_j["param_max_average_unrolled_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_combine_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_combine_insns"]
+  j = var_opt_int_j["param_max_combine_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_unroll_iterations" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_unroll_iterations"]
+  j = var_opt_int_j["param_max_unroll_iterations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_completely_peel_times" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_completely_peel_times"]
+  j = var_opt_int_j["param_max_completely_peel_times"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_completely_peeled_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_completely_peeled_insns"]
+  j = var_opt_int_j["param_max_completely_peeled_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_crossjump_edges" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_crossjump_edges"]
+  j = var_opt_int_j["param_max_crossjump_edges"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_cse_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_cse_insns"]
+  j = var_opt_int_j["param_max_cse_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_cse_path_length" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_cse_path_length"]
+  j = var_opt_int_j["param_max_cse_path_length"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_cselib_memory_locations" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_cselib_memory_locations"]
+  j = var_opt_int_j["param_max_cselib_memory_locations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_debug_marker_count" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_debug_marker_count"]
+  j = var_opt_int_j["param_max_debug_marker_count"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_delay_slot_insn_search" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_delay_slot_insn_search"]
+  j = var_opt_int_j["param_max_delay_slot_insn_search"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_delay_slot_live_search" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_delay_slot_live_search"]
+  j = var_opt_int_j["param_max_delay_slot_live_search"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_dse_active_local_stores" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_dse_active_local_stores"]
+  j = var_opt_int_j["param_max_dse_active_local_stores"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_early_inliner_max_iterations" in var_opt_int_k) {
+  k = var_opt_int_k["param_early_inliner_max_iterations"]
+  j = var_opt_int_j["param_early_inliner_max_iterations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_find_base_term_values" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_find_base_term_values"]
+  j = var_opt_int_j["param_max_find_base_term_values"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_fsm_thread_length" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_fsm_thread_length"]
+  j = var_opt_int_j["param_max_fsm_thread_length"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_fsm_thread_path_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_fsm_thread_path_insns"]
+  j = var_opt_int_j["param_max_fsm_thread_path_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_gcse_insertion_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_gcse_insertion_ratio"]
+  j = var_opt_int_j["param_max_gcse_insertion_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_gcse_memory" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_gcse_memory"]
+  j = var_opt_int_j["param_max_gcse_memory"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_goto_duplication_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_goto_duplication_insns"]
+  j = var_opt_int_j["param_max_goto_duplication_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_grow_copy_bb_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_grow_copy_bb_insns"]
+  j = var_opt_int_j["param_max_grow_copy_bb_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_hoist_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_hoist_depth"]
+  j = var_opt_int_j["param_max_hoist_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_inline_functions_called_once_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_inline_functions_called_once_insns"]
+  j = var_opt_int_j["param_inline_functions_called_once_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_inline_functions_called_once_loop_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_inline_functions_called_once_loop_depth"]
+  j = var_opt_int_j["param_inline_functions_called_once_loop_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_insns_auto" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_insns_auto"]
+  j = var_opt_int_j["param_max_inline_insns_auto"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_insns_recursive_auto" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_insns_recursive_auto"]
+  j = var_opt_int_j["param_max_inline_insns_recursive_auto"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_insns_recursive" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_insns_recursive"]
+  j = var_opt_int_j["param_max_inline_insns_recursive"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_insns_single" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_insns_single"]
+  j = var_opt_int_j["param_max_inline_insns_single"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_insns_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_insns_size"]
+  j = var_opt_int_j["param_max_inline_insns_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_insns_small" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_insns_small"]
+  j = var_opt_int_j["param_max_inline_insns_small"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_recursive_depth_auto" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_recursive_depth_auto"]
+  j = var_opt_int_j["param_max_inline_recursive_depth_auto"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_inline_recursive_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_inline_recursive_depth"]
+  j = var_opt_int_j["param_max_inline_recursive_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_isl_operations" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_isl_operations"]
+  j = var_opt_int_j["param_max_isl_operations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_iterations_computation_cost" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_iterations_computation_cost"]
+  j = var_opt_int_j["param_max_iterations_computation_cost"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_iterations_to_track" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_iterations_to_track"]
+  j = var_opt_int_j["param_max_iterations_to_track"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_jump_thread_duplication_stmts" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_jump_thread_duplication_stmts"]
+  j = var_opt_int_j["param_max_jump_thread_duplication_stmts"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_last_value_rtl" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_last_value_rtl"]
+  j = var_opt_int_j["param_max_last_value_rtl"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_loop_header_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_loop_header_insns"]
+  j = var_opt_int_j["param_max_loop_header_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[1] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_modulo_backtrack_attempts" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_modulo_backtrack_attempts"]
+  j = var_opt_int_j["param_max_modulo_backtrack_attempts"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_partial_antic_length" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_partial_antic_length"]
+  j = var_opt_int_j["param_max_partial_antic_length"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_peel_branches" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_peel_branches"]
+  j = var_opt_int_j["param_max_peel_branches"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_peel_times" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_peel_times"]
+  j = var_opt_int_j["param_max_peel_times"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_peeled_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_peeled_insns"]
+  j = var_opt_int_j["param_max_peeled_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_pending_list_length" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_pending_list_length"]
+  j = var_opt_int_j["param_max_pending_list_length"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_pipeline_region_blocks" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_pipeline_region_blocks"]
+  j = var_opt_int_j["param_max_pipeline_region_blocks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_pipeline_region_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_pipeline_region_insns"]
+  j = var_opt_int_j["param_max_pipeline_region_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_pow_sqrt_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_pow_sqrt_depth"]
+  j = var_opt_int_j["param_max_pow_sqrt_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_predicted_iterations" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_predicted_iterations"]
+  j = var_opt_int_j["param_max_predicted_iterations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_reload_search_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_reload_search_insns"]
+  j = var_opt_int_j["param_max_reload_search_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_rtl_if_conversion_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_rtl_if_conversion_insns"]
+  j = var_opt_int_j["param_max_rtl_if_conversion_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_rtl_if_conversion_predictable_cost" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_rtl_if_conversion_predictable_cost"]
+  j = var_opt_int_j["param_max_rtl_if_conversion_predictable_cost"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_rtl_if_conversion_unpredictable_cost" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_rtl_if_conversion_unpredictable_cost"]
+  j = var_opt_int_j["param_max_rtl_if_conversion_unpredictable_cost"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_sched_extend_regions_iters" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_sched_extend_regions_iters"]
+  j = var_opt_int_j["param_max_sched_extend_regions_iters"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_sched_insn_conflict_delay" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_sched_insn_conflict_delay"]
+  j = var_opt_int_j["param_max_sched_insn_conflict_delay"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_sched_ready_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_sched_ready_insns"]
+  j = var_opt_int_j["param_max_sched_ready_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_sched_region_blocks" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_sched_region_blocks"]
+  j = var_opt_int_j["param_max_sched_region_blocks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_sched_region_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_sched_region_insns"]
+  j = var_opt_int_j["param_max_sched_region_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_slsr_candidate_scan" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_slsr_candidate_scan"]
+  j = var_opt_int_j["param_max_slsr_candidate_scan"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_speculative_devirt_maydefs" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_speculative_devirt_maydefs"]
+  j = var_opt_int_j["param_max_speculative_devirt_maydefs"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_stores_to_merge" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_stores_to_merge"]
+  j = var_opt_int_j["param_max_stores_to_merge"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_stores_to_sink" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_stores_to_sink"]
+  j = var_opt_int_j["param_max_stores_to_sink"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_tail_merge_comparisons" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_tail_merge_comparisons"]
+  j = var_opt_int_j["param_max_tail_merge_comparisons"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_tail_merge_iterations" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_tail_merge_iterations"]
+  j = var_opt_int_j["param_max_tail_merge_iterations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_tracked_strlens" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_tracked_strlens"]
+  j = var_opt_int_j["param_max_tracked_strlens"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_tree_if_conversion_phi_args" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_tree_if_conversion_phi_args"]
+  j = var_opt_int_j["param_max_tree_if_conversion_phi_args"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_unroll_times" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_unroll_times"]
+  j = var_opt_int_j["param_max_unroll_times"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_unrolled_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_unrolled_insns"]
+  j = var_opt_int_j["param_max_unrolled_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_unswitch_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_unswitch_insns"]
+  j = var_opt_int_j["param_max_unswitch_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_unswitch_level" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_unswitch_level"]
+  j = var_opt_int_j["param_max_unswitch_level"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_variable_expansions" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_variable_expansions"]
+  j = var_opt_int_j["param_max_variable_expansions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_vartrack_expr_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_vartrack_expr_depth"]
+  j = var_opt_int_j["param_max_vartrack_expr_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_vartrack_reverse_op_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_vartrack_reverse_op_size"]
+  j = var_opt_int_j["param_max_vartrack_reverse_op_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_vartrack_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_vartrack_size"]
+  j = var_opt_int_j["param_max_vartrack_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_max_vrp_switch_assertions" in var_opt_int_k) {
+  k = var_opt_int_k["param_max_vrp_switch_assertions"]
+  j = var_opt_int_j["param_max_vrp_switch_assertions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_crossjump_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_crossjump_insns"]
+  j = var_opt_int_j["param_min_crossjump_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_inline_recursive_probability" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_inline_recursive_probability"]
+  j = var_opt_int_j["param_min_inline_recursive_probability"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_insn_to_prefetch_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_insn_to_prefetch_ratio"]
+  j = var_opt_int_j["param_min_insn_to_prefetch_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_loop_cond_split_prob" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_loop_cond_split_prob"]
+  j = var_opt_int_j["param_min_loop_cond_split_prob"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_pagesize" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_pagesize"]
+  j = var_opt_int_j["param_min_pagesize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_size_for_stack_sharing" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_size_for_stack_sharing"]
+  j = var_opt_int_j["param_min_size_for_stack_sharing"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_spec_prob" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_spec_prob"]
+  j = var_opt_int_j["param_min_spec_prob"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_min_vect_loop_bound" in var_opt_int_k) {
+  k = var_opt_int_k["param_min_vect_loop_bound"]
+  j = var_opt_int_j["param_min_vect_loop_bound"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_modref_max_accesses" in var_opt_int_k) {
+  k = var_opt_int_k["param_modref_max_accesses"]
+  j = var_opt_int_j["param_modref_max_accesses"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_modref_max_adjustments" in var_opt_int_k) {
+  k = var_opt_int_k["param_modref_max_adjustments"]
+  j = var_opt_int_j["param_modref_max_adjustments"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_modref_max_bases" in var_opt_int_k) {
+  k = var_opt_int_k["param_modref_max_bases"]
+  j = var_opt_int_j["param_modref_max_bases"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_modref_max_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_modref_max_depth"]
+  j = var_opt_int_j["param_modref_max_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_modref_max_escape_points" in var_opt_int_k) {
+  k = var_opt_int_k["param_modref_max_escape_points"]
+  j = var_opt_int_j["param_modref_max_escape_points"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_modref_max_refs" in var_opt_int_k) {
+  k = var_opt_int_k["param_modref_max_refs"]
+  j = var_opt_int_j["param_modref_max_refs"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_modref_max_tests" in var_opt_int_k) {
+  k = var_opt_int_k["param_modref_max_tests"]
+  j = var_opt_int_j["param_modref_max_tests"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ldp_dependency_search_range" in var_opt_int_k) {
+  k = var_opt_int_k["param_ldp_dependency_search_range"]
+  j = var_opt_int_j["param_ldp_dependency_search_range"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_parloops_chunk_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_parloops_chunk_size"]
+  j = var_opt_int_j["param_parloops_chunk_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_parloops_min_per_thread" in var_opt_int_k) {
+  k = var_opt_int_k["param_parloops_min_per_thread"]
+  j = var_opt_int_j["param_parloops_min_per_thread"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_parloops_schedule" in var_opt_int_k) {
+  k = var_opt_int_k["param_parloops_schedule"]
+  j = var_opt_int_j["param_parloops_schedule"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_partial_inlining_entry_probability" in var_opt_int_k) {
+  k = var_opt_int_k["param_partial_inlining_entry_probability"]
+  j = var_opt_int_j["param_partial_inlining_entry_probability"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_predictable_branch_outcome" in var_opt_int_k) {
+  k = var_opt_int_k["param_predictable_branch_outcome"]
+  j = var_opt_int_j["param_predictable_branch_outcome"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_prefetch_dynamic_strides" in var_opt_int_k) {
+  k = var_opt_int_k["param_prefetch_dynamic_strides"]
+  j = var_opt_int_j["param_prefetch_dynamic_strides"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_prefetch_latency" in var_opt_int_k) {
+  k = var_opt_int_k["param_prefetch_latency"]
+  j = var_opt_int_j["param_prefetch_latency"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_prefetch_min_insn_to_mem_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_prefetch_min_insn_to_mem_ratio"]
+  j = var_opt_int_j["param_prefetch_min_insn_to_mem_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_prefetch_minimum_stride" in var_opt_int_k) {
+  k = var_opt_int_k["param_prefetch_minimum_stride"]
+  j = var_opt_int_j["param_prefetch_minimum_stride"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ranger_logical_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_ranger_logical_depth"]
+  j = var_opt_int_j["param_ranger_logical_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_relation_block_limit" in var_opt_int_k) {
+  k = var_opt_int_k["param_relation_block_limit"]
+  j = var_opt_int_j["param_relation_block_limit"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_rpo_vn_max_loop_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_rpo_vn_max_loop_depth"]
+  j = var_opt_int_j["param_rpo_vn_max_loop_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[2] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sccvn_max_alias_queries_per_access" in var_opt_int_k) {
+  k = var_opt_int_k["param_sccvn_max_alias_queries_per_access"]
+  j = var_opt_int_j["param_sccvn_max_alias_queries_per_access"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_scev_max_expr_complexity" in var_opt_int_k) {
+  k = var_opt_int_k["param_scev_max_expr_complexity"]
+  j = var_opt_int_j["param_scev_max_expr_complexity"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_scev_max_expr_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_scev_max_expr_size"]
+  j = var_opt_int_j["param_scev_max_expr_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sched_autopref_queue_depth" in var_opt_int_k) {
+  k = var_opt_int_k["param_sched_autopref_queue_depth"]
+  j = var_opt_int_j["param_sched_autopref_queue_depth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sched_mem_true_dep_cost" in var_opt_int_k) {
+  k = var_opt_int_k["param_sched_mem_true_dep_cost"]
+  j = var_opt_int_j["param_sched_mem_true_dep_cost"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sched_pressure_algorithm" in var_opt_int_k) {
+  k = var_opt_int_k["param_sched_pressure_algorithm"]
+  j = var_opt_int_j["param_sched_pressure_algorithm"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sched_spec_prob_cutoff" in var_opt_int_k) {
+  k = var_opt_int_k["param_sched_spec_prob_cutoff"]
+  j = var_opt_int_j["param_sched_spec_prob_cutoff"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sched_state_edge_prob_cutoff" in var_opt_int_k) {
+  k = var_opt_int_k["param_sched_state_edge_prob_cutoff"]
+  j = var_opt_int_j["param_sched_state_edge_prob_cutoff"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_selsched_insns_to_rename" in var_opt_int_k) {
+  k = var_opt_int_k["param_selsched_insns_to_rename"]
+  j = var_opt_int_j["param_selsched_insns_to_rename"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_selsched_max_lookahead" in var_opt_int_k) {
+  k = var_opt_int_k["param_selsched_max_lookahead"]
+  j = var_opt_int_j["param_selsched_max_lookahead"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_selsched_max_sched_times" in var_opt_int_k) {
+  k = var_opt_int_k["param_selsched_max_sched_times"]
+  j = var_opt_int_j["param_selsched_max_sched_times"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("semi_relayout_level" in var_opt_int_k) {
+  k = var_opt_int_k["semi_relayout_level"]
+  j = var_opt_int_j["semi_relayout_level"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_simultaneous_prefetches" in var_opt_int_k) {
+  k = var_opt_int_k["param_simultaneous_prefetches"]
+  j = var_opt_int_j["param_simultaneous_prefetches"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sink_frequency_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_sink_frequency_threshold"]
+  j = var_opt_int_j["param_sink_frequency_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sms_dfa_history" in var_opt_int_k) {
+  k = var_opt_int_k["param_sms_dfa_history"]
+  j = var_opt_int_j["param_sms_dfa_history"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sms_loop_average_count_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_sms_loop_average_count_threshold"]
+  j = var_opt_int_j["param_sms_loop_average_count_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sms_max_ii_factor" in var_opt_int_k) {
+  k = var_opt_int_k["param_sms_max_ii_factor"]
+  j = var_opt_int_j["param_sms_max_ii_factor"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sms_min_sc" in var_opt_int_k) {
+  k = var_opt_int_k["param_sms_min_sc"]
+  j = var_opt_int_j["param_sms_min_sc"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sra_max_propagations" in var_opt_int_k) {
+  k = var_opt_int_k["param_sra_max_propagations"]
+  j = var_opt_int_j["param_sra_max_propagations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sra_max_scalarization_size_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_sra_max_scalarization_size_size"]
+  j = var_opt_int_j["param_sra_max_scalarization_size_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_sra_max_scalarization_size_speed" in var_opt_int_k) {
+  k = var_opt_int_k["param_sra_max_scalarization_size_speed"]
+  j = var_opt_int_j["param_sra_max_scalarization_size_speed"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ssa_name_def_chain_limit" in var_opt_int_k) {
+  k = var_opt_int_k["param_ssa_name_def_chain_limit"]
+  j = var_opt_int_j["param_ssa_name_def_chain_limit"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ssp_buffer_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_ssp_buffer_size"]
+  j = var_opt_int_j["param_ssp_buffer_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_stack_clash_protection_guard_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_stack_clash_protection_guard_size"]
+  j = var_opt_int_j["param_stack_clash_protection_guard_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_stack_clash_protection_probe_interval" in var_opt_int_k) {
+  k = var_opt_int_k["param_stack_clash_protection_probe_interval"]
+  j = var_opt_int_j["param_stack_clash_protection_probe_interval"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_store_merging_allow_unaligned" in var_opt_int_k) {
+  k = var_opt_int_k["param_store_merging_allow_unaligned"]
+  j = var_opt_int_j["param_store_merging_allow_unaligned"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_store_merging_max_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_store_merging_max_size"]
+  j = var_opt_int_j["param_store_merging_max_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_struct_reorg_cold_struct_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_struct_reorg_cold_struct_ratio"]
+  j = var_opt_int_j["param_struct_reorg_cold_struct_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_switch_conversion_branch_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_switch_conversion_branch_ratio"]
+  j = var_opt_int_j["param_switch_conversion_branch_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tm_max_aggregate_size" in var_opt_int_k) {
+  k = var_opt_int_k["param_tm_max_aggregate_size"]
+  j = var_opt_int_j["param_tm_max_aggregate_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tracer_dynamic_coverage_feedback" in var_opt_int_k) {
+  k = var_opt_int_k["param_tracer_dynamic_coverage_feedback"]
+  j = var_opt_int_j["param_tracer_dynamic_coverage_feedback"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tracer_dynamic_coverage" in var_opt_int_k) {
+  k = var_opt_int_k["param_tracer_dynamic_coverage"]
+  j = var_opt_int_j["param_tracer_dynamic_coverage"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tracer_max_code_growth" in var_opt_int_k) {
+  k = var_opt_int_k["param_tracer_max_code_growth"]
+  j = var_opt_int_j["param_tracer_max_code_growth"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tracer_min_branch_probability_feedback" in var_opt_int_k) {
+  k = var_opt_int_k["param_tracer_min_branch_probability_feedback"]
+  j = var_opt_int_j["param_tracer_min_branch_probability_feedback"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tracer_min_branch_probability" in var_opt_int_k) {
+  k = var_opt_int_k["param_tracer_min_branch_probability"]
+  j = var_opt_int_j["param_tracer_min_branch_probability"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tracer_min_branch_ratio" in var_opt_int_k) {
+  k = var_opt_int_k["param_tracer_min_branch_ratio"]
+  j = var_opt_int_j["param_tracer_min_branch_ratio"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_tree_reassoc_width" in var_opt_int_k) {
+  k = var_opt_int_k["param_tree_reassoc_width"]
+  j = var_opt_int_j["param_tree_reassoc_width"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_uninit_control_dep_attempts" in var_opt_int_k) {
+  k = var_opt_int_k["param_uninit_control_dep_attempts"]
+  j = var_opt_int_j["param_uninit_control_dep_attempts"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_uninlined_function_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_uninlined_function_insns"]
+  j = var_opt_int_j["param_uninlined_function_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_uninlined_function_time" in var_opt_int_k) {
+  k = var_opt_int_k["param_uninlined_function_time"]
+  j = var_opt_int_j["param_uninlined_function_time"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_uninlined_function_thunk_insns" in var_opt_int_k) {
+  k = var_opt_int_k["param_uninlined_function_thunk_insns"]
+  j = var_opt_int_j["param_uninlined_function_thunk_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_uninlined_function_thunk_time" in var_opt_int_k) {
+  k = var_opt_int_k["param_uninlined_function_thunk_time"]
+  j = var_opt_int_j["param_uninlined_function_thunk_time"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_unlikely_bb_count_fraction" in var_opt_int_k) {
+  k = var_opt_int_k["param_unlikely_bb_count_fraction"]
+  j = var_opt_int_j["param_unlikely_bb_count_fraction"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_unroll_jam_max_unroll" in var_opt_int_k) {
+  k = var_opt_int_k["param_unroll_jam_max_unroll"]
+  j = var_opt_int_j["param_unroll_jam_max_unroll"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_unroll_jam_min_percent" in var_opt_int_k) {
+  k = var_opt_int_k["param_unroll_jam_min_percent"]
+  j = var_opt_int_j["param_unroll_jam_min_percent"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_use_after_scope_direct_emission_threshold" in var_opt_int_k) {
+  k = var_opt_int_k["param_use_after_scope_direct_emission_threshold"]
+  j = var_opt_int_j["param_use_after_scope_direct_emission_threshold"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_flexible_seg_len" in var_opt_int_k) {
+  k = var_opt_int_k["param_flexible_seg_len"]
+  j = var_opt_int_j["param_flexible_seg_len"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vect_epilogues_nomask" in var_opt_int_k) {
+  k = var_opt_int_k["param_vect_epilogues_nomask"]
+  j = var_opt_int_j["param_vect_epilogues_nomask"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vect_induction_float" in var_opt_int_k) {
+  k = var_opt_int_k["param_vect_induction_float"]
+  j = var_opt_int_j["param_vect_induction_float"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vect_inner_loop_cost_factor" in var_opt_int_k) {
+  k = var_opt_int_k["param_vect_inner_loop_cost_factor"]
+  j = var_opt_int_j["param_vect_inner_loop_cost_factor"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vect_max_peeling_for_alignment" in var_opt_int_k) {
+  k = var_opt_int_k["param_vect_max_peeling_for_alignment"]
+  j = var_opt_int_j["param_vect_max_peeling_for_alignment"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vect_max_version_for_alias_checks" in var_opt_int_k) {
+  k = var_opt_int_k["param_vect_max_version_for_alias_checks"]
+  j = var_opt_int_j["param_vect_max_version_for_alias_checks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vect_max_version_for_alignment_checks" in var_opt_int_k) {
+  k = var_opt_int_k["param_vect_max_version_for_alignment_checks"]
+  j = var_opt_int_j["param_vect_max_version_for_alignment_checks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vect_partial_vector_usage" in var_opt_int_k) {
+  k = var_opt_int_k["param_vect_partial_vector_usage"]
+  j = var_opt_int_j["param_vect_partial_vector_usage"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_stalled_insns" in var_opt_int_k) {
+  k = var_opt_int_k["flag_sched_stalled_insns"]
+  j = var_opt_int_j["flag_sched_stalled_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_stalled_insns_dep" in var_opt_int_k) {
+  k = var_opt_int_k["flag_sched_stalled_insns_dep"]
+  j = var_opt_int_j["flag_sched_stalled_insns_dep"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_parallelize_loops" in var_opt_int_k) {
+  k = var_opt_int_k["flag_tree_parallelize_loops"]
+  j = var_opt_int_j["flag_tree_parallelize_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_evrp_mode" in var_opt_enum_k) {
+  k = var_opt_enum_k["param_evrp_mode"]
+  j = var_opt_enum_j["param_evrp_mode"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_ranger_debug" in var_opt_enum_k) {
+  k = var_opt_enum_k["param_ranger_debug"]
+  j = var_opt_enum_j["param_ranger_debug"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_threader_debug" in var_opt_enum_k) {
+  k = var_opt_enum_k["param_threader_debug"]
+  j = var_opt_enum_j["param_threader_debug"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vrp1_mode" in var_opt_enum_k) {
+  k = var_opt_enum_k["param_vrp1_mode"]
+  j = var_opt_enum_j["param_vrp1_mode"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("param_vrp2_mode" in var_opt_enum_k) {
+  k = var_opt_enum_k["param_vrp2_mode"]
+  j = var_opt_enum_j["param_vrp2_mode"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_excess_precision" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_excess_precision"]
+  j = var_opt_enum_j["flag_excess_precision"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_fp_contract_mode" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_fp_contract_mode"]
+  j = var_opt_enum_j["flag_fp_contract_mode"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[3] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ira_algorithm" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_ira_algorithm"]
+  j = var_opt_enum_j["flag_ira_algorithm"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ira_region" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_ira_region"]
+  j = var_opt_enum_j["flag_ira_region"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_live_patching" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_live_patching"]
+  j = var_opt_enum_j["flag_live_patching"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_fp_model" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_fp_model"]
+  j = var_opt_enum_j["flag_fp_model"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_reorder_blocks_algorithm" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_reorder_blocks_algorithm"]
+  j = var_opt_enum_j["flag_reorder_blocks_algorithm"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_simd_cost_model" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_simd_cost_model"]
+  j = var_opt_enum_j["flag_simd_cost_model"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_stack_reuse" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_stack_reuse"]
+  j = var_opt_enum_j["flag_stack_reuse"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_auto_var_init" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_auto_var_init"]
+  j = var_opt_enum_j["flag_auto_var_init"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_vect_cost_model" in var_opt_enum_k) {
+  k = var_opt_enum_k["flag_vect_cost_model"]
+  j = var_opt_enum_j["flag_vect_cost_model"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("optimize" in var_opt_char_k) {
+  k = var_opt_char_k["optimize"]
+  j = var_opt_char_j["optimize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("optimize_size" in var_opt_char_k) {
+  k = var_opt_char_k["optimize_size"]
+  j = var_opt_char_j["optimize_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("optimize_debug" in var_opt_char_k) {
+  k = var_opt_char_k["optimize_debug"]
+  j = var_opt_char_j["optimize_debug"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("optimize_fast" in var_opt_char_k) {
+  k = var_opt_char_k["optimize_fast"]
+  j = var_opt_char_j["optimize_fast"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("warn_inline" in var_opt_char_k) {
+  k = var_opt_char_k["warn_inline"]
+  j = var_opt_char_j["warn_inline"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_aggressive_loop_optimizations" in var_opt_char_k) {
+  k = var_opt_char_k["flag_aggressive_loop_optimizations"]
+  j = var_opt_char_j["flag_aggressive_loop_optimizations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_align_functions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_align_functions"]
+  j = var_opt_char_j["flag_align_functions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_align_jumps" in var_opt_char_k) {
+  k = var_opt_char_k["flag_align_jumps"]
+  j = var_opt_char_j["flag_align_jumps"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_align_labels" in var_opt_char_k) {
+  k = var_opt_char_k["flag_align_labels"]
+  j = var_opt_char_j["flag_align_labels"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_align_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_align_loops"]
+  j = var_opt_char_j["flag_align_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_allocation_dce" in var_opt_char_k) {
+  k = var_opt_char_k["flag_allocation_dce"]
+  j = var_opt_char_j["flag_allocation_dce"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_store_data_races" in var_opt_char_k) {
+  k = var_opt_char_k["flag_store_data_races"]
+  j = var_opt_char_j["flag_store_data_races"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_array_widen_compare" in var_opt_char_k) {
+  k = var_opt_char_k["flag_array_widen_compare"]
+  j = var_opt_char_j["flag_array_widen_compare"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_associative_math" in var_opt_char_k) {
+  k = var_opt_char_k["flag_associative_math"]
+  j = var_opt_char_j["flag_associative_math"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_asynchronous_unwind_tables" in var_opt_char_k) {
+  k = var_opt_char_k["flag_asynchronous_unwind_tables"]
+  j = var_opt_char_j["flag_asynchronous_unwind_tables"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_auto_inc_dec" in var_opt_char_k) {
+  k = var_opt_char_k["flag_auto_inc_dec"]
+  j = var_opt_char_j["flag_auto_inc_dec"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_bit_tests" in var_opt_char_k) {
+  k = var_opt_char_k["flag_bit_tests"]
+  j = var_opt_char_j["flag_bit_tests"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_branch_on_count_reg" in var_opt_char_k) {
+  k = var_opt_char_k["flag_branch_on_count_reg"]
+  j = var_opt_char_j["flag_branch_on_count_reg"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_branch_probabilities" in var_opt_char_k) {
+  k = var_opt_char_k["flag_branch_probabilities"]
+  j = var_opt_char_j["flag_branch_probabilities"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_caller_saves" in var_opt_char_k) {
+  k = var_opt_char_k["flag_caller_saves"]
+  j = var_opt_char_j["flag_caller_saves"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ccmp2" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ccmp2"]
+  j = var_opt_char_j["flag_ccmp2"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_code_hoisting" in var_opt_char_k) {
+  k = var_opt_char_k["flag_code_hoisting"]
+  j = var_opt_char_j["flag_code_hoisting"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_combine_stack_adjustments" in var_opt_char_k) {
+  k = var_opt_char_k["flag_combine_stack_adjustments"]
+  j = var_opt_char_j["flag_combine_stack_adjustments"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_compare_elim_after_reload" in var_opt_char_k) {
+  k = var_opt_char_k["flag_compare_elim_after_reload"]
+  j = var_opt_char_j["flag_compare_elim_after_reload"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_conserve_stack" in var_opt_char_k) {
+  k = var_opt_char_k["flag_conserve_stack"]
+  j = var_opt_char_j["flag_conserve_stack"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_convert_minmax" in var_opt_char_k) {
+  k = var_opt_char_k["flag_convert_minmax"]
+  j = var_opt_char_j["flag_convert_minmax"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_cprop_registers" in var_opt_char_k) {
+  k = var_opt_char_k["flag_cprop_registers"]
+  j = var_opt_char_j["flag_cprop_registers"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_crossjumping" in var_opt_char_k) {
+  k = var_opt_char_k["flag_crossjumping"]
+  j = var_opt_char_j["flag_crossjumping"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_crypto_accel_aes" in var_opt_char_k) {
+  k = var_opt_char_k["flag_crypto_accel_aes"]
+  j = var_opt_char_j["flag_crypto_accel_aes"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_cse_follow_jumps" in var_opt_char_k) {
+  k = var_opt_char_k["flag_cse_follow_jumps"]
+  j = var_opt_char_j["flag_cse_follow_jumps"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_cx_fortran_rules" in var_opt_char_k) {
+  k = var_opt_char_k["flag_cx_fortran_rules"]
+  j = var_opt_char_j["flag_cx_fortran_rules"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_cx_limited_range" in var_opt_char_k) {
+  k = var_opt_char_k["flag_cx_limited_range"]
+  j = var_opt_char_j["flag_cx_limited_range"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_dce" in var_opt_char_k) {
+  k = var_opt_char_k["flag_dce"]
+  j = var_opt_char_j["flag_dce"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_defer_pop" in var_opt_char_k) {
+  k = var_opt_char_k["flag_defer_pop"]
+  j = var_opt_char_j["flag_defer_pop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_delayed_branch" in var_opt_char_k) {
+  k = var_opt_char_k["flag_delayed_branch"]
+  j = var_opt_char_j["flag_delayed_branch"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_delete_dead_exceptions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_delete_dead_exceptions"]
+  j = var_opt_char_j["flag_delete_dead_exceptions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_delete_null_pointer_checks" in var_opt_char_k) {
+  k = var_opt_char_k["flag_delete_null_pointer_checks"]
+  j = var_opt_char_j["flag_delete_null_pointer_checks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_devirtualize" in var_opt_char_k) {
+  k = var_opt_char_k["flag_devirtualize"]
+  j = var_opt_char_j["flag_devirtualize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_devirtualize_speculatively" in var_opt_char_k) {
+  k = var_opt_char_k["flag_devirtualize_speculatively"]
+  j = var_opt_char_j["flag_devirtualize_speculatively"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_dse" in var_opt_char_k) {
+  k = var_opt_char_k["flag_dse"]
+  j = var_opt_char_j["flag_dse"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_early_inlining" in var_opt_char_k) {
+  k = var_opt_char_k["flag_early_inlining"]
+  j = var_opt_char_j["flag_early_inlining"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_exceptions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_exceptions"]
+  j = var_opt_char_j["flag_exceptions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_expensive_optimizations" in var_opt_char_k) {
+  k = var_opt_char_k["flag_expensive_optimizations"]
+  j = var_opt_char_j["flag_expensive_optimizations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_finite_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_finite_loops"]
+  j = var_opt_char_j["flag_finite_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_finite_math_only" in var_opt_char_k) {
+  k = var_opt_char_k["flag_finite_math_only"]
+  j = var_opt_char_j["flag_finite_math_only"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_float_store" in var_opt_char_k) {
+  k = var_opt_char_k["flag_float_store"]
+  j = var_opt_char_j["flag_float_store"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_fold_simple_inlines" in var_opt_char_k) {
+  k = var_opt_char_k["flag_fold_simple_inlines"]
+  j = var_opt_char_j["flag_fold_simple_inlines"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_forward_propagate" in var_opt_char_k) {
+  k = var_opt_char_k["flag_forward_propagate"]
+  j = var_opt_char_j["flag_forward_propagate"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_fp_int_builtin_inexact" in var_opt_char_k) {
+  k = var_opt_char_k["flag_fp_int_builtin_inexact"]
+  j = var_opt_char_j["flag_fp_int_builtin_inexact"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ftz" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ftz"]
+  j = var_opt_char_j["flag_ftz"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_no_function_cse" in var_opt_char_k) {
+  k = var_opt_char_k["flag_no_function_cse"]
+  j = var_opt_char_j["flag_no_function_cse"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_gcse" in var_opt_char_k) {
+  k = var_opt_char_k["flag_gcse"]
+  j = var_opt_char_j["flag_gcse"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_gcse_after_reload" in var_opt_char_k) {
+  k = var_opt_char_k["flag_gcse_after_reload"]
+  j = var_opt_char_j["flag_gcse_after_reload"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_gcse_las" in var_opt_char_k) {
+  k = var_opt_char_k["flag_gcse_las"]
+  j = var_opt_char_j["flag_gcse_las"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_gcse_lm" in var_opt_char_k) {
+  k = var_opt_char_k["flag_gcse_lm"]
+  j = var_opt_char_j["flag_gcse_lm"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[4] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_gcse_sm" in var_opt_char_k) {
+  k = var_opt_char_k["flag_gcse_sm"]
+  j = var_opt_char_j["flag_gcse_sm"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_graphite" in var_opt_char_k) {
+  k = var_opt_char_k["flag_graphite"]
+  j = var_opt_char_j["flag_graphite"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_graphite_identity" in var_opt_char_k) {
+  k = var_opt_char_k["flag_graphite_identity"]
+  j = var_opt_char_j["flag_graphite_identity"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_guess_branch_prob" in var_opt_char_k) {
+  k = var_opt_char_k["flag_guess_branch_prob"]
+  j = var_opt_char_j["flag_guess_branch_prob"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_harden_compares" in var_opt_char_k) {
+  k = var_opt_char_k["flag_harden_compares"]
+  j = var_opt_char_j["flag_harden_compares"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_harden_conditional_branches" in var_opt_char_k) {
+  k = var_opt_char_k["flag_harden_conditional_branches"]
+  j = var_opt_char_j["flag_harden_conditional_branches"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_hoist_adjacent_loads" in var_opt_char_k) {
+  k = var_opt_char_k["flag_hoist_adjacent_loads"]
+  j = var_opt_char_j["flag_hoist_adjacent_loads"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_icp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_icp"]
+  j = var_opt_char_j["flag_icp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_icp_speculatively" in var_opt_char_k) {
+  k = var_opt_char_k["flag_icp_speculatively"]
+  j = var_opt_char_j["flag_icp_speculatively"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_if_conversion" in var_opt_char_k) {
+  k = var_opt_char_k["flag_if_conversion"]
+  j = var_opt_char_j["flag_if_conversion"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_if_conversion_gimple" in var_opt_char_k) {
+  k = var_opt_char_k["flag_if_conversion_gimple"]
+  j = var_opt_char_j["flag_if_conversion_gimple"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_if_conversion2" in var_opt_char_k) {
+  k = var_opt_char_k["flag_if_conversion2"]
+  j = var_opt_char_j["flag_if_conversion2"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ifcvt_allow_complicated_cmps" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ifcvt_allow_complicated_cmps"]
+  j = var_opt_char_j["flag_ifcvt_allow_complicated_cmps"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_indirect_inlining" in var_opt_char_k) {
+  k = var_opt_char_k["flag_indirect_inlining"]
+  j = var_opt_char_j["flag_indirect_inlining"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_no_inline" in var_opt_char_k) {
+  k = var_opt_char_k["flag_no_inline"]
+  j = var_opt_char_j["flag_no_inline"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_inline_atomics" in var_opt_char_k) {
+  k = var_opt_char_k["flag_inline_atomics"]
+  j = var_opt_char_j["flag_inline_atomics"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_inline_functions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_inline_functions"]
+  j = var_opt_char_j["flag_inline_functions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_inline_functions_called_once" in var_opt_char_k) {
+  k = var_opt_char_k["flag_inline_functions_called_once"]
+  j = var_opt_char_j["flag_inline_functions_called_once"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_inline_small_functions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_inline_small_functions"]
+  j = var_opt_char_j["flag_inline_small_functions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_bit_cp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_bit_cp"]
+  j = var_opt_char_j["flag_ipa_bit_cp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_cp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_cp"]
+  j = var_opt_char_j["flag_ipa_cp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_cp_clone" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_cp_clone"]
+  j = var_opt_char_j["flag_ipa_cp_clone"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_ic" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_ic"]
+  j = var_opt_char_j["flag_ipa_ic"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_icf" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_icf"]
+  j = var_opt_char_j["flag_ipa_icf"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_icf_functions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_icf_functions"]
+  j = var_opt_char_j["flag_ipa_icf_functions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_icf_variables" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_icf_variables"]
+  j = var_opt_char_j["flag_ipa_icf_variables"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_modref" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_modref"]
+  j = var_opt_char_j["flag_ipa_modref"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_prefetch" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_prefetch"]
+  j = var_opt_char_j["flag_ipa_prefetch"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_profile" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_profile"]
+  j = var_opt_char_j["flag_ipa_profile"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_pta" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_pta"]
+  j = var_opt_char_j["flag_ipa_pta"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_pure_const" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_pure_const"]
+  j = var_opt_char_j["flag_ipa_pure_const"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_ra" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_ra"]
+  j = var_opt_char_j["flag_ipa_ra"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_reference" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_reference"]
+  j = var_opt_char_j["flag_ipa_reference"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_reference_addressable" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_reference_addressable"]
+  j = var_opt_char_j["flag_ipa_reference_addressable"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_reorder_fields" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_reorder_fields"]
+  j = var_opt_char_j["flag_ipa_reorder_fields"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_sra" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_sra"]
+  j = var_opt_char_j["flag_ipa_sra"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_stack_alignment" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_stack_alignment"]
+  j = var_opt_char_j["flag_ipa_stack_alignment"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_strict_aliasing" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_strict_aliasing"]
+  j = var_opt_char_j["flag_ipa_strict_aliasing"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_struct_reorg" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_struct_reorg"]
+  j = var_opt_char_j["flag_ipa_struct_reorg"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ipa_vrp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ipa_vrp"]
+  j = var_opt_char_j["flag_ipa_vrp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ira_hoist_pressure" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ira_hoist_pressure"]
+  j = var_opt_char_j["flag_ira_hoist_pressure"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ira_loop_pressure" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ira_loop_pressure"]
+  j = var_opt_char_j["flag_ira_loop_pressure"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ira_share_save_slots" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ira_share_save_slots"]
+  j = var_opt_char_j["flag_ira_share_save_slots"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ira_share_spill_slots" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ira_share_spill_slots"]
+  j = var_opt_char_j["flag_ira_share_spill_slots"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_isolate_erroneous_paths_attribute" in var_opt_char_k) {
+  k = var_opt_char_k["flag_isolate_erroneous_paths_attribute"]
+  j = var_opt_char_j["flag_isolate_erroneous_paths_attribute"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_isolate_erroneous_paths_dereference" in var_opt_char_k) {
+  k = var_opt_char_k["flag_isolate_erroneous_paths_dereference"]
+  j = var_opt_char_j["flag_isolate_erroneous_paths_dereference"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ivopts" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ivopts"]
+  j = var_opt_char_j["flag_ivopts"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_jump_tables" in var_opt_char_k) {
+  k = var_opt_char_k["flag_jump_tables"]
+  j = var_opt_char_j["flag_jump_tables"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_keep_gc_roots_live" in var_opt_char_k) {
+  k = var_opt_char_k["flag_keep_gc_roots_live"]
+  j = var_opt_char_j["flag_keep_gc_roots_live"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_kernel_pgo" in var_opt_char_k) {
+  k = var_opt_char_k["flag_kernel_pgo"]
+  j = var_opt_char_j["flag_kernel_pgo"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_lifetime_dse" in var_opt_char_k) {
+  k = var_opt_char_k["flag_lifetime_dse"]
+  j = var_opt_char_j["flag_lifetime_dse"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_limit_function_alignment" in var_opt_char_k) {
+  k = var_opt_char_k["flag_limit_function_alignment"]
+  j = var_opt_char_j["flag_limit_function_alignment"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_live_range_shrinkage" in var_opt_char_k) {
+  k = var_opt_char_k["flag_live_range_shrinkage"]
+  j = var_opt_char_j["flag_live_range_shrinkage"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_loop_crc" in var_opt_char_k) {
+  k = var_opt_char_k["flag_loop_crc"]
+  j = var_opt_char_j["flag_loop_crc"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_loop_elim" in var_opt_char_k) {
+  k = var_opt_char_k["flag_loop_elim"]
+  j = var_opt_char_j["flag_loop_elim"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_loop_interchange" in var_opt_char_k) {
+  k = var_opt_char_k["flag_loop_interchange"]
+  j = var_opt_char_j["flag_loop_interchange"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_loop_nest_optimize" in var_opt_char_k) {
+  k = var_opt_char_k["flag_loop_nest_optimize"]
+  j = var_opt_char_j["flag_loop_nest_optimize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_loop_parallelize_all" in var_opt_char_k) {
+  k = var_opt_char_k["flag_loop_parallelize_all"]
+  j = var_opt_char_j["flag_loop_parallelize_all"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_unroll_jam" in var_opt_char_k) {
+  k = var_opt_char_k["flag_unroll_jam"]
+  j = var_opt_char_j["flag_unroll_jam"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_lra_remat" in var_opt_char_k) {
+  k = var_opt_char_k["flag_lra_remat"]
+  j = var_opt_char_j["flag_lra_remat"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_errno_math" in var_opt_char_k) {
+  k = var_opt_char_k["flag_errno_math"]
+  j = var_opt_char_j["flag_errno_math"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_merge_mull" in var_opt_char_k) {
+  k = var_opt_char_k["flag_merge_mull"]
+  j = var_opt_char_j["flag_merge_mull"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_modulo_sched" in var_opt_char_k) {
+  k = var_opt_char_k["flag_modulo_sched"]
+  j = var_opt_char_j["flag_modulo_sched"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_modulo_sched_allow_regmoves" in var_opt_char_k) {
+  k = var_opt_char_k["flag_modulo_sched_allow_regmoves"]
+  j = var_opt_char_j["flag_modulo_sched_allow_regmoves"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[5] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_move_loop_invariants" in var_opt_char_k) {
+  k = var_opt_char_k["flag_move_loop_invariants"]
+  j = var_opt_char_j["flag_move_loop_invariants"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_move_loop_stores" in var_opt_char_k) {
+  k = var_opt_char_k["flag_move_loop_stores"]
+  j = var_opt_char_j["flag_move_loop_stores"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_non_call_exceptions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_non_call_exceptions"]
+  j = var_opt_char_j["flag_non_call_exceptions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_nothrow_opt" in var_opt_char_k) {
+  k = var_opt_char_k["flag_nothrow_opt"]
+  j = var_opt_char_j["flag_nothrow_opt"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_omit_frame_pointer" in var_opt_char_k) {
+  k = var_opt_char_k["flag_omit_frame_pointer"]
+  j = var_opt_char_j["flag_omit_frame_pointer"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_opt_info" in var_opt_char_k) {
+  k = var_opt_char_k["flag_opt_info"]
+  j = var_opt_char_j["flag_opt_info"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_optimize_sibling_calls" in var_opt_char_k) {
+  k = var_opt_char_k["flag_optimize_sibling_calls"]
+  j = var_opt_char_j["flag_optimize_sibling_calls"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_optimize_strlen" in var_opt_char_k) {
+  k = var_opt_char_k["flag_optimize_strlen"]
+  j = var_opt_char_j["flag_optimize_strlen"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_pack_struct" in var_opt_char_k) {
+  k = var_opt_char_k["flag_pack_struct"]
+  j = var_opt_char_j["flag_pack_struct"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_partial_inlining" in var_opt_char_k) {
+  k = var_opt_char_k["flag_partial_inlining"]
+  j = var_opt_char_j["flag_partial_inlining"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_peel_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_peel_loops"]
+  j = var_opt_char_j["flag_peel_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_no_peephole" in var_opt_char_k) {
+  k = var_opt_char_k["flag_no_peephole"]
+  j = var_opt_char_j["flag_no_peephole"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_peephole2" in var_opt_char_k) {
+  k = var_opt_char_k["flag_peephole2"]
+  j = var_opt_char_j["flag_peephole2"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_plt" in var_opt_char_k) {
+  k = var_opt_char_k["flag_plt"]
+  j = var_opt_char_j["flag_plt"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_predictive_commoning" in var_opt_char_k) {
+  k = var_opt_char_k["flag_predictive_commoning"]
+  j = var_opt_char_j["flag_predictive_commoning"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_prefetch_loop_arrays" in var_opt_char_k) {
+  k = var_opt_char_k["flag_prefetch_loop_arrays"]
+  j = var_opt_char_j["flag_prefetch_loop_arrays"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_printf_return_value" in var_opt_char_k) {
+  k = var_opt_char_k["flag_printf_return_value"]
+  j = var_opt_char_j["flag_printf_return_value"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_profile_partial_training" in var_opt_char_k) {
+  k = var_opt_char_k["flag_profile_partial_training"]
+  j = var_opt_char_j["flag_profile_partial_training"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_profile_reorder_functions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_profile_reorder_functions"]
+  j = var_opt_char_j["flag_profile_reorder_functions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_reciprocal_math" in var_opt_char_k) {
+  k = var_opt_char_k["flag_reciprocal_math"]
+  j = var_opt_char_j["flag_reciprocal_math"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ree" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ree"]
+  j = var_opt_char_j["flag_ree"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_pcc_struct_return" in var_opt_char_k) {
+  k = var_opt_char_k["flag_pcc_struct_return"]
+  j = var_opt_char_j["flag_pcc_struct_return"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_rename_registers" in var_opt_char_k) {
+  k = var_opt_char_k["flag_rename_registers"]
+  j = var_opt_char_j["flag_rename_registers"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_reorder_blocks" in var_opt_char_k) {
+  k = var_opt_char_k["flag_reorder_blocks"]
+  j = var_opt_char_j["flag_reorder_blocks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_reorder_blocks_and_partition" in var_opt_char_k) {
+  k = var_opt_char_k["flag_reorder_blocks_and_partition"]
+  j = var_opt_char_j["flag_reorder_blocks_and_partition"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_reorder_functions" in var_opt_char_k) {
+  k = var_opt_char_k["flag_reorder_functions"]
+  j = var_opt_char_j["flag_reorder_functions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_rerun_cse_after_loop" in var_opt_char_k) {
+  k = var_opt_char_k["flag_rerun_cse_after_loop"]
+  j = var_opt_char_j["flag_rerun_cse_after_loop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_resched_modulo_sched" in var_opt_char_k) {
+  k = var_opt_char_k["flag_resched_modulo_sched"]
+  j = var_opt_char_j["flag_resched_modulo_sched"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_rounding_math" in var_opt_char_k) {
+  k = var_opt_char_k["flag_rounding_math"]
+  j = var_opt_char_j["flag_rounding_math"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_rtti" in var_opt_char_k) {
+  k = var_opt_char_k["flag_rtti"]
+  j = var_opt_char_j["flag_rtti"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_save_optimization_record" in var_opt_char_k) {
+  k = var_opt_char_k["flag_save_optimization_record"]
+  j = var_opt_char_j["flag_save_optimization_record"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_critical_path_heuristic" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched_critical_path_heuristic"]
+  j = var_opt_char_j["flag_sched_critical_path_heuristic"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_dep_count_heuristic" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched_dep_count_heuristic"]
+  j = var_opt_char_j["flag_sched_dep_count_heuristic"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_group_heuristic" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched_group_heuristic"]
+  j = var_opt_char_j["flag_sched_group_heuristic"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_schedule_interblock" in var_opt_char_k) {
+  k = var_opt_char_k["flag_schedule_interblock"]
+  j = var_opt_char_j["flag_schedule_interblock"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_last_insn_heuristic" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched_last_insn_heuristic"]
+  j = var_opt_char_j["flag_sched_last_insn_heuristic"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_pressure" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched_pressure"]
+  j = var_opt_char_j["flag_sched_pressure"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_rank_heuristic" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched_rank_heuristic"]
+  j = var_opt_char_j["flag_sched_rank_heuristic"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_schedule_speculative" in var_opt_char_k) {
+  k = var_opt_char_k["flag_schedule_speculative"]
+  j = var_opt_char_j["flag_schedule_speculative"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched_spec_insn_heuristic" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched_spec_insn_heuristic"]
+  j = var_opt_char_j["flag_sched_spec_insn_heuristic"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_schedule_speculative_load" in var_opt_char_k) {
+  k = var_opt_char_k["flag_schedule_speculative_load"]
+  j = var_opt_char_j["flag_schedule_speculative_load"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_schedule_speculative_load_dangerous" in var_opt_char_k) {
+  k = var_opt_char_k["flag_schedule_speculative_load_dangerous"]
+  j = var_opt_char_j["flag_schedule_speculative_load_dangerous"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sched2_use_superblocks" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sched2_use_superblocks"]
+  j = var_opt_char_j["flag_sched2_use_superblocks"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_schedule_fusion" in var_opt_char_k) {
+  k = var_opt_char_k["flag_schedule_fusion"]
+  j = var_opt_char_j["flag_schedule_fusion"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_schedule_insns" in var_opt_char_k) {
+  k = var_opt_char_k["flag_schedule_insns"]
+  j = var_opt_char_j["flag_schedule_insns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_schedule_insns_after_reload" in var_opt_char_k) {
+  k = var_opt_char_k["flag_schedule_insns_after_reload"]
+  j = var_opt_char_j["flag_schedule_insns_after_reload"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_section_anchors" in var_opt_char_k) {
+  k = var_opt_char_k["flag_section_anchors"]
+  j = var_opt_char_j["flag_section_anchors"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sel_sched_pipelining" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sel_sched_pipelining"]
+  j = var_opt_char_j["flag_sel_sched_pipelining"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sel_sched_pipelining_outer_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sel_sched_pipelining_outer_loops"]
+  j = var_opt_char_j["flag_sel_sched_pipelining_outer_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_sel_sched_reschedule_pipelined" in var_opt_char_k) {
+  k = var_opt_char_k["flag_sel_sched_reschedule_pipelined"]
+  j = var_opt_char_j["flag_sel_sched_reschedule_pipelined"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_selective_scheduling" in var_opt_char_k) {
+  k = var_opt_char_k["flag_selective_scheduling"]
+  j = var_opt_char_j["flag_selective_scheduling"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_selective_scheduling2" in var_opt_char_k) {
+  k = var_opt_char_k["flag_selective_scheduling2"]
+  j = var_opt_char_j["flag_selective_scheduling2"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_semantic_interposition" in var_opt_char_k) {
+  k = var_opt_char_k["flag_semantic_interposition"]
+  j = var_opt_char_j["flag_semantic_interposition"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_short_enums" in var_opt_char_k) {
+  k = var_opt_char_k["flag_short_enums"]
+  j = var_opt_char_j["flag_short_enums"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_short_wchar" in var_opt_char_k) {
+  k = var_opt_char_k["flag_short_wchar"]
+  j = var_opt_char_j["flag_short_wchar"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_shrink_wrap" in var_opt_char_k) {
+  k = var_opt_char_k["flag_shrink_wrap"]
+  j = var_opt_char_j["flag_shrink_wrap"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_shrink_wrap_separate" in var_opt_char_k) {
+  k = var_opt_char_k["flag_shrink_wrap_separate"]
+  j = var_opt_char_j["flag_shrink_wrap_separate"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_signaling_nans" in var_opt_char_k) {
+  k = var_opt_char_k["flag_signaling_nans"]
+  j = var_opt_char_j["flag_signaling_nans"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_signed_zeros" in var_opt_char_k) {
+  k = var_opt_char_k["flag_signed_zeros"]
+  j = var_opt_char_j["flag_signed_zeros"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_simdmath" in var_opt_char_k) {
+  k = var_opt_char_k["flag_simdmath"]
+  j = var_opt_char_j["flag_simdmath"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_single_precision_constant" in var_opt_char_k) {
+  k = var_opt_char_k["flag_single_precision_constant"]
+  j = var_opt_char_j["flag_single_precision_constant"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_split_ivs_in_unroller" in var_opt_char_k) {
+  k = var_opt_char_k["flag_split_ivs_in_unroller"]
+  j = var_opt_char_j["flag_split_ivs_in_unroller"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_split_ldp_stp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_split_ldp_stp"]
+  j = var_opt_char_j["flag_split_ldp_stp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_split_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_split_loops"]
+  j = var_opt_char_j["flag_split_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[6] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_split_paths" in var_opt_char_k) {
+  k = var_opt_char_k["flag_split_paths"]
+  j = var_opt_char_j["flag_split_paths"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_split_wide_types" in var_opt_char_k) {
+  k = var_opt_char_k["flag_split_wide_types"]
+  j = var_opt_char_j["flag_split_wide_types"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_split_wide_types_early" in var_opt_char_k) {
+  k = var_opt_char_k["flag_split_wide_types_early"]
+  j = var_opt_char_j["flag_split_wide_types_early"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ssa_backprop" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ssa_backprop"]
+  j = var_opt_char_j["flag_ssa_backprop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_ssa_phiopt" in var_opt_char_k) {
+  k = var_opt_char_k["flag_ssa_phiopt"]
+  j = var_opt_char_j["flag_ssa_phiopt"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_stack_clash_protection" in var_opt_char_k) {
+  k = var_opt_char_k["flag_stack_clash_protection"]
+  j = var_opt_char_j["flag_stack_clash_protection"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_stack_protect" in var_opt_char_k) {
+  k = var_opt_char_k["flag_stack_protect"]
+  j = var_opt_char_j["flag_stack_protect"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_stdarg_opt" in var_opt_char_k) {
+  k = var_opt_char_k["flag_stdarg_opt"]
+  j = var_opt_char_j["flag_stdarg_opt"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_store_merging" in var_opt_char_k) {
+  k = var_opt_char_k["flag_store_merging"]
+  j = var_opt_char_j["flag_store_merging"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_strict_aliasing" in var_opt_char_k) {
+  k = var_opt_char_k["flag_strict_aliasing"]
+  j = var_opt_char_j["flag_strict_aliasing"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_strict_enums" in var_opt_char_k) {
+  k = var_opt_char_k["flag_strict_enums"]
+  j = var_opt_char_j["flag_strict_enums"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_strict_volatile_bitfields" in var_opt_char_k) {
+  k = var_opt_char_k["flag_strict_volatile_bitfields"]
+  j = var_opt_char_j["flag_strict_volatile_bitfields"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_thread_jumps" in var_opt_char_k) {
+  k = var_opt_char_k["flag_thread_jumps"]
+  j = var_opt_char_j["flag_thread_jumps"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_threadsafe_statics" in var_opt_char_k) {
+  k = var_opt_char_k["flag_threadsafe_statics"]
+  j = var_opt_char_j["flag_threadsafe_statics"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_toplevel_reorder" in var_opt_char_k) {
+  k = var_opt_char_k["flag_toplevel_reorder"]
+  j = var_opt_char_j["flag_toplevel_reorder"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tracer" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tracer"]
+  j = var_opt_char_j["flag_tracer"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_trapping_math" in var_opt_char_k) {
+  k = var_opt_char_k["flag_trapping_math"]
+  j = var_opt_char_j["flag_trapping_math"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_trapv" in var_opt_char_k) {
+  k = var_opt_char_k["flag_trapv"]
+  j = var_opt_char_j["flag_trapv"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_bit_ccp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_bit_ccp"]
+  j = var_opt_char_j["flag_tree_bit_ccp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 18) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_builtin_call_dce" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_builtin_call_dce"]
+  j = var_opt_char_j["flag_tree_builtin_call_dce"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 19) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_ccp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_ccp"]
+  j = var_opt_char_j["flag_tree_ccp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 20) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_ch" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_ch"]
+  j = var_opt_char_j["flag_tree_ch"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 21) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_coalesce_vars" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_coalesce_vars"]
+  j = var_opt_char_j["flag_tree_coalesce_vars"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 22) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_copy_prop" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_copy_prop"]
+  j = var_opt_char_j["flag_tree_copy_prop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 23) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_cselim" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_cselim"]
+  j = var_opt_char_j["flag_tree_cselim"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 24) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_dce" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_dce"]
+  j = var_opt_char_j["flag_tree_dce"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 25) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_dom" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_dom"]
+  j = var_opt_char_j["flag_tree_dom"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 26) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_dse" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_dse"]
+  j = var_opt_char_j["flag_tree_dse"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 27) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_forwprop" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_forwprop"]
+  j = var_opt_char_j["flag_tree_forwprop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 28) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_fre" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_fre"]
+  j = var_opt_char_j["flag_tree_fre"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 29) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_loop_distribute_patterns" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_loop_distribute_patterns"]
+  j = var_opt_char_j["flag_tree_loop_distribute_patterns"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 30) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_loop_distribution" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_loop_distribution"]
+  j = var_opt_char_j["flag_tree_loop_distribution"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 31) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_loop_if_convert" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_loop_if_convert"]
+  j = var_opt_char_j["flag_tree_loop_if_convert"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 32) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_loop_im" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_loop_im"]
+  j = var_opt_char_j["flag_tree_loop_im"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 33) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_loop_ivcanon" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_loop_ivcanon"]
+  j = var_opt_char_j["flag_tree_loop_ivcanon"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 34) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_loop_optimize" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_loop_optimize"]
+  j = var_opt_char_j["flag_tree_loop_optimize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 35) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_loop_vectorize" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_loop_vectorize"]
+  j = var_opt_char_j["flag_tree_loop_vectorize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 36) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_live_range_split" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_live_range_split"]
+  j = var_opt_char_j["flag_tree_live_range_split"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 37) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_partial_pre" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_partial_pre"]
+  j = var_opt_char_j["flag_tree_partial_pre"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 38) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_phiprop" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_phiprop"]
+  j = var_opt_char_j["flag_tree_phiprop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 39) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_pre" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_pre"]
+  j = var_opt_char_j["flag_tree_pre"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 40) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_pta" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_pta"]
+  j = var_opt_char_j["flag_tree_pta"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 41) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_reassoc" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_reassoc"]
+  j = var_opt_char_j["flag_tree_reassoc"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 42) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_scev_cprop" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_scev_cprop"]
+  j = var_opt_char_j["flag_tree_scev_cprop"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 43) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_sink" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_sink"]
+  j = var_opt_char_j["flag_tree_sink"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 44) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_slp_transpose_vectorize" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_slp_transpose_vectorize"]
+  j = var_opt_char_j["flag_tree_slp_transpose_vectorize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 45) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_slp_vectorize" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_slp_vectorize"]
+  j = var_opt_char_j["flag_tree_slp_vectorize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 46) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_slsr" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_slsr"]
+  j = var_opt_char_j["flag_tree_slsr"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 47) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_sra" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_sra"]
+  j = var_opt_char_j["flag_tree_sra"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 48) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_switch_conversion" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_switch_conversion"]
+  j = var_opt_char_j["flag_tree_switch_conversion"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 49) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_tail_merge" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_tail_merge"]
+  j = var_opt_char_j["flag_tree_tail_merge"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 50) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_ter" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_ter"]
+  j = var_opt_char_j["flag_tree_ter"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 51) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_vectorize" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_vectorize"]
+  j = var_opt_char_j["flag_tree_vectorize"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 52) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_tree_vrp" in var_opt_char_k) {
+  k = var_opt_char_k["flag_tree_vrp"]
+  j = var_opt_char_j["flag_tree_vrp"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 53) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_unconstrained_commons" in var_opt_char_k) {
+  k = var_opt_char_k["flag_unconstrained_commons"]
+  j = var_opt_char_j["flag_unconstrained_commons"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 54) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_unroll_all_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_unroll_all_loops"]
+  j = var_opt_char_j["flag_unroll_all_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 55) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_cunroll_grow_size" in var_opt_char_k) {
+  k = var_opt_char_k["flag_cunroll_grow_size"]
+  j = var_opt_char_j["flag_cunroll_grow_size"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 56) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_unroll_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_unroll_loops"]
+  j = var_opt_char_j["flag_unroll_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 57) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_unsafe_math_optimizations" in var_opt_char_k) {
+  k = var_opt_char_k["flag_unsafe_math_optimizations"]
+  j = var_opt_char_j["flag_unsafe_math_optimizations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 58) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_unswitch_loops" in var_opt_char_k) {
+  k = var_opt_char_k["flag_unswitch_loops"]
+  j = var_opt_char_j["flag_unswitch_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 59) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_unwind_tables" in var_opt_char_k) {
+  k = var_opt_char_k["flag_unwind_tables"]
+  j = var_opt_char_j["flag_unwind_tables"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 60) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_var_tracking" in var_opt_char_k) {
+  k = var_opt_char_k["flag_var_tracking"]
+  j = var_opt_char_j["flag_var_tracking"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 61) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_var_tracking_assignments" in var_opt_char_k) {
+  k = var_opt_char_k["flag_var_tracking_assignments"]
+  j = var_opt_char_j["flag_var_tracking_assignments"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 62) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_var_tracking_assignments_toggle" in var_opt_char_k) {
+  k = var_opt_char_k["flag_var_tracking_assignments_toggle"]
+  j = var_opt_char_j["flag_var_tracking_assignments_toggle"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[7] >> 63) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_var_tracking_uninit" in var_opt_char_k) {
+  k = var_opt_char_k["flag_var_tracking_uninit"]
+  j = var_opt_char_j["flag_var_tracking_uninit"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 0) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_variable_expansion_in_unroller" in var_opt_char_k) {
+  k = var_opt_char_k["flag_variable_expansion_in_unroller"]
+  j = var_opt_char_j["flag_variable_expansion_in_unroller"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 1) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_version_loops_for_strides" in var_opt_char_k) {
+  k = var_opt_char_k["flag_version_loops_for_strides"]
+  j = var_opt_char_j["flag_version_loops_for_strides"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 2) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_value_profile_transformations" in var_opt_char_k) {
+  k = var_opt_char_k["flag_value_profile_transformations"]
+  j = var_opt_char_j["flag_value_profile_transformations"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 3) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_web" in var_opt_char_k) {
+  k = var_opt_char_k["flag_web"]
+  j = var_opt_char_j["flag_web"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 4) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_wrapv" in var_opt_char_k) {
+  k = var_opt_char_k["flag_wrapv"]
+  j = var_opt_char_j["flag_wrapv"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 5) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_wrapv_pointer" in var_opt_char_k) {
+  k = var_opt_char_k["flag_wrapv_pointer"]
+  j = var_opt_char_j["flag_wrapv_pointer"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 6) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("debug_nonbind_markers_p" in var_opt_char_k) {
+  k = var_opt_char_k["debug_nonbind_markers_p"]
+  j = var_opt_char_j["debug_nonbind_markers_p"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 7) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_cmlt_arith" in var_opt_char_k) {
+  k = var_opt_char_k["flag_cmlt_arith"]
+  j = var_opt_char_j["flag_cmlt_arith"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 8) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_mlow_precision_div" in var_opt_char_k) {
+  k = var_opt_char_k["flag_mlow_precision_div"]
+  j = var_opt_char_j["flag_mlow_precision_div"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 9) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_mrecip_low_precision_sqrt" in var_opt_char_k) {
+  k = var_opt_char_k["flag_mrecip_low_precision_sqrt"]
+  j = var_opt_char_j["flag_mrecip_low_precision_sqrt"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 10) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_mlow_precision_sqrt" in var_opt_char_k) {
+  k = var_opt_char_k["flag_mlow_precision_sqrt"]
+  j = var_opt_char_j["flag_mlow_precision_sqrt"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 11) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_simdmath_64" in var_opt_char_k) {
+  k = var_opt_char_k["flag_simdmath_64"]
+  j = var_opt_char_j["flag_simdmath_64"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 12) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("str_align_functions" in var_opt_string_k) {
+  k = var_opt_string_k["str_align_functions"]
+  j = var_opt_string_j["str_align_functions"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 13) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("str_align_jumps" in var_opt_string_k) {
+  k = var_opt_string_k["str_align_jumps"]
+  j = var_opt_string_j["str_align_jumps"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 14) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("str_align_labels" in var_opt_string_k) {
+  k = var_opt_string_k["str_align_labels"]
+  j = var_opt_string_j["str_align_labels"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 15) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("str_align_loops" in var_opt_string_k) {
+  k = var_opt_string_k["str_align_loops"]
+  j = var_opt_string_j["str_align_loops"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 16) & HOST_WIDE_INT_1U) << "j";"
+}
+if ("flag_patchable_function_entry" in var_opt_string_k) {
+  k = var_opt_string_k["flag_patchable_function_entry"]
+  j = var_opt_string_j["flag_patchable_function_entry"]
+  print "  ptr->explicit_mask[" k "] |= ((explicit_mask_prev[8] >> 17) & HOST_WIDE_INT_1U) << "j";"
+}
+print "}";
+print "";
+
 print "/* Free heap memory used by optimization options  */";
 print "void";
 print "cl_optimization_option_free (struct cl_optimization *ptr ATTRIBUTE_UNUSED)";
