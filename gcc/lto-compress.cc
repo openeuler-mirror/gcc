@@ -305,7 +305,11 @@ void
 lto_end_compression (struct lto_compression_stream *stream)
 {
 #ifdef HAVE_ZSTD_H
-  lto_compression_zstd (stream);
+  if (lto_compression_algorithm
+      && strcmp (lto_compression_algorithm, "zstd") == 0)
+    lto_compression_zstd (stream);
+  else
+    lto_compression_zlib (stream);
 #else
   lto_compression_zlib (stream);
 #endif

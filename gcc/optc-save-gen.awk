@@ -1043,6 +1043,10 @@ for (i = 0; i < n_target_string; i++) {
 	print "";
 }
 
+print "";
+print "  if (targetm.target_option.print_diff)";
+print "    targetm.target_option.print_diff (file, indent, ptr1, ptr2);";
+
 print "}";
 
 print "";
@@ -1154,6 +1158,59 @@ for (i = 0; i < n_target_int; i++) {
 		print "  if (ptr1->explicit_mask_" var_target_int[i] " != ptr2->explicit_mask_" var_target_int[i] ")";
 		print "    return false;";
 	}
+}
+
+print "  return true;";
+
+print "}";
+
+print "";
+print "/* Compare two target major options.  */";
+print "bool";
+print "cl_target_option_eq_major (struct cl_target_option const *ptr1 ATTRIBUTE_UNUSED,";
+print "                     struct cl_target_option const *ptr2 ATTRIBUTE_UNUSED)";
+print "{";
+n_target_val_major = 0;
+
+for (i = 0; i < n_target_save; i++) {
+	var = target_save_decl[i];
+	sub (" *=.*", "", var);
+	name = var;
+	type = var;
+	sub("^.*[ *]", "", name)
+	sub(" *" name "$", "", type)
+        if (target_save_decl[i] ~ "^const char \\*+[_" alnum "]+$")
+		continue;
+        if (target_save_decl[i] ~ " .*\\[.+\\]+$")
+                continue;
+
+        var_target_val_major[n_target_val_major++] = name;
+}
+if (have_save) {
+	for (i = 0; i < n_opts; i++) {
+		if (flag_set_p("Save", flags[i])) {
+			name = var_name(flags[i])
+			if(name == "")
+				name = "target_flags";
+
+			if(name in var_list_seen)
+				continue;
+
+			var_list_seen[name]++;
+			otype = var_type_struct(flags[i])
+			if (otype ~ "^const char \\**$")
+				continue;
+			var_target_val_major[n_target_val_major++] = "x_" name;
+		}
+	}
+} else {
+	var_target_val_major[n_target_val_major++] = "x_target_flags";
+}
+
+for (i = 0; i < n_target_val_major; i++) {
+	name = var_target_val_major[i]
+	print "  if (ptr1->" name" != ptr2->" name ")";
+	print "    return false;";
 }
 
 print "  return true;";

@@ -6644,6 +6644,16 @@ information in the @code{struct cl_target_option} structure for\n\
 function-specific options.",
  void, (FILE *file, int indent, struct cl_target_option *ptr), NULL)
 
+/* Function to print any extra target state from the target options
+   structure.  */
+DEFHOOK
+(print_diff,
+ "This hook is called to print diff additional target-specific\n\
+information in the ptr1 and ptr2 @code{struct cl_target_option} structure for\n\
+function-specific options.",
+ void, (FILE *file, int indent, struct cl_target_option *ptr1,
+ struct cl_target_option *ptr2), NULL)
+
 /* Function to parse arguments to be validated for #pragma target, and to
    change the state if the options are valid.  If the first argument is
    NULL, the second argument specifies the default options to use.  Return

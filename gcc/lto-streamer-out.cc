@@ -2666,7 +2666,12 @@ produce_lto_section ()
   free (section_name);
 
 #ifdef HAVE_ZSTD_H
-  lto_compression compression = ZSTD;
+  lto_compression compression = ZLIB;
+  if (lto_compression_algorithm
+      && strcmp (lto_compression_algorithm, "zstd") == 0)
+    compression = ZSTD;
+  else
+    compression = ZLIB;
 #else
   lto_compression compression = ZLIB;
 #endif

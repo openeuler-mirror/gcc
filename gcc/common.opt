@@ -1928,6 +1928,21 @@ finline-atomics
 Common Var(flag_inline_atomics) Init(1) Optimization
 Inline __atomic operations when a lock free instruction sequence is available.
 
+fmulti-version-lib=
+Common Joined Var(multi_version_lib_string)
+Use specify LTO stream in mode for specified target (object or lib). If there
+are multiple target files, use commas (,) to separate them and without spaces.
+
+finline-force
+Common Var(flag_inline_force) Init(0) Optimization
+Force perform ipa inline when march options are incompatible between functions.
+
+finline-force=
+Common Joined Var(force_inline_targets_string)
+Force perform ipa inline specified target(object or lib) when march options are
+incompatible between functions.  If there are multiple target files, use commas
+(,) to separate them and without spaces.
+
 fcf-protection
 Common RejectNegative Alias(fcf-protection=,full)
 
@@ -2167,6 +2182,11 @@ Enum(lto_partition_model) String(max) Value(LTO_PARTITION_MAX)
 flto-partition=
 Common Joined RejectNegative Enum(lto_partition_model) Var(flag_lto_partition) Init(LTO_PARTITION_BALANCED)
 Specify the algorithm to partition symbols and vars at linktime.
+
+flto-compression-algorithm=
+Common Joined Var(lto_compression_algorithm)
+-flto-compression-algorithm=<format> Generate lto compression in zlib/zstd
+format <format>.
 
 ; The initial value of -1 comes from Z_DEFAULT_COMPRESSION in zlib.h.
 flto-compression-level=

@@ -491,6 +491,8 @@ merge_and_complain (vec<cl_decoded_option> &decoded_options,
 	|| decoded_options[j].opt_index == OPT_fpic)
       {
 	/* -fno-pic in one unit implies -fno-pic everywhere.  */
+	/* The -fno-pic adjustment here should provide some information hints,
+	   but may affect the use case test of deja.  */
 	if (decoded_options[j].value == 0)
 	  j++;
 	/* If we have no pic option or merge in -fno-pic, we still may turn
@@ -534,6 +536,8 @@ merge_and_complain (vec<cl_decoded_option> &decoded_options,
 	    || decoded_options[j].opt_index == OPT_fpie)
       {
 	/* -fno-pie in one unit implies -fno-pie everywhere.  */
+	/* The -fno-pie adjustment here should provide some information hints,
+	   but may affect the use case test of deja.  */
 	if (decoded_options[j].value == 0)
 	  j++;
 	/* If we have no pie option or merge in -fno-pie, we still preserve

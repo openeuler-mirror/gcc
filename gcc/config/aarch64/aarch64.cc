@@ -20829,6 +20829,44 @@ aarch64_option_print (FILE *file, int indent, struct cl_target_option *ptr)
 	   arch->name, extension.c_str ());
 }
 
+/* Implement TARGET_OPTION_PRINT_DIFF.  */
+
+static void
+aarch64_option_print_diff (FILE *file, int indent,
+			   struct cl_target_option *ptr1,
+			   struct cl_target_option *ptr2)
+{
+  const char *const cpu1
+    = aarch64_get_tune_cpu (ptr1->x_selected_tune)->name;
+  const struct processor *arch1 = aarch64_get_arch (ptr1->x_selected_arch);
+  std::string extension1
+    = aarch64_get_extension_string_for_isa_flags (ptr1->x_aarch64_isa_flags,
+						  arch1->flags);
+
+  const char *const cpu2
+    = aarch64_get_tune_cpu (ptr2->x_selected_tune)->name;
+  const struct processor *arch2 = aarch64_get_arch (ptr2->x_selected_arch);
+  std::string extension2
+    = aarch64_get_extension_string_for_isa_flags (ptr2->x_aarch64_isa_flags,
+						  arch2->flags);
+
+  if (cpu1 != cpu2 && (!cpu1 || !cpu2 || strcmp (cpu1, cpu2)))
+    fprintf (file, "%*s%s (%s/%s)\n", indent, "",
+	     "cpu", cpu1 ? cpu1 : "(null)", cpu2 ? cpu2 : "(null)");
+
+  if (arch1->name != arch2->name
+      && (!arch1->name || !arch2->name || strcmp (arch1->name, arch2->name)))
+    fprintf (file, "%*s%s (%s/%s)\n", indent, "",
+	     "arch", arch1->name ? arch1->name : "(null)",
+	     arch2->name ? arch2->name : "(null)");
+
+  if (extension1 != extension2)
+    fprintf (file, "%*s%s (%s/%s)\n", indent, "",
+	     "extension",
+	     extension1.empty () ? "(null)" : extension1.c_str (),
+	     extension2.empty () ? "(null)" : extension2.c_str ());
+}
+
 static GTY(()) tree aarch64_previous_fndecl;
 
 void
@@ -31160,6 +31198,9 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_OPTION_PRINT
 #define TARGET_OPTION_PRINT aarch64_option_print
+
+#undef TARGET_OPTION_PRINT_DIFF
+#define TARGET_OPTION_PRINT_DIFF aarch64_option_print_diff
 
 #undef TARGET_OPTION_VALID_ATTRIBUTE_P
 #define TARGET_OPTION_VALID_ATTRIBUTE_P aarch64_option_valid_attribute_p
