@@ -1213,6 +1213,18 @@ The maximum factor which the loop vectorizer applies to the cost of statements i
 Common Joined UInteger Var(param_vect_induction_float) Init(1) IntegerRange(0, 1) Param Optimization
 Enable loop vectorization of floating point inductions.
 
+-param=vect-swap-operands=
+Common Joined UInteger Var(param_vect_swap_operands) Init(0) IntegerRange(0, 1) Param Optimization
+Enable swapping operands for commutative operations in vectorization analysis.
+
+-param=addr-expand-for-alias-check=
+Common Joined UInteger Var(param_addr_expand_for_alias_check) Init(0) IntegerRange(0, 1) Param Optimization
+Enable data reference address expansion for alias check.
+
+-param=vect-register-size-check=
+Common Joined UInteger Var(param_vect_register_size_check) Init(0) IntegerRange(0, 1) Param Optimization
+Enable checking if a group of interleaving data references may not fit in vector register.
+
 -param=vrp1-mode=
 Common Joined Var(param_vrp1_mode) Enum(vrp_mode) Init(VRP_MODE_VRP) Param Optimization
 --param=vrp1-mode=[vrp|ranger] Specifies the mode VRP1 should operate in.

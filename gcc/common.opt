@@ -3268,6 +3268,10 @@ ftree-slp-transpose-vectorize
 Common Var(flag_tree_slp_transpose_vectorize) Optimization Init(0)
 Enable basic block vectorization (SLP) for transposed stores and loads on trees.
 
+ftree-slp-late
+Common Var(flag_slp_late) Init(0) Optimization
+Enable additional SLP vectorization pass after reassociation.
+
 fvect-cost-model=
 Common Joined RejectNegative Enum(vect_cost_model) Var(flag_vect_cost_model) Init(VECT_COST_MODEL_DEFAULT) Optimization
 -fvect-cost-model=[unlimited|dynamic|cheap|very-cheap]	Specifies the cost model for vectorization.

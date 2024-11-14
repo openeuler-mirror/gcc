@@ -1524,6 +1524,45 @@ make_pass_slp_vectorize (gcc::context *ctxt)
   return new pass_slp_vectorize (ctxt);
 }
 
+/*  The late SLP vectorization pass.  */
+
+namespace {
+
+const pass_data pass_data_slp_vectorize_late =
+{
+  GIMPLE_PASS, /* type.  */
+  "slp_late", /* name.  */
+  OPTGROUP_NONE, /* optinfo_flags.  */
+  TV_TREE_LATE_SLP, /* tv_id.  */
+  PROP_cfg, /* properties_required.  */
+  0, /* properties_provided.  */
+  0, /* properties_destroyed.  */
+  0, /* todo_flags_start.  */
+  0, /* todo_flags_finish.  */
+};
+
+class pass_slp_vectorize_late : public gimple_opt_pass
+{
+public:
+  pass_slp_vectorize_late (gcc::context *ctxt)
+    : gimple_opt_pass (pass_data_slp_vectorize_late, ctxt)
+  {}
+
+  /* opt_pass methods: */
+  virtual bool gate (function *)
+  {
+    return flag_slp_late != 0;
+  }
+
+}; // class pass_slp_vectorize_late
+
+} // anon namespace
+
+gimple_opt_pass *
+make_pass_slp_vectorize_late (gcc::context *ctxt)
+{
+  return new pass_slp_vectorize_late (ctxt);
+}
 
 /* Increase alignment of global arrays to improve vectorization potential.
    TODO:
