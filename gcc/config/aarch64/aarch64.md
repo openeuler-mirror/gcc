@@ -549,6 +549,7 @@
 (include "tsv110.md")
 (include "thunderx3t110.md")
 (include "hip09.md")
+(include "hip10c.md")
 (include "hip11.md")
 
 ;; -------------------------------------------------------------------

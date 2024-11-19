@@ -131,6 +131,7 @@ AARCH64_CORE("a64fx", a64fx, a64fx, V8_2A,  (F16, SVE), a64fx, 0x46, 0x001, -1)
 /* HiSilicon ('H') cores. */
 AARCH64_CORE("tsv110",  tsv110, tsv110, V8_2A,  (CRYPTO, F16), tsv110,   0x48, 0xd01, -1)
 AARCH64_CORE("hip09", hip09, hip09, V8_5A,  (SVE, I8MM, F32MM, F64MM, PROFILE, PREDRES), hip09, 0x48, 0xd02, 0x0)
+AARCH64_CORE("hip10c", hip10c, hip10c, V8_5A,  (SVE, I8MM, BF16, F32MM, F64MM, FLAGM, PAUTH, SSBS, SHA3, SM4, PROFILE, PREDRES), hip10c, 0x48, 0xddd, 0x0)
 
 /* ARMv8.3-A Architecture Processors.  */
 
