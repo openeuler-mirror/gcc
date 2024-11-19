@@ -201,7 +201,7 @@ instrument_values (histogram_values values)
    CFG_CHECKSUM is the precomputed checksum for the CFG.  */
 
 static gcov_type *
-get_exec_counts (unsigned cfg_checksum, unsigned lineno_checksum)
+get_exec_counts (unsigned cfg_checksum, unsigned lineno_checksum, bool is_cspgo)
 {
   unsigned num_edges = 0;
   basic_block bb;
@@ -219,7 +219,7 @@ get_exec_counts (unsigned cfg_checksum, unsigned lineno_checksum)
     }
 
   counts = get_coverage_counts (GCOV_COUNTER_ARCS, cfg_checksum,
-				lineno_checksum, num_edges);
+				lineno_checksum, num_edges, is_cspgo);
   if (!counts)
     return NULL;
 
@@ -418,7 +418,8 @@ cmp_stats (const void *ptr1, const void *ptr2)
    CFG_CHECKSUM is the precomputed checksum for the CFG.  */
 
 static void
-compute_branch_probabilities (unsigned cfg_checksum, unsigned lineno_checksum)
+compute_branch_probabilities (unsigned cfg_checksum, unsigned lineno_checksum,
+			      bool is_cspgo)
 {
   basic_block bb;
   int i;
@@ -427,7 +428,8 @@ compute_branch_probabilities (unsigned cfg_checksum, unsigned lineno_checksum)
   int passes;
   int hist_br_prob[20];
   int num_branches;
-  gcov_type *exec_counts = get_exec_counts (cfg_checksum, lineno_checksum);
+  gcov_type *exec_counts = get_exec_counts (cfg_checksum, lineno_checksum,
+					    is_cspgo);
   int inconsistent = 0;
 
   /* Very simple sanity checks so we catch bugs in our profiling code.  */
@@ -868,7 +870,7 @@ sort_hist_values (histogram_value hist)
 
 static void
 compute_value_histograms (histogram_values values, unsigned cfg_checksum,
-                          unsigned lineno_checksum)
+			  unsigned lineno_checksum, bool is_cspgo)
 {
   unsigned i, j, t, any;
   unsigned n_histogram_counters[GCOV_N_VALUE_COUNTERS];
@@ -898,7 +900,8 @@ compute_value_histograms (histogram_values values, unsigned cfg_checksum,
       histogram_counts[t] = get_coverage_counts (COUNTER_FOR_HIST_TYPE (t),
 						 cfg_checksum,
 						 lineno_checksum,
-						 n_histogram_counters[t]);
+						 n_histogram_counters[t],
+						 is_cspgo);
       if (histogram_counts[t])
 	any = 1;
       act_count[t] = histogram_counts[t];
@@ -1128,11 +1131,12 @@ compare_freqs (const void *p1, const void *p2)
 /* Only read execution count for thunks.  */
 
 void
-read_thunk_profile (struct cgraph_node *node)
+read_thunk_profile (struct cgraph_node *node, bool is_cspgo)
 {
   tree old = current_function_decl;
   current_function_decl = node->decl;
-  gcov_type *counts = get_coverage_counts (GCOV_COUNTER_ARCS, 0, 0, 1);
+  gcov_type *counts = get_coverage_counts (GCOV_COUNTER_ARCS, 0, 0, 1,
+					   is_cspgo);
   if (counts)
     {
       node->callees->count = node->count
@@ -1164,7 +1168,7 @@ read_thunk_profile (struct cgraph_node *node)
    Main entry point of this file.  */
 
 void
-branch_prob (bool thunk)
+branch_prob (bool thunk, bool is_cspgo)
 {
   basic_block bb;
   unsigned i;
@@ -1507,9 +1511,10 @@ branch_prob (bool thunk)
 
   if (flag_branch_probabilities)
     {
-      compute_branch_probabilities (cfg_checksum, lineno_checksum);
+      compute_branch_probabilities (cfg_checksum, lineno_checksum, is_cspgo);
       if (flag_profile_values)
-	compute_value_histograms (values, cfg_checksum, lineno_checksum);
+	compute_value_histograms (values, cfg_checksum, lineno_checksum,
+				  is_cspgo);
     }
 
   remove_fake_edges ();

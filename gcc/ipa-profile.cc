@@ -827,7 +827,7 @@ ipa_profile (void)
   if (dump_file)
     {
       if (!node_map_initialized)
-	init_node_map (false);
+	init_node_map (false, false);
       node_map_initialized = true;
 
       ipa_profile_dump_all_summaries (dump_file);
@@ -850,7 +850,7 @@ ipa_profile (void)
 	  if (spec_count)
 	    {
 	      if (!node_map_initialized)
-		init_node_map (false);
+		init_node_map (false, false);
 	      node_map_initialized = true;
 	      ncommon++;
 

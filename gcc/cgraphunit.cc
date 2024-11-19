@@ -208,6 +208,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "ipa-inline.h"
 #include "omp-offload.h"
 #include "symtab-thunks.h"
+#include "profile.h" // for del_node_map
 
 /* Queue of cgraph nodes scheduled to be added into cgraph.  This is a
    secondary queue used during optimization to accommodate passes that
@@ -1928,6 +1929,29 @@ tp_first_run_node_cmp (const void *pa, const void *pb)
   return tp_first_run_a - tp_first_run_b;
 }
 
+static bool
+expand_node_with_cspgo (cgraph_node *node, bool is_cspgo)
+{
+  gcc_assert (node);
+  /* Nodes in other partition, inline to, and clone of are not
+     interesting in cspgo.  */
+  if (!node->has_gimple_body_p ()
+      || node->in_other_partition
+      || node->inlined_to
+      || node->clone_of)
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] node %s will not do"
+			    " transform\n", node->dump_name ());
+      return false;
+    }
+
+  if (node->process)
+    node->ipa_transform_for_cspgo (is_cspgo);
+  return true;
+}
+
+
 /* Expand all functions that must be output.
 
    Attempt to topologically sort the nodes so function is output when
@@ -1968,6 +1992,39 @@ expand_all_functions (void)
   /* First output functions with time profile in specified order.  */
   qsort (tp_first_run_order, tp_first_run_order_pos,
 	 sizeof (cgraph_node *), tp_first_run_node_cmp);
+
+  if (flag_csprofile_generate || flag_csprofile_use)
+    {
+      bool is_cspgo = false;
+
+      /* We need to execute loop twice.  The first performs all transforms
+	 except cspgo, and the second performs cspgo transform.  */
+      for (int idx = 0; idx < 2; idx++)
+	{
+	  for (i = 0; i < tp_first_run_order_pos; i++)
+	    {
+	      node = tp_first_run_order[i];
+	      if (!expand_node_with_cspgo (node, is_cspgo))
+		continue;
+	    }
+
+	  for (i = new_order_pos - 1; i >= 0; i--)
+	    {
+	      node = order[i];
+	      if (!expand_node_with_cspgo (node, is_cspgo))
+		continue;
+	    }
+
+	  is_cspgo = true;
+	}
+
+      if (flag_csprofile_use)
+	handle_missing_profiles ();
+
+      if (coverage_node_map_initialized_p ())
+	del_node_map ();
+    }
+
   for (i = 0; i < tp_first_run_order_pos; i++)
     {
       node = tp_first_run_order[i];
@@ -2008,6 +2065,10 @@ expand_all_functions (void)
   if (symtab->dump_file && tp_first_run_order_pos)
     fprintf (symtab->dump_file, "Expanded functions with time profile:%u/%u\n",
              profiled_func_count, expanded_func_count);
+
+  /* Generate coverage variables and constructor for cspgo.  */
+  if (flag_csprofile_generate)
+    coverage_finish (true);
 
   symtab->process_new_functions ();
   free_gimplify_stack ();
@@ -2176,7 +2237,7 @@ ipa_passes (void)
   if (!in_lto_p)
     {
       /* Generate coverage variables and constructors.  */
-      coverage_finish ();
+      coverage_finish (false);
 
       /* Process new functions added.  */
       set_cfun (NULL);

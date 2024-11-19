@@ -1234,7 +1234,7 @@ coverage_node_map_initialized_p (void)
    that the PROFILE_IDs was already assigned.  */
 
 void
-init_node_map (bool local)
+init_node_map (bool local, bool is_cspgo)
 {
   struct cgraph_node *n;
   cgraph_node_map = new hash_map<profile_id_hash, cgraph_node *>;
@@ -1245,6 +1245,12 @@ init_node_map (bool local)
 	cgraph_node **val;
 	dump_user_location_t loc
 	  = dump_user_location_t::from_function_decl (n->decl);
+
+	/* In cspgo, inline and clone functions will not be expand,
+	   so skipped.  */
+	if (is_cspgo && (n->inlined_to || n->clone_of))
+	  continue;
+
 	if (local)
 	  {
 	    n->profile_id = coverage_compute_profile_id (n);
@@ -1290,6 +1296,7 @@ void
 del_node_map (void)
 {
   delete cgraph_node_map;
+  cgraph_node_map = 0;
 }
 
 /* Return cgraph node for function with pid */

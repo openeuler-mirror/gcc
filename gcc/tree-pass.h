@@ -519,6 +519,7 @@ extern simple_ipa_opt_pass *make_pass_ipa_increase_alignment (gcc::context
 							      *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_fn_summary (gcc::context *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_inline (gcc::context *ctxt);
+extern ipa_opt_pass_d *make_pass_ipa_csprofile (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_free_lang_data (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_free_fn_summary (gcc::context *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_cp (gcc::context *ctxt);
@@ -667,6 +668,7 @@ extern void execute_pass_list (function *, opt_pass *);
 extern void execute_ipa_pass_list (opt_pass *);
 extern void execute_ipa_summary_passes (ipa_opt_pass_d *);
 extern void execute_all_ipa_transforms (bool);
+extern void execute_all_ipa_transforms_for_cspgo (bool);
 extern void execute_all_ipa_stmt_fixups (struct cgraph_node *, gimple **);
 extern bool pass_init_dump_file (opt_pass *);
 extern void pass_fini_dump_file (opt_pass *);

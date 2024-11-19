@@ -4076,6 +4076,53 @@ cgraph_node::get_body (void)
   return updated;
 }
 
+/* Prepare function body.  When doing LTO, read cgraph_node's body from disk
+   if it is not already present.  When some IPA transformations are scheduled,
+   apply them.
+   Flag is used to control only skipping or enabling cspgo.  */
+
+bool
+cgraph_node::ipa_transform_for_cspgo (bool is_cspgo)
+{
+  bool updated;
+
+  bitmap_obstack_initialize (NULL);
+  updated = get_untransformed_body ();
+
+  /* Getting transformed body makes no sense for inline clones;
+     we should never use this on real clones because they are materialized
+     early.
+     TODO: Materializing clones here will likely lead to smaller LTRANS
+     footprint.  */
+  gcc_assert (!inlined_to && !clone_of);
+  if (ipa_transforms_to_apply.exists ())
+    {
+      opt_pass *saved_current_pass = current_pass;
+      FILE *saved_dump_file = dump_file;
+      const char *saved_dump_file_name = dump_file_name;
+      dump_flags_t saved_dump_flags = dump_flags;
+      dump_file_name = NULL;
+      set_dump_file (NULL);
+
+      push_cfun (DECL_STRUCT_FUNCTION (decl));
+
+      update_ssa (TODO_update_ssa_only_virtuals);
+      execute_all_ipa_transforms_for_cspgo (is_cspgo);
+      cgraph_edge::rebuild_edges ();
+      free_dominance_info (CDI_DOMINATORS);
+      free_dominance_info (CDI_POST_DOMINATORS);
+      pop_cfun ();
+      updated = true;
+
+      current_pass = saved_current_pass;
+      set_dump_file (saved_dump_file);
+      dump_file_name = saved_dump_file_name;
+      dump_flags = saved_dump_flags;
+    }
+  bitmap_obstack_release (NULL);
+  return updated;
+}
+
 /* Return the DECL_STRUCT_FUNCTION of the function.  */
 
 struct function *

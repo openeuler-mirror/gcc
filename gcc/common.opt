@@ -2397,6 +2397,10 @@ Common Joined RejectNegative Var(profile_data_prefix)
 Set the top-level directory for storing the profile data.
 The default is 'pwd'.
 
+fcfgo-csprofile-dir=
+Common Joined RejectNegative Var(csprofile_data_prefix)
+Set the top-level directory for storing the cs profile data.
+
 fprofile-note=
 Common Joined RejectNegative Var(profile_note_location)
 Select the name for storing the profile note file.
@@ -2461,6 +2465,14 @@ fprofile-generate=
 Common Joined RejectNegative
 Enable common options for generating profile info for profile feedback directed optimizations, and set -fprofile-dir=.
 
+fcfgo-csprofile-generate
+Common Var(flag_csprofile_generate)
+Enable common options for generating context sensitive profile info for profile feedback directed optimizations.
+
+fcfgo-csprofile-generate=
+Common Joined RejectNegative
+Enable common options for generating context sensitive profile info for profile feedback directed optimizations, and set -fcfgo-csprofile-dir=.
+
 fkernel-pgo
 Common Var(flag_kernel_pgo) Optimization Init(0)
 Disable TLS setting of instrumentation variables to support PGO kernel compilation in -fprofile-generate, as kernel does not support TLS.
@@ -2484,6 +2496,14 @@ Enable common options for performing profile feedback directed optimizations.
 fprofile-use=
 Common Joined RejectNegative
 Enable common options for performing profile feedback directed optimizations, and set -fprofile-dir=.
+
+fcfgo-csprofile-use
+Common Var(flag_csprofile_use)
+Enable common options for performing context sensitive profile feedback directed optimizations.
+
+fcfgo-csprofile-use=
+Common Joined RejectNegative
+Enable common options for performing context sensitive profile feedback directed optimizations, and set -fcfgo-csprofile-dir=.
 
 fprofile-values
 Common Var(flag_profile_values)

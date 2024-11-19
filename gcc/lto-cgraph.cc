@@ -1677,6 +1677,13 @@ merge_profile_summaries (struct lto_file_decl_data **file_data_vec)
   if (flag_ltrans)
     return;
 
+  /* TODO: The different max_run values obtained during the cspgo GEN and USE
+     stages with unknown bug resulted in different scaling results, which led
+     different optimization decisions and finally led to coverage mismatch.
+     Therefore, skip the following processing steps when doing cspgo.  */
+  if (flag_csprofile_generate || flag_csprofile_use)
+    return;
+
   /* Now compute count_materialization_scale of each node.
      During LTRANS we already have values of count_materialization_scale
      computed, so just update them.  */
