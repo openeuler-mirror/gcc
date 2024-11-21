@@ -2611,6 +2611,32 @@ print_help (struct gcc_options *opts, unsigned int lang_mask,
 			 lang_mask);
 }
 
+/* Checks whether the input forced inline string complies with the
+   restriction.  */
+
+void
+check_force_inline_targets_string (const char *arg, location_t loc)
+{
+  const int MAX_FORCE_INLINE_TARGET_LEN = 10000;
+  const int MAX_NUM_TARGET = 100;
+  __SIZE_TYPE__ length = strlen (arg);
+  int target_num = 1;
+  if (length > MAX_FORCE_INLINE_TARGET_LEN)
+    error_at (loc,
+	      "input string exceeds %d characters to %<-finline_force=%> "
+	      "option: %qs", MAX_FORCE_INLINE_TARGET_LEN, arg);
+  for (__SIZE_TYPE__ i = 0; i < length; i++)
+    {
+      if (arg[i] == ',')
+	{
+	  target_num++;
+	  if (target_num > MAX_NUM_TARGET)
+	    error_at (loc, "input target exceeds %d to %<-finline_force=%> "
+		      "option: %qs", MAX_NUM_TARGET, arg);
+	}
+    }
+}
+
 /* Handle target- and language-independent options.  Return zero to
    generate an "unknown option" message.  Only options that need
    extra handling need to be listed here; if you simply want
@@ -2952,6 +2978,14 @@ common_handle_option (struct gcc_options *opts,
 			   value / 2);
       break;
 
+    case OPT_finline_force:
+      opts->x_force_inline_targets_string = value ? "" : NULL;
+      break;
+
+    case OPT_finline_force_:
+      check_force_inline_targets_string (arg, loc);
+      break;
+
     case OPT_finstrument_functions_exclude_function_list_:
       add_comma_separated_to_vector
 	(&opts->x_flag_instrument_functions_exclude_functions, arg);
@@ -3224,6 +3258,18 @@ common_handle_option (struct gcc_options *opts,
 	  && atoi (arg) == 0)
 	error_at (loc,
 		  "unrecognized argument to %<-flto=%> option: %qs", arg);
+      break;
+
+    case OPT_flto_compression_algorithm_:
+      if (atoi (arg) == 0
+	  && strcmp (arg, "zlib") != 0
+#ifdef HAVE_ZSTD_H
+	  && strcmp (arg, "zstd") != 0
+#endif
+	)
+	error_at (loc,
+		  "unrecognized argument to %<-flto-compression-algorithm=%> "
+		  "option: %qs", arg);
       break;
 
     case OPT_w:

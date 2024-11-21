@@ -89,6 +89,10 @@ along with this program; see the file COPYING3.  If not see
 
 #define LTO_SEGMENT_NAME "__GNU_LTO"
 
+#define GCC_major_version 12
+#define LTO_major_version GCC_major_version
+#define LTO_minor_version 0
+
 /* Return true if STR string starts with PREFIX.  */
 
 static inline bool
@@ -118,6 +122,18 @@ struct plugin_symtab
   unsigned long long id;
 };
 
+/* Structure that represents LTO ELF section with information
+   about the format.  */
+
+struct lto_section
+{
+  int16_t major_version;
+  int16_t minor_version;
+  unsigned char slim_object;
+  unsigned char _padding;
+  uint16_t flags;
+};
+
 /* Encapsulates object file data during symbol scan.  */
 struct plugin_objfile
 {
@@ -126,6 +142,7 @@ struct plugin_objfile
   simple_object_read *objfile;
   struct plugin_symtab *out;
   const struct ld_plugin_input_file *file;
+  struct lto_section version;
 };
 
 /* All that we have to remember about a file. */
@@ -215,6 +232,8 @@ static int gold_version = -1;
    by using -plugin-opt=-sym-style={none,win32,underscore|uscore}
    (in fact, only first letter of style arg is checked.)  */
 static enum symbol_style sym_style = ss_none;
+
+static bool multi_version_lto_parse = false;
 
 static void
 check_1 (int gate, enum ld_plugin_level level, const char *text)
@@ -1078,6 +1097,59 @@ err:
   return 0;
 }
 
+/* Process version section of an object file.  */
+
+static int
+process_lto_version (void *data, const char *name, off_t offset, off_t length)
+{
+  struct plugin_objfile *obj = (struct plugin_objfile *)data;
+  char *s;
+  char *secdatastart, *secdata;
+
+  if (!startswith (name, ".gnu.lto_.lto"))
+    return 1;
+
+  s = strrchr (name, '.');
+  if (s)
+    sscanf (s, ".%" PRI_LL "x", &obj->out->id);
+  secdata = secdatastart = xmalloc (length);
+  offset += obj->file->offset;
+  if (offset != lseek (obj->file->fd, offset, SEEK_SET))
+    goto err;
+
+  do
+    {
+      ssize_t got = read (obj->file->fd, secdata, length);
+      if (got == 0)
+	break;
+      else if (got > 0)
+	{
+	  secdata += got;
+	  length -= got;
+	}
+      else if (errno != EINTR)
+	goto err;
+    }
+  while (length > 0);
+  if (length > 0)
+    goto err;
+
+  struct lto_section *lto_info = (struct lto_section *)secdatastart;
+  obj->version = *lto_info;
+
+  obj->found++;
+  free (secdatastart);
+  return 1;
+
+err:
+  if (message)
+    message (LDPL_FATAL, "%s: corrupt object file", obj->file->name);
+  /* Force claim_file_handler to abandon this file.  */
+  obj->found = 0;
+  free (secdatastart);
+  return 0;
+}
+
 /* Process one section of an object file.  */
 
 static int
@@ -1223,6 +1295,15 @@ claim_file_handler (const struct ld_plugin_input_file *file, int *claimed)
   if (obj.found == 0 && obj.offload == 0)
     goto err;
 
+  if (multi_version_lto_parse)
+    {
+      simple_object_find_sections (obj.objfile, process_lto_version, &obj,
+	      &err);
+      if (obj.version.major_version != LTO_major_version
+	  || obj.version.minor_version != LTO_minor_version)
+	goto err;
+    }
+
   if (obj.found > 1)
     resolve_conflicts (&lto_file.symtab, &lto_file.conflicts);
 
@@ -1366,6 +1447,8 @@ process_option (const char *option)
     }
   else if (startswith (option, "-ltrans-objects="))
     ltrans_objects = xstrdup (option + strlen ("-ltrans-objects="));
+  else if (strcmp (option, "-multi-version-lto-parse") == 0)
+    multi_version_lto_parse = true;
   else
     {
       int size;
