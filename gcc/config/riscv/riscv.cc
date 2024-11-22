@@ -844,7 +844,7 @@ riscv_valid_lo_sum_p (enum riscv_symbol_type sym_type, machine_mode mode,
   if (!riscv_split_symbol_type (sym_type))
     return false;
 
-  /* We can't tell size or alignment when we have BLKmode, so try extracing a
+  /* We can't tell size or alignment when we have BLKmode, so try extracting a
      decl from the symbol if possible.  */
   if (mode == BLKmode)
     {
@@ -1678,7 +1678,7 @@ riscv_legitimize_move (machine_mode mode, rtx dest, rtx src)
 
   /* RISC-V GCC may generate non-legitimate address due to we provide some
      pattern for optimize access PIC local symbol and it's make GCC generate
-     unrecognizable instruction during optmizing.  */
+     unrecognizable instruction during optimizing.  */
 
   if (MEM_P (dest) && !riscv_legitimate_address_p (mode, XEXP (dest, 0),
 						   reload_completed))
@@ -4988,7 +4988,9 @@ riscv_option_override (void)
     g_switch_value = 0;
 
   /* The presence of the M extension implies that division instructions
-     are present, so include them unless explicitly disabled.  */
+     are present, so include them unless explicitly disabled.
+     Similarly, if the M extension is not available, then disable
+     division instructions, unless they are explicitly enabled.  */
   if (TARGET_MUL && (target_flags_explicit & MASK_DIV) == 0)
     target_flags |= MASK_DIV;
   else if (!TARGET_MUL && TARGET_DIV)
@@ -5354,7 +5356,7 @@ riscv_get_interrupt_type (tree decl)
 }
 
 /* Implement `TARGET_SET_CURRENT_FUNCTION'.  */
-/* Sanity cheching for above function attributes.  */
+/* Sanity checking for above function attributes.  */
 static void
 riscv_set_current_function (tree decl)
 {
