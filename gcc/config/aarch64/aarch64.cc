@@ -18764,12 +18764,14 @@ override_C_optimize_options (struct gcc_options *opts)
   opts->x_flag_ipa_struct_reorg = 6;
   opts->x_struct_layout_optimize_level = 6;
   opts->x_flag_gnu89_inline = 1;
-  opts->x_flag_ccmp2 = 1;
-  opts->x_flag_array_widen_compare = 1;
   opts->x_flag_convert_minmax = 1;
   opts->x_flag_tree_slp_transpose_vectorize = 1;
   opts->x_param_max_inline_insns_auto = 64;
   opts->x_param_inline_unit_growth = 96;
+  opts->x_param_pointer_compression_size = 16;
+  opts->x_semi_relayout_level = 14;
+  opts->x_flag_ipa_prefetch = 1;
+  opts->x_flag_ipa_ic = 1;
 }
 
 /* Check whether in CPP language or LTO with only CPP language.  */
@@ -18826,6 +18828,8 @@ override_optimize_options_1 (struct gcc_options *opts)
   opts->x_param_ifcvt_allow_register_renaming = 2;
   opts->x_param_max_rtl_if_conversion_unpredictable_cost = 48;
   opts->x_param_max_rtl_if_conversion_predictable_cost = 48;
+  opts->x_flag_ccmp2 = 1;
+  opts->x_flag_array_widen_compare = 1;
 }
 
 static void
@@ -18848,6 +18852,8 @@ override_Fortran_optimize_options (struct gcc_options *opts)
   opts->x_flag_reorder_blocks = 1;
   opts->x_flag_crypto_accel_aes = 1;
   opts->x_param_flexible_seg_len = 1;
+  opts->x_flag_alias_analysis_expand_ssa = 1;
+  opts->x_flag_chrec_mul_fold_strict_overflow = 1;
 }
 
 /* Reset the optimize option.
@@ -18857,7 +18863,9 @@ static void
 reset_machine_option (struct gcc_options *opts)
 {
   if (!(opts->x_optimize_maximum)
-      || strstr (opts->x_aarch64_tune_string, "hip09") == NULL)
+      || opts->x_aarch64_cpu_string == NULL
+      || (strstr (opts->x_aarch64_cpu_string, "tsv110") == NULL
+      && strstr (opts->x_aarch64_cpu_string, "hip09") == NULL))
     {
       return;
     }

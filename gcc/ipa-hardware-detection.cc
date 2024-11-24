@@ -39,6 +39,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "cfghooks.h"
 #include "gimple-fold.h"
 #include "gimplify-me.h"
+#include "ai4c-infer.h"
 
 namespace {
 
@@ -191,10 +192,11 @@ bool
 pass_ipa_hardware_detection::gate (function *)
 {
   const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
-  return (ai_infer_level
+  const char *ai_guided = getenv ("AI_GUIDED");
+  return (ai_guided || (ai_infer_level
 	  && optimize_maximum > 0
 	  /* Only enable in lto or whole_program.  */
-	  && (in_lto_p || flag_whole_program));
+	  && (in_lto_p || flag_whole_program)));
 }
 
 unsigned int
