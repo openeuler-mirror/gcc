@@ -1116,6 +1116,10 @@ The percentage of function, weighted by execution frequency, that must be covere
 Common Joined UInteger Var(param_tracer_max_code_growth) Init(100) Param Optimization
 Maximal code growth caused by tail duplication (in percent).
 
+-param=tracer-max-not-covered-insns-num=
+Common Joined UInteger Var(param_tracer_max_not_covered_insns_num) Init(12) Param Optimization
+Maximal number of instructions in the block, that must not be covered by trace formation.
+
 -param=tracer-min-branch-probability=
 Common Joined UInteger Var(param_tracer_min_branch_probability) Init(50) IntegerRange(0, 100) Param Optimization
 Stop forward growth if the probability of best edge is less than this threshold (in percent). Used when profile feedback is not available.
@@ -1127,6 +1131,10 @@ Stop forward growth if the probability of best edge is less than this threshold 
 -param=tracer-min-branch-ratio=
 Common Joined UInteger Var(param_tracer_min_branch_ratio) Init(10) IntegerRange(0, 100) Param Optimization
 Stop reverse growth if the reverse probability of best edge is less than this threshold (in percent).
+
+-param=tracer-min-not-covered-insns-num=
+Common Joined UInteger Var(param_tracer_min_not_covered_insns_num) Init(1) Param Optimization
+Minimal number of instructions in the block, that must not be covered by trace formation.
 
 -param=tree-reassoc-width=
 Common Joined UInteger Var(param_tree_reassoc_width) Param Optimization

@@ -304,6 +304,17 @@ tail_duplicate (void)
     {
       int n;
       analyze_bb (bb, &n);
+
+    if (flag_tracer_static && n >= param_tracer_min_not_covered_insns_num
+	&& n <= param_tracer_max_not_covered_insns_num)
+      {
+	if (dump_file)
+	  fprintf (dump_file,
+		   "BB%d with n = %d will not be covered by tracer formation\n",
+		   bb->index, n);
+	continue;
+      }
+
       if (!ignore_bb_p (bb))
 	blocks[bb->index] = heap.insert (-bb->count.to_frequency (cfun), bb);
 
