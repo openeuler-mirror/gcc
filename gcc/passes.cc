@@ -2410,6 +2410,77 @@ execute_all_ipa_transforms (bool do_not_collect)
   node->ipa_transforms_to_apply.release ();
 }
 
+/* When is_cspgo is true, execute all passes except cspgo and save the pointer
+   for the next execution.  */
+
+void
+execute_all_ipa_transforms_for_cspgo (bool is_cspgo)
+{
+  struct cgraph_node *node;
+  ipa_opt_pass_d *cspgo_pass = NULL;
+  node = cgraph_node::get (current_function_decl);
+
+  cgraph_node *next_clone;
+  for (cgraph_node *n = node->clones; n; n = next_clone)
+    {
+      next_clone = n->next_sibling_clone;
+      if (n->decl != node->decl)
+	n->materialize_clone ();
+    }
+
+  int j = 0;
+  gcc::pass_manager *passes = g->get_passes ();
+  bool report = profile_report && (cfun->curr_properties & PROP_gimple) != 0;
+
+  if (report)
+    push_cfun (DECL_STRUCT_FUNCTION (node->decl));
+
+  for (auto p : node->ipa_transforms_to_apply)
+    {
+      /* Execute all passes except cspgo, and save the pointer of cspgo pass
+	 for the next execution.  */
+      if (!is_cspgo && strstr (p->name, "csprofile") != NULL)
+	{
+	  cspgo_pass = p;
+	  continue;
+	}
+      /* To get consistent statistics, we need to account each functio
+	 to each IPA pass.  */
+      if (report)
+	{
+	  for (;j < p->static_pass_number; j++)
+	    if (passes->get_pass_for_id (j)
+		&& passes->get_pass_for_id (j)->type == IPA_PASS
+		&& ((ipa_opt_pass_d *)passes->get_pass_for_id (j))
+		   ->function_transform)
+	      {
+		check_profile_consistency (j, true);
+		account_profile (j, true);
+	      }
+	  gcc_checking_assert (passes->get_pass_for_id (j) == p);
+	}
+      execute_one_ipa_transform_pass (node, p, true);
+    }
+  /* Account remaining IPA passes.  */
+  if (report)
+    {
+      for (;!passes->get_pass_for_id (j)
+	    || passes->get_pass_for_id (j)->type != RTL_PASS; j++)
+	if (passes->get_pass_for_id (j)
+	    && passes->get_pass_for_id (j)->type == IPA_PASS
+	    && ((ipa_opt_pass_d *)passes->get_pass_for_id (j))
+	       ->function_transform)
+	  {
+	    check_profile_consistency (j, true);
+	    account_profile (j, true);
+	  }
+      pop_cfun ();
+    }
+  node->ipa_transforms_to_apply.release ();
+  if (!is_cspgo)
+    node->ipa_transforms_to_apply.safe_push (cspgo_pass);
+}
+
 /* Check if PASS is explicitly disabled or enabled and return
    the gate status.  FUNC is the function to be processed, and
    GATE_STATUS is the gate status determined by pass manager by

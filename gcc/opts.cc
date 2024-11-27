@@ -3050,6 +3050,15 @@ common_handle_option (struct gcc_options *opts,
 			     false);
       break;
 
+    case OPT_fcfgo_csprofile_use_:
+      opts->x_csprofile_data_prefix = xstrdup (arg);
+      value = true;
+      /* No break here - do -fcfgo-csprofile-use processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_csprofile_use:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_use, value);
+      break;
+
     case OPT_fauto_profile_:
       opts->x_auto_profile_file = xstrdup (arg);
       opts->x_flag_auto_profile = true;
@@ -3091,6 +3100,15 @@ common_handle_option (struct gcc_options *opts,
       SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_values, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_inline_functions, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_bit_cp, value);
+      break;
+
+    case OPT_fcfgo_csprofile_generate_:
+      opts->x_csprofile_data_prefix = xstrdup (arg);
+      value = true;
+      /* No break here - do -fcfgo-csprofile-generate processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_csprofile_generate:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_generate, value);
       break;
 
     case OPT_fprofile_info_section:

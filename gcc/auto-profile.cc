@@ -1775,7 +1775,7 @@ auto_profile (void)
   if (symtab->state == FINISHED)
     return 0;
 
-  init_node_map (true);
+  init_node_map (true, false);
   profile_info = autofdo::afdo_profile_info;
 
   FOR_EACH_FUNCTION (node)

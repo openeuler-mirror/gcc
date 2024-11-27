@@ -86,7 +86,6 @@ struct counts_entry : pointer_hash <counts_entry>
 
 static GTY(()) struct coverage_data *functions_head = 0;
 static struct coverage_data **functions_tail = &functions_head;
-static unsigned no_coverage = 0;
 
 /* Cumulative counter information for whole program.  */
 static unsigned prg_ctr_mask; /* Mask of counter types generated.  */
@@ -113,6 +112,9 @@ static unsigned bbg_file_stamp;
 
 /* Name of the count data (gcda) file.  */
 static char *da_file_name;
+
+/* Name of the cs count data (gcda) file.  */
+static char *cs_da_file_name;
 
 /* The names of merge functions for counters.  */
 #define STR(str) #str
@@ -173,23 +175,28 @@ counts_entry::remove (counts_entry *entry)
 /* Hash table of count data.  */
 static hash_table<counts_entry> *counts_hash;
 
+/* Hash table of cs count data.  */
+static hash_table<counts_entry> *cs_counts_hash;
+
 /* Read in the counts file, if available.  */
 
 static void
-read_counts_file (void)
+read_counts_file (bool is_cspgo)
 {
   gcov_unsigned_t fn_ident = 0;
   gcov_unsigned_t tag;
   int is_error = 0;
   unsigned lineno_checksum = 0;
   unsigned cfg_checksum = 0;
+  char *gcda_file_name = (is_cspgo ? cs_da_file_name : da_file_name);
 
-  if (!gcov_open (da_file_name, 1))
+  if (!gcov_open (gcda_file_name, 1))
     return;
 
   if (!gcov_magic (gcov_read_unsigned (), GCOV_DATA_MAGIC))
     {
-      warning (0, "%qs is not a gcov data file", da_file_name);
+      warning (0, "%qs is not a %s data file", gcda_file_name,
+	       (is_cspgo ? "cs gcov" : "gcov"));
       gcov_close ();
       return;
     }
@@ -201,7 +208,7 @@ read_counts_file (void)
       GCOV_UNSIGNED2STRING (e, GCOV_VERSION);
 
       warning (0, "%qs is version %q.*s, expected version %q.*s",
- 	       da_file_name, 4, v, 4, e);
+	       gcda_file_name, 4, v, 4, e);
       gcov_close ();
       return;
     }
@@ -213,7 +220,7 @@ read_counts_file (void)
   /* Read checksum.  */
   gcov_read_unsigned ();
 
-  counts_hash = new hash_table<counts_entry> (10);
+  (is_cspgo ? cs_counts_hash : counts_hash) = new hash_table<counts_entry> (10);
   while ((tag = gcov_read_unsigned ()))
     {
       gcov_unsigned_t length;
@@ -234,9 +241,18 @@ read_counts_file (void)
 	}
       else if (tag == GCOV_TAG_OBJECT_SUMMARY)
 	{
-	  profile_info = XCNEW (gcov_summary);
-	  profile_info->runs = gcov_read_unsigned ();
-	  profile_info->sum_max = gcov_read_unsigned ();
+	  if (is_cspgo)
+	    {
+	      /* TODO: runs and sum_max need better handling for cspgo.  */
+	      gcov_unsigned_t runs = gcov_read_unsigned ();
+	      gcov_unsigned_t sum_max = gcov_read_unsigned ();
+	    }
+	  else
+	    {
+	      profile_info = XCNEW (gcov_summary);
+	      profile_info->runs = gcov_read_unsigned ();
+	      profile_info->sum_max = gcov_read_unsigned ();
+	    }
 	}
       else if (GCOV_TAG_IS_COUNTER (tag) && fn_ident)
 	{
@@ -249,7 +265,9 @@ read_counts_file (void)
 	  elt.ident = fn_ident;
 	  elt.ctr = GCOV_COUNTER_FOR_TAG (tag);
 
-	  slot = counts_hash->find_slot (&elt, INSERT);
+	  slot = (is_cspgo ? cs_counts_hash->find_slot (&elt, INSERT) :
+			     counts_hash->find_slot (&elt, INSERT));
+
 	  entry = *slot;
 	  if (!entry)
 	    {
@@ -264,12 +282,21 @@ read_counts_file (void)
 	  else if (entry->lineno_checksum != lineno_checksum
 		   || entry->cfg_checksum != cfg_checksum)
 	    {
-	      error ("profile data for function %u is corrupted", fn_ident);
+	      error ("%s data for function %u is corrupted",
+		     (is_cspgo ? "cs profile" : "profile"), fn_ident);
 	      error ("checksum is (%x,%x) instead of (%x,%x)",
 		     entry->lineno_checksum, entry->cfg_checksum,
 		     lineno_checksum, cfg_checksum);
-	      delete counts_hash;
-	      counts_hash = NULL;
+	      if (is_cspgo)
+		{
+		  delete cs_counts_hash;
+		  cs_counts_hash = NULL;
+		}
+	      else
+		{
+		  delete counts_hash;
+		  counts_hash = NULL;
+		}
 	      break;
 	    }
 	  if (read_length > 0)
@@ -282,9 +309,17 @@ read_counts_file (void)
 	  error (is_error < 0
 		 ? G_("%qs has overflowed")
 		 : G_("%qs is corrupted"),
-		 da_file_name);
-	  delete counts_hash;
-	  counts_hash = NULL;
+		 gcda_file_name);
+	  if (is_cspgo)
+	    {
+	      delete cs_counts_hash;
+	      cs_counts_hash = NULL;
+	    }
+	  else
+	    {
+	      delete counts_hash;
+	      counts_hash = NULL;
+	    }
 	  break;
 	}
     }
@@ -296,26 +331,30 @@ read_counts_file (void)
 
 gcov_type *
 get_coverage_counts (unsigned counter, unsigned cfg_checksum,
-		     unsigned lineno_checksum, unsigned int n_counts)
+		     unsigned lineno_checksum, unsigned int n_counts,
+		     bool is_cspgo)
 {
   counts_entry *entry, elt;
+  char *gcda_file_name = (is_cspgo ? cs_da_file_name : da_file_name);
 
   /* No hash table, no counts.  */
-  if (!counts_hash)
+  if ((is_cspgo ? (!cs_counts_hash) : (!counts_hash)))
     {
       static int warned = 0;
 
       if (!warned++)
 	{
 	  warning (OPT_Wmissing_profile,
-		   "%qs profile count data file not found",
-		   da_file_name);
+		   "%qs %s count data file not found",
+		   gcda_file_name, (is_cspgo ? "cs profile" : "profile"));
 	  if (dump_enabled_p ())
 	    {
 	      dump_user_location_t loc
 		= dump_user_location_t::from_location_t (input_location);
 	      dump_printf_loc (MSG_MISSED_OPTIMIZATION, loc,
-			       "file %s not found, %s\n", da_file_name,
+			       "%s file %s not found, %s\n",
+			       (is_cspgo ? "cs profile" : "profile"),
+			       gcda_file_name,
 			       (flag_guess_branch_prob
 				? "execution counts estimated"
 				: "execution counts assumed to be zero"));
@@ -331,13 +370,14 @@ get_coverage_counts (unsigned counter, unsigned cfg_checksum,
       elt.ident = cgraph_node::get (current_function_decl)->profile_id;
     }
   elt.ctr = counter;
-  entry = counts_hash->find (&elt);
+  entry = (is_cspgo ? cs_counts_hash->find (&elt) : counts_hash->find (&elt));
   if (!entry)
     {
       if (counter == GCOV_COUNTER_ARCS)
 	warning_at (DECL_SOURCE_LOCATION (current_function_decl),
 		    OPT_Wmissing_profile,
-		    "profile for function %qD not found in profile data",
+		    "%s for function %qD not found in profile data",
+		    (is_cspgo ? "cs profile" : "profile"),
 		    current_function_decl);
       /* The function was not emitted, or is weak and not chosen in the
 	 final executable.  Silently fail, because there's nothing we
@@ -357,9 +397,10 @@ get_coverage_counts (unsigned counter, unsigned cfg_checksum,
 	warning_printed =
 	  warning_at (DECL_SOURCE_LOCATION (current_function_decl),
 		      OPT_Wcoverage_mismatch,
-		      "number of counters in profile data for function %qD "
+		      "number of counters in %s data for function %qD "
 		      "does not match "
 		      "its profile data (counter %qs, expected %i and have %i)",
+		      (is_cspgo ? "cs profile" : "profile"),
 		      current_function_decl,
 		      ctr_names[counter], entry->n_counts, n_counts);
       else
@@ -367,7 +408,8 @@ get_coverage_counts (unsigned counter, unsigned cfg_checksum,
 	  warning_at (DECL_SOURCE_LOCATION (current_function_decl),
 		      OPT_Wcoverage_mismatch,
 		      "the control flow of function %qD does not match "
-		      "its profile data (counter %qs)", current_function_decl,
+		      "its %s data (counter %qs)", current_function_decl,
+		      (is_cspgo ? "cs profile" : "profile"),
 		      ctr_names[counter]);
       if (warning_printed && dump_enabled_p ())
 	{
@@ -413,9 +455,6 @@ get_coverage_counts (unsigned counter, unsigned cfg_checksum,
 int
 coverage_counter_alloc (unsigned counter, unsigned num)
 {
-  if (no_coverage)
-    return 0;
-
   if (!num)
     return 1;
 
@@ -623,7 +662,7 @@ coverage_begin_function (unsigned lineno_checksum, unsigned cfg_checksum)
 {
   /* We don't need to output .gcno file unless we're under -ftest-coverage
      (e.g. -fprofile-arcs/generate/use don't need .gcno to work). */
-  if (no_coverage || !bbg_file_name)
+  if (!bbg_file_name)
     return 0;
 
   expanded_location startloc
@@ -981,7 +1020,8 @@ build_info_type (tree type, tree fn_info_ptr_type)
    function info objects.  */
 
 static tree
-build_info (tree info_type, tree fn_ary, unsigned object_checksum)
+build_info (tree info_type, tree fn_ary, unsigned object_checksum,
+	    bool is_cspgo)
 {
   tree info_fields = TYPE_FIELDS (info_type);
   tree merge_fn_type, n_funcs;
@@ -1014,8 +1054,16 @@ build_info (tree info_type, tree fn_ary, unsigned object_checksum)
   info_fields = DECL_CHAIN (info_fields);
 
   /* Filename */
-  da_file_name_len = strlen (da_file_name);
-  filename_string = build_string (da_file_name_len + 1, da_file_name);
+  if (is_cspgo)
+    {
+      da_file_name_len = strlen (cs_da_file_name);
+      filename_string = build_string (da_file_name_len + 1, cs_da_file_name);
+    }
+  else
+    {
+      da_file_name_len = strlen (da_file_name);
+      filename_string = build_string (da_file_name_len + 1, da_file_name);
+    }
   TREE_TYPE (filename_string) = build_array_type
     (char_type_node, build_index_type (size_int (da_file_name_len)));
   CONSTRUCTOR_APPEND_ELT (v1, info_fields,
@@ -1142,7 +1190,7 @@ build_gcov_info_var_registration (tree gcov_info_type)
    for the object.  Returns TRUE if coverage data is being emitted.  */
 
 static bool
-coverage_obj_init (void)
+coverage_obj_init (bool is_cspgo)
 {
   tree gcov_info_type;
   unsigned n_counters = 0;
@@ -1150,8 +1198,6 @@ coverage_obj_init (void)
   struct coverage_data *fn;
   struct coverage_data **fn_prev;
   char name_buf[32];
-
-  no_coverage = 1; /* Disable any further coverage.  */
 
   if (!prg_ctr_mask)
     return false;
@@ -1161,7 +1207,9 @@ coverage_obj_init (void)
 
   /* Prune functions.  */
   for (fn_prev = &functions_head; (fn = *fn_prev);)
-    if (DECL_STRUCT_FUNCTION (fn->fn_decl))
+    /* In cspgo, the DECL_STRUCT_FUNCTION attribute has been checked in
+       csprofile_transform.  */
+    if (is_cspgo || DECL_STRUCT_FUNCTION (fn->fn_decl))
       fn_prev = &fn->next;
     else
       /* The function is not being emitted, remove from list.  */
@@ -1225,7 +1273,7 @@ coverage_obj_fn (vec<constructor_elt, va_gc> *ctor, tree fn,
 
 static void
 coverage_obj_finish (vec<constructor_elt, va_gc> *ctor,
-		     unsigned object_checksum)
+		     unsigned object_checksum, bool is_cspgo)
 {
   unsigned n_functions = vec_safe_length (ctor);
   tree fn_info_ary_type = build_array_type
@@ -1242,7 +1290,8 @@ coverage_obj_finish (vec<constructor_elt, va_gc> *ctor,
   varpool_node::finalize_decl (fn_info_ary);
   
   DECL_INITIAL (gcov_info_var)
-    = build_info (TREE_TYPE (gcov_info_var), fn_info_ary, object_checksum);
+    = build_info (TREE_TYPE (gcov_info_var), fn_info_ary, object_checksum,
+		  is_cspgo);
   varpool_node::finalize_decl (gcov_info_var);
 }
 
@@ -1310,11 +1359,32 @@ coverage_init (const char *filename)
   memcpy (da_file_name + prefix_len, filename, len);
   strcpy (da_file_name + prefix_len + len, GCOV_DATA_SUFFIX);
 
+  /* Name of cspgo da file.  */
+  if (flag_csprofile_generate || flag_csprofile_use)
+    {
+      if (csprofile_data_prefix)
+	prefix_len = strlen (csprofile_data_prefix);
+
+      cs_da_file_name = XNEWVEC (char, len + strlen (GCOV_DATA_SUFFIX)
+				 + prefix_len + 2);
+
+      if (csprofile_data_prefix)
+	{
+	  memcpy (cs_da_file_name, csprofile_data_prefix, prefix_len);
+	  cs_da_file_name[prefix_len++] = *separator;
+	}
+      memcpy (cs_da_file_name + prefix_len, filename, len);
+      strcpy (cs_da_file_name + prefix_len + len, GCOV_DATA_SUFFIX);
+    }
+
   bbg_file_stamp = local_tick;
   if (flag_auto_profile)
     read_autofdo_file ();
   else if (flag_branch_probabilities)
-    read_counts_file ();
+    read_counts_file (false);
+
+  if (flag_csprofile_use)
+    read_counts_file (true);
 
   /* Name of bbg file.  */
   if (flag_test_coverage && !flag_compare_debug)
@@ -1354,7 +1424,7 @@ coverage_init (const char *filename)
    variables and constructor.  */
 
 void
-coverage_finish (void)
+coverage_finish (bool is_cspgo)
 {
   if (bbg_file_name && gcov_close ())
     unlink (bbg_file_name);
@@ -1368,7 +1438,7 @@ coverage_finish (void)
   /* Global GCDA checksum that aggregates all functions.  */
   unsigned object_checksum = 0;
 
-  if (coverage_obj_init ())
+  if (coverage_obj_init (is_cspgo))
     {
       vec<constructor_elt, va_gc> *fn_ctor = NULL;
       struct coverage_data *fn;
@@ -1382,11 +1452,17 @@ coverage_finish (void)
 					    fn->lineno_checksum);
 	  object_checksum = crc32_unsigned (object_checksum, fn->cfg_checksum);
 	}
-      coverage_obj_finish (fn_ctor, object_checksum);
+      coverage_obj_finish (fn_ctor, object_checksum, is_cspgo);
     }
 
-  XDELETEVEC (da_file_name);
+  if (da_file_name)
+    XDELETEVEC (da_file_name);
   da_file_name = NULL;
+  if (is_cspgo)
+    {
+      XDELETEVEC (cs_da_file_name);
+      cs_da_file_name = NULL;
+    }
 }
 
 #include "gt-coverage.h"
