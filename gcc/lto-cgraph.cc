@@ -1681,7 +1681,8 @@ merge_profile_summaries (struct lto_file_decl_data **file_data_vec)
      stages with unknown bug resulted in different scaling results, which led
      different optimization decisions and finally led to coverage mismatch.
      Therefore, skip the following processing steps when doing cspgo.  */
-  if (flag_csprofile_generate || flag_csprofile_use)
+  if (flag_csprofile_generate || flag_csprofile_use
+      || flag_cfgo_profile_generate || flag_cfgo_profile_use)
     return;
 
   /* Now compute count_materialization_scale of each node.

@@ -2087,6 +2087,38 @@ enable_fdo_optimizations (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, flag_tree_loop_distribution, value);
 }
 
+/* Enable cfgo-related flags.  */
+
+static void
+enable_cfgo_optimizations (struct gcc_options *opts,
+			   struct gcc_options *opts_set,
+			   int value)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_modulo_sched, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_selective_scheduling, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_rename_registers, value);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_auto, 185);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_inline_unit_growth, 66);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_recursive_depth_auto,
+		       31);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_function_insns, 7286);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_function_growth, 89);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_unit_insns, 11783);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_eval_threshold, 864);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_loop_hint_bonus, 440);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_max_recursive_depth, 29);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_min_recursive_probability,
+		       4);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_recursive_freq_factor, 18);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_recursion_penalty, 64);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_single_call_penalty, 43);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_unit_growth, 96);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_large_unit_insns, 47631);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_value_list_size, 12);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_profile_count_base, 54);
+}
+
 /* -f{,no-}sanitize{,-recover}= suboptions.  */
 const struct sanitizer_opts_s sanitizer_opts[] =
 {
@@ -3033,6 +3065,18 @@ common_handle_option (struct gcc_options *opts,
       /* Deferred.  */
       break;
 
+    case OPT_fcfgo_profile_use_:
+      /* No break here - do -fcfgo-profile-use processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_profile_use:
+      value = true;
+      if (value)
+	{
+	  enable_cfgo_optimizations (opts, opts_set, value);
+	  SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_use, value);
+	}
+      /* No break here - do -fprofile-use processing.  */
+      /* FALLTHRU */
     case OPT_fprofile_use_:
       opts->x_profile_data_prefix = xstrdup (arg);
       opts->x_flag_profile_use = true;
@@ -3090,6 +3134,19 @@ common_handle_option (struct gcc_options *opts,
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_struct_reorg, value);
       break;
 
+    case OPT_fcfgo_profile_generate_:
+      /* No break here - do -fcfgo-profile-generate processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_profile_generate:
+      value = true;
+      if (value)
+	{
+	  enable_cfgo_optimizations (opts, opts_set, value);
+	  SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_generate,
+			       value);
+	}
+      /* No break here - do -fcfgo-profile-generate processing.  */
+      /* FALLTHRU */
     case OPT_fprofile_generate_:
       opts->x_profile_data_prefix = xstrdup (arg);
       value = true;
