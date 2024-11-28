@@ -1393,6 +1393,7 @@ OBJS = \
 	gimple-builder.o \
 	gimple-expr.o \
 	gimple-if-to-switch.o \
+	gimple-if-split.o \
 	gimple-iterator.o \
 	gimple-fold.o \
 	gimple-harden-conditionals.o \

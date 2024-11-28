@@ -112,6 +112,8 @@ extern basic_block gimple_switch_default_bb (function *, gswitch *);
 extern edge gimple_switch_edge (function *, gswitch *, unsigned);
 extern edge gimple_switch_default_edge (function *, gswitch *);
 extern bool cond_only_block_p (basic_block);
+extern bool recognize_if_then_else (basic_block, basic_block *, basic_block *);
+extern bool same_phi_args_p (basic_block, basic_block, basic_block);
 
 /* Return true if the LHS of a call should be removed.  */
 

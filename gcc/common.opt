@@ -1981,6 +1981,10 @@ finstrument-functions-exclude-file-list=
 Common RejectNegative Joined
 -finstrument-functions-exclude-file-list=filename,...	Do not instrument functions listed in files.
 
+fif-split
+Common Var(flag_if_split) Init(0) Optimization
+Perform splitting if complex conditions on separate ones with clonning their bodies (gimple version).
+
 fipa-cp
 Common Var(flag_ipa_cp) Optimization
 Perform interprocedural constant propagation.
