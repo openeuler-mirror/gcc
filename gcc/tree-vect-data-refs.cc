@@ -3234,6 +3234,21 @@ vect_analyze_data_ref_accesses (vec_info *vinfo,
 		      != type_size_a))
 		break;
 
+	      if (param_vect_register_size_check)
+		{
+		  tree scalar_type = TREE_TYPE (DR_REF (dra));
+		  tree vec_type = get_related_vectype_for_scalar_type (
+		      vinfo->vector_mode, scalar_type);
+		  poly_uint64 vec_size = TYPE_VECTOR_SUBPARTS (vec_type);
+
+		  /* If we have a large interleaving group (especially a group
+		     of loads with gaps) that does not fit in vector register,
+		     we should split this group to chunks we support.  */
+		  if (maybe_ge (((unsigned HOST_WIDE_INT)init_b - init_prev)
+				/ type_size_a, vec_size))
+		    break;
+		}
+
 	      /* If the step (if not zero or non-constant) is smaller than the
 		 difference between data-refs' inits this splits groups into
 		 suitable sizes.  */

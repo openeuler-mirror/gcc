@@ -3021,6 +3021,18 @@ dr_may_alias_p (const struct data_reference *a, const struct data_reference *b,
       get_inner_reference_aff (DR_REF (b), &off2, &size2);
       aff_combination_scale (&off1, -1);
       aff_combination_add (&off2, &off1);
+
+      if (param_addr_expand_for_alias_check)
+	{
+	  using tree_expand_map_t = hash_map<tree, name_expansion *>;
+	  /* Cache used by aff_combination_expand.  */
+	  tree_expand_map_t *cache = NULL;
+
+	  if (off2.n)
+	    aff_combination_expand (&off2, &cache);
+	  free_affine_expand_cache (&cache);
+	}
+
       if (aff_comb_cannot_overlap_p (&off2, size1, size2))
 	return false;
     }

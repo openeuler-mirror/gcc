@@ -687,6 +687,34 @@ vect_get_and_check_slp_defs (vec_info *vinfo, unsigned char swap,
   if (first)
     return 0;
 
+  /* If different statements in the group of commutative operations
+     have the same arguments but in different places, swap them to
+     group the same operands in one vector.
+
+     Check if swapping is enabled, operation is commutative and has
+     two operands of the same type.
+     If one of the operands in current statement match the operand
+     on another place of the first statement in the group we
+     swap operands in current statement.  */
+  if (param_vect_swap_operands && commutative_op == 0 && !first
+      && is_a <bb_vec_info> (vinfo) && number_of_oprnds == 2
+      && vect_def_types_match (dts[0], dts[1]))
+    {
+      slp_oprnd_info oprnd_info0 = (*oprnds_info)[0];
+      slp_oprnd_info oprnd_info1 = (*oprnds_info)[1];
+      if (oprnd_info1->ops[stmt_num] == oprnd_info0->ops[0]
+	  || oprnd_info0->ops[stmt_num] == oprnd_info1->ops[0])
+      {
+	std::swap (oprnd_info0->def_stmts[stmt_num],
+		   oprnd_info1->def_stmts[stmt_num]);
+	std::swap (oprnd_info0->ops[stmt_num],
+		   oprnd_info1->ops[stmt_num]);
+	if (dump_enabled_p ())
+	  dump_printf_loc (MSG_NOTE, vect_location,
+			   "Swapped operands for %G", stmt_info->stmt);
+      }
+    }
+
   /* Now match the operand definition types to that of the first stmt.  */
   for (i = 0; i < number_of_oprnds;)
     {
