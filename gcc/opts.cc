@@ -3200,6 +3200,10 @@ common_handle_option (struct gcc_options *opts,
       }
       break;
 
+    case OPT_ftracer_static:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_tracer, true);
+      break;
+
     case OPT_ftree_vectorize:
       /* Automatically sets -ftree-loop-vectorize and
 	 -ftree-slp-vectorize.  Nothing more to do here.  */

@@ -2998,6 +2998,10 @@ ftracer
 Common Var(flag_tracer) Optimization
 Perform superblock formation via tail duplication.
 
+ftracer-static
+Common Var(flag_tracer_static) Init(0) Optimization
+Perform superblock formation via tail duplication for a given bb size.
+
 ftrampolines
 Common Var(flag_trampolines) Init(0)
 For targets that normally need trampolines for nested functions, always
