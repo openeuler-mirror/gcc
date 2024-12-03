@@ -61,5 +61,6 @@ DEF_ESCAPE (escape_unhandled_rewrite, "Type escapes via a unhandled rewrite stmt
 DEF_ESCAPE (escape_via_orig_escape, "Type escapes via a original escape type")
 DEF_ESCAPE (escape_instance_field, "Type escapes via a field of instance")
 DEF_ESCAPE (escape_via_empty_no_orig, "Type escapes via empty and no original")
+DEF_ESCAPE (escape_no_record_var, "Type escapes via no record var")
 
 #undef DEF_ESCAPE

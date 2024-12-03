@@ -1433,6 +1433,7 @@ public:
   void propagate_escape_via_original (void);
   void propagate_escape_via_empty_with_no_original (void);
   void propagate_escape_via_ext_func_types (void);
+  void propagate_escape_via_no_record_var (void);
   void analyze_types (void);
   void clear_visited (void);
   bool create_new_types (void);
@@ -4467,6 +4468,13 @@ ipa_struct_reorg::check_type_and_push (tree newdecl, srdecl *decl,
 	}
       /* At this point there should only be unkown void* ssa names.  */
       gcc_assert (TREE_CODE (newdecl) == SSA_NAME);
+      tree inner = SSA_NAME_VAR (newdecl);
+      if (current_layout_opt_level >= STRUCT_REORDER_FIELDS && 
+	  inner && find_decl (inner) == NULL)
+	{
+	  type->mark_escape (escape_no_record_var, stmt);
+	  return;
+	}
       if (dump_file && (dump_flags & TDF_DETAILS))
 	{
 	  fprintf (dump_file, "\nrecording unkown decl: ");
@@ -5512,6 +5520,41 @@ ipa_struct_reorg::propagate_escape_via_ext_func_types (void)
     }
 }
 
+/* Escape propagation is performed on ssa_name decl that no record var in
+   decls.  */
+
+void
+ipa_struct_reorg::propagate_escape_via_no_record_var (void)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\n propagate_escape_via_no_record_var: \n\n");
+
+  for (unsigned i = 0; i < functions.length (); i++)
+    {
+      if (functions[i]->node)
+	set_cfun (DECL_STRUCT_FUNCTION (functions[i]->node->decl));
+
+      for (unsigned j = 0; j < functions[i]->decls.length (); j++)
+	{
+	  srdecl *decl = functions[i]->decls[j];
+	  srtype *type = decl->type;
+
+	  if (TREE_CODE (decl->decl) == SSA_NAME)
+	    {
+	      tree inner = SSA_NAME_VAR (decl->decl);
+
+	      if (inner && functions[i]->find_decl (inner) == NULL)
+		type->mark_escape (escape_no_record_var, NULL);
+	    }
+	}
+
+      set_cfun (NULL);
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "\n end propagate_escape_via_no_record_var \n\n");
+}
+
 /* Prune the escaped types and their decls from what was recorded.  */
 
 void
@@ -5530,6 +5573,7 @@ ipa_struct_reorg::prune_escaped_types (void)
       propagate_escape_via_original ();
       propagate_escape_via_empty_with_no_original ();
       propagate_escape_via_ext_func_types ();
+      propagate_escape_via_no_record_var ();
     }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
