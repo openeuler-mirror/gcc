@@ -5800,6 +5800,10 @@ do_self_spec (const char *spec)
   do_spec_1 (" ", 0, NULL);
 
   const char* tune_native = eval_spec_function ("local_cpu_detect", "cpu", "");
+  if (tune_native == NULL)
+    {
+      tune_native = "native";
+    }
   setenv ("GCC_AI4C_TUNE_INFO", tune_native, 1);
 
   /* Mark %<S switches processed by do_self_spec to be ignored permanently.
