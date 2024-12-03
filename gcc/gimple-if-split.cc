@@ -38,6 +38,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-cfg.h"
 #include "bitmap.h"
 #include "cfganal.h"
+#include "cfgloop.h"
 
 /* Perform splitting if-then-else patterns, whose complex OR condition in
 cond-bb contains comparison of some variable with constant and then-bb got
@@ -255,6 +256,7 @@ process_complex_cond (basic_block cond_bb, basic_block then_bb,
   cond_parts_defs defs;
 
   if (!can_duplicate_block_p (then_bb)
+      || !single_succ_p (then_bb)
       || !necessary_complex_cond_p (cond, then_bb, &defs))
     return;
 
@@ -345,14 +347,39 @@ static basic_block
 make_two_separate_calls (basic_block outer_cond_bb, basic_block inner_cond_bb,
 			 basic_block then_bb)
 {
-  if (!can_duplicate_block_p (then_bb) || EDGE_COUNT (then_bb->succs) != 1)
+  if (!can_duplicate_block_p (then_bb) || !single_succ_p (then_bb))
     return NULL;
 
   edge outer_then_e = find_edge (outer_cond_bb, then_bb);
 
   /* Making duplication of then_bb.  */
   basic_block then_bb_dom = get_immediate_dominator (CDI_DOMINATORS, then_bb);
+
+  /* Saving ret_value and then_bb succ edge flags, if then_bb is pred of
+   * EXIT_BLOCK and has return statement inside.  */
+  tree ret_val;
+  int then_bb_succ_edge_flags;
+  if (single_succ (then_bb) == EXIT_BLOCK_PTR_FOR_FN (cfun))
+    {
+      gcc_assert (gimple_code (last_stmt (then_bb)) == GIMPLE_RETURN);
+      ret_val = gimple_return_retval (as_a<greturn*>(last_stmt (then_bb)));
+
+      then_bb_succ_edge_flags = single_succ_edge (then_bb)->flags;
+    }
+
   basic_block merge_bb = split_edge (single_succ_edge (then_bb));
+
+  /* Building return statement in merge_bb and setting merge_bb succ edge flags,
+   * if now merge_bb is pred of EXIT_BLOCK.  */
+  if (single_succ (merge_bb) == EXIT_BLOCK_PTR_FOR_FN (cfun))
+    {
+      gimple* ret = gimple_build_return (ret_val);
+      gimple_stmt_iterator gsi = gsi_last_bb (merge_bb);
+      gsi_insert_after (&gsi, ret, GSI_NEW_STMT);
+
+      single_succ_edge (merge_bb)->flags = then_bb_succ_edge_flags;
+    }
+
   basic_block then_bb1 = duplicate_block (then_bb, outer_then_e, outer_cond_bb);
   edge outer_then1_e = find_edge (outer_cond_bb, then_bb1);
 
@@ -371,6 +398,9 @@ make_two_separate_calls (basic_block outer_cond_bb, basic_block inner_cond_bb,
   set_immediate_dominator (CDI_POST_DOMINATORS, then_bb1, merge_bb);
   set_immediate_dominator (CDI_POST_DOMINATORS, merge_bb,
 			   single_succ (merge_bb));
+
+  if (get_immediate_dominator (CDI_POST_DOMINATORS, outer_cond_bb) == then_bb)
+     set_immediate_dominator (CDI_POST_DOMINATORS, outer_cond_bb, merge_bb);
 
   return then_bb1;
 }
@@ -548,6 +578,7 @@ pass_if_split::execute (function *fun)
 
   checking_verify_ssa (true, true);
   checking_verify_flow_info ();
+  checking_verify_loop_structure ();
   checking_verify_dominators (CDI_DOMINATORS);
   checking_verify_dominators (CDI_POST_DOMINATORS);
 
