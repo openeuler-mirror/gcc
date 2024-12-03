@@ -39,6 +39,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "attribs.h"
 #include "asan.h"
 #include "file-prefix-map.h" /* add_*_prefix_map()  */
+#include "ai4c-infer.h"
 
 typedef const char *const_char_p; /* For DEF_VEC_P.  */
 
@@ -304,6 +305,15 @@ decode_options (struct gcc_options *opts, struct gcc_options *opts_set,
 		location_t loc, diagnostic_context *dc,
 		void (*target_option_override_hook) (void))
 {
+  set_cache_info (global_options.x_param_simultaneous_prefetches,
+		  global_options.x_param_l1_cache_size,
+		  global_options.x_param_l1_cache_line_size,
+		  global_options.x_param_l2_cache_size,
+		  global_options.x_param_prefetch_latency,
+		  global_options.x_param_ipa_prefetch_distance_factor);
+  const char *tune_native = getenv ("GCC_AI4C_TUNE_INFO");
+  prepare_native_tune_str (tune_native);
+
   struct cl_option_handlers handlers;
 
   unsigned int lang_mask;
