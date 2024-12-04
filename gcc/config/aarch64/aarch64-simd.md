@@ -6566,18 +6566,25 @@
 	    (match_operand:VDQHSD 1 "register_operand" "w")
 	    (match_operand:VDQHSD 2 "half_size_minus_one_operand"))
 	  (match_operand:VDQHSD 3 "cmlt_arith_mask_operand")))]
-  "TARGET_SIMD && flag_cmlt_arith"
+  "TARGET_SIMD && !reload_completed && flag_cmlt_arith"
   "#"
-  "&& reload_completed"
-  [(set (match_operand:<V_INT_EQUIV> 0 "register_operand")
+  "&& true"
+  [(set (match_operand:<V_INT_EQUIV> 0 "register_operand" "=w")
 	(lshiftrt:<V_INT_EQUIV>
 	  (match_operand:VDQHSD 1 "register_operand")
 	  (match_operand:VDQHSD 2 "half_size_minus_one_operand")))
+   (set (match_operand:<V_INT_EQUIV> 4 "register_operand" "w")
+	  (match_operand:VDQHSD 3 "cmlt_arith_mask_operand"))
    (set (match_dup 0)
 	(and:<V_INT_EQUIV>
-	  (match_dup 0)
-	  (match_operand:VDQHSD 3 "cmlt_arith_mask_operand")))]
-  ""
+	  (match_dup 4)
+	  (match_dup 0)))]
+  {
+    if (can_create_pseudo_p ())
+      operands[4] = gen_reg_rtx (<V_INT_EQUIV>mode);
+    else
+      FAIL;
+  }
   [(set_attr "type" "neon_compare_zero")]
 )
 
