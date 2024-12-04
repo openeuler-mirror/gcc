@@ -2171,7 +2171,8 @@ optimize_function (cgraph_node *n, function *fn)
     }
   tree var_type = TREE_TYPE (inc_var);
   enum tree_code inc_code;
-  if (TREE_CODE (var_type) == POINTER_TYPE)
+  enum tree_code var_code = TREE_CODE (var_type);
+  if (var_code == POINTER_TYPE || var_code == REFERENCE_TYPE)
     inc_code = POINTER_PLUS_EXPR;
   else
     inc_code = PLUS_EXPR;
