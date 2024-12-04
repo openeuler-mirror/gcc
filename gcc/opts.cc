@@ -34,6 +34,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "diagnostic-color.h"
 #include "version.h"
 #include "selftest.h"
+#include "ai4c-infer.h"
 
 /* In this file all option sets are explicit.  */
 #undef OPTION_SET_P
@@ -3086,17 +3087,28 @@ common_handle_option (struct gcc_options *opts,
       break;
 
     case OPT_fcfgo_profile_use_:
+      opts->x_profile_data_prefix = xstrdup (arg);
+      opts->x_flag_profile_use = true;
+      value = true;
       /* No break here - do -fcfgo-profile-use processing.  */
       /* FALLTHRU */
     case OPT_fcfgo_profile_use:
-      value = true;
-      if (value)
+      if (get_optimize_decision_from_ai4c ())
 	{
+	  value = true;
 	  enable_cfgo_optimizations (opts, opts_set, value);
 	  SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_use, value);
+	  /* Enable orig fdo optimizations.  */
+	  enable_fdo_optimizations (opts, opts_set, value);
+	  SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_reorder_functions,
+			       value);
+	  /* Indirect call profiling should do all useful transformations
+	     speculative devirtualization does.  */
+	  if (opts->x_flag_value_profile_transformations)
+	    SET_OPTION_IF_UNSET (opts, opts_set, flag_devirtualize_speculatively,
+				 false);
 	}
-      /* No break here - do -fprofile-use processing.  */
-      /* FALLTHRU */
+      break;
     case OPT_fprofile_use_:
       opts->x_profile_data_prefix = xstrdup (arg);
       opts->x_flag_profile_use = true;
@@ -3116,10 +3128,10 @@ common_handle_option (struct gcc_options *opts,
 
     case OPT_fcfgo_csprofile_use_:
       opts->x_csprofile_data_prefix = xstrdup (arg);
-      value = true;
       /* No break here - do -fcfgo-csprofile-use processing.  */
       /* FALLTHRU */
     case OPT_fcfgo_csprofile_use:
+      value = get_optimize_decision_from_ai4c ();
       SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_use, value);
       break;
 
@@ -3155,18 +3167,22 @@ common_handle_option (struct gcc_options *opts,
       break;
 
     case OPT_fcfgo_profile_generate_:
+      opts->x_profile_data_prefix = xstrdup (arg);
+      value = true;
       /* No break here - do -fcfgo-profile-generate processing.  */
       /* FALLTHRU */
     case OPT_fcfgo_profile_generate:
-      value = true;
-      if (value)
+      if (get_optimize_decision_from_ai4c ())
 	{
 	  enable_cfgo_optimizations (opts, opts_set, value);
 	  SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_generate,
 			       value);
 	}
-      /* No break here - do -fcfgo-profile-generate processing.  */
-      /* FALLTHRU */
+      SET_OPTION_IF_UNSET (opts, opts_set, profile_arc_flag, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_values, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_inline_functions, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_bit_cp, value);
+      break;
     case OPT_fprofile_generate_:
       opts->x_profile_data_prefix = xstrdup (arg);
       value = true;
@@ -3181,10 +3197,10 @@ common_handle_option (struct gcc_options *opts,
 
     case OPT_fcfgo_csprofile_generate_:
       opts->x_csprofile_data_prefix = xstrdup (arg);
-      value = true;
       /* No break here - do -fcfgo-csprofile-generate processing.  */
       /* FALLTHRU */
     case OPT_fcfgo_csprofile_generate:
+      value = get_optimize_decision_from_ai4c ();
       SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_generate, value);
       break;
 
