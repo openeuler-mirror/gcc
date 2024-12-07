@@ -43,6 +43,10 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/csr_*.c]] \
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/rf_*.c]] \
 	"" "-fipa-reorder-fields -fdump-ipa-all -flto-partition=one -fwhole-program"
 
+# -fipa-struct-reorg=2
+gcc-dg-runtest $srcdir/$subdir/rf_rewrite_problem_with_split.c \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
 # -fipa-struct-reorg=3
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/dfe*.c]] \
 	"" "-fipa-struct-reorg=3 -fdump-ipa-all -flto-partition=one -fwhole-program"
