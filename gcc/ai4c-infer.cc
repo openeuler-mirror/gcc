@@ -61,6 +61,12 @@ static int64_t optimize_result;
 void
 prepare_native_tune_str (const char *info)
 {
+  if (info == NULL)
+    {
+      strcpy (native_tune, "=native+");
+      return;
+    }
+
   gcc_assert (strlen (info) < NATIVE_TUNE_SIZE);
   if (info)
     strcpy (native_tune, info);
@@ -83,7 +89,7 @@ set_cache_info (int prefetches, int l1_cache_size,
 
 /* Read float from onnx.fdata.  */
 
-float static
+float
 read_float_from_file (FILE* file)
 {
   char hex_float[8];
@@ -196,7 +202,7 @@ fill_node (const char *file_name)
   return;
 }
 
-static void
+void
 matmul (const float *lhs, const float *rhs, int m, int k, int n, float *out)
 {
   for (int i = 0; i < m; i++)
@@ -212,7 +218,7 @@ matmul (const float *lhs, const float *rhs, int m, int k, int n, float *out)
     }
 }
 
-static void
+void
 add (const float *lhs, const float *rhs, int length, float *out)
 {
   for (int i = 0; i < length; i++)
@@ -221,7 +227,7 @@ add (const float *lhs, const float *rhs, int length, float *out)
     }
 }
 
-static void
+void
 sub (const float *lhs, const float *rhs, int length, float *out)
 {
   for (int i = 0; i < length; i++)
@@ -230,7 +236,7 @@ sub (const float *lhs, const float *rhs, int length, float *out)
     }
 }
 
-static void
+void
 sigmoid (const float *in, int length, float *out)
 {
   for (int i = 0; i < length; i++)
@@ -239,7 +245,7 @@ sigmoid (const float *in, int length, float *out)
     }
 }
 
-static void
+void
 relu (const float *data, int length, float *out)
 {
   for (int i = 0; i < length; i++)
@@ -255,14 +261,14 @@ relu (const float *data, int length, float *out)
     }
 }
 
-static void
+void
 line_concat (const float *in, int in_size, float *out, int out_size)
 {
   for (int i = 0; i < in_size; i++)
     out[out_size + i] = in[i];
 }
 
-static void
+void
 one_hot_encoder (const char *in, const char (*cats)[65], float *out,
 		 int out_size)
 {
@@ -279,14 +285,14 @@ one_hot_encoder (const char *in, const char (*cats)[65], float *out,
     }
 }
 
-static void
+void
 imputer (const int64_t *in, int size, float *out)
 {
   for (int i = 0; i < size; i++)
     out[i] = in[i] * 1.0f;
 }
 
-static void
+void
 scaler (const float *in, const float *offset, const float *scale, int size,
 	float *out)
 {
@@ -294,7 +300,7 @@ scaler (const float *in, const float *offset, const float *scale, int size,
     out[i] = (in[i] - offset[i]) * scale[i];
 }
 
-static int
+int
 argmax (const float *in, int in_size)
 {
   int out_idx = 0;
@@ -327,7 +333,20 @@ preprocess (int argc, int64_t *argv, int64_t *in_modes)
 static int
 graph_infer (int argc, const char *argv, int argc2, int64_t *argv2)
 {
-  const char *file_name = getenv ("GCC_AI4C_ONNX_FDATA");
+  char *gcc_exec_prefix = getenv ("ONNX_FDATA_PATH");
+  if (gcc_exec_prefix == NULL)
+    return 0;
+  char file_name[512];
+
+  if (gcc_exec_prefix)
+    {
+      const char *onnx_fdata = "onnx.fdata";
+      strncpy (file_name, gcc_exec_prefix, sizeof (file_name) - 1);
+      file_name[sizeof (file_name) - 1] = '\0';
+      char *last_slash = strrchr (file_name, '/');
+      if (last_slash)
+	strcpy (last_slash + 1, onnx_fdata);
+    }
 
   if (access (file_name, F_OK) == 0)
     {
@@ -401,7 +420,8 @@ graph_infer (int argc, const char *argv, int argc2, int64_t *argv2)
   return argmax_output;
 }
 
-void execute_sha256 (const char *input, char *output, size_t output_size)
+void
+execute_sha256 (const char *input, char *output, size_t output_size)
 {
     char command[256];
     snprintf (command, sizeof (command), "echo -n \"%s\" | sha256sum", input);

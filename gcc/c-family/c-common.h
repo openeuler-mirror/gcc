@@ -940,6 +940,8 @@ extern void set_compound_literal_name (tree decl);
 
 extern tree build_va_arg (location_t, tree, tree);
 
+extern void deferred_opts_add_macro_front (const char *);
+
 extern const unsigned int c_family_lang_mask;
 extern unsigned int c_common_option_lang_mask (void);
 extern void c_common_diagnostics_set_defaults (diagnostic_context *);

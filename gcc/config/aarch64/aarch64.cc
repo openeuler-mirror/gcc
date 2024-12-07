@@ -18771,6 +18771,7 @@ override_C_optimize_options (struct gcc_options *opts)
   opts->x_semi_relayout_level = 14;
   opts->x_flag_ipa_prefetch = 1;
   opts->x_flag_ipa_ic = 1;
+  opts->x_flag_cmlt_arith = 1;
 }
 
 /* Check whether in CPP language or LTO with only CPP language.  */
@@ -18872,22 +18873,27 @@ reset_machine_option (struct gcc_options *opts)
   const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
   if (ai_infer_level)
     {
+      char *collect_gcc = getenv("COLLECT_GCC");
+      const char* gcc_exec = basename(ASTRDUP(collect_gcc));
+      if (gcc_exec == NULL)
+	{
+	  return;
+	}
       override_optimize_options_1 (opts);
-      if (lang_c_p ())
+      if (strstr(gcc_exec, "gcc") != NULL)
 	{
 	  override_C_optimize_options (opts);
 	}
-      else if (lang_cpp_p ())
+      else if (strstr(gcc_exec, "g++") != NULL)
 	{
 	  override_CPP_optimize_options (opts);
 	}
-      else if (lang_GNU_Fortran ())
+      else if (strstr(gcc_exec, "gfortran") != NULL)
 	{
 	  override_Fortran_optimize_options (opts);
 	}
     }
 }
-
 
 /* STMT_COST is the cost calculated for STMT_INFO, which has cost kind KIND
    and which when vectorized would operate on vector type VECTYPE.  Add the
@@ -20348,7 +20354,6 @@ aarch64_override_options_internal (struct gcc_options *opts)
       && aarch64_tune_params.prefetch->default_opt_level >= 0
       && opts->x_optimize >= aarch64_tune_params.prefetch->default_opt_level)
     opts->x_flag_prefetch_loop_arrays = 1;
-
   reset_machine_option (opts);
   aarch64_override_options_after_change_1 (opts);
 }

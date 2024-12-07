@@ -44,7 +44,6 @@ class driver
   void set_up_specs () const;
   void putenv_COLLECT_GCC (const char *argv0) const;
   void maybe_putenv_COLLECT_LTO_WRAPPER () const;
-  void putenv_ONNX_FDATA () const;
   void maybe_putenv_OFFLOAD_TARGETS () const;
   void handle_unrecognized_options ();
   int maybe_print_and_exit () const;

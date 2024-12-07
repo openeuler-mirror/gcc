@@ -94,6 +94,9 @@ static bool std_cxx_inc = true;
 /* If the quote chain has been split by -I-.  */
 static bool quote_chain_split;
 
+/* Size of deferred_opts.  */
+static size_t deferred_opts_size;
+
 /* Number of deferred options.  */
 static size_t deferred_count;
 
@@ -144,6 +147,23 @@ static struct deferred_opt
 
 extern const unsigned int 
 c_family_lang_mask = (CL_C | CL_CXX | CL_ObjC | CL_ObjCXX);
+
+/* Add macro to the front of deferred_opts.  */
+void
+deferred_opts_add_macro_front (const char *arg)
+{
+  /* Allocate a new vec and move elements back.  */
+  auto *new_opts = XNEWVEC (struct deferred_opt, deferred_opts_size + 1);
+  memcpy (new_opts + 1, deferred_opts,
+	  sizeof (struct deferred_opt) * deferred_opts_size);
+  XDELETEVEC (deferred_opts);
+  deferred_opts = new_opts;
+  deferred_opts_size++;
+  deferred_count++;
+
+  deferred_opts[0].code = OPT_D;
+  deferred_opts[0].arg = arg;
+}
 
 /* Defer option CODE with argument ARG.  */
 static void
@@ -251,6 +271,7 @@ c_common_init_options (unsigned int decoded_options_count,
   cpp_opts->warn_dollars = 0;
 
   deferred_opts = XNEWVEC (struct deferred_opt, decoded_options_count);
+  deferred_opts_size = decoded_options_count;
 
   if (c_language == clk_c)
     {

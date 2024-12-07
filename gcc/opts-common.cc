@@ -27,6 +27,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "diagnostic.h"
 #include "spellcheck.h"
 #include "opts-jobserver.h"
+#include "ai4c-infer.h"
 
 static void prune_options (struct cl_decoded_option **, unsigned int *,
 			   unsigned int);
@@ -992,71 +993,6 @@ opts_concat (const char *first, ...)
   return newstr;
 }
 
-typedef int64_t (*run_ai_model_func)(int, const char **,
-				     const char *, int, int64_t *);
-#define PTR_UNION_TYPE(TOTYPE) union { void *_q; TOTYPE _nq; }
-#define PTR_UNION_AS_VOID_PTR(NAME) (NAME._q)
-#define PTR_UNION_AS_CAST_PTR(NAME) (NAME._nq)
-
-static int64_t
-ai_infer_optimization (int argc, const char **argv,
-		       const char *mcpu_option,
-		       int argc_hw, int64_t *argv_hw)
-{
-  /* Load dependent AI-framework libraries.  */
-  void *onnxruntime_lib_handle = NULL;
-  const char *onnxruntime_lib_path = "libonnxruntime.so";
-
-  onnxruntime_lib_handle = dlopen (onnxruntime_lib_path,
-				   RTLD_LAZY | RTLD_GLOBAL);
-  if (!onnxruntime_lib_handle)
-    {
-      return -1;
-    }
-
-  void *ai4c_lib_handle = NULL;
-  const char *ai4c_lib_path = "libONNXRunner.so";
-
-  ai4c_lib_handle = dlopen (ai4c_lib_path, RTLD_LAZY | RTLD_GLOBAL);
-  if (!ai4c_lib_handle)
-    {
-      return -1;
-    }
-
-  /* Clear any existing error.  */
-  dlerror ();
-
-  /* Run AI4Compiler model.  */
-  if (ai4c_lib_handle == NULL || onnxruntime_lib_handle == NULL)
-    {
-      return -1;
-    }
-
-  run_ai_model_func run_ai_model;
-  PTR_UNION_TYPE (run_ai_model_func) run_ai_model_func_union;
-  PTR_UNION_AS_VOID_PTR (run_ai_model_func_union)
-    = dlsym (ai4c_lib_handle, "runONNXModelOptimizer");
-  run_ai_model = PTR_UNION_AS_CAST_PTR (run_ai_model_func_union);
-  if (!run_ai_model)
-    {
-      dlclose (ai4c_lib_handle);
-      dlclose (onnxruntime_lib_handle);
-      return -1;
-    }
-  int64_t model_pred = (*run_ai_model) (argc, argv,
-					mcpu_option, argc_hw, argv_hw);
-
-  if (ai4c_lib_handle)
-    dlclose (ai4c_lib_handle);
-
-  if (onnxruntime_lib_handle)
-    dlclose (onnxruntime_lib_handle);
-
-  if (model_pred == 1)
-    setenv ("AI_INFER_LEVEL", "1", 1);
-  return model_pred;
-}
-
 static int
 handle_lto_option (unsigned int lang_mask,
 		   unsigned int num_decoded_options,
@@ -1132,12 +1068,12 @@ handle_machine_option (unsigned int lang_mask,
     global_options.x_param_l2_cache_size,
     global_options.x_param_prefetch_latency,
     global_options.x_param_ipa_prefetch_distance_factor};
-  int64_t output_pred = ai_infer_optimization (
+  int64_t output_pred = get_optimize_decision_from_optimizer (
 			  argc, argv, "hip09", argc_hw, argv_hw);
+  if (output_pred == 1)
+    return output_pred;
   if (output_pred != 1)
-    {
-      return ret;
-    }
+    return ret;
 
   return handle_lto_option (lang_mask, num_decoded_options,
 			    argc, argv, opt_array);

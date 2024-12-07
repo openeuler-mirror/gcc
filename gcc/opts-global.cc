@@ -312,7 +312,10 @@ decode_options (struct gcc_options *opts, struct gcc_options *opts_set,
 		  global_options.x_param_prefetch_latency,
 		  global_options.x_param_ipa_prefetch_distance_factor);
   const char *tune_native = getenv ("GCC_AI4C_TUNE_INFO");
-  prepare_native_tune_str (tune_native);
+  if (tune_native != nullptr)
+    {
+      prepare_native_tune_str (tune_native);
+    }
 
   struct cl_option_handlers handlers;
 
