@@ -21,6 +21,7 @@
 // <http://www.gnu.org/licenses/>.
 
 #include "../c++17/fs_dir.cc"
+#ifndef __riscv
 asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EE14_M_get_deleterERKSt9type_info");
 asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EE3getEv");
 asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EE6uniqueEv");
@@ -30,16 +31,20 @@ asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx114_DirELN9__gnu_cxx12_L
 asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx114_DirELN9__gnu_cxx12_Lock_policyE2EE3getEv");
 asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx114_DirELN9__gnu_cxx12_Lock_policyE2EE6uniqueEv");
 asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx114_DirELN9__gnu_cxx12_Lock_policyE2EE9use_countEv");
+#endif
 //asm (".hidden _ZNKSt12__shared_ptrINSt10filesystem7__cxx114_DirELN9__gnu_cxx12_Lock_policyE2EEcvbEv");
 asm (".hidden _ZNSt10filesystem7__cxx114_Dir7advanceEbRSt10error_code");
 asm (".hidden _ZNSt10filesystem7__cxx114_DirD1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt10filesystem7__cxx114_DirD2Ev");
+#endif
 #ifdef __x86_64__
 asm (".hidden _ZNSt10filesystem9_Dir_base7advanceEbRSt10error_code");
 //asm (".hidden _ZNSt10filesystem9_Dir_baseC1EPKcbRSt10error_code");
 //asm (".hidden _ZNSt10filesystem9_Dir_baseC2EPKcbRSt10error_code");
 #endif
 asm (".hidden _ZNSt10filesystem7__cxx114pathC1INSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES1_EERKT_NS1_6formatE");
+#ifndef __riscv
 asm (".hidden _ZNSt10filesystem7__cxx114pathC2INSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES1_EERKT_NS1_6formatE");
 asm (".hidden _ZNSt12__shared_ptrINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EE4swapERS6_");
 asm (".hidden _ZNSt12__shared_ptrINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EE5resetEv");
@@ -65,14 +70,20 @@ asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx114_DirESaIS2_
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx114_DirESaIS2_ELN9__gnu_cxx12_Lock_policyE2EE14_M_get_deleterERKSt9type_info");
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx114_DirESaIS2_ELN9__gnu_cxx12_Lock_policyE2EED0Ev");
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx114_DirESaIS2_ELN9__gnu_cxx12_Lock_policyE2EED1Ev");
+#endif
 asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114_DirESaIS2_EE12emplace_backIIS2_EEERS2_DpOT_");
+#ifndef __riscv
 asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114_DirESaIS2_EE12emplace_backIJS2_EEERS2_DpOT_");
+#endif
 //asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114_DirESaIS2_EE16_M_push_back_auxIIRP11__dirstreamRKNS1_4pathEEEEvDpOT_");
 //asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114_DirESaIS2_EE16_M_push_back_auxIJRP11__dirstreamRKNS1_4pathEEEEvDpOT_");
 asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114_DirESaIS2_EED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114_DirESaIS2_EED2Ev");
+#endif
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1IS3_EEPKcRKS3_");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2IS3_EEPKcRKS3_");
+#ifndef __riscv
 asm (".hidden _ZTISt11_Mutex_baseILN9__gnu_cxx12_Lock_policyE2EE");
 asm (".hidden _ZTISt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE");
 asm (".hidden _ZTISt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackESaIS3_ELN9__gnu_cxx12_Lock_policyE2EE");
@@ -87,12 +98,15 @@ asm (".hidden _ZTVSt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx114_DirESaIS2
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackESaIS3_ELN9__gnu_cxx12_Lock_policyE2EED2Ev");
 asm (".hidden _ZZNSt19_Sp_make_shared_tag5_S_tiEvE5__tag");
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt10filesystem7__cxx114_DirESaIS2_ELN9__gnu_cxx12_Lock_policyE2EED2Ev");
-#ifndef __i386__
+#endif
+#if !defined__i386__ && !defined __riscv
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE24_M_release_last_use_coldEv");
 //asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114_DirESaIS2_EE17_M_reallocate_mapEmb");
 #endif
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem7__cxx114path5_List5_ImplENS3_13_Impl_deleterEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem7__cxx114path5_List5_ImplENS3_13_Impl_deleterEED2Ev");
+#endif
 #ifdef __i386__
 asm (".hidden _ZNSt10filesystem9_Dir_base7advanceEbRSt10error_code");
 #endif

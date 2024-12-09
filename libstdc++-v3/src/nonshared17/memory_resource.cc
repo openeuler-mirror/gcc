@@ -26,20 +26,28 @@ asm (".hidden _ZNKSt3pmr28unsynchronized_pool_resource11do_is_equalERKNS_15memor
 asm (".hidden _ZNSt3pmr15__pool_resource14_M_alloc_poolsEv");
 asm (".hidden _ZNSt3pmr15__pool_resource7releaseEv");
 asm (".hidden _ZNSt3pmr15__pool_resourceC1ERKNS_12pool_optionsEPNS_15memory_resourceE");
+#ifndef __riscv
 asm (".hidden _ZNSt3pmr15__pool_resourceC2ERKNS_12pool_optionsEPNS_15memory_resourceE");
+#endif
 asm (".hidden _ZNSt3pmr15__pool_resourceD1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt3pmr15__pool_resourceD2Ev");
+#endif
 asm (".hidden _ZNSt3pmr26synchronized_pool_resource15_M_alloc_tpoolsERSt10lock_guardISt12shared_mutexE");
 asm (".hidden _ZNSt3pmr26synchronized_pool_resource22_M_alloc_shared_tpoolsERSt10lock_guardISt12shared_mutexE");
 asm (".hidden _ZNSt3pmr26synchronized_pool_resource24_M_thread_specific_poolsEv");
 asm (".hidden _ZNSt3pmr26synchronized_pool_resource7_TPoolsD1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt3pmr26synchronized_pool_resource7_TPoolsD2Ev");
+#endif
 asm (".hidden _ZNSt3pmr26synchronized_pool_resourceD0Ev");
 asm (".hidden _ZNSt3pmr28unsynchronized_pool_resourceD0Ev");
+#ifndef __riscv
 asm (".hidden _ZTSNSt3pmr26synchronized_pool_resourceE");
 asm (".hidden _ZTSNSt3pmr28unsynchronized_pool_resourceE");
 asm (".hidden _ZTVNSt3pmr26synchronized_pool_resourceE");
 asm (".hidden _ZTVNSt3pmr28unsynchronized_pool_resourceE");
+#endif
 asm (".hidden _ZNKSt3pmr25monotonic_buffer_resource11do_is_equalERKNS_15memory_resourceE");
 asm (".hidden _ZNSt3pmr15__pool_resource5_Pool12try_allocateEv");
 asm (".hidden _ZNSt3pmr15__pool_resource5_Pool9replenishEPNS_15memory_resourceERKNS_12pool_optionsE");
@@ -71,5 +79,7 @@ asm (".hidden _ZNSt6vectorINSt3pmr15__pool_resource9_BigBlockENS0_21polymorphic_
 asm (".hidden _ZNSt6vectorINSt3pmr15__pool_resource9_BigBlockENS0_21polymorphic_allocatorIS2_EEE17_M_realloc_appendIJRjS7_EEEvDpOT_");
 #else
 asm (".hidden _ZNSt6vectorINSt3pmr15__pool_resource9_BigBlockENS0_21polymorphic_allocatorIS2_EEE17_M_realloc_appendIIRmS7_EEEvDpOT_");
+#ifndef __riscv
 asm (".hidden _ZNSt6vectorINSt3pmr15__pool_resource9_BigBlockENS0_21polymorphic_allocatorIS2_EEE17_M_realloc_appendIJRmS7_EEEvDpOT_");
+#endif
 #endif

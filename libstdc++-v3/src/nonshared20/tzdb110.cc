@@ -24,4 +24,6 @@
 #include "tzdb80.cc"
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEED0Ev");
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEED2Ev");
+#endif

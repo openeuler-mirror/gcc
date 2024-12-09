@@ -22,6 +22,7 @@
 
 #define _GLIBCXX_NONSHARED_CXX11_80
 #include "../c++11/codecvt.cc"
+#ifndef __riscv
 asm (".hidden _ZTISt12codecvt_base");
 asm (".hidden _ZTSSt12codecvt_base");
 asm (".hidden _ZTISt23__codecvt_abstract_baseIDic11__mbstate_tE");
@@ -36,3 +37,4 @@ asm (".hidden _ZTSSt23__codecvt_abstract_baseIDiDu11__mbstate_tE");
 asm (".hidden _ZTSSt23__codecvt_abstract_baseIDsDu11__mbstate_tE");
 asm (".hidden _ZTVSt23__codecvt_abstract_baseIDiDu11__mbstate_tE");
 asm (".hidden _ZTVSt23__codecvt_abstract_baseIDsDu11__mbstate_tE");
+#endif

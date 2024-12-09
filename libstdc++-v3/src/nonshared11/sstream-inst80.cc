@@ -49,7 +49,11 @@ _GLIBCXX_END_NAMESPACE_VERSION
 
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEED0Ev");
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEED2Ev");
+#endif
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEED0Ev");
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEED2Ev");
+#endif

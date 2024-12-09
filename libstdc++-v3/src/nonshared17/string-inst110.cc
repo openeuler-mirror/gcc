@@ -21,16 +21,24 @@
 // <http://www.gnu.org/licenses/>.
 
 #include "../c++17/string-inst.cc"
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2ENS4_12__sv_wrapperERKS3_");
+#endif
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1ENS4_12__sv_wrapperERKS3_");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12__sv_wrapperC2ESt17basic_string_viewIcS2_E");
+#endif
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12__sv_wrapperC1ESt17basic_string_viewIcS2_E");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE17_S_to_string_viewESt17basic_string_viewIcS2_E");
 asm (".hidden _ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEcvSt17basic_string_viewIcS2_EEv");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4dataEv");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEC2ENS4_12__sv_wrapperERKS3_");
+#endif
 asm (".hidden _ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEC1ENS4_12__sv_wrapperERKS3_");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE12__sv_wrapperC2ESt17basic_string_viewIwS2_E");
+#endif
 asm (".hidden _ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE12__sv_wrapperC1ESt17basic_string_viewIwS2_E");
 asm (".hidden _ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE17_S_to_string_viewESt17basic_string_viewIwS2_E");
 asm (".hidden _ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEcvSt17basic_string_viewIwS2_EEv");

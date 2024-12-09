@@ -32,5 +32,7 @@ asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcENSt3pmr21polymorphi
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcENSt3pmr21polymorphic_allocatorIcEEE15_M_replace_coldEPcmPKcmm");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcENSt3pmr21polymorphic_allocatorIcEEE9_M_mutateEmmPKcm");
 #endif
+#ifndef __riscv
 asm (".hidden _ZNSt8__detail31__from_chars_alnum_to_val_tableILb0EE5valueE");
+#endif
 asm (".hidden _ZSt10from_charsIiLi0EESt17from_chars_resultPKcS2_RT_i");

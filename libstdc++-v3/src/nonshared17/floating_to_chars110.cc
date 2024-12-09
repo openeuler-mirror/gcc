@@ -24,7 +24,9 @@
 #include "../c++17/floating_to_chars.cc"
 //asm (".hidden _ZSt12__to_chars_iIoENSt9enable_ifIXsrSt5__or_IJS1_IJSt7is_sameINSt9remove_cvIT_E4typeEaES2_IS6_sES2_IS6_iES2_IS6_lES2_IS6_xES2_IS6_nEEES1_IJS2_IS6_hES2_IS6_tES2_IS6_jES2_IS6_mES2_IS6_yES2_IS6_oEEES2_IcS6_EEE5valueESt15to_chars_resultE4typeEPcSQ_S4_i");
 //asm (".hidden _ZSt12__to_chars_iIoENSt9enable_ifIXsrSt5__or_IIS1_IISt7is_sameINSt9remove_cvIT_E4typeEaES2_IS6_sES2_IS6_iES2_IS6_lES2_IS6_xES2_IS6_nEEES1_IIS2_IS6_hES2_IS6_tES2_IS6_jES2_IS6_mES2_IS6_yES2_IS6_oEEES2_IcS6_EEE5valueESt15to_chars_resultE4typeEPcSQ_S4_i");
+#ifndef __riscv
 asm (".hidden _ZNSt8__detail18__to_chars_10_implIjEEvPcjT_");
+#endif
 #if !defined(__i386__)
 asm (".hidden _ZSt12__to_chars_iIoESt15to_chars_resultPcS1_T_i");
 #endif

@@ -21,22 +21,30 @@
 // <http://www.gnu.org/licenses/>.
 
 #include "../c++17/cow-fs_ops.cc"
+#ifndef __riscv
 asm (".hidden _ZNSt15_Sp_counted_ptrIDnLN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv");
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE10_M_destroyEv");
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE10_M_releaseEv");
+#endif
 //asm (".hidden _ZNSt5dequeINSt10filesystem4pathESaIS1_EE16_M_push_back_auxIJRKS1_EEEvDpOT_");
 //asm (".hidden _ZNSt5dequeINSt10filesystem4pathESaIS1_EE16_M_push_back_auxIIRKS1_EEEvDpOT_");
 //asm (".hidden _ZNSt5dequeINSt10filesystem4pathESaIS1_EE12emplace_backIJS1_EEERS1_DpOT_");
 //asm (".hidden _ZNSt5dequeINSt10filesystem4pathESaIS1_EE12emplace_backIIS1_EEERS1_DpOT_");
 asm (".hidden _ZNSt5dequeINSt10filesystem4pathESaIS1_EED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt5dequeINSt10filesystem4pathESaIS1_EED2Ev");
+#endif
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem4path5_List5_ImplENS2_13_Impl_deleterEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem4path5_List5_ImplENS2_13_Impl_deleterEED2Ev");
+#endif
 asm (".hidden _ZSt14__copy_move_a1ILb1EPNSt10filesystem4pathES1_EN9__gnu_cxx11__enable_ifIXsrSt23__is_random_access_iterIT0_NSt15iterator_traitsIS6_E17iterator_categoryEE7__valueESt15_Deque_iteratorIT1_RSC_PSC_EE6__typeES6_S6_SF_");
 asm (".hidden _ZSt23__copy_move_backward_a1ILb1EPNSt10filesystem4pathES1_EN9__gnu_cxx11__enable_ifIXsrSt23__is_random_access_iterIT0_NSt15iterator_traitsIS6_E17iterator_categoryEE7__valueESt15_Deque_iteratorIT1_RSC_PSC_EE6__typeES6_S6_SF_");
 //asm (".hidden _ZSt8_DestroyISt15_Deque_iteratorINSt10filesystem4pathERS2_PS2_EEvT_S6_");
 asm (".hidden _ZNSsC1ISaIcEEEPKcRKS0_");
+#ifndef __riscv
 asm (".hidden _ZNSsC2ISaIcEEEPKcRKS0_");
+#endif
 #ifndef __i386__
 //asm (".hidden _ZNSs9_M_mutateEmmm");
 asm (".hidden _ZNSt11_Deque_baseINSt10filesystem4pathESaIS1_EE17_M_initialize_mapEm");
@@ -47,7 +55,9 @@ asm (".hidden _ZNSt5dequeINSt10filesystem4pathESaIS1_EE24_M_new_elements_at_fron
 //asm (".hidden _ZNSs6resizeEmc");
 //asm (".hidden _ZNSt10filesystem4pathD1Ev");
 //asm (".hidden _ZNSt10filesystem4pathD2Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE24_M_release_last_use_coldEv");
+#endif
 #endif
 #if defined(__x86_64__)
 //asm (".hidden _ZSt13move_backwardISt15_Deque_iteratorINSt10filesystem4pathERS2_PS2_ES5_ET0_T_S7_S6_");

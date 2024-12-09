@@ -23,27 +23,37 @@
 #include "../c++17/fs_ops.cc"
 asm (".hidden _ZN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEED0Ev");
 asm (".hidden _ZN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEED2Ev");
+#endif
 asm (".hidden _ZNSt10filesystem12do_copy_fileEPKcS1_NS_26copy_options_existing_fileEP4statS4_RSt10error_code");
+#ifndef __riscv
 asm (".hidden _ZNSt15_Sp_counted_ptrIDnLN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv");
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE10_M_destroyEv");
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE10_M_releaseEv");
+#endif
 //asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114pathESaIS2_EE16_M_push_back_auxIJRKS2_EEEvDpOT_");
 //asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114pathESaIS2_EE16_M_push_back_auxIIRKS2_EEEvDpOT_");
 asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114pathESaIS2_EED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114pathESaIS2_EED2Ev");
 asm (".hidden _ZTIN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEEE");
 asm (".hidden _ZTSN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEEE");
 asm (".hidden _ZTVN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEEE");
+#endif
 asm (".hidden _ZNKSt10filesystem7__cxx114path8filenameEv");
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem7__cxx114path5_List5_ImplENS3_13_Impl_deleterEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem7__cxx114path5_List5_ImplENS3_13_Impl_deleterEED2Ev");
+#endif
 asm (".hidden _ZSt14__copy_move_a1ILb1EPNSt10filesystem7__cxx114pathES2_EN9__gnu_cxx11__enable_ifIXsrSt23__is_random_access_iterIT0_NSt15iterator_traitsIS7_E17iterator_categoryEE7__valueESt15_Deque_iteratorIT1_RSD_PSD_EE6__typeES7_S7_SG_");
 asm (".hidden _ZSt23__copy_move_backward_a1ILb1EPNSt10filesystem7__cxx114pathES2_EN9__gnu_cxx11__enable_ifIXsrSt23__is_random_access_iterIT0_NSt15iterator_traitsIS7_E17iterator_categoryEE7__valueESt15_Deque_iteratorIT1_RSD_PSD_EE6__typeES7_S7_SG_");
 //asm (".hidden _ZSt8_DestroyISt15_Deque_iteratorINSt10filesystem7__cxx114pathERS3_PS3_EEvT_S7_");
 #ifndef __i386__
 asm (".hidden _ZN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEEC1EiSt13_Ios_Openmodem");
+#ifndef __riscv
 asm (".hidden _ZN9__gnu_cxx13stdio_filebufIcSt11char_traitsIcEEC2EiSt13_Ios_Openmodem");
+#endif
 asm (".hidden _ZNSt10filesystem8do_spaceEPKcRmS2_S2_RSt10error_code");
 asm (".hidden _ZNSt11_Deque_baseINSt10filesystem7__cxx114pathESaIS2_EE17_M_initialize_mapEm");
 asm (".hidden _ZNSt5dequeINSt10filesystem7__cxx114pathESaIS2_EE13_M_insert_auxINS2_8iteratorEEEvSt15_Deque_iteratorIS2_RS2_PS2_ET_SB_m");

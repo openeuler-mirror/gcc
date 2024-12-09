@@ -53,8 +53,11 @@
 #elif defined __s390__
 #define ALIGN1	.align 4
 #define ALIGN3	.align 2
+#elif defined __riscv && __riscv_xlen == 64
+#define ALIGN1	.align 3
+#define ALIGN3	.align 3
 #endif
-#if defined __x86_64__ || defined __powerpc64__ || defined __s390x__ || defined __ia64__ || defined __aarch64__
+#if defined __x86_64__ || defined __powerpc64__ || defined __s390x__ || defined __ia64__ || defined __aarch64__ || (defined __riscv && __riscv_xlen == 64)
 #define SIZE1	32
 #define SIZE2	16
 #define OFF	16

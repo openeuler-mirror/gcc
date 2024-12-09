@@ -23,33 +23,51 @@
 #include "../c++20/tzdb.cc"
 asm (".hidden _ZNKSt6chrono9time_zone4nameEv");
 asm (".hidden _ZNKSt6chrono14time_zone_link4nameEv");
+#ifndef __riscv
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EED2Ev");
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EED1Ev");
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EED0Ev");
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_destroyEv");
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EE14_M_get_deleterERKSt9type_info");
+#endif
 asm (".hidden _ZNKSt6chrono14year_month_day19_M_days_since_epochEv");
 asm (".hidden _ZNSt6chronossERKNS_14time_zone_linkES2_");
+#ifndef __riscv
 asm (".hidden _ZNSt6chrono9time_zoneC2ESt10unique_ptrINS0_5_ImplESt14default_deleteIS2_EE");
+#endif
 asm (".hidden _ZNSt6chrono9time_zoneC1ESt10unique_ptrINS0_5_ImplESt14default_deleteIS2_EE");
+#ifndef __riscv
 asm (".hidden _ZNSt6chrono9tzdb_list5_Node13_S_head_cacheE");
 asm (".hidden _ZNSt6atomicISt10shared_ptrINSt6chrono9tzdb_list5_NodeEEED2Ev");
+#endif
 asm (".hidden _ZNSt6atomicISt10shared_ptrINSt6chrono9tzdb_list5_NodeEEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt6chrono9tzdb_list5_Node13_S_head_ownerE");
+#endif
 asm (".hidden _ZNSt6chrono9tzdb_list5_Node15_S_replace_headESt10shared_ptrIS1_ES3_");
 //asm (".hidden _ZNSt6vectorISt4pairINSt6chrono8sys_infoESt17basic_string_viewIcSt11char_traitsIcEEESaIS7_EE17_M_realloc_insertIJRS2_RS6_EEEvN9__gnu_cxx17__normal_iteratorIPS7_S9_EEDpOT_");
 //asm (".hidden _ZNSt6vectorISt4pairINSt6chrono8sys_infoESt17basic_string_viewIcSt11char_traitsIcEEESaIS7_EE17_M_realloc_insertIIRS2_RS6_EEEvN9__gnu_cxx17__normal_iteratorIPS7_S9_EEDpOT_");
+#ifndef __riscv
 asm (".hidden _ZNSt6chrono9time_zoneD2Ev");
+#endif
 asm (".hidden _ZNSt6chrono9time_zoneD1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv");
 asm (".hidden _ZSt11make_uniqueINSt6chrono9time_zone5_ImplEJRSt10shared_ptrINS0_9tzdb_list5_NodeEEEENSt8__detail9_MakeUniqIT_E15__single_objectEDpOT0_");
+#endif
 asm (".hidden _ZSt11make_uniqueINSt6chrono9time_zone5_ImplEIRSt10shared_ptrINS0_9tzdb_list5_NodeEEEENSt8__detail9_MakeUniqIT_E15__single_objectEDpOT0_");
+#ifndef __riscv
 asm (".hidden _ZNSt6vectorINSt6chrono9time_zoneESaIS1_EE12emplace_backIJS1_EEERS1_DpOT_");
+#endif
 asm (".hidden _ZNSt6vectorINSt6chrono9time_zoneESaIS1_EE12emplace_backIIS1_EEERS1_DpOT_");
+#ifndef __riscv
 asm (".hidden _ZNSt12_Vector_baseINSt6chrono11leap_secondESaIS1_EED2Ev");
+#endif
 asm (".hidden _ZNSt12_Vector_baseINSt6chrono11leap_secondESaIS1_EED1Ev");
 asm (".hidden _ZNSt6chrono9tzdb_list5_Node20_S_read_leap_secondsEv");
+#ifndef __riscv
 asm (".hidden _ZNSt6vectorINSt6chrono14time_zone_linkESaIS1_EE12emplace_backIJS1_EEERS1_DpOT_");
+#endif
 asm (".hidden _ZNSt6vectorINSt6chrono14time_zone_linkESaIS1_EE12emplace_backIIS1_EEERS1_DpOT_");
 asm (".hidden _ZSt23__atomic_notify_addressIiEvPKT_b");
 asm (".hidden _ZSt16__insertion_sortIN9__gnu_cxx17__normal_iteratorIPNSt6chrono9time_zoneESt6vectorIS3_SaIS3_EEEENS0_5__ops15_Iter_comp_iterIZNSt6ranges8__detail16__make_comp_projINSB_4lessESt8identityEEDaRT_RT0_EUlOSG_OSI_E_EEEvSG_SG_SI_");
@@ -58,18 +76,30 @@ asm (".hidden _ZZNSt6ranges8__detail16__make_comp_projINS_4lessEMNSt6chrono9time
 asm (".hidden _ZSt16__insertion_sortIN9__gnu_cxx17__normal_iteratorIPNSt6chrono9time_zoneESt6vectorIS3_SaIS3_EEEENS0_5__ops15_Iter_comp_iterIZNSt6ranges8__detail16__make_comp_projINSB_4lessEMS3_KDoFSt17basic_string_viewIcSt11char_traitsIcEEvEEEDaRT_RT0_EUlOSL_OSN_E_EEEvSL_SL_SN_");
 asm (".hidden _ZZNSt6ranges8__detail16__make_comp_projINS_4lessEMNSt6chrono14time_zone_linkEKDoFSt17basic_string_viewIcSt11char_traitsIcEEvEEEDaRT_RT0_ENKUlOSB_OSD_E_clIRS4_SJ_EEbSF_SG_");
 asm (".hidden _ZSt16__insertion_sortIN9__gnu_cxx17__normal_iteratorIPNSt6chrono14time_zone_linkESt6vectorIS3_SaIS3_EEEENS0_5__ops15_Iter_comp_iterIZNSt6ranges8__detail16__make_comp_projINSB_4lessEMS3_KDoFSt17basic_string_viewIcSt11char_traitsIcEEvEEEDaRT_RT0_EUlOSL_OSN_E_EEEvSL_SL_SN_");
+#ifndef __riscv
 asm (".hidden _ZSt4swapINSt6chrono9time_zoneEENSt9enable_ifIXsrSt6__and_IJSt6__not_ISt15__is_tuple_likeIT_EESt21is_move_constructibleIS6_ESt18is_move_assignableIS6_EEE5valueEvE4typeERS6_SG_");
+#endif
 asm (".hidden _ZSt4swapINSt6chrono9time_zoneEENSt9enable_ifIXsrSt6__and_IISt6__not_ISt15__is_tuple_likeIT_EESt21is_move_constructibleIS6_ESt18is_move_assignableIS6_EEE5valueEvE4typeERS6_SG_");
+#ifndef __riscv
 asm (".hidden _ZSt4swapINSt6chrono14time_zone_linkEENSt9enable_ifIXsrSt6__and_IJSt6__not_ISt15__is_tuple_likeIT_EESt21is_move_constructibleIS6_ESt18is_move_assignableIS6_EEE5valueEvE4typeERS6_SG_");
+#endif
 asm (".hidden _ZSt4swapINSt6chrono14time_zone_linkEENSt9enable_ifIXsrSt6__and_IISt6__not_ISt15__is_tuple_likeIT_EESt21is_move_constructibleIS6_ESt18is_move_assignableIS6_EEE5valueEvE4typeERS6_SG_");
+#ifndef __riscv
 asm (".hidden _ZTVSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EE");
+#endif
 asm (".hidden _ZNSt6chrono9tzdb_list5_Node12_S_init_tzdbEv");
+#ifndef __riscv
 asm (".hidden _ZNSt6chrono9tzdb_list5_Node11_S_the_listE");
+#endif
+#ifndef __riscv
 asm (".hidden _ZTSSt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EE");
 asm (".hidden _ZTISt23_Sp_counted_ptr_inplaceINSt6chrono9tzdb_list5_NodeESaIvELN9__gnu_cxx12_Lock_policyE2EE");
+#endif
 //asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEED2Ev");
 //asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2EOS4_");
+#endif
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EOS4_");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_");
@@ -82,7 +112,9 @@ asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceE
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6appendEPKcj");
 #else
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EPKcmRKS3_");
+#ifndef __riscv
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2EPKcmRKS3_");
+#endif
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7reserveEm");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_mutateEmmPKcm");
 asm (".hidden _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEmmPKcm");
@@ -109,14 +141,21 @@ asm (".hidden _ZSt16__introsort_loopIN9__gnu_cxx17__normal_iteratorIPNSt6chrono1
 asm (".hidden _ZSt16__introsort_loopIN9__gnu_cxx17__normal_iteratorIPNSt6chrono9time_zoneESt6vectorIS3_SaIS3_EEEElNS0_5__ops15_Iter_comp_iterIZNSt6ranges8__detail16__make_comp_projINSB_4lessEMS3_KDoFSt17basic_string_viewIcSt11char_traitsIcEEvEEEDaRT_RT0_EUlOSL_OSN_E_EEEvSL_SL_SN_T1_");
 asm (".hidden _ZSt16__introsort_loopIN9__gnu_cxx17__normal_iteratorIPNSt6chrono9time_zoneESt6vectorIS3_SaIS3_EEEElNS0_5__ops15_Iter_comp_iterIZNSt6ranges8__detail16__make_comp_projINSB_4lessESt8identityEEDaRT_RT0_EUlOSG_OSI_E_EEEvSG_SG_SI_T1_");
 #endif
+#ifndef __riscv
 asm (".hidden _ZTSSt19_Sp_make_shared_tag");
+#endif
 #ifndef __i386__
+#ifndef __riscv
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE24_M_release_last_use_coldEv");
 #endif
+#endif
 asm (".hidden _ZSt23__atomic_wait_address_vIiZNKSt13__atomic_baseIiE4waitEiSt12memory_orderEUlvE_EvPKT_S4_T0_");
+#ifndef __riscv
 asm (".hidden _ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE10_M_releaseEv");
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem7__cxx114path5_List5_ImplENS3_13_Impl_deleterEED2Ev");
+#endif
 asm (".hidden _ZNSt10unique_ptrINSt10filesystem7__cxx114path5_List5_ImplENS3_13_Impl_deleterEED1Ev");
+#ifndef __riscv
 asm (".hidden _ZTSSt11_Mutex_baseILN9__gnu_cxx12_Lock_policyE2EE");
 asm (".hidden _ZTISt11_Mutex_baseILN9__gnu_cxx12_Lock_policyE2EE");
 asm (".hidden _ZTSSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE");
@@ -124,4 +163,5 @@ asm (".hidden _ZTISt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE");
 asm (".hidden _ZZNSt19_Sp_make_shared_tag5_S_tiEvE5__tag");
 asm (".hidden _ZZNSt8__detail18__waiter_pool_base6_S_forEPKvE3__w");
 asm (".hidden _ZNSt6vectorISt4pairINSt6chrono8sys_infoESt17basic_string_viewIcSt11char_traitsIcEEESaIS7_EE17_M_realloc_appendIJRS2_RS6_EEEvDpOT_");
+#endif
 asm (".hidden _ZNSt6vectorISt4pairINSt6chrono8sys_infoESt17basic_string_viewIcSt11char_traitsIcEEESaIS7_EE17_M_realloc_appendIIRS2_RS6_EEEvDpOT_");
