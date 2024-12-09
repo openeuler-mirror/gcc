@@ -8646,8 +8646,11 @@ public:
 
     if (level >= COMPLETE_STRUCT_RELAYOUT)
       {
-	/* Preserved for backward compatibility.  */
-	ret_reorg = ipa_struct_reorg ().execute (STRUCT_SPLIT);
+	/* Preserved for backward compatibility.
+	   Rewrite between STRUCT_REORDER_FIELDS and STRUCT_SPLIT has unfixed
+	   problem, so avoid using them together.  */
+	if (!ret)
+	  ret_reorg = ipa_struct_reorg ().execute (STRUCT_SPLIT);
 	if (!ret_reorg)
 	  ret_reorg = ipa_struct_reorg ().execute (COMPLETE_STRUCT_RELAYOUT);
       }
