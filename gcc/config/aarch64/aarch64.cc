@@ -499,6 +499,8 @@ static const struct cpu_addrcost_table hip09_addrcost_table =
     },
   0, /* pre_modify  */
   0, /* post_modify  */
+  0, /* post_modify_ld3_st3  */
+  0, /* post_modify_ld4_st4  */
   0, /* register_offset  */
   1, /* register_sextend  */
   1, /* register_zextend  */
@@ -1910,7 +1912,7 @@ static const struct tune_params hip09_tunings =
   &hip09_extra_costs,
   &hip09_addrcost_table,
   &hip09_regmove_cost,
-  &hip09_vector_cost,
+  &generic_vector_cost,
   &generic_branch_cost,
   &generic_approx_modes,
   SVE_256, /* sve_width  */
