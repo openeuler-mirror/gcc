@@ -872,7 +872,11 @@ const struct cpu_cost_table hip09_extra_costs =
   },
   /* Vector */
   {
-    COSTS_N_INSNS (1)  /* alu.  */
+    COSTS_N_INSNS (1),  /* alu.  */
+    COSTS_N_INSNS (4),  /* mult.  */
+    COSTS_N_INSNS (1),  /* movi.  */
+    COSTS_N_INSNS (2),  /* dup.  */
+    COSTS_N_INSNS (2)   /* extract.  */
   }
 };
 
