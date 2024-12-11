@@ -393,6 +393,9 @@ tool_cleanup (bool from_signal)
   if (o_file != 0 && o_file[0])
     maybe_unlink (o_file);
 
+  if (ai_optimize_file != 0 && ai_optimize_file[0])
+    maybe_unlink (ai_optimize_file);
+
 #ifdef COLLECT_EXPORT_LIST
   if (export_file != 0 && export_file[0])
     maybe_unlink (export_file);
