@@ -5799,10 +5799,13 @@ do_self_spec (const char *spec)
   do_spec_2 (spec, NULL);
   do_spec_1 (" ", 0, NULL);
 
-  const char* tune_native = eval_spec_function ("local_cpu_detect", "cpu", "");
+  const char* tune_native = NULL;
+#if defined (__x86_64__) || defined (__aarch64__)
+  tune_native = eval_spec_function ("local_cpu_detect", "cpu", "");
+#endif
   if (tune_native == NULL)
     {
-      tune_native = "native";
+      tune_native = "=native+";
     }
   setenv ("GCC_AI4C_TUNE_INFO", tune_native, 1);
 
@@ -8129,7 +8132,6 @@ driver::main (int argc, char **argv)
   putenv_COLLECT_AS_OPTIONS (assembler_options);
   putenv_COLLECT_GCC (argv[0]);
   maybe_putenv_COLLECT_LTO_WRAPPER ();
-  putenv_ONNX_FDATA ();
   maybe_putenv_OFFLOAD_TARGETS ();
   handle_unrecognized_options ();
 
@@ -8187,6 +8189,9 @@ driver::expand_at_files (int *argc, char ***argv) const
 void
 driver::decode_argv (int argc, const char **argv)
 {
+  const char* libexec_path = standard_libexec_prefix;
+  if (libexec_path)
+    setenv ("ONNX_FDATA_PATH", libexec_path, 1);
   init_opts_obstack ();
   init_options_struct (&global_options, &global_options_set);
 
@@ -8558,34 +8563,6 @@ driver::putenv_COLLECT_GCC (const char *argv0) const
   obstack_grow (&collect_obstack, "COLLECT_GCC=", sizeof ("COLLECT_GCC=") - 1);
   obstack_grow (&collect_obstack, argv0, strlen (argv0) + 1);
   xputenv (XOBFINISH (&collect_obstack, char *));
-}
-
-/* Set up to remember the pathname of the onnx.fdata.  */
-
-void
-driver::putenv_ONNX_FDATA () const
-{
-  char *lto_wrapper_file;
-  lto_wrapper_file = find_a_program ("lto-wrapper");
-
-  if (lto_wrapper_file)
-    {
-      lto_wrapper_file = convert_white_space (lto_wrapper_file);
-      char native_file[512];
-      const char *onnx_fdata = "onnx.fdata";
-      strncpy (native_file, lto_wrapper_file, sizeof (native_file) - 1);
-      native_file[sizeof (native_file) - 1] = '\0';
-      char *last_slash = strrchr (native_file, '/');
-      if (last_slash)
-	strcpy (last_slash + 1, onnx_fdata);
-      obstack_init (&collect_obstack);
-      obstack_grow (&collect_obstack, "GCC_AI4C_ONNX_FDATA=",
-		    sizeof ("GCC_AI4C_ONNX_FDATA=") - 1);
-      obstack_grow (&collect_obstack,  native_file,
-		    strlen ( native_file) + 1);
-      xputenv (XOBFINISH (&collect_obstack, char *));
-    }
-
 }
 
 /* Set up to remember the pathname of the lto wrapper. */

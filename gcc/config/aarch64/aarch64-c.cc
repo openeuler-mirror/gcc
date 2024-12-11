@@ -47,6 +47,21 @@ aarch64_def_or_undef (bool def_p, const char *macro, cpp_reader *pfile)
     cpp_undef (pfile, macro);
 }
 
+/* Reset the optimize option.
+   After checking the model result, this function can
+   reset the more appropriate options.  */
+static void
+reset_machine_option (struct gcc_options *opts)
+{
+  const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
+  if (ai_infer_level)
+    {
+      auto *cpp_opts = cpp_get_options (parse_in);
+      cpp_opts->macro_use_commandline = 1;
+      deferred_opts_add_macro_front ("OBSTACK_CHUNK_SIZE=65536");
+    }
+}
+
 /* Define the macros that we always expect to have on AArch64.  */
 
 static void
@@ -119,6 +134,7 @@ aarch64_define_unconditional_macros (cpp_reader *pfile)
       cpp_opts->warn_variadic_macros = old_warn_variadic_macros;
       cpp_opts->cpp_warn_c90_c99_compat = old_cpp_warn_c90_c99_compat;
     }
+  reset_machine_option(&global_options);
 }
 
 /* Undefine/redefine macros that depend on the current backend state and may

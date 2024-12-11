@@ -21,9 +21,25 @@
 #ifndef AI4C_INFER_H
 #define AI4C_INFER_H
 
+extern void matmul (const float *, const float *, int, int, int, float *);
+extern void add (const float *, const float *, int, float *);
+extern void sub (const float *, const float *, int, float *);
+extern void sigmoid (const float *, int, float *);
+extern void relu (const float *, int, float *);
+extern void line_concat (const float *, int, float *, int);
+extern void one_hot_encoder (const char *, const char (*)[65], float *, int);
+extern void imputer (const int64_t *, int, float *);		 
+extern void scaler (const float *, const float *, const float *, int, float *);
+extern int argmax (const float *, int);
+
+extern void
+execute_sha256 (const char *, char *, size_t);
+extern float read_float_from_file (FILE*);
+
 extern int get_optimize_decision_from_ai4c ();
-extern void set_cache_info (int prefetches, int l1_cache_size, 
-			    int l1_cache_line_size, int l2_cache_size,
-			    int prefetch_latency, int prefetch_distance_factor);
-extern void prepare_native_tune_str (const char *info);
+extern int get_optimize_decision_from_optimizer (int, const char **,
+						 const char *, int ,
+						 int64_t *);
+extern void set_cache_info (int, int, int, int, int, int);
+extern void prepare_native_tune_str (const char *);
 #endif /* AI4C_INFER_H */
