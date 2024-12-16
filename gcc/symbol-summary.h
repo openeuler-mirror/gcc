@@ -21,6 +21,10 @@ along with GCC; see the file COPYING3.  If not see
 #ifndef GCC_SYMBOL_SUMMARY_H
 #define GCC_SYMBOL_SUMMARY_H
 
+#include "diagnostic.h"
+/* Check whether in C language or LTO with only C language.  */
+extern bool lang_c_p (void);
+
 /* Base class for function_summary and fast_function_summary classes.  */
 
 template <class T>
@@ -109,7 +113,9 @@ protected:
 			     : m_allocator.allocate ();
     /* In structure optimizatons, we call memset to ensure that
        the allocated memory is initialized to 0.  */
-    if (flag_ipa_struct_reorg)
+    if (optimize >= 3 && flag_ipa_struct_reorg && !seen_error ()
+	&& flag_lto_partition == LTO_PARTITION_ONE && lang_c_p ()
+	&& (in_lto_p || flag_whole_program))
       memset (allocated, 0, sizeof (T));
     return allocated;
   }
