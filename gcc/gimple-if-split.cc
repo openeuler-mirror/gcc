@@ -61,14 +61,14 @@ Example:
 //-------------------------------------------------------------------------
 /* Check if arg list of call got n.  */
 bool
-got_in_args_p (gimple* call, tree n)
+got_in_args_p (gimple *call, tree n)
 {
   unsigned num_args = gimple_call_num_args (call);
 
   for (int i = 0; i < num_args; i++)
     {
       if (n == gimple_call_arg (call, i))
-  return true;
+	return true;
     }
 
   return false;
@@ -142,19 +142,24 @@ bb_got_necessary_call_p (basic_block bb, tree n, unsigned nesting)
 //-------------------------------------------------------------------------
 // Complex conditions
 //-------------------------------------------------------------------------
-/* Auxiliary struct which contains var and its constant of comaprison
- * of expr: n == cst.  */
-struct var_const
+/* Auxiliary struct which contains tree nodes of such statements:
+ * var = (n == cst). Actually in some cases var field can be not an ssa
+ * name and/or it's rhs can be not "comparison with constant"
+ * expression.  However, we need to fill var field of such structures
+ * in necessary_complex_cond_p () to build/change conditions in
+ * process_complex_cond ().  */
+struct var_n_const
 {
+  tree var = NULL_TREE;
   tree n = NULL_TREE;
   tree cst = NULL_TREE;
 };
 
 /* Check if var_def stmt got this pattern:
  *    var = (n == const);
- * If it does, we need to set var_cst struct.  */
+ * If it does, we need to set n and cst in var_n_cst struct.  */
 static bool
-comp_with_const_p (gimple *var_def, var_const *var_cst)
+comp_with_const_p (gimple *var_def, var_n_const *var_n_cst)
 {
   if (gimple_expr_code (var_def) != EQ_EXPR)
     return false;
@@ -164,33 +169,24 @@ comp_with_const_p (gimple *var_def, var_const *var_cst)
   if (TREE_CODE (var_def_rhs2) != INTEGER_CST)
     return false;
 
-  var_cst->n = gimple_assign_rhs1 (var_def);
-  var_cst->cst = var_def_rhs2;
+  var_n_cst->n = gimple_assign_rhs1 (var_def);
+  var_n_cst->cst = var_def_rhs2;
 
   return true;
 }
 
-/* Auxiliary struct which contains defenition of each part of
- * complex condition, like:
- *    a = ... <- a_def
- *    b = ... <- b_def
- *    c = a | b  <- complex_cond.  */
-struct cond_parts_defs
-{
-  gimple *a_def = NULL;
-  gimple *b_def = NULL;
-};
-
 /* Check if cond got this pattern:
  *    a = ...; <- a_def
  *    b = ...; <- b_def
- *    c = a | b;
+ *    c = a | b; <- c_def
  *    if (c != 0)
- * and a_def or b_def is comparison with constant.  If it does,
- * we need to set a with a_def and b with b_def.  */
+ * and a_def or b_def is comparison with constant.
+ * If it does, we need to set a_var_n_cst and b_var_n_cst.
+ * Also set a_var_n_cst->var as gimple_assign_rhs1 (c_def),
+ * b_var_n_cst->var as gimple_assign_rhs2 (c_def).  */
 static bool
 necessary_complex_cond_p (const gimple *cond, basic_block then_bb,
-			  cond_parts_defs *defs)
+			  var_n_const *a_var_n_cst, var_n_const *b_var_n_cst)
 {
   tree lhs = gimple_cond_lhs (cond);
   tree rhs = gimple_cond_rhs (cond);
@@ -207,27 +203,25 @@ necessary_complex_cond_p (const gimple *cond, basic_block then_bb,
       || gimple_expr_code (c_def) != BIT_IOR_EXPR)
     return false;
 
-  tree a_var = gimple_assign_rhs1 (c_def);
-  tree b_var = gimple_assign_rhs2 (c_def);
-  gimple *a_def = SSA_NAME_DEF_STMT (a_var);
-  gimple *b_def = SSA_NAME_DEF_STMT (b_var);
+  bool result = false;
 
-  if (!a_def || !is_gimple_assign (a_def) || !b_def
-      || !is_gimple_assign (b_def))
-    return false;
+  gimple *a_def;
+  a_var_n_cst->var = gimple_assign_rhs1 (c_def);
+  if (TREE_CODE (a_var_n_cst->var) == SSA_NAME
+      && (a_def = SSA_NAME_DEF_STMT (a_var_n_cst->var))
+      && is_gimple_assign (a_def) && comp_with_const_p (a_def, a_var_n_cst)
+      && bb_got_necessary_call_p (then_bb, a_var_n_cst->n, SCALAR_NESTING))
+    result = true;
 
-  var_const var_cst;
+  gimple *b_def;
+  b_var_n_cst->var = gimple_assign_rhs2 (c_def);
+  if (TREE_CODE (b_var_n_cst->var) == SSA_NAME
+      && (b_def = SSA_NAME_DEF_STMT (b_var_n_cst->var))
+      && is_gimple_assign (b_def) && comp_with_const_p (b_def, b_var_n_cst)
+      && bb_got_necessary_call_p (then_bb, b_var_n_cst->n, SCALAR_NESTING))
+    result = true;
 
-  if (!(comp_with_const_p (a_def, &var_cst)
-	&& bb_got_necessary_call_p (then_bb, var_cst.n, SCALAR_NESTING))
-      && !(comp_with_const_p (b_def, &var_cst)
-	   && bb_got_necessary_call_p (then_bb, var_cst.n, SCALAR_NESTING)))
-    return false;
-
-  defs->a_def = a_def;
-  defs->b_def = b_def;
-
-  return true;
+  return result;
 }
 
 /* Check if our complex condition seems to be "necessary"
@@ -253,11 +247,10 @@ process_complex_cond (basic_block cond_bb, basic_block then_bb,
 		      basic_block else_bb)
 {
   gimple *cond = last_stmt (cond_bb);
-  cond_parts_defs defs;
+  var_n_const a_var_n_cst, b_var_n_cst;
 
-  if (!can_duplicate_block_p (then_bb)
-      || !single_succ_p (then_bb)
-      || !necessary_complex_cond_p (cond, then_bb, &defs))
+  if (!can_duplicate_block_p (then_bb) || !single_succ_p (then_bb)
+      || !necessary_complex_cond_p (cond, then_bb, &a_var_n_cst, &b_var_n_cst))
     return;
 
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -267,19 +260,16 @@ process_complex_cond (basic_block cond_bb, basic_block then_bb,
       print_gimple_stmt (dump_file, cond, 0, TDF_NONE);
     }
 
-  var_const var_cst;
-
   /* Setting cond.  */
-  if (comp_with_const_p (defs.a_def, &var_cst))
-      /* Setting cond as: if (n == const).  */
-      gimple_cond_set_condition (as_a<gcond *> (cond), EQ_EXPR, var_cst.n,
-					var_cst.cst);
+  if (a_var_n_cst.n != NULL_TREE && a_var_n_cst.cst != NULL_TREE)
+    /* Setting cond as: if (n == const).  */
+    gimple_cond_set_condition (as_a<gcond *> (cond), EQ_EXPR, a_var_n_cst.n,
+			       a_var_n_cst.cst);
   else
     {
       /* Setting cond as: if (a != 0).  */
-      tree cond_lhs = gimple_assign_lhs (defs.a_def);
-      gimple_cond_set_condition (as_a<gcond *> (cond), NE_EXPR, cond_lhs,
-      					build_zero_cst (TREE_TYPE (cond_lhs)));
+      gimple_cond_set_condition (as_a<gcond *> (cond), NE_EXPR, a_var_n_cst.var,
+				 build_zero_cst (TREE_TYPE (a_var_n_cst.var)));
     }
   update_stmt (cond);
 
@@ -290,19 +280,18 @@ process_complex_cond (basic_block cond_bb, basic_block then_bb,
 
   /* Setting inner_cond.  */
   gcond *inner_cond = NULL;
-  if (comp_with_const_p (defs.b_def, &var_cst))
+  if (b_var_n_cst.n != NULL_TREE && b_var_n_cst.cst != NULL_TREE)
     {
-      /* Setting inner cond as: if (b == const).  */
-      inner_cond = gimple_build_cond (EQ_EXPR, var_cst.n, var_cst.cst,
+      /* Setting inner cond as: if (n == const).  */
+      inner_cond = gimple_build_cond (EQ_EXPR, b_var_n_cst.n, b_var_n_cst.cst,
 				      NULL_TREE, NULL_TREE);
     }
   else
     {
       /* Setting inner cond as: if (b != 0).  */
-      tree inner_cond_lhs = gimple_assign_lhs (defs.b_def);
       inner_cond = gimple_build_cond (
-	  NE_EXPR, inner_cond_lhs, build_zero_cst (TREE_TYPE (inner_cond_lhs)),
-	  NULL_TREE, NULL_TREE);
+	  NE_EXPR, b_var_n_cst.var,
+	  build_zero_cst (TREE_TYPE (b_var_n_cst.var)), NULL_TREE, NULL_TREE);
     }
   gimple_stmt_iterator gsi = gsi_last_bb (inner_cond_bb);
   gsi_insert_after (&gsi, inner_cond, GSI_NEW_STMT);
@@ -362,7 +351,7 @@ make_two_separate_calls (basic_block outer_cond_bb, basic_block inner_cond_bb,
   if (single_succ (then_bb) == EXIT_BLOCK_PTR_FOR_FN (cfun))
     {
       gcc_assert (gimple_code (last_stmt (then_bb)) == GIMPLE_RETURN);
-      ret_val = gimple_return_retval (as_a<greturn*>(last_stmt (then_bb)));
+      ret_val = gimple_return_retval (as_a<greturn *> (last_stmt (then_bb)));
 
       then_bb_succ_edge_flags = single_succ_edge (then_bb)->flags;
     }
@@ -373,7 +362,7 @@ make_two_separate_calls (basic_block outer_cond_bb, basic_block inner_cond_bb,
    * if now merge_bb is pred of EXIT_BLOCK.  */
   if (single_succ (merge_bb) == EXIT_BLOCK_PTR_FOR_FN (cfun))
     {
-      gimple* ret = gimple_build_return (ret_val);
+      gimple *ret = gimple_build_return (ret_val);
       gimple_stmt_iterator gsi = gsi_last_bb (merge_bb);
       gsi_insert_after (&gsi, ret, GSI_NEW_STMT);
 
@@ -400,7 +389,7 @@ make_two_separate_calls (basic_block outer_cond_bb, basic_block inner_cond_bb,
 			   single_succ (merge_bb));
 
   if (get_immediate_dominator (CDI_POST_DOMINATORS, outer_cond_bb) == then_bb)
-     set_immediate_dominator (CDI_POST_DOMINATORS, outer_cond_bb, merge_bb);
+    set_immediate_dominator (CDI_POST_DOMINATORS, outer_cond_bb, merge_bb);
 
   return then_bb1;
 }
