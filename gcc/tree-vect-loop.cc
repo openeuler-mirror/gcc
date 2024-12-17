@@ -3016,10 +3016,6 @@ vect_analyze_loop (class loop *loop, vec_info_shared *shared,
   opt_loop_vec_info first_loop_vinfo = opt_loop_vec_info::success (NULL);
   /* Loop_vinfo for loop-distribution pass.  */
   opt_loop_vec_info fail_loop_vinfo = opt_loop_vec_info::success (NULL);
-  if (result_only_p)
-  {
-     vect_slp_init ();
-  }
   unsigned int mode_i = 0;
   unsigned HOST_WIDE_INT simdlen = loop->simdlen;
 
