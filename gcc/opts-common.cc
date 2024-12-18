@@ -1070,8 +1070,6 @@ handle_machine_option (unsigned int lang_mask,
     global_options.x_param_ipa_prefetch_distance_factor};
   int64_t output_pred = get_optimize_decision_from_optimizer (
 			  argc, argv, "hip09", argc_hw, argv_hw);
-  if (output_pred == 1)
-    return output_pred;
   if (output_pred != 1)
     return ret;
 
