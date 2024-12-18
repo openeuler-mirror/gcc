@@ -262,9 +262,11 @@ process_complex_cond (basic_block cond_bb, basic_block then_bb,
 
   /* Setting cond.  */
   if (a_var_n_cst.n != NULL_TREE && a_var_n_cst.cst != NULL_TREE)
-    /* Setting cond as: if (n == const).  */
-    gimple_cond_set_condition (as_a<gcond *> (cond), EQ_EXPR, a_var_n_cst.n,
+    {
+      /* Setting cond as: if (n == const).  */
+      gimple_cond_set_condition (as_a<gcond *> (cond), EQ_EXPR, a_var_n_cst.n,
 			       a_var_n_cst.cst);
+    }
   else
     {
       /* Setting cond as: if (a != 0).  */
@@ -276,7 +278,18 @@ process_complex_cond (basic_block cond_bb, basic_block then_bb,
   /* Creating inner_cond_bb.  */
   edge then_e = find_edge (cond_bb, then_bb);
   edge else_e = find_edge (cond_bb, else_bb);
+
+  bool inner_cond_bb_need_set_loop = false;
+  if (else_e->dest->loop_father != else_e->src->loop_father)
+	inner_cond_bb_need_set_loop = true;
+
   basic_block inner_cond_bb = split_edge (else_e);
+
+  if (inner_cond_bb_need_set_loop)
+    {
+	remove_bb_from_loops (inner_cond_bb);
+	add_bb_to_loop (inner_cond_bb, cond_bb->loop_father);
+    }
 
   /* Setting inner_cond.  */
   gcond *inner_cond = NULL;

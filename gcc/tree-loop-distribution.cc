@@ -5265,10 +5265,16 @@ loop_distribution::execute (function *fun)
 
 	  bool destroy_p;
 	  int nb_generated_loops, nb_generated_calls;
+
+	  vect_slp_init ();
+
 	  nb_generated_loops
 	    = distribute_loop (loop, work_list, cd, &nb_generated_calls,
 			       &destroy_p, (!optimize_loop_for_speed_p (loop)
 					    || !flag_tree_loop_distribution));
+
+	  vect_slp_fini ();
+
 	  if (destroy_p)
 	    loops_to_be_destroyed.safe_push (loop);
 
