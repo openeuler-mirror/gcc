@@ -4443,7 +4443,7 @@ dump_direct_callee_info_to_asm (basic_block bb, gcov_type call_count)
 }
 
 /* Dump the edge info into asm.    */
-static int
+static void
 dump_edge_jump_info_to_asm (basic_block bb, gcov_type bb_count)
 {
   edge e;
