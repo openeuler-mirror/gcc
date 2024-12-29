@@ -284,19 +284,50 @@ static int
 graph_infer (int argc1, const char **argv1, const char *mops,
              int argc2, int64_t *argv2)
 {
-  char *gcc_exec_prefix = getenv ("ONNX_FDATA_PATH");
-  if (gcc_exec_prefix == NULL)
+  char gcc_exec_prefix[512];
+  ssize_t len = readlink ("/proc/self/exe", gcc_exec_prefix,
+  			  sizeof (gcc_exec_prefix) - 1);
+  if (len == -1)
     return 0;
-  char native_file[512];
 
-  if (gcc_exec_prefix)
+  char native_file[512];
+  strncpy (native_file, gcc_exec_prefix, sizeof (native_file) - 1);
+  const char *target = "bin/gcc";
+  const char *target_cc1 = "cc1";
+  const char *target_gpp = "bin/g++";
+  const char *target_cc1plus = "cc1plus";
+  const char *target_gfortran = "bin/gfortran";
+  const char *target_f951 = "f951";
+  const char *replacement = "../libexec/gcc/optimizer.fdata";
+  const char *replacement_front_end = "../../optimizer.fdata";
+
+  /* Replace the part of the current executable file path after the last slash
+     to locate the model file.  */
+  if (strstr (native_file, target) != NULL ||
+      strstr (native_file, target_gpp) != NULL ||
+      strstr (native_file, target_gfortran) != NULL)
     {
-      const char *onnx_fdata = "optimizer.fdata";
-      strncpy (native_file, gcc_exec_prefix, sizeof (native_file) - 1);
-      native_file[sizeof (native_file) - 1] = '\0';
       char *last_slash = strrchr (native_file, '/');
-      if (last_slash)
-	strcpy (last_slash + 1, onnx_fdata);
+      if (last_slash != NULL)
+	{
+	  size_t prefix_len = last_slash - native_file + 1;
+	  native_file[prefix_len] = '\0';
+	  strncat (native_file, replacement, sizeof (native_file) -
+		   strlen (native_file) - 1);
+	}
+    }
+  else if (strstr (native_file, target_cc1) != NULL ||
+	   strstr (native_file, target_cc1plus) != NULL ||
+	   strstr (native_file, target_f951) != NULL)
+    {
+      char *last_slash = strrchr (native_file, '/');
+      if (last_slash != NULL)
+	{
+	  size_t prefix_len = last_slash - native_file + 1;
+	  native_file[prefix_len] = '\0';
+	  strncat (native_file, replacement_front_end, sizeof (native_file) -
+		   strlen (native_file) - 1);
+	}
     }
 
   if (access (native_file, F_OK) == 0)
