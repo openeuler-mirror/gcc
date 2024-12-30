@@ -333,29 +333,11 @@ preprocess (int argc, int64_t *argv, int64_t *in_modes)
 static int
 graph_infer (int argc, const char *argv, int argc2, int64_t *argv2)
 {
-  char *gcc_exec_prefix = getenv ("ONNX_FDATA_PATH");
-  if (gcc_exec_prefix == NULL)
-    return 0;
-  char file_name[512];
-
-  if (gcc_exec_prefix)
-    {
-      const char *onnx_fdata = "onnx.fdata";
-      strncpy (file_name, gcc_exec_prefix, sizeof (file_name) - 1);
-      file_name[sizeof (file_name) - 1] = '\0';
-      char *last_slash = strrchr (file_name, '/');
-      if (last_slash)
-	strcpy (last_slash + 1, onnx_fdata);
-    }
-
+  const char *file_name = getenv ("GCC_AI4C_ONNX_FDATA");
   if (access (file_name, F_OK) == 0)
-    {
-      fill_node (file_name);
-    }
+    fill_node (file_name);
   else
-    {
-      return 0;
-    }
+    return 0;
 
   int64_t in_modes[M_MODE_SIZE];
 
@@ -441,9 +423,7 @@ int
 get_optimize_decision_from_ai4c ()
 {
   if (initialized== 1)
-    {
-      return optimize_result;
-    }
+    return optimize_result;
   if (native_tune && (strchr (native_tune, '+') != NULL))
     {
       char hash[65];
