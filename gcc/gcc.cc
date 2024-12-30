@@ -5800,7 +5800,7 @@ do_self_spec (const char *spec)
   do_spec_1 (" ", 0, NULL);
 
   const char* tune_native = NULL;
-#if defined (__x86_64__) || defined (__aarch64__)
+#if !defined(CROSS_DIRECTORY_STRUCTURE) && (defined (__x86_64__) || defined (__aarch64__))
   tune_native = eval_spec_function ("local_cpu_detect", "cpu", "");
 #endif
   if (tune_native == NULL)
