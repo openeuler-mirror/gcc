@@ -749,8 +749,8 @@ static const struct cpu_regmove_cost hip09_regmove_cost =
   1, /* GP2GP  */
   /* Avoid the use of slow int<->fp moves for spilling by setting
      their cost higher than memmov_cost.  */
-  2, /* GP2FP  */
-  3, /* FP2GP  */
+  5, /* GP2FP  */
+  5, /* FP2GP  */
   2  /* FP2FP  */
 };
 
@@ -1923,10 +1923,10 @@ static const struct tune_params hip09_tunings =
     4, /* load_pred.  */
     4 /* store_pred.  */
   }, /* memmov_cost.  */
-  4,    /* issue_rate  */
+  2,    /* issue_rate  */
   (AARCH64_FUSE_AES_AESMC | AARCH64_FUSE_ALU_BRANCH
    | AARCH64_FUSE_ALU_CBZ), /* fusible_ops  */
-  "16", /* function_align.  */
+  "16:12", /* function_align.  */
   "4",  /* jump_align.  */
   "8",  /* loop_align.  */
   2,    /* int_reassoc_width.  */
