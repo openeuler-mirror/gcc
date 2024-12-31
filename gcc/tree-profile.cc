@@ -1108,34 +1108,47 @@ public:
   /* opt_pass methods: */
   virtual bool gate (function *)
     {
-      return (flag_csprofile_generate || flag_csprofile_use);
+      if (flag_csprofile_generate || flag_csprofile_use)
+	{
+	  int ret = true;
+	  if (!profile_data_prefix)
+	    {
+	      error ("pgo profile path must set when using cspgo.");
+	      ret = false;
+	    }
+
+	  if (!csprofile_data_prefix)
+	    {
+	      error ("cspgo profile path must set when using cspgo.");
+	      ret = false;
+	    }
+
+	  if (!(flag_cfgo_profile_use || flag_profile_use))
+	    {
+	      error ("cspgo must used with cfgo-pgo or pgo.");
+	      ret = false;
+	    }
+
+	  /* pgo and cspgo path must different.  */
+	  char* cfgo_pgo_path = lrealpath (profile_data_prefix);
+	  char* cfgo_cspgo_path = lrealpath (csprofile_data_prefix);
+	  bool files_differ = filename_cmp (cfgo_pgo_path, cfgo_cspgo_path);
+	  if (!files_differ)
+	    {
+	      error ("pgo and cspgo path must different between %s and %s",
+		     cfgo_pgo_path, cfgo_cspgo_path);
+	      ret = false;
+	    }
+	  free (cfgo_pgo_path);
+	  free (cfgo_cspgo_path);
+
+	  return ret;
+	}
+      return false;
     }
   /* The main process of cspgo is in csprofile_transform, execute does not need
      to do anything.  */
-  virtual unsigned int execute (function *)
-    {
-      if (!profile_data_prefix)
-	error ("profile_data_prefix must set when using cspgo.");
-
-      if (!csprofile_data_prefix)
-	error ("csprofile_data_prefix must set when using cspgo.");
-
-      if (!flag_cfgo_profile_use)
-	error ("cspgo must used with cfgo-pgo.");
-
-      /* Just compare canonical pathnames.  */
-      char* cfgo_pgo_path = lrealpath (profile_data_prefix);
-      char* cfgo_cspgo_path = lrealpath (csprofile_data_prefix);
-      bool files_differ = filename_cmp (cfgo_pgo_path, cfgo_cspgo_path);
-      if (!files_differ)
-	{
-	  error ("pgo and cspgo path must different between %s and %s",
-		 cfgo_pgo_path, cfgo_cspgo_path);
-	}
-      free (cfgo_pgo_path);
-      free (cfgo_cspgo_path);
-      return 0;
-    }
+  virtual unsigned int execute (function *) { return 0; }
 
 }; // class pass_ipa_csprofile
 
