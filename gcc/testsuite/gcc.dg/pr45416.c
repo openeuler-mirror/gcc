@@ -1,6 +1,6 @@
 /* { dg-do compile } */
 /* { dg-skip-if "Skip for Thumb1." { { arm*-*-* } && { arm_thumb1_ok } } } */
-/* { dg-options "-O2 -ftree-fold-phiopt" } */
+/* { dg-options "-O2" } */
 
 int foo(long long a)
 {

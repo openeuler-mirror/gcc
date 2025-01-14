@@ -1,6 +1,6 @@
 /* PR tree-optimization/97690 */
 /* { dg-do compile } */
-/* { dg-options "-O2 -ftree-fold-phiopt -fdump-tree-phiopt2" } */
+/* { dg-options "-O2 -fdump-tree-phiopt2" } */
 
 int foo (_Bool d) { return d ? 2 : 0; }
 int bar (_Bool d) { return d ? 1 : 0; }

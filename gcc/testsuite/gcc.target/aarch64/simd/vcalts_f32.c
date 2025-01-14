@@ -1,7 +1,7 @@
 /* Test the vcalts_f32 AArch64 SIMD intrinsic.  */
 
 /* { dg-do run } */
-/* { dg-options "-save-temps -O3 -ftree-fold-phiopt" } */
+/* { dg-options "-save-temps -O3" } */
 
 #include "arm_neon.h"
 

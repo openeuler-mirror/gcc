@@ -8094,7 +8094,6 @@ expand_builtin (tree exp, rtx target, rtx subtarget, machine_mode mode,
     case BUILT_IN_BSWAP16:
     case BUILT_IN_BSWAP32:
     case BUILT_IN_BSWAP64:
-    case BUILT_IN_BSWAP128:
       target = expand_builtin_bswap (target_mode, exp, target, subtarget);
       if (target)
 	return target;
@@ -11815,7 +11814,6 @@ is_inexpensive_builtin (tree decl)
       case BUILT_IN_BSWAP16:
       case BUILT_IN_BSWAP32:
       case BUILT_IN_BSWAP64:
-      case BUILT_IN_BSWAP128:
       case BUILT_IN_CLZ:
       case BUILT_IN_CLZIMAX:
       case BUILT_IN_CLZL:
