@@ -618,11 +618,23 @@
   (and (match_code "const_int")
        (match_test "IN_RANGE (INTVAL (op), 0, 64)")))
 
+(define_predicate "aarch64_simd_shift_imm_bitsize_v16qi"
+  (match_code "const_vector")
+{
+  return INTVAL (unwrap_const_vec_duplicate (op)) == 8;
+})
+
+(define_predicate "aarch64_simd_shift_imm_bitsize_v8hi"
+  (match_code "const_vector")
+{
+  return INTVAL (unwrap_const_vec_duplicate (op)) == 16;
+})
+
 (define_predicate "aarch64_simd_shift_imm_bitsize_v4si"
   (match_code "const_vector")
 {
   HOST_WIDE_INT val = INTVAL (unwrap_const_vec_duplicate (op));
-  return  val == 8 || val == 16 || val == 32;
+  return INTVAL (unwrap_const_vec_duplicate (op)) == 32;
 })
 
 (define_predicate "aarch64_constant_pool_symref"
