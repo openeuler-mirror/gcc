@@ -5164,22 +5164,30 @@
 	  (truncate:V4HI
 	    (not:V4SI
 	      (match_operand:V4SI 2 "register_operand" "w")))))]
-  "TARGET_SIMD"
+  "TARGET_SIMD && !reload_completed"
   "#"
   "&& true"
-  [(set (match_operand:V4SI 1 "register_operand" "=w")
+  [(set (match_operand:V4SI 3 "register_operand" "=w")
 	(not:V4SI
 	  (match_dup 1)))
-   (set (match_operand:V4SI 2 "register_operand" "=w")
+   (set (match_operand:V4SI 4 "register_operand" "=w")
 	(not:V4SI
 	  (match_dup 2)))
    (set (match_operand:V8HI 0 "register_operand" "=w")
 	(vec_concat:V8HI
 	  (truncate:V4HI
-	    (match_dup 1))
+	    (match_dup 3))
 	  (truncate:V4HI
-	    (match_dup 2))))]
-  ""
+	    (match_dup 4))))]
+   {
+    if (can_create_pseudo_p ())
+      {
+	operands[3] = gen_reg_rtx (V4SImode);
+	operands[4] = gen_reg_rtx (V4SImode);
+      }
+    else
+      FAIL;
+  }
   [(set_attr "type" "multiple")]
 )
 
