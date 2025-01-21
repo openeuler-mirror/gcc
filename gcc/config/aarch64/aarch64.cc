@@ -535,6 +535,8 @@ static const struct cpu_addrcost_table hip10c_addrcost_table =
     },
   0, /* pre_modify  */
   0, /* post_modify  */
+  0, /* post_modify_ld3_st3  */
+  0, /* post_modify_ld4_st4  */
   0, /* register_offset  */
   1, /* register_sextend  */
   1, /* register_zextend  */
@@ -551,6 +553,8 @@ static const struct cpu_addrcost_table hip11_addrcost_table =
     },
   0, /* pre_modify  */
   0, /* post_modify  */
+  0, /* post_modify_ld3_st3  */
+  0, /* post_modify_ld4_st4  */
   0, /* register_offset  */
   1, /* register_sextend  */
   1, /* register_zextend  */
