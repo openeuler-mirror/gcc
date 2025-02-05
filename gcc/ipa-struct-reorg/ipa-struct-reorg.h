@@ -64,6 +64,9 @@ struct srtype;
 struct sraccess;
 struct srdecl;
 struct srfunction;
+class fc_type_info;
+class fc_field;
+class fc_field_class;
 
 struct srfunction
 {
@@ -136,6 +139,8 @@ public:
   unsigned bucket_parts;
   unsigned bucket_size;
 
+  fc_type_info *fc_info;
+
   // Constructors
   srtype (tree type);
 
@@ -157,6 +162,8 @@ public:
   void mark_escape (escape_type, gimple *stmt);
   void create_global_ptr_for_pc ();
   unsigned calculate_bucket_size ();
+  bool has_recursive_field_type ();
+  void check_fc_fields ();
   bool has_escaped (void)
   {
     return escapes != does_not_escape;
@@ -196,6 +203,9 @@ struct srfield
   tree newfield[max_split];
   unsigned field_access; /* FIELD_DECL -> bitflag (use for dfe).  */
 
+  fc_field *static_fc_field;
+  fc_field_class *field_class;
+
   // Constructors
   srfield (tree field, srtype *base);
 
@@ -211,27 +221,31 @@ struct srfield
   void create_new_reorder_fields (tree newtype[max_split],
 				  tree newfields[max_split],
 				  tree newlast[max_split]);
+  bool dead_field_p ();
 };
 
 struct sraccess
 {
+  unsigned index;
+  tree expr;
   gimple *stmt;
   cgraph_node *node;
 
+  srfunction *function;
   srtype *type;
+  tree base;
   // NULL field means the whole type is accessed
   srfield *field;
 
   // Constructors
-  sraccess (gimple *s, cgraph_node *n, srtype *t, srfield *f = NULL)
-    : stmt (s),
-      node (n),
-      type (t),
-      field (f)
-  {}
+  sraccess (tree, gimple *, cgraph_node *, srfunction *,
+	    srtype *, tree, srfield *);
 
   // Methods
-  void dump (FILE *file);
+  void dump (FILE *file) const;
+  bool write_type_p (tree) const;
+  bool write_field_p (tree) const;
+  bool read_field_p (tree) const;
 };
 
 struct srdecl
@@ -262,6 +276,101 @@ struct srdecl
   }
 };
 
+/* All fields belong to this class should have the same type.  */
+
+class fc_field_class
+{
+public:
+  /* The same type for all of the fields in the class.  */
+  tree fieldtype;
+
+  /* The fields with the same type are in the same element of this vector.  */
+  auto_vec<srfield *> srfields;
+
+  fc_field_class (tree fieldtype)
+    : fieldtype (fieldtype)
+  {}
+
+  void dump (FILE *) const;
+  unsigned size () const;
+  int get_field_index (srfield *) const;
+};
+
+/* The field for field compression.  */
+
+class fc_field
+{
+public:
+  tree field;
+  tree new_type;
+
+  /* This field's max value we can know at compile time.  If it is 0, it means
+     the max value cannot be determined at compile time.  */
+  HOST_WIDE_INT max_value;
+
+  /* The bit width of the field if it is not zero.  */
+  unsigned bits;
+
+  /* The original field of a shadow field if it is not NULL.  */
+  srfield *original;
+
+  /* All assignments that need to be optimized as shadow.  */
+  auto_vec<gimple *> shadow_stmts;
+
+  /* The 1:1 map of shadow_stmts to indicate the current function of a shadow
+     stmt belongs to.  */
+  auto_vec<srfunction *> shadow_stmts_func;
+
+  /* For static field compression.  */
+  fc_field (tree field, HOST_WIDE_INT max_value, srfield *original)
+    : field (field), new_type (NULL_TREE), max_value (max_value),
+      bits (0), original (original)
+  {}
+
+  unsigned get_bits (void) const
+  {
+    return bits;
+  }
+};
+
+/* The class to hold field compression type information.
+   A single info object is only for one structure type.  */
+
+class fc_type_info
+{
+public:
+  srtype *type;
+
+  /* The flag to control whether the type can do static field compression.  */
+  bool static_fc_p = false;
+
+  /* Multiple fields of the data struct for static compression.  */
+  auto_delete_vec<fc_field> static_fc_fields;
+
+  /* The field classes classified by field type.  */
+  auto_delete_vec<fc_field_class> field_classes;
+
+  fc_type_info (srtype *type)
+    : type (type)
+  {}
+  fc_type_info ()
+    : type (NULL)
+  {}
+
+  fc_field_class *find_field_class_by_type (tree) const;
+  fc_field_class *record_field_class (srfield *);
+};
+
+/* The structure to hold necessary information for field shadow.  */
+
+struct fc_shadow_info
+{
+  auto_delete_vec<auto_vec<gimple *>> pair_stmts_groups;
+  auto_vec<srfunction *> pair_stmts_func;
+  gimple *unpair_stmt = NULL;
+  srfunction *unpair_stmt_func = NULL;
+  unsigned unpair_stmt_index = 0;
+};
 
 } // namespace struct_reorg
 
