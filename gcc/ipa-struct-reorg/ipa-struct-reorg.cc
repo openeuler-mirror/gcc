@@ -108,6 +108,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "gimplify-me.h"
 #include "cfgloop.h"
 #include "langhooks.h"
+#include "cfgexpand.h"
 
 /* Check whether in C language or LTO with only C language.  */
 
@@ -147,6 +148,17 @@ using namespace struct_relayout;
 
 #define VOID_POINTER_P(type) \
   (POINTER_TYPE_P (type) && VOID_TYPE_P (TREE_TYPE (type)))
+
+#define FC_DUMP_MSG(message) \
+  do \
+    { \
+      if (dump_file && (dump_flags & TDF_DETAILS)) \
+	fprintf (dump_file, "[field compress] %s", (message)); \
+    } while (0)
+
+/* Flags for operand_equal_p to treat decls with the same name equal.  */
+
+#define COMPARE_DECL_FLAGS (OEP_DECL_NAME | OEP_LEXICOGRAPHIC)
 
 static void
 set_var_attributes (tree var)
@@ -250,6 +262,51 @@ gimplify_build1 (gimple_stmt_iterator *gsi, enum tree_code code, tree type,
 				   GSI_SAME_STMT);
 }
 
+/* Create a conditional expression as COND ? VAL1 : VAL2.  */
+
+static inline tree
+build_cond_expr (tree cond, tree val1, tree val2)
+{
+  if (TREE_CODE (TREE_TYPE (cond)) != BOOLEAN_TYPE)
+    cond = fold_build2 (NE_EXPR, boolean_type_node, cond,
+			build_zero_cst (TREE_TYPE (cond)));
+
+  return fold_build3 (COND_EXPR, TREE_TYPE (val1), cond, val1, val2);
+}
+
+/* Given a struct/class pointer ADDR, and FIELD_DECL belonging to the
+   struct/class, create a field reference expression.  */
+
+static inline tree
+build_field_ref (tree addr, tree field_decl)
+{
+  enum tree_code code;
+
+  if (DECL_BIT_FIELD (field_decl))
+    code = BIT_FIELD_REF;
+  else
+    code = COMPONENT_REF;
+
+  tree base = TREE_CODE (addr) == MEM_REF ? addr : build_simple_mem_ref (addr);
+
+  return build3 (code, TREE_TYPE (field_decl), base, field_decl, NULL_TREE);
+}
+
+/* Build a convert gimple to cast RHS to LHS.  */
+
+tree
+build_convert_gimple (tree lhs, tree rhs, gimple_stmt_iterator *gsi)
+{
+  tree ltype = TREE_TYPE (lhs);
+  tree rtype = TREE_TYPE (rhs);
+  if (types_compatible_p (ltype, rtype))
+    return NULL_TREE;
+
+  rhs = fold_build1 (CONVERT_EXPR, ltype, rhs);
+  rhs = force_gimple_operand_gsi (gsi, rhs, true, NULL, true, GSI_SAME_STMT);
+  return rhs;
+}
+
 /* Get the number of pointer layers.  */
 
 int
@@ -283,6 +340,15 @@ is_from_void_ptr_parm (tree ssa_name)
 	  && VOID_POINTER_P (TREE_TYPE (ssa_name)));
 }
 
+/* Check if STMT is a gimple assign whose rhs code is CODE.  */
+
+static bool
+gimple_assign_rhs_code_p (gimple *stmt, enum tree_code code)
+{
+  return stmt && is_gimple_assign (stmt)
+	 && gimple_assign_rhs_code (stmt) == code;
+}
+
 /* Enum the struct layout optimize level,
    which should be the same as the option -fstruct-reorg=.  */
 
@@ -297,6 +363,29 @@ enum struct_layout_opt_level
   POINTER_COMPRESSION_UNSAFE = 1 << 5,
   SEMI_RELAYOUT = 1 << 6
 };
+
+srfunction *current_function;
+vec<srfunction *> csrfun_stack;
+
+class csrfun_context
+{
+public:
+  csrfun_context (srfunction *srfun)
+  {
+    csrfun_stack.safe_push (current_function);
+    current_function = srfun;
+
+    push_cfun (DECL_STRUCT_FUNCTION (srfun->node->decl));
+  }
+
+  ~csrfun_context ()
+  {
+    pop_cfun ();
+    current_function = csrfun_stack.pop ();
+  }
+};
+
+#define SET_CFUN(srfn) csrfun_context csrfn_ctx(srfn);
 
 /* Defines the target pointer size of compressed pointer, which should be 8,
    16, 32.  */
@@ -412,7 +501,9 @@ srfield::srfield (tree field, srtype *base)
     base (base),
     type (NULL),
     clusternum (0),
-    field_access (EMPTY_FIELD)
+    field_access (EMPTY_FIELD),
+    static_fc_field (NULL),
+    field_class (NULL)
 {
   for (int i = 0; i < max_split; i++)
     newfield[i] = NULL_TREE;
@@ -430,7 +521,8 @@ srtype::srtype (tree type)
     has_legal_alloc_num (false),
     has_alloc_array (0),
     semi_relayout (false),
-    bucket_parts (0)
+    bucket_parts (0),
+    fc_info (NULL)
 {
   for (int i = 0; i < max_split; i++)
     newtype[i] = NULL_TREE;
@@ -467,8 +559,8 @@ srtype::has_dead_field (void)
   FOR_EACH_VEC_ELT (fields, i, this_field)
     {
       /* Function pointer members are not processed, because DFE
-         does not currently support accurate analysis of function
-         pointers, and we have not identified specific use cases. */
+	 does not currently support accurate analysis of function
+	 pointers, and we have not identified specific use cases.  */
       if (!(this_field->field_access & READ_FIELD)
 	 && !FUNCTION_POINTER_TYPE_P (this_field->fieldtype))
 	{
@@ -844,15 +936,11 @@ srfield::create_new_reorder_fields (tree newtype[max_split],
   tree nt = NULL_TREE;
   if (type == NULL)
     /* Common var.  */
-    nt = fieldtype;
+    nt = static_fc_field ? static_fc_field->new_type : fieldtype;
   else
-    {
-      /* RECORD_TYPE var.  */
-      if (type->has_escaped ())
-	nt = type->type;
-      else
-	nt = type->newtype[0];
-    }
+    /* RECORD_TYPE var.  */
+    nt = type->has_escaped () ? type->type : type->newtype[0];
+
   tree field = make_node (FIELD_DECL);
 
   /* Used for recursive types.
@@ -898,10 +986,40 @@ srfield::create_new_reorder_fields (tree newtype[max_split],
   TREE_THIS_VOLATILE (field) = TREE_THIS_VOLATILE (fielddecl);
   DECL_CONTEXT (field) = newtype[clusternum];
 
+  if (flag_ipa_struct_sfc && base->fc_info && base->fc_info->static_fc_p)
+    {
+      DECL_PACKED (field) = 1;
+
+      if (static_fc_field)
+	{
+	  /* Always not align compressed fields.  */
+	  SET_DECL_ALIGN (field, 0);
+
+	  if (static_fc_field->bits)
+	    {
+	      DECL_BIT_FIELD (field) = 1;
+	      DECL_SIZE (field) = bitsize_int (static_fc_field->bits);
+	      DECL_NONADDRESSABLE_P (field) = 1;
+	      /* Build unsigned bitfield integer type.  */
+	      nt = build_nonstandard_integer_type (static_fc_field->bits, 1);
+	      TREE_TYPE (field) = nt;
+	      static_fc_field->new_type = nt;
+	    }
+	}
+    }
+
   reorder_fields (newfields, newlast, field);
 
   /* srfield member variable, which stores the new field decl.  */
   newfield[0] = field;
+}
+
+bool
+srfield::dead_field_p ()
+{
+  return current_layout_opt_level & DEAD_FIELD_ELIMINATION
+	       && !(field_access & READ_FIELD)
+	       && !FUNCTION_POINTER_TYPE_P (fieldtype);
 }
 
 /* Given a struct s whose fields has already reordered by size, we try to
@@ -962,6 +1080,35 @@ srtype::calculate_bucket_size ()
     return 0;
   bucket_parts = ++parts;
   return parts * relayout_part_size;
+}
+
+bool
+srtype::has_recursive_field_type ()
+{
+  /* A dead field is ignored as it will be removed in transformation.  */
+  for (const auto &srf : fields)
+    if (srf->type == this && !srf->dead_field_p ())
+      return true;
+  return false;
+}
+
+void
+srtype::check_fc_fields ()
+{
+  if (!fc_info || !fc_info->static_fc_p)
+    return;
+
+  for (unsigned i = 0; i < fields.length (); i++)
+    {
+      fc_field *fc_f;
+      unsigned j;
+      FOR_EACH_VEC_ELT (fc_info->static_fc_fields, j, fc_f)
+      if (fields[i]->fielddecl == fc_f->field)
+	{
+	  fields[i]->static_fc_field = fc_f;
+	  break;
+	}
+    }
 }
 
 /* Create the new TYPE corresponding to THIS type.  */
@@ -1037,12 +1184,11 @@ srtype::create_new_type (void)
 	}
     }
 
+  check_fc_fields ();
   for (unsigned i = 0; i < fields.length (); i++)
     {
       srfield *f = fields[i];
-      if (current_layout_opt_level & DEAD_FIELD_ELIMINATION
-	  && !(f->field_access & READ_FIELD)
-	  && !FUNCTION_POINTER_TYPE_P (f->fieldtype))
+      if (f->dead_field_p ())
 	{
 	  /* Fields with escape risks should not be processed. */
 	  if (f->type == NULL || (f->type->escapes == does_not_escape))
@@ -1268,10 +1414,32 @@ srfield::simple_dump (FILE *f)
     fprintf (f, "field (%d)", DECL_UID (fielddecl));
 }
 
+sraccess::sraccess (tree e, gimple *s, cgraph_node *n, srfunction *srfn,
+		    srtype *t, tree b, srfield *f)
+    : expr (e),
+      stmt (s),
+      node (n),
+      function (srfn),
+      type (t),
+      base (b),
+      field (f)
+{
+  for (unsigned i = 0; i < gimple_num_ops (stmt); i++)
+    {
+      if (gimple_op (stmt, i) == expr)
+	{
+	  index = i;
+	  return;
+	}
+    }
+
+  gcc_unreachable ();
+}
+
 /* Dump out the access structure to FILE.  */
 
 void
-sraccess::dump (FILE *f)
+sraccess::dump (FILE *f) const
 {
   fprintf (f, "access { ");
   fprintf (f, "type = '(");
@@ -1291,6 +1459,36 @@ sraccess::dump (FILE *f)
   fprintf (f, "}\n");
 }
 
+/* Check if it's an assignment to the given type.  */
+
+bool
+sraccess::write_type_p (tree type) const
+{
+  return this->type && this->type->type == type
+	 && is_gimple_assign (stmt)
+	 && index == 0;
+}
+
+/* Check if it's an assignment to the given field.  */
+
+bool
+sraccess::write_field_p (tree fielddecl) const
+{
+  return field && field->fielddecl == fielddecl
+	 && is_gimple_assign (stmt)
+	 && index == 0;
+}
+
+/* Check if it's an assignment that read the given field.  */
+
+bool
+sraccess::read_field_p (tree fielddecl) const
+{
+  return field && field->fielddecl == fielddecl
+	 && is_gimple_assign (stmt)
+	 && index > 0;
+}
+
 /* Dump out the decl structure to FILE.  */
 
 void
@@ -1304,6 +1502,79 @@ srdecl::dump (FILE *file)
   print_generic_expr (file, decl);
   fprintf (file, " type: ");
   type->simple_dump (file);
+}
+
+void
+fc_field_class::dump (FILE *file) const
+{
+  fprintf (file, "field type: ");
+  print_generic_expr (file, fieldtype);
+  fprintf (file, "\n");
+  fprintf (file, "fields: ");
+
+  unsigned i;
+  srfield *srf;
+  FOR_EACH_VEC_ELT (srfields, i, srf)
+    {
+      print_generic_expr (file, srf->fielddecl);
+      if (i == srfields.length () - 1)
+	fprintf (file, "\n");
+      else
+	fprintf (file, ", ");
+    }
+}
+
+unsigned
+fc_field_class::size () const
+{
+  return srfields.length ();
+}
+
+/* Search and return the index of the given srfield.
+   Return -1 if couldn't find the srfield.  */
+
+int
+fc_field_class::get_field_index (srfield *field) const
+{
+  unsigned i;
+  srfield *srf;
+  FOR_EACH_VEC_ELT (srfields, i, srf)
+    if (srf == field)
+      return i;
+
+  return -1;
+}
+
+fc_field_class *
+fc_type_info::find_field_class_by_type (tree type) const
+{
+  for (auto *field_class : field_classes)
+    {
+      if (field_class->fieldtype == type)
+	return field_class;
+    }
+
+  return NULL;
+}
+
+fc_field_class *
+fc_type_info::record_field_class (srfield *srf)
+{
+  if (srf->field_class)
+    return srf->field_class;
+
+  fc_field_class *field_class = find_field_class_by_type (srf->fieldtype);
+
+  if (!field_class)
+    {
+      field_class = new fc_field_class (srf->fieldtype);
+      field_classes.safe_push (field_class);
+    }
+
+  srf->field_class = field_class;
+  field_class->srfields.safe_push (srf);
+
+  return field_class;
 }
 
 } // namespace struct_reorg
@@ -1397,22 +1668,33 @@ csrtype::init_type_info (void)
 
 namespace {
 
+struct const_map
+{
+  tree var;
+  HOST_WIDE_INT value;
+  const_map (tree var, HOST_WIDE_INT value)
+    : var (var), value (value)
+  {}
+};
+
 struct ipa_struct_reorg
 {
+private:
+  auto_vec_del<const_map> global_consts;
+
 public:
   // Constructors
   ipa_struct_reorg (void)
-    : current_function (NULL),
-      done_recording (false)
+    : done_recording (false)
   {}
 
   // Fields
   auto_vec_del<srtype> types;
   auto_vec_del<srfunction> functions;
   srglobal globals;
-  srfunction *current_function;
   hash_set <cgraph_node *> safe_functions;
   auto_vec<srtype *> ext_func_types;
+  auto_vec_del<fc_type_info> fc_infos;
 
   bool done_recording;
 
@@ -1557,6 +1839,43 @@ public:
   void relayout_field_copy (gimple_stmt_iterator *, gimple *, tree, tree,
 			    tree&, tree &);
   bool do_semi_relayout (gimple_stmt_iterator *, gimple *, tree &, tree &);
+
+  // field-compress methods:
+  bool get_base_type (tree, tree &, srtype *&, srfield *&);
+  void check_and_prune_struct_for_field_compression ();
+  bool find_field_compression_candidate (srtype *);
+  void classify_fields (fc_type_info *);
+  bool find_static_fc_fields (fc_type_info *);
+  bool compress_fields (fc_type_info *);
+  bool find_shadow_fields (fc_type_info *);
+  bool find_shadow_fields (fc_type_info *, fc_field_class *);
+  bool find_pair_stmts (fc_field_class *, fc_shadow_info &);
+  void add_pair_stmts_group (fc_shadow_info &,
+			     const auto_vec<gimple *> &,
+			     const auto_vec<unsigned> &);
+  srfield *read_field_in_fc_class_p (gimple *, fc_field_class *);
+  srfield *write_field_in_fc_class_p (gimple *, fc_field_class *);
+  fc_field *fc_fields_contains (auto_vec<fc_field *> &, tree);
+  bool fc_pair_stmts_rhs_equal_p (const auto_vec<gimple *> &);
+  bool fc_operand_equal_p (tree, tree);
+  bool fc_global_const_p (tree, HOST_WIDE_INT &);
+  bool fc_peephole_const_p (tree, HOST_WIDE_INT &);
+  const_map *find_global_const (tree);
+  bool check_unpair_stmt (fc_field_class *, gimple *,
+			  srfunction *, srfield *);
+  tree find_mem_base (tree);
+  gimple *find_alloc_stmt (tree);
+  bool static_compress_p (fc_type_info *, tree);
+  HOST_WIDE_INT find_max_value (srtype *, tree);
+  std::pair<bool, HOST_WIDE_INT> find_assign_max_value (gimple *);
+  bool struct_copy_p (gimple *, tree);
+  bool find_hot_access (fc_type_info *, auto_vec<fc_field *> &);
+  void cleanup_shadow_write (fc_type_info *);
+  void rewrite_shadow_read (fc_type_info *);
+  void insert_shadow_stmt (gimple *, unsigned, fc_field *, tree);
+  bool compress_fields_static (fc_type_info *info);
+  void compress_to_bitfields (fc_type_info *info);
+  auto_vec<basic_block> collect_all_predecessor (gimple *);
 };
 
 struct ipa_struct_relayout
@@ -2224,13 +2543,16 @@ ipa_struct_reorg::dump_newtypes (FILE *f)
 				       field; field = DECL_CHAIN (field))
 	  {
 	    fprintf (f, "field (%d) ", DECL_UID (field));
-	    fprintf (f, "{");
+	    print_generic_expr (f, field);
+	    fprintf (f, " {");
 	    fprintf (f, "type = ");
 	    print_generic_expr (f, TREE_TYPE (field));
 	    fprintf (f, "}\n");
 	  }
-	fprintf (f, "}\n ");
-	fprintf (f, "\n");
+	fprintf (f, "}\n");
+	fprintf (f, "size : ");
+	print_generic_expr (f, TYPE_SIZE_UNIT (type->newtype[0]));
+	fprintf (f, "\n\n");
     }
 }
 
@@ -3939,6 +4261,9 @@ ipa_struct_reorg::maybe_record_assign (cgraph_node *node, gassign *stmt)
 	mark_type_as_escape (TREE_TYPE (lhs), escape_array, stmt);
       if (TREE_CODE (rhs) == ARRAY_REF)
 	mark_type_as_escape (TREE_TYPE (rhs), escape_array, stmt);
+
+      record_stmt_expr (lhs, node, stmt);
+      record_stmt_expr (rhs, node, stmt);
     }
 }
 
@@ -4401,7 +4726,8 @@ ipa_struct_reorg::record_stmt_expr (tree expr, cgraph_node *node, gimple *stmt)
 
 
   /* Record it.  */
-  type->add_access (new sraccess (stmt, node, type, field));
+  type->add_access (new sraccess (expr, stmt, node, find_function (node),
+				  type, base, field));
 }
 
 /* Find function corresponding to NODE.  */
@@ -7469,8 +7795,8 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	      gsi_insert_before (gsi, g, GSI_SAME_STMT);
 	    }
 	  remove = true;
-	} 
-      else 
+	}
+      else
 	{
 	  for (unsigned i = 0; i < max_split && newrhs1[i] && newrhs2[i]; i++)
 	    {
@@ -7516,6 +7842,11 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	    continue;
 	  tree lhs_expr = newlhs[i] ? newlhs[i] : lhs;
 	  tree rhs_expr = newrhs[i] ? newrhs[i] : rhs;
+
+	  tree conv_rhs = build_convert_gimple (lhs_expr, rhs_expr, gsi);
+	  if (conv_rhs)
+	    rhs_expr = conv_rhs;
+
 	  gimple *newstmt = gimple_build_assign (lhs_expr, rhs_expr);
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
@@ -8106,6 +8437,18 @@ ipa_struct_reorg::rewrite_functions (void)
 {
   unsigned retval = 0;
 
+  if (flag_ipa_struct_sfc_shadow)
+    {
+      for (unsigned i = 0; i < fc_infos.length (); i++)
+	{
+	  fc_type_info *info = fc_infos[i];
+	  if (!info || !info->static_fc_p)
+	    continue;
+	  cleanup_shadow_write (info);
+	  rewrite_shadow_read (info);
+	}
+    }
+
   /* Create new types, if we did not create any new types,
      then don't rewrite any accesses.  */
   if (!create_new_types ())
@@ -8518,6 +8861,1142 @@ ipa_struct_reorg::check_and_prune_struct_for_semi_relayout (void)
     }
 }
 
+/* Get the BASE and field of the VAR.  */
+bool
+ipa_struct_reorg::get_base_type (tree var, tree &base,
+				 srtype *&type, srfield *&field)
+{
+  if (!var || TREE_CODE (var) != COMPONENT_REF)
+    return false;
+
+  /* Ignore data access that is canonical.  */
+  bool realpart, imagpart;
+  bool address;
+  bool indirect;
+  bool escape_from_base;
+  return get_type_field (var, base, indirect, type, field,
+			 realpart, imagpart, address, escape_from_base);
+}
+
+void
+ipa_struct_reorg::check_and_prune_struct_for_field_compression (void)
+{
+  for (auto *type : types)
+    {
+      if (dump_file)
+	{
+	  fprintf (dump_file, "[field compress] Analyzing type : ");
+	  print_generic_expr (dump_file, type->type);
+	  fprintf (dump_file, "\n");
+	}
+
+      /* Check if the type is escaped or not.  */
+      if (type->has_escaped ())
+	continue;
+
+      type->fc_info = new fc_type_info (type);
+      fc_infos.safe_push (type->fc_info);
+
+      if (!find_field_compression_candidate (type))
+	continue;
+
+      gcc_assert (type->fc_info->static_fc_p);
+      if (dump_file)
+	{
+	  fprintf (dump_file, "[field compress] Found candidate: ");
+	  print_generic_expr (dump_file, type->type);
+	  fprintf (dump_file, "\n");
+	}
+
+      /* Support only 1 type.  */
+      break;
+    }
+}
+
+/* Find a field compression candidate.  */
+
+bool
+ipa_struct_reorg::find_field_compression_candidate (srtype *type)
+{
+  if (type->has_recursive_field_type ())
+    {
+      FC_DUMP_MSG ("Recursive field type unsupported\n");
+      return false;
+    }
+
+  fc_type_info *info = type->fc_info;
+
+  /* Classify fields by field type firstly.  */
+  classify_fields (info);
+
+  if (flag_ipa_struct_sfc)
+    {
+      FC_DUMP_MSG ("Looking for static fc fields\n");
+      info->static_fc_p = find_static_fc_fields (info);
+    }
+
+  if (!info->static_fc_p)
+    {
+      FC_DUMP_MSG ("Fail finding field compression candidate\n");
+      return false;
+    }
+
+  if (!compress_fields (info))
+    {
+      FC_DUMP_MSG ("Fail compressing fields\n");
+      return false;
+    }
+
+  return true;
+}
+
+/* Classify all fields by data type.  */
+
+void
+ipa_struct_reorg::classify_fields (fc_type_info *info)
+{
+  for (auto *srf : info->type->fields)
+    info->record_field_class (srf);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      unsigned i;
+      fc_field_class *field_class;
+      FOR_EACH_VEC_ELT (info->field_classes, i, field_class)
+	{
+	  fprintf (dump_file, "[field compress] %dth field class:\n", i);
+	  field_class->dump (dump_file);
+	}
+    }
+}
+
+/* Scan all of fields to check whether each can be statically
+   compressed or not.  */
+
+bool
+ipa_struct_reorg::find_static_fc_fields (fc_type_info *info)
+{
+  bool found_static_compress = false;
+
+  if (flag_ipa_struct_sfc_shadow)
+    found_static_compress |= find_shadow_fields (info);
+
+  for (auto *srf : info->type->fields)
+    {
+      /* We have marked these fields as shadow, so skip them.  */
+      if (fc_fields_contains (info->static_fc_fields, srf->fielddecl))
+	continue;
+
+      found_static_compress |= static_compress_p (info, srf->fielddecl);
+    }
+
+  if (!found_static_compress)
+    {
+      FC_DUMP_MSG ("Fail finding static fc fields\n");
+      return false;
+    }
+
+  gcc_assert (!info->static_fc_fields.is_empty ());
+
+  /* Avoid compressing fields without hot access.  */
+  if (!find_hot_access (info, info->static_fc_fields))
+    {
+      FC_DUMP_MSG ("Fail finding hot access for static\n");
+      return false;
+    }
+
+  return true;
+}
+
+/* Compress fields and create new field types.  */
+
+bool
+ipa_struct_reorg::compress_fields (fc_type_info *info)
+{
+  if (info->static_fc_p && !compress_fields_static (info))
+    info->static_fc_p = false;
+
+  if (!info->static_fc_p)
+    return false;
+
+  compress_to_bitfields (info);
+
+  return true;
+}
+
+/* Check if the type has any field that can be shadowed.  */
+
+bool
+ipa_struct_reorg::find_shadow_fields (fc_type_info *info)
+{
+  FC_DUMP_MSG ("Finding shadow fields\n");
+
+  bool found_shadow = false;
+  for (auto *field_class : info->field_classes)
+    {
+      /* Field shadowing requires two or more fields.  */
+      if (field_class->size () < 2)
+	continue;
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Find shadow field for field class:\n");
+	  field_class->dump (dump_file);
+	}
+
+      if (find_shadow_fields (info, field_class))
+	{
+	  found_shadow = true;
+	  continue;
+	}
+
+      FC_DUMP_MSG ("Fail finding shadow field\n");
+    }
+
+  return found_shadow;
+}
+
+bool
+ipa_struct_reorg::find_shadow_fields (fc_type_info *info,
+				      fc_field_class *field_class)
+{
+  /* Find and record all pair assignments.  */
+  fc_shadow_info shadow_info;
+  if (!find_pair_stmts (field_class, shadow_info))
+    return false;
+
+  /* Unpair assignment checking.  */
+  auto &srfields = field_class->srfields;
+  unsigned original_index = 0;
+  if (shadow_info.unpair_stmt)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Find unpair assignment:\n");
+	  print_gimple_stmt (dump_file, shadow_info.unpair_stmt, 0);
+	}
+
+      original_index = shadow_info.unpair_stmt_index;
+      if (!check_unpair_stmt (field_class,
+			      shadow_info.unpair_stmt,
+			      shadow_info.unpair_stmt_func,
+			      srfields[original_index]))
+	return false;
+    }
+
+  /* Add a new static fc_field.  */
+  srfield *original_srf = srfields[original_index];
+
+  unsigned i;
+  srfield *shadow_srf;
+  FOR_EACH_VEC_ELT (srfields, i, shadow_srf)
+    {
+      if (i == original_index)
+	continue;
+
+      fc_field *fc_f = new fc_field (shadow_srf->fielddecl, 1, original_srf);
+      info->static_fc_fields.safe_push (fc_f);
+
+      /* Record all shadow stmts to fc_field.  */
+      unsigned j;
+      auto_vec<gimple *> *group;
+      FOR_EACH_VEC_ELT (shadow_info.pair_stmts_groups, j, group)
+	{
+	  fc_f->shadow_stmts.safe_push ((*group)[i]);
+	  fc_f->shadow_stmts_func.safe_push (shadow_info.pair_stmts_func[j]);
+	}
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Found shadow field: ");
+	  print_generic_expr (dump_file, shadow_srf->fielddecl);
+	  fprintf (dump_file, "\n");
+	}
+    }
+
+  return true;
+}
+
+bool
+ipa_struct_reorg::find_pair_stmts (fc_field_class *field_class,
+				   fc_shadow_info &info)
+{
+  for (auto *srfn : functions)
+    {
+      SET_CFUN (srfn);
+      basic_block bb = NULL;
+      FOR_EACH_BB_FN (bb, cfun)
+	{
+	  auto_vec<gimple *> group;
+	  auto_vec<unsigned> indexes;
+	  auto_bitmap visited_fields;
+	  bool read = false;
+
+	  for (auto si = gsi_start_bb (bb); !gsi_end_p (si); gsi_next (&si))
+	    {
+	      gimple *stmt = gsi_stmt (si);
+	      if (!is_gimple_assign (stmt))
+		continue;
+
+	      /* Check if any of the fields have been read.
+		 We need to make sure there is no stmt
+		 reading the fields within a pair stmt group.  */
+	      if (read_field_in_fc_class_p (stmt, field_class))
+		read = true;
+
+	      srfield *srf = write_field_in_fc_class_p (stmt, field_class);
+	      if (!srf)
+		continue;
+
+	      /* Multiple rhs is not considered conservatively.  */
+	      if (gimple_assign_rhs_class (stmt) != GIMPLE_SINGLE_RHS)
+		return false;
+
+	      /* Initialize the read flag when recording first stmt.
+		 The read flag must be false when recording
+		 the rest of the stmts.  */
+	      if (group.is_empty ())
+		read = false;
+	      else if (read)
+		return false;
+
+	      int index = field_class->get_field_index (srf);
+	      if (index == -1 || !bitmap_set_bit (visited_fields, index))
+		return false;
+
+	      indexes.safe_push (index);
+	      group.safe_push (stmt);
+	      if (group.length () == field_class->size ())
+		{
+		  if (!fc_pair_stmts_rhs_equal_p (group))
+		    return false;
+
+		  add_pair_stmts_group (info, group, indexes);
+		  info.pair_stmts_func.safe_push (srfn);
+		  group.truncate (0);
+		  indexes.truncate (0);
+		  bitmap_clear (visited_fields);
+		}
+
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "[BB #%d] Record stmt: ", bb->index);
+		  print_gimple_stmt (dump_file, stmt, 0);
+		}
+	    }
+
+	  /* Only support one unpair assignment now.  */
+	  if (!group.is_empty ())
+	    {
+	      if (info.unpair_stmt || group.length () > 1)
+		return false;
+	      info.unpair_stmt = group[0];
+	      info.unpair_stmt_func = srfn;
+	      info.unpair_stmt_index = indexes[0];
+	    }
+	}
+    }
+
+  return true;
+}
+
+/* Reorder a group of pair stmts and add it to fc_shadow_info.  */
+
+void
+ipa_struct_reorg::add_pair_stmts_group (fc_shadow_info &info,
+					const auto_vec<gimple *> &group,
+					const auto_vec<unsigned> &indexes)
+{
+  auto ordered_group = new auto_vec<gimple *> (group.length ());
+
+  unsigned i;
+  unsigned ordered_index;
+  FOR_EACH_VEC_ELT (indexes, i, ordered_index)
+    (*ordered_group)[ordered_index] = group[i];
+
+  info.pair_stmts_groups.safe_push (ordered_group);
+}
+
+/* Check if the stmt reads any field in the given field class.  */
+
+srfield *
+ipa_struct_reorg::read_field_in_fc_class_p (gimple *stmt,
+					    fc_field_class *fclass)
+{
+  for (unsigned i = 1; i < gimple_num_ops (stmt); i++)
+    {
+      tree base = NULL_TREE;
+      srtype *type = NULL;
+      srfield *field = NULL;
+      if (!get_base_type (gimple_op (stmt, i), base, type, field))
+	continue;
+
+      if (field && field->field_class == fclass)
+	return field;
+    }
+
+  return NULL;
+}
+
+/* Check if the stmt reads any field in the given field class.  */
+
+srfield *
+ipa_struct_reorg::write_field_in_fc_class_p (gimple *stmt,
+					     fc_field_class *fclass)
+{
+  tree base = NULL_TREE;
+  srtype *type = NULL;
+  srfield *field = NULL;
+
+  if (!get_base_type (gimple_assign_lhs (stmt), base, type, field)
+      || !field
+      || field->field_class != fclass)
+    return NULL;
+
+  return field;
+}
+
+fc_field *
+ipa_struct_reorg::fc_fields_contains (auto_vec<fc_field *> &fc_fields,
+				      tree field)
+{
+  for (auto *fc_f : fc_fields)
+    if (fc_f->field == field)
+      return fc_f;
+
+  return NULL;
+}
+
+/* Check if the right operands of all assignments are equal.  */
+
+bool
+ipa_struct_reorg::fc_pair_stmts_rhs_equal_p (const auto_vec<gimple *> &stmts)
+{
+  if (stmts.length () < 2)
+    return false;
+
+  tree rhs = gimple_assign_rhs1 (stmts[0]);
+  for (unsigned i = 1; i < stmts.length (); i++)
+    if (!fc_operand_equal_p (rhs, gimple_assign_rhs1 (stmts[i])))
+      return false;
+
+  return true;
+}
+
+/* Check if VAR1 and VAR2 are equal for field compression.  */
+
+bool
+ipa_struct_reorg::fc_operand_equal_p (tree var1, tree var2)
+{
+  if (operand_equal_p (var1, var2))
+    return true;
+
+  /* Match code and operands.  */
+  tree_code code = TREE_CODE (var1);
+  if (code != TREE_CODE (var2))
+    return false;
+
+  if (code == SSA_NAME)
+    {
+      gimple *stmt1 = SSA_NAME_DEF_STMT (var1);
+      gimple *stmt2 = SSA_NAME_DEF_STMT (var2);
+      return is_gimple_assign (stmt1) && is_gimple_assign (stmt2)
+	     && fc_operand_equal_p (gimple_assign_rhs_to_tree (stmt1),
+				    gimple_assign_rhs_to_tree (stmt2));
+    }
+
+  /* Only part of the cases are covered now.  */
+  HOST_WIDE_INT value;
+  switch (get_gimple_rhs_class (code))
+    {
+      case GIMPLE_UNARY_RHS:
+	return ((code == COMPONENT_REF || code == MEM_REF)
+		&& fc_global_const_p (var1, value)
+		&& operand_equal_p (var1, var2, COMPARE_DECL_FLAGS));
+      case GIMPLE_BINARY_RHS:
+	return fc_operand_equal_p (TREE_OPERAND (var1, 0),
+				   TREE_OPERAND (var2, 0))
+	       && fc_operand_equal_p (TREE_OPERAND (var1, 1),
+				      TREE_OPERAND (var2, 1));
+      default:
+	return false;
+    }
+}
+
+/* Return true if VAR is a global variable, and it is assigned to be a constant
+   and it is never changed globally.  The assumption is this VAR doesn't have
+   address taken, and the type containing it doesn't escape.  */
+
+bool
+ipa_struct_reorg::fc_global_const_p (tree var, HOST_WIDE_INT &value)
+{
+  srtype *type;
+  srfield *field;
+  tree base;
+  if (!get_base_type (var, base, type, field) || type->has_escaped ())
+    return false;
+
+  const_map *cm = find_global_const (var);
+  if (cm)
+    {
+      value = cm->value;
+      return true;
+    }
+
+  bool is_const = false;
+  HOST_WIDE_INT const_value = 0;
+  for (auto *access : type->accesses)
+    {
+      SET_CFUN (access->function);
+
+      gimple *stmt = access->stmt;
+      if (!gimple_assign_single_p (stmt)
+	  || !operand_equal_p (gimple_assign_lhs (stmt), var))
+	continue;
+
+      if (!fc_peephole_const_p (gimple_assign_rhs1 (stmt), value))
+	return false;
+
+      /* Make sure the value is never changed.  */
+      if (is_const)
+	{
+	  if (value != const_value)
+	    return false;
+	  continue;
+	}
+
+      is_const = true;
+      const_value = value;
+
+      /* Record a global constant here.  */
+      global_consts.safe_push (new const_map (var, value));
+    }
+
+  return is_const;
+}
+
+/* Return true if VAR is a simple constant that can be identified by peephole.
+   and the HWI will be updated accordingly.  Otherwise, the HWI will not be
+   changed.  */
+
+bool
+ipa_struct_reorg::fc_peephole_const_p (tree var, HOST_WIDE_INT &value)
+{
+  if (TREE_CODE (var) == INTEGER_CST)
+    {
+      value = tree_to_shwi (var);
+      return true;
+    }
+
+  if (TREE_CODE (var) != SSA_NAME)
+    return false;
+
+  /* Var might be an argument.  */
+  gimple *stmt = SSA_NAME_DEF_STMT (var);
+  if (!is_gimple_assign (stmt))
+    return false;
+
+  if (gimple_assign_load_p (stmt))
+    return fc_global_const_p (gimple_assign_rhs1 (stmt), value);
+
+  HOST_WIDE_INT value1, value2;
+  if (gimple_assign_rhs_class (stmt) != GIMPLE_BINARY_RHS
+      || !fc_peephole_const_p (gimple_assign_rhs1 (stmt), value1)
+      || !fc_peephole_const_p (gimple_assign_rhs2 (stmt), value2))
+    return false;
+
+  enum tree_code rhs_code = gimple_assign_rhs_code (stmt);
+  switch (rhs_code)
+    {
+      case PLUS_EXPR:
+	value = value1 + value2;
+	break;
+      case MULT_EXPR:
+	value = value1 * value2;
+	break;
+      case MAX_EXPR:
+	value = (value1 > value2) ? value1 : value2;
+	break;
+      case MIN_EXPR:
+	value = (value1 < value2) ? value1 : value2;
+	break;
+      default:
+	return false;
+    }
+
+  return true;
+}
+
+const_map *
+ipa_struct_reorg::find_global_const (tree var)
+{
+  for (auto *cm : global_consts)
+    if (operand_equal_p (cm->var, var))
+      return cm;
+
+  return NULL;
+}
+
+/* The unpair statement need to meet the following requirements:
+   (1) The array being accessed(mem base) should be allocated by calloc()
+       so that we can make sure its values are initialized as zero
+   (2) There must not be any assignment to other fields in the same
+       field class in the same array before the unpair stmt
+
+   These requirements are to ensure we know the value of shadow fields
+   when an unpair stmt happens.  */
+
+bool
+ipa_struct_reorg::check_unpair_stmt (fc_field_class *field_class,
+				     gimple *unpair_stmt,
+				     srfunction *unpair_stmt_func,
+				     srfield *unpair_field)
+{
+  SET_CFUN (unpair_stmt_func);
+
+  srtype *type = NULL;
+  srfield *field = NULL;
+  tree base = NULL_TREE;
+  if (!get_base_type (gimple_assign_lhs (unpair_stmt), base, type, field))
+    return false;
+
+  /* The array being accessed.  */
+  tree mem_base = find_mem_base (base);
+  if (!mem_base)
+    return false;
+
+  auto blocks = collect_all_predecessor (unpair_stmt);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Found %d blocks that can reach <bb %d> in func ",
+	       blocks.length (), gimple_bb (unpair_stmt)->index);
+      print_generic_expr (dump_file, cfun->decl);
+      fprintf (dump_file, ":\n");
+
+      for (auto *bb : blocks)
+	fprintf (dump_file, "%d ", bb->index);
+
+      fprintf (dump_file, "\n\n");
+    }
+
+  /* Check requirement (2).  */
+  for (auto *bb : blocks)
+    {
+      for (auto gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
+	{
+	  gimple *stmt = gsi_stmt (gsi);
+	  if (!is_gimple_assign (stmt))
+	    continue;
+
+	  if (!get_base_type (gimple_assign_lhs (stmt), base, type, field)
+	      || field->field_class != field_class
+	      || field == unpair_field)
+	    continue;
+
+	  /* Accessing to different array is allowed.  */
+	  tree cur_mem_base = find_mem_base (base);
+	  if (!cur_mem_base || operand_equal_p (mem_base, cur_mem_base))
+	    return false;
+	}
+    }
+
+  return true;
+}
+
+/* Search backward following def/use chain until finding a memory pointer.  */
+
+tree
+ipa_struct_reorg::find_mem_base (tree var)
+{
+  auto_bitmap visited;
+  auto_vec<tree> worklists;
+  worklists.safe_push (var);
+
+  tree mem_base = NULL_TREE;
+  while (!worklists.is_empty ())
+    {
+      tree t = worklists.pop ();
+      if (TREE_CODE (t) != SSA_NAME)
+	{
+	  gimple *alloc_stmt = find_alloc_stmt (t);
+	  if (!alloc_stmt || !is_gimple_call (alloc_stmt))
+	    return NULL;
+
+	  tree alloc_lhs = gimple_call_lhs (alloc_stmt);
+	  if (mem_base && !operand_equal_p (mem_base, alloc_lhs))
+	    return NULL;
+
+	  mem_base = alloc_lhs;
+	  continue;
+	}
+
+      if (!bitmap_set_bit (visited, SSA_NAME_VERSION (t)))
+	continue;
+
+      gimple *stmt = SSA_NAME_DEF_STMT (t);
+      if (gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
+	{
+	  if (mem_base && !operand_equal_p (mem_base, t))
+	    return NULL;
+	  mem_base = t;
+	}
+      else if (gimple_assign_rhs_code_p (stmt, POINTER_PLUS_EXPR)
+	       || gimple_assign_single_p (stmt))
+	{
+	  worklists.safe_push (gimple_assign_rhs1 (stmt));
+	}
+      else if (gimple_code (stmt) == GIMPLE_PHI)
+	{
+	  for (unsigned i = 0; i < gimple_phi_num_args (stmt); i++)
+	    worklists.safe_push (gimple_phi_arg_def (stmt, i));
+	}
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      if (mem_base)
+	{
+	  FC_DUMP_MSG ("Found memory base: ");
+	  print_generic_expr (dump_file, mem_base);
+	  fprintf (dump_file, "\n");
+	}
+      else
+	FC_DUMP_MSG ("Fail finding memory base\n");
+    }
+
+  return mem_base;
+}
+
+/* Return allocation stmt for a non-ssa var.
+
+   _1 = calloc(...);
+   var = _1;
+
+   We will try to find the above pattern and return the first stmt.  */
+
+gimple *
+ipa_struct_reorg::find_alloc_stmt (tree var)
+{
+  basic_block bb = NULL;
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      for (gimple_stmt_iterator si = gsi_start_bb (bb); !gsi_end_p (si);
+	   gsi_next (&si))
+	{
+	  gimple *stmt = gsi_stmt (si);
+	  if (!is_gimple_assign (stmt)
+	      || !operand_equal_p (gimple_assign_lhs (stmt), var))
+	    continue;
+
+	  if (!gimple_assign_single_p (stmt))
+	    return NULL;
+
+	  tree rhs1 = gimple_assign_rhs1 (stmt);
+	  if (integer_zerop (rhs1))
+	    continue;
+
+	  if (TREE_CODE (rhs1) != SSA_NAME)
+	    return NULL;
+
+	  gimple *def_stmt = SSA_NAME_DEF_STMT (rhs1);
+	  if (!gimple_call_builtin_p (def_stmt, BUILT_IN_CALLOC))
+	    return NULL;
+
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      FC_DUMP_MSG ("Found allocation stmt: ");
+	      print_gimple_stmt (dump_file, def_stmt, 0);
+	    }
+
+	  return def_stmt;
+	}
+    }
+
+  return NULL;
+}
+
+/* Scan field's assignments globally to determine whether it can be statically
+   compressed or not.  */
+
+bool
+ipa_struct_reorg::static_compress_p (fc_type_info *info, tree field)
+{
+  HOST_WIDE_INT max_value = find_max_value (info->type, field);
+
+  /* We cannot know the max value at compile time, if it is 0.  */
+  if (!max_value)
+    return false;
+
+  fc_field *fc_f = new fc_field (field, max_value, 0);
+  info->static_fc_fields.safe_push (fc_f);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Found a static compression field: ");
+      print_generic_expr (dump_file, field);
+      fprintf (dump_file, ", max_value = %ld\n", max_value);
+    }
+
+  return true;
+}
+
+/* Scan field's assignments globally to find the max value.  */
+
+HOST_WIDE_INT
+ipa_struct_reorg::find_max_value (srtype *type, tree field)
+{
+  auto_vec<tree> worklist;
+  auto_bitmap visited;
+  HOST_WIDE_INT max_value = 0;
+
+  for (auto *access : type->accesses)
+    {
+      if (!access->write_field_p (field)
+	  || !gimple_assign_single_p (access->stmt))
+	continue;
+
+      SET_CFUN (access->function);
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Check stmt: ");
+	  print_gimple_stmt (dump_file, access->stmt, 0);
+	  fprintf (dump_file, "\n");
+	}
+
+      auto [found, value] = find_assign_max_value (access->stmt);
+      if (!found)
+	return 0;
+
+      if (value > UINT_MAX)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      FC_DUMP_MSG ("Max value of ");
+	      print_generic_expr (dump_file, field);
+	      fprintf (dump_file, " is too big, max_value = %ld\n", value);
+	    }
+	  return 0;
+	}
+
+      if (value > max_value)
+	max_value = value;
+    }
+
+  return max_value;
+}
+
+/* Trace back to find the max value.
+   Return value contains two parts:
+     first:
+       true: Found a max value.
+       false: Otherwise.
+     second: The max value if found.  */
+
+std::pair<bool, HOST_WIDE_INT>
+ipa_struct_reorg::find_assign_max_value (gimple *stmt)
+{
+  auto_vec<tree> worklist;
+  auto_bitmap visited;
+  HOST_WIDE_INT max_value = 0;
+
+  worklist.safe_push (gimple_assign_rhs1 (stmt));
+  while (!worklist.is_empty ())
+    {
+      tree t = worklist.pop ();
+
+      if (TREE_CODE (t) == INTEGER_CST)
+	{
+	  HOST_WIDE_INT value = TREE_INT_CST_LOW (t);
+	  if (value < 0)
+	    return {false, 0};
+	  if (value > max_value)
+	    max_value = value;
+	  continue;
+	}
+
+      /* Trace back through ssa's def chain.  */
+      if (TREE_CODE (t) != SSA_NAME)
+	return {false, 0};
+
+      if (!bitmap_set_bit (visited, SSA_NAME_VERSION (t)))
+	continue;
+
+      gimple *def_stmt = SSA_NAME_DEF_STMT (t);
+      if (gimple_code (def_stmt) == GIMPLE_PHI)
+	{
+	  for (unsigned i = 0; i < gimple_phi_num_args (def_stmt); i++)
+	    worklist.safe_push (gimple_phi_arg_def (def_stmt, i));
+	}
+      else if (gimple_code (def_stmt) == GIMPLE_ASSIGN)
+	{
+	  if (gimple_assign_rhs_class (def_stmt) != GIMPLE_SINGLE_RHS
+	      && !CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (def_stmt)))
+	    return {false, 0};
+	  worklist.safe_push (gimple_assign_rhs1 (def_stmt));
+	}
+      else
+	{
+	  return {false, 0};
+	}
+    }
+
+  return {true, max_value};
+}
+
+/* Check if it is a struct copy.  */
+
+bool
+ipa_struct_reorg::struct_copy_p (gimple *stmt, tree type)
+{
+  if (!gimple_assign_single_p (stmt)
+      || TREE_TYPE (gimple_assign_lhs (stmt)) != type
+      || !types_compatible_p (TREE_TYPE (gimple_assign_rhs1 (stmt)), type))
+    return false;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Found struct copy: \n");
+      print_gimple_stmt (dump_file, stmt, 0);
+      fprintf (dump_file, "\n");
+    }
+
+  return true;
+}
+
+/* Return true if we can find a hot loop, in which
+   (1) there is a struct copy for the fc_type
+   (2) or, all fc_fields have been written.  */
+
+bool
+ipa_struct_reorg::find_hot_access (fc_type_info *info,
+				   auto_vec<fc_field *> &fc_fields)
+{
+  /* Record which fields are written in a block.  */
+  hash_map<basic_block, hash_set<tree>> write_map;
+
+  srtype *type = info->type;
+  for (auto *access : type->accesses)
+    {
+      SET_CFUN (access->function);
+
+      basic_block bb = access->stmt->bb;
+      if (!bb->loop_father->num
+	  || !access->write_type_p (type->type))
+	continue;
+
+      /* Case (1).  */
+      if (struct_copy_p (access->stmt, type->type))
+	return true;
+
+      /* Case (2).  */
+      if (!access->field)
+	continue;
+
+      tree fielddecl = access->field->fielddecl;
+      if (!fielddecl || !fc_fields_contains (fc_fields, fielddecl))
+	continue;
+
+      auto &set = write_map.get_or_insert (bb);
+      set.add (fielddecl);
+
+      /* Now all fields have been written.  */
+      if (set.elements () == fc_fields.length ())
+	return true;
+    }
+
+  return false;
+}
+
+/* Clean up all of write stmts to shadow field by changing the RHS to be true,
+   which means it is a shadow.  */
+
+void
+ipa_struct_reorg::cleanup_shadow_write (fc_type_info *info)
+{
+  for (auto *fc_f : info->static_fc_fields)
+    {
+      if (!fc_f->original)
+	continue;
+
+      unsigned i;
+      gimple *stmt;
+      FOR_EACH_VEC_ELT (fc_f->shadow_stmts, i, stmt)
+	{
+	  SET_CFUN (fc_f->shadow_stmts_func[i]);
+	  gcc_assert (gimple_assign_single_p (stmt));
+	  gimple_assign_set_rhs1 (
+	    stmt, build_int_cst (TREE_TYPE (fc_f->field), 1));
+	  update_stmt (stmt);
+	}
+    }
+}
+
+/* Rewrite all of read of shadow field by using question expression.  */
+
+void
+ipa_struct_reorg::rewrite_shadow_read (fc_type_info *info)
+{
+  for (auto *fc_f : info->static_fc_fields)
+    {
+      if (!fc_f->original)
+	continue;
+
+      for (auto *access : info->type->accesses)
+	{
+	  if (!access->read_field_p (fc_f->field))
+	    continue;
+
+	  SET_CFUN (access->function);
+	  insert_shadow_stmt (access->stmt, access->index,
+			      fc_f, access->base);
+	}
+    }
+}
+
+/* Insert the followings for shadow data read before STMT.
+   The IDX operand is the shadow data.
+
+   * For static: (shadow_field == true) ? original_field : 0 */
+
+void
+ipa_struct_reorg::insert_shadow_stmt (gimple *stmt, unsigned idx,
+				      fc_field *fc_field, tree base)
+{
+  tree shadow = gimple_op (stmt, idx);
+  tree original = build_field_ref (base, fc_field->original->fielddecl);
+
+  /* Insert new stmt immediately before stmt.  */
+  gimple_stmt_iterator gsi = gsi_for_stmt (stmt);
+
+  /* original_ssa = original */
+  tree original_ssa = make_temp_ssa_name (TREE_TYPE (original), NULL, "");
+  gimple *original_stmt = gimple_build_assign (original_ssa, original);
+  gsi_insert_before (&gsi, original_stmt, GSI_SAME_STMT);
+  update_stmt (original_stmt);
+
+  /* shadow_ssa = shadow */
+  tree shadow_ssa = make_temp_ssa_name (TREE_TYPE (shadow), NULL, "");
+  gimple *shadow_stmt = gimple_build_assign (shadow_ssa, shadow);
+  gsi_insert_before (&gsi, shadow_stmt, GSI_SAME_STMT);
+  update_stmt (shadow_stmt);
+
+  /* new_shadow_ssa = (shadow_ssa == true ? original_ssa : 0) */
+  tree cond = fold_build2 (EQ_EXPR, boolean_type_node, shadow_ssa,
+			   build_int_cst (TREE_TYPE (shadow), 1));
+
+  tree new_shadow = build_cond_expr (cond, original_ssa,
+				     build_int_cst (TREE_TYPE (shadow), 0));
+  new_shadow = force_gimple_operand_gsi (&gsi, new_shadow, true, NULL, true,
+					 GSI_SAME_STMT);
+  tree new_shadow_ssa = make_temp_ssa_name (TREE_TYPE (shadow), NULL, "");
+  gimple *new_shadow_stmt = gimple_build_assign (new_shadow_ssa, new_shadow);
+  gsi_insert_before (&gsi, new_shadow_stmt, GSI_SAME_STMT);
+
+  gimple_set_op (stmt, idx, new_shadow_ssa);
+  update_stmt (new_shadow_stmt);
+  update_stmt (stmt);
+}
+
+/* Compress fields and create static new field types.  */
+
+bool
+ipa_struct_reorg::compress_fields_static (fc_type_info *info)
+{
+  /* For static compression fields, compress them according to max_value.  */
+  for (auto *fc_f : info->static_fc_fields)
+    {
+      tree old_type = TREE_TYPE (fc_f->field);
+      tree new_type = NULL_TREE;
+
+      HOST_WIDE_INT max_value = fc_f->max_value;
+      gcc_assert (max_value > 0 && max_value <= UINT_MAX);
+
+      /* Conservatively we only do static compression for unsigned type.  */
+      if (max_value <= 0xff)
+	new_type = unsigned_char_type_node;
+      else if (max_value <= 0xffff)
+	new_type = short_unsigned_type_node;
+      else
+	new_type = unsigned_type_node;
+
+      fc_f->new_type = new_type;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Change the type of ");
+	  print_generic_expr (dump_file, fc_f->field);
+	  fprintf (dump_file, " from (prec=%d) to ", TYPE_PRECISION (old_type));
+	  print_generic_expr (dump_file, new_type);
+	  fprintf (dump_file, "(prec=%d)\n", TYPE_PRECISION (new_type));
+	}
+    }
+
+  return true;
+}
+
+/* Compress fields to bitfield, for which bits will be the width.  */
+
+void
+ipa_struct_reorg::compress_to_bitfields (fc_type_info *info)
+{
+  /* For static compression.  Calculate bitsize for static field.  */
+  if (flag_ipa_struct_sfc_bitfield && info->static_fc_p)
+    {
+      for (auto *fc_f : info->static_fc_fields)
+	{
+	  HOST_WIDE_INT max_value = fc_f->max_value;
+	  gcc_assert (max_value > 0 && max_value <= UINT_MAX);
+
+	  /* Calculate bitsize.  */
+	  fc_f->bits = 0;
+	  while (max_value)
+	    {
+	      fc_f->bits++;
+	      max_value >>= 1;
+	    }
+
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      FC_DUMP_MSG ("Bitfield: ");
+	      print_generic_expr (dump_file, fc_f->field);
+	      fprintf (dump_file, ":%d", fc_f->bits);
+	      fprintf (dump_file, "\n");
+	    }
+	}
+    }
+}
+
+/* Collect all blocks that can reach stmt.  */
+
+auto_vec<basic_block>
+ipa_struct_reorg::collect_all_predecessor (gimple *stmt)
+{
+  auto_vec<basic_block> blocks;
+  basic_block start_bb = gimple_bb (stmt);
+
+  if (start_bb)
+    {
+      auto_bitmap visited;
+      auto_vec<basic_block> worklists;
+      worklists.safe_push (start_bb);
+
+      while (!worklists.is_empty ())
+	{
+	  basic_block bb = worklists.pop ();
+	  if (!bitmap_set_bit (visited, bb->index))
+	    continue;
+
+	  blocks.safe_push (bb);
+	  edge e;
+	  edge_iterator ei;
+	  FOR_EACH_EDGE (e, ei, bb->preds)
+	    worklists.safe_push (e->src);
+	}
+    }
+
+  return blocks;
+}
 
 /* Init pointer size from parameter param_pointer_compression_size.  */
 
@@ -8562,6 +10041,8 @@ ipa_struct_reorg::execute (unsigned int opt)
 	check_and_prune_struct_for_pointer_compression ();
       if (opt >= SEMI_RELAYOUT)
 	check_and_prune_struct_for_semi_relayout ();
+      if (flag_ipa_struct_sfc)
+	check_and_prune_struct_for_field_compression ();
       ret = rewrite_functions ();
     }
   else

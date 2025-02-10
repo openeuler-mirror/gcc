@@ -18875,8 +18875,11 @@ static void
 override_C_optimize_options (struct gcc_options *opts)
 {
   opts->x_flag_ipa_reorder_fields = 1;
-  opts->x_flag_ipa_struct_reorg = 6;
-  opts->x_struct_layout_optimize_level = 6;
+  opts->x_flag_ipa_struct_reorg = 5;
+  opts->x_struct_layout_optimize_level = 5;
+  opts->x_flag_ipa_struct_sfc = 1;
+  opts->x_flag_ipa_struct_sfc_bitfield = 1;
+  opts->x_flag_ipa_struct_sfc_shadow = 1;
   opts->x_flag_gnu89_inline = 1;
   opts->x_flag_convert_minmax = 1;
   opts->x_flag_tree_slp_transpose_vectorize = 1;

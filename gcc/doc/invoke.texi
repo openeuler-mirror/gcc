@@ -528,6 +528,7 @@ Objective-C and Objective-C++ Dialects}.
 -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const @gol
 -fipa-reorder-fields @gol
 -fipa-struct-reorg @gol
+-fipa-struct-sfc  -fipa-struct-sfc-bitfield  -fipa-struct-sfc-shadow @gol
 -fipa-reference  -fipa-reference-addressable @gol
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm} @gol
 -flive-patching=@var{level} @gol

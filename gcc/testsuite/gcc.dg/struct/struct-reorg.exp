@@ -65,6 +65,18 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/pc*.c]] \
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/semi_relayout*.c]] \
 	"" "-fipa-struct-reorg=6 -fdump-ipa-all -flto-partition=one -fwhole-program"
 
+# -fipa-struct-sfc
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-sfc -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
+# -fipa-struct-sfc -fipa-struct-sfc-bitfield
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc-bitfield_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-sfc -fipa-struct-sfc-bitfield -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
+# -fipa-struct-sfc -fipa-struct-sfc-shadow
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc-shadow_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-sfc -fipa-struct-sfc-shadow -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
 # All done.
 torture-finish
 dg-finish
