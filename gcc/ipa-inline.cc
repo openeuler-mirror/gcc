@@ -225,38 +225,6 @@ caller_growth_limits (struct cgraph_edge *e)
   return true;
 }
 
-/* Warn and prompt the user, and output only once for the file pair where
-   the function is located.  */
-
-static void
-prompt_inline_failed_target_option_reason (struct cgraph_edge *e)
-{
-  static std::set<std::pair<void*, void*>> address_pair_set;
-  if (e->inline_failed == CIF_TARGET_OPTION_MISMATCH
-      && !cl_target_option_eq_major (target_opts_for_fn (e->caller->decl),
-	   target_opts_for_fn (e->callee->ultimate_alias_target ()->decl))
-      && e->caller->lto_file_data
-      && e->callee->ultimate_alias_target ()->lto_file_data)
-    {
-      std::pair<void*, void*> addr_pair
-	= std::make_pair (&e->caller->lto_file_data,
-			  &e->callee->ultimate_alias_target ()->lto_file_data);
-      if (address_pair_set.find (addr_pair) != address_pair_set.end ())
-	return;
-
-      address_pair_set.insert (addr_pair);
-      warning (0, "LTO objects caller in: %s, callee in: %s, not inlinable: %s."
-	       " Try to use -finline-force=callee_object_or_lib_name to force "
-	       "inline", e->caller->lto_file_data->file_name,
-	       e->callee->ultimate_alias_target ()->lto_file_data->file_name,
-	       cgraph_inline_failed_string (CIF_TARGET_OPTION_MISMATCH));
-
-      cl_target_option_print_diff
-	(stderr, 2, target_opts_for_fn (e->caller->decl),
-	target_opts_for_fn (e->callee->ultimate_alias_target ()->decl));
-    }
-}
-
 /* Dump info about why inlining has failed.  */
 
 static void
@@ -289,8 +257,6 @@ report_inline_failed_reason (struct cgraph_edge *e)
 	    (dump_file, 2, opts_for_fn (e->caller->decl),
 	     opts_for_fn (e->callee->ultimate_alias_target ()->decl));
     }
-
-  prompt_inline_failed_target_option_reason (e);
 }
 
  /* Decide whether sanitizer-related attributes allow inlining. */
