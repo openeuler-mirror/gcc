@@ -4367,6 +4367,20 @@ ipa_struct_reorg::wholeaccess (tree expr, tree base,
   if (!handled_type (TREE_TYPE (expr)))
     return false;
 
+  if (!t || !t->type)
+    return false;
+
+  tree type = TYPE_MAIN_VARIANT (t->type);
+  if (TREE_CODE (expr) == MEM_REF
+      && POINTER_TYPE_P (TREE_TYPE (expr))
+      && POINTER_TYPE_P (accesstype)
+      && POINTER_TYPE_P (TREE_TYPE (accesstype))
+      && POINTER_TYPE_P (TREE_TYPE (base))
+      && TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (base))) == type
+      && TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (expr))) == type
+      && TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (accesstype))) == type)
+    return false;
+
   srtype *other_type = find_type (inner_type (TREE_TYPE (expr)));
 
   if (t == other_type)
@@ -5372,11 +5386,8 @@ ipa_struct_reorg::record_function (cgraph_node *node)
   function *fn;
   tree parm, var;
   unsigned int i;
-  srfunction *sfn;
+  srfunction *sfn = NULL;
   escape_type escapes = does_not_escape;
-
-  sfn = new srfunction (node);
-  functions.safe_push (sfn);
 
   if (dump_file  && (dump_flags & TDF_DETAILS))
     fprintf (dump_file,
@@ -5394,6 +5405,9 @@ ipa_struct_reorg::record_function (cgraph_node *node)
 
   if (!fn)
     return sfn;
+
+  sfn = new srfunction (node);
+  functions.safe_push (sfn);
 
   current_function = sfn;
 
@@ -8983,6 +8997,10 @@ ipa_struct_reorg::find_static_fc_fields (fc_type_info *info)
 
   for (auto *srf : info->type->fields)
     {
+      /* Avoid compressing non-integer type.  */
+      if (TREE_CODE (srf->fieldtype) != INTEGER_TYPE)
+	continue;
+
       /* We have marked these fields as shadow, so skip them.  */
       if (fc_fields_contains (info->static_fc_fields, srf->fielddecl))
 	continue;
@@ -9034,6 +9052,11 @@ ipa_struct_reorg::find_shadow_fields (fc_type_info *info)
   bool found_shadow = false;
   for (auto *field_class : info->field_classes)
     {
+      /* Avoid shadowing non-integer type, we can try to do this
+	 in the future.  */
+      if (TREE_CODE (field_class->fieldtype) != INTEGER_TYPE)
+	continue;
+
       /* Field shadowing requires two or more fields.  */
       if (field_class->size () < 2)
 	continue;
