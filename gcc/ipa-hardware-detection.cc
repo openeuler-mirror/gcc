@@ -89,7 +89,7 @@ create_part_bb (basic_block last_bb, tree part_base)
 		     &gsi, PLUS_EXPR, unsigned_type_node, part_base,
 		     build_int_cst (unsigned_type_node, 4294963967));
   gcond *cond = gimple_build_cond (LE_EXPR, part_cond,
-				   build_int_cst (unsigned_type_node, 2),
+				   build_int_cst (unsigned_type_node, 128),
 				   NULL_TREE, NULL_TREE);
   gimple_set_location (cond, input_location);
   gsi_insert_before (&gsi, cond, GSI_SAME_STMT);

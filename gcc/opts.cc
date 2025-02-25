@@ -3486,12 +3486,19 @@ common_handle_option (struct gcc_options *opts,
       break;
     
     case OPT_fauto_bolt_:
-      opts->x_flag_auto_bolt = true;
+      if (get_optimize_decision_from_ai4c ())
+	{
+	  opts->x_flag_auto_bolt = true;
+	}
       /* FALLTHRU */
     case OPT_fauto_bolt:
       if (opts->x_flag_bolt_use)
         error_at (loc,
 		  "-fauto-bolt conflicts with -fbolt-use.");
+      if (get_optimize_decision_from_ai4c ())
+	{
+	  opts->x_flag_auto_bolt = true;
+	}
       break;
 
     case OPT_fbolt_use_:
@@ -3499,6 +3506,10 @@ common_handle_option (struct gcc_options *opts,
       if (opts->x_flag_auto_bolt)
         error_at (loc,
 		  "-fauto-bolt conflicts with -fbolt-use.");
+      if (get_optimize_decision_from_ai4c ())
+	{
+	  opts->x_flag_bolt_use = true;
+	}
     break;
 
     case OPT_fbolt_target_:
