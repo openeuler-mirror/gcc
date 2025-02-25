@@ -1579,6 +1579,12 @@ print_exp (pretty_printer *pp, const_rtx x, int verbose)
       op[1] = XEXP (x, 1);
       op[2] = XEXP (x, 2);
       break;
+    case PREFETCH_FULL:
+      fun = "prefetch_full";
+      op[0] = XEXP (x, 0);
+      op[1] = XEXP (x, 1);
+      op[2] = XEXP (x, 2);
+      break;
     case UNSPEC:
     case UNSPEC_VOLATILE:
       {

@@ -1952,7 +1952,7 @@
 (define_insn "@aarch64_sve_prefetch<mode>"
   [(prefetch (unspec:DI
 	       [(match_operand:<VPRED> 0 "register_operand" "Upl")
-		(match_operand:SVE_FULL_I 1 "aarch64_sve_prefetch_operand" "UP<Vesize>")
+		(match_operand:SVE_FULL 1 "aarch64_sve_prefetch_operand" "UP<Vesize>")
 		(match_operand:DI 2 "const_int_operand")]
 	       UNSPEC_SVE_PREFETCH)
 	     (match_operand:DI 3 "const_int_operand")
@@ -1985,14 +1985,14 @@
 ;; 6: the prefetch operator (an svprfop)
 ;; 7: the normal RTL prefetch rw flag
 ;; 8: the normal RTL prefetch locality value
-(define_insn "@aarch64_sve_gather_prefetch<SVE_FULL_I:mode><VNx4SI_ONLY:mode>"
+(define_insn "@aarch64_sve_gather_prefetch<SVE_FULL:mode><VNx4SI_ONLY:mode>"
   [(prefetch (unspec:DI
 	       [(match_operand:VNx4BI 0 "register_operand" "Upl, Upl, Upl, Upl, Upl, Upl")
-		(match_operand:DI 1 "aarch64_sve_gather_offset_<SVE_FULL_I:Vesize>" "Z, vg<SVE_FULL_I:Vesize>, rk, rk, rk, rk")
+		(match_operand:DI 1 "aarch64_sve_gather_offset_<SVE_FULL:Vesize>" "Z, vg<SVE_FULL:Vesize>, rk, rk, rk, rk")
 		(match_operand:VNx4SI_ONLY 2 "register_operand" "w, w, w, w, w, w")
 		(match_operand:DI 3 "const_int_operand" "i, i, Z, Ui1, Z, Ui1")
-		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL_I:Vesize>" "Ui1, Ui1, Ui1, Ui1, i, i")
-		(match_operand:SVE_FULL_I 5 "aarch64_simd_imm_zero")
+		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL:Vesize>" "Ui1, Ui1, Ui1, Ui1, i, i")
+		(match_operand:SVE_FULL 5 "aarch64_simd_imm_zero")
 		(match_operand:DI 6 "const_int_operand")]
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
@@ -2000,12 +2000,12 @@
   "TARGET_SVE && TARGET_NON_STREAMING"
   {
     static const char *const insns[][2] = {
-      "prf<SVE_FULL_I:Vesize>", "%0, [%2.s]",
-      "prf<SVE_FULL_I:Vesize>", "%0, [%2.s, #%1]",
+      "prf<SVE_FULL:Vesize>", "%0, [%2.s]",
+      "prf<SVE_FULL:Vesize>", "%0, [%2.s, #%1]",
       "prfb", "%0, [%1, %2.s, sxtw]",
       "prfb", "%0, [%1, %2.s, uxtw]",
-      "prf<SVE_FULL_I:Vesize>", "%0, [%1, %2.s, sxtw %p4]",
-      "prf<SVE_FULL_I:Vesize>", "%0, [%1, %2.s, uxtw %p4]"
+      "prf<SVE_FULL:Vesize>", "%0, [%1, %2.s, sxtw %p4]",
+      "prf<SVE_FULL:Vesize>", "%0, [%1, %2.s, uxtw %p4]"
     };
     const char *const *parts = insns[which_alternative];
     return aarch64_output_sve_prefetch (parts[0], operands[6], parts[1]);
@@ -2014,14 +2014,14 @@
 
 ;; Predicated gather prefetches for 64-bit elements.  The value of operand 3
 ;; doesn't matter in this case.
-(define_insn "@aarch64_sve_gather_prefetch<SVE_FULL_I:mode><VNx2DI_ONLY:mode>"
+(define_insn "@aarch64_sve_gather_prefetch<SVE_FULL:mode><VNx2DI_ONLY:mode>"
   [(prefetch (unspec:DI
 	       [(match_operand:VNx2BI 0 "register_operand" "Upl, Upl, Upl, Upl")
-		(match_operand:DI 1 "aarch64_sve_gather_offset_<SVE_FULL_I:Vesize>" "Z, vg<SVE_FULL_I:Vesize>, rk, rk")
+		(match_operand:DI 1 "aarch64_sve_gather_offset_<SVE_FULL:Vesize>" "Z, vg<SVE_FULL:Vesize>, rk, rk")
 		(match_operand:VNx2DI_ONLY 2 "register_operand" "w, w, w, w")
 		(match_operand:DI 3 "const_int_operand")
-		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL_I:Vesize>" "Ui1, Ui1, Ui1, i")
-		(match_operand:SVE_FULL_I 5 "aarch64_simd_imm_zero")
+		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL:Vesize>" "Ui1, Ui1, Ui1, i")
+		(match_operand:SVE_FULL 5 "aarch64_simd_imm_zero")
 		(match_operand:DI 6 "const_int_operand")]
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
@@ -2029,10 +2029,10 @@
   "TARGET_SVE && TARGET_NON_STREAMING"
   {
     static const char *const insns[][2] = {
-      "prf<SVE_FULL_I:Vesize>", "%0, [%2.d]",
-      "prf<SVE_FULL_I:Vesize>", "%0, [%2.d, #%1]",
+      "prf<SVE_FULL:Vesize>", "%0, [%2.d]",
+      "prf<SVE_FULL:Vesize>", "%0, [%2.d, #%1]",
       "prfb", "%0, [%1, %2.d]",
-      "prf<SVE_FULL_I:Vesize>", "%0, [%1, %2.d, lsl %p4]"
+      "prf<SVE_FULL:Vesize>", "%0, [%1, %2.d, lsl %p4]"
     };
     const char *const *parts = insns[which_alternative];
     return aarch64_output_sve_prefetch (parts[0], operands[6], parts[1]);
@@ -2040,7 +2040,7 @@
 )
 
 ;; Likewise, but with the offset being sign-extended from 32 bits.
-(define_insn_and_rewrite "*aarch64_sve_gather_prefetch<SVE_FULL_I:mode><VNx2DI_ONLY:mode>_sxtw"
+(define_insn_and_rewrite "*aarch64_sve_gather_prefetch<SVE_FULL:mode><VNx2DI_ONLY:mode>_sxtw"
   [(prefetch (unspec:DI
 	       [(match_operand:VNx2BI 0 "register_operand" "Upl, Upl")
 		(match_operand:DI 1 "register_operand" "rk, rk")
@@ -2051,8 +2051,8 @@
 		       (match_operand:VNx2DI 2 "register_operand" "w, w")))]
 		  UNSPEC_PRED_X)
 		(match_operand:DI 3 "const_int_operand")
-		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL_I:Vesize>" "Ui1, i")
-		(match_operand:SVE_FULL_I 5 "aarch64_simd_imm_zero")
+		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL:Vesize>" "Ui1, i")
+		(match_operand:SVE_FULL 5 "aarch64_simd_imm_zero")
 		(match_operand:DI 6 "const_int_operand")]
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
@@ -2061,7 +2061,7 @@
   {
     static const char *const insns[][2] = {
       "prfb", "%0, [%1, %2.d, sxtw]",
-      "prf<SVE_FULL_I:Vesize>", "%0, [%1, %2.d, sxtw %p4]"
+      "prf<SVE_FULL:Vesize>", "%0, [%1, %2.d, sxtw %p4]"
     };
     const char *const *parts = insns[which_alternative];
     return aarch64_output_sve_prefetch (parts[0], operands[6], parts[1]);
@@ -2073,7 +2073,7 @@
 )
 
 ;; Likewise, but with the offset being zero-extended from 32 bits.
-(define_insn "*aarch64_sve_gather_prefetch<SVE_FULL_I:mode><VNx2DI_ONLY:mode>_uxtw"
+(define_insn "*aarch64_sve_gather_prefetch<SVE_FULL:mode><VNx2DI_ONLY:mode>_uxtw"
   [(prefetch (unspec:DI
 	       [(match_operand:VNx2BI 0 "register_operand" "Upl, Upl")
 		(match_operand:DI 1 "register_operand" "rk, rk")
@@ -2081,8 +2081,8 @@
 		  (match_operand:VNx2DI 2 "register_operand" "w, w")
 		  (match_operand:VNx2DI 9 "aarch64_sve_uxtw_immediate"))
 		(match_operand:DI 3 "const_int_operand")
-		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL_I:Vesize>" "Ui1, i")
-		(match_operand:SVE_FULL_I 5 "aarch64_simd_imm_zero")
+		(match_operand:DI 4 "aarch64_gather_scale_operand_<SVE_FULL:Vesize>" "Ui1, i")
+		(match_operand:SVE_FULL 5 "aarch64_simd_imm_zero")
 		(match_operand:DI 6 "const_int_operand")]
 	       UNSPEC_SVE_PREFETCH_GATHER)
 	     (match_operand:DI 7 "const_int_operand")
@@ -2091,7 +2091,7 @@
   {
     static const char *const insns[][2] = {
       "prfb", "%0, [%1, %2.d, uxtw]",
-      "prf<SVE_FULL_I:Vesize>", "%0, [%1, %2.d, uxtw %p4]"
+      "prf<SVE_FULL:Vesize>", "%0, [%1, %2.d, uxtw %p4]"
     };
     const char *const *parts = insns[which_alternative];
     return aarch64_output_sve_prefetch (parts[0], operands[6], parts[1]);

@@ -534,6 +534,7 @@ builtin_safe_for_const_function_p (bool *looping, tree callee)
 	*looping = false;
 	return true;
       case BUILT_IN_PREFETCH:
+      case BUILT_IN_PREFETCH_FULL:
 	*looping = true;
 	return true;
       default:

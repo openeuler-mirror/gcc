@@ -83,6 +83,7 @@ extern void dump_function_to_file (tree, FILE *, dump_flags_t);
 extern void debug_function (tree, dump_flags_t);
 extern void print_loops_bb (FILE *, basic_block, int, int);
 extern void print_loops (FILE *, int);
+extern void loop_dump (FILE *file, class loop *loop);
 extern void debug (class loop &ref);
 extern void debug (class loop *ptr);
 extern void debug_verbose (class loop &ref);

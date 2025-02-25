@@ -2108,6 +2108,13 @@ enable_fdo_optimizations (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, flag_tree_loop_distribution, value);
 }
 
+static void
+set_cache_misses_profile_params (struct gcc_options *opts,
+				 struct gcc_options *opts_set)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_prefetch_loop_arrays, 1);
+}
+
 /* Enable cfgo-related flags.  */
 
 static void
@@ -3143,10 +3150,20 @@ common_handle_option (struct gcc_options *opts,
       /* FALLTHRU */
     case OPT_fauto_profile:
       enable_fdo_optimizations (opts, opts_set, value);
-	  /* 2 is special and means flag_profile_correction trun on by
-	     -fauto-profile.  */
+      /* 2 is special and means flag_profile_correction trun on by
+	 -fauto-profile.  */
       SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_correction,
-			   (value ? 2 : 0));
+		      (value ? 2 : 0));
+      break;
+
+    case OPT_fadditional_profile_:
+      opts->x_additional_profile_file = xstrdup (arg);
+      opts->x_flag_additional_profile = true;
+      value = true;
+      /* No break here - do -fadditional-profile processing. */
+      /* FALLTHRU */
+    case OPT_fadditional_profile:
+      opts->x_flag_ipa_extend_auto_profile = value;
       break;
 
     case OPT_fipa_struct_reorg_:
@@ -3155,15 +3172,34 @@ common_handle_option (struct gcc_options *opts,
     case OPT_fipa_struct_reorg:
       opts->x_flag_ipa_struct_reorg = value;
       if (value && !opts->x_struct_layout_optimize_level)
-	{
-	  /* Using the -fipa-struct-reorg option is equivalent to using
-	     -fipa-struct-reorg=1.  */
-	  opts->x_struct_layout_optimize_level = 1;
-	}
+      {
+	      /* Using the -fipa-struct-reorg option is equivalent to using
+		 -fipa-struct-reorg=1.  */
+	      opts->x_struct_layout_optimize_level = 1;
+      }
       break;
 
     case OPT_fipa_reorder_fields:
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_struct_reorg, value);
+      break;
+
+    case OPT_fipa_extend_auto_profile:
+      opts->x_flag_ipa_extend_auto_profile = opts->x_flag_cache_misses_profile
+	      ? true : value;
+      break;
+
+    case OPT_fcache_misses_profile_:
+      opts->x_cache_misses_profile_file = xstrdup (arg);
+      opts->x_flag_cache_misses_profile = true;
+      value = true;
+      /* No break here - do -fcache-misses-profile processing. */
+      /* FALLTHRU */
+    case OPT_fcache_misses_profile:
+      opts->x_flag_ipa_extend_auto_profile = value;
+      if (value)
+      {
+	      set_cache_misses_profile_params (opts, opts_set);
+      }
       break;
 
     case OPT_fcfgo_profile_generate_:

@@ -2814,6 +2814,10 @@ do {								        \
 #define PREFETCH_SCHEDULE_BARRIER_P(RTX)					\
   (RTL_FLAG_CHECK1 ("PREFETCH_SCHEDULE_BARRIER_P", (RTX), PREFETCH)->volatil)
 
+/* True if RTX is flagged to be a scheduling barrier.  */
+#define PREFETCH_FULL_SCHEDULE_BARRIER_P(RTX)				\
+  (RTL_FLAG_CHECK1 ("PREFETCH_FULL_SCHEDULE_BARRIER_P", (RTX), PREFETCH_FULL)->volatil)
+
 /* Indicate whether the machine has any sort of auto increment addressing.
    If not, we can avoid checking for REG_INC notes.  */
 

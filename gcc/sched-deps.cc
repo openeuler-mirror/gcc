@@ -2705,7 +2705,9 @@ sched_analyze_2 (class deps_desc *deps, rtx x, rtx_insn *insn)
       break;
 
     case PREFETCH:
-      if (PREFETCH_SCHEDULE_BARRIER_P (x))
+    case PREFETCH_FULL:
+      if ((code == PREFETCH && PREFETCH_SCHEDULE_BARRIER_P (x))
+          || (code == PREFETCH_FULL && PREFETCH_FULL_SCHEDULE_BARRIER_P (x)))
 	reg_pending_barrier = TRUE_BARRIER;
       /* Prefetch insn contains addresses only.  So if the prefetch
 	 address has no registers, there will be no dependencies on
