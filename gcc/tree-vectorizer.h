@@ -2177,6 +2177,7 @@ extern bool slpeel_can_duplicate_loop_p (const class loop *, const_edge);
 class loop *slpeel_tree_duplicate_loop_to_edge_cfg (class loop *,
 						     class loop *, edge);
 class loop *vect_loop_versioning (loop_vec_info, gimple *);
+class loop *vect_loop_versioning_2 (loop_vec_info, gimple *);
 extern class loop *vect_do_peeling (loop_vec_info, tree, tree,
 				    tree *, tree *, tree *, int, bool, bool,
 				    tree *);

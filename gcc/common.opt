@@ -1148,6 +1148,26 @@ Common Joined RejectNegative Var(auto_profile_file)
 Use sample profile information for call graph node weights. The profile
 file is specified in the argument.
 
+fcache-misses-profile
+Common Var(flag_cache_misses_profile)
+Use sample profile information for source code cache miss count.  The default
+profile file is cmsdata.gcov in `pwd`.
+
+fcache-misses-profile=
+Common Joined RejectNegative Var(cache_misses_profile_file)
+Use sample profile information for source code cache miss count.  The profile
+file is specified in the argument.
+
+fadditional-profile
+Common Var(flag_additional_profile)
+Use additional PMU-event sample profile information for source code bb count.
+The default profile file is addldata.gcov in `pwd`.
+
+fadditional-profile=
+Common Joined RejectNegative Var(additional_profile_file)
+Use additional PMU-event sample profile information for source code bb count.
+The profile file is specified in the argument.
+
 ; -fcheck-bounds causes gcc to generate array bounds checks.
 ; For C, C++ and ObjC: defaults off.
 ; For Java: defaults to on.
@@ -2074,6 +2094,10 @@ fipa-struct-sfc-shadow
 Common Var(flag_ipa_struct_sfc_shadow) Init(0) Optimization
 Enable field shadowing optimization in static struct field compression.
 
+fipa-extend-auto-profile
+Common Var(flag_ipa_extend_auto_profile)
+Use sample profile information for source code.
+
 fipa-vrp
 Common Var(flag_ipa_vrp) Optimization
 Perform IPA Value Range Propagation.
@@ -2423,6 +2447,10 @@ Generate prefetch instructions, if available, for arrays in loops.
 fipa-prefetch
 Common Var(flag_ipa_prefetch) Init(0) Optimization
 Generate prefetch instructions, if available, using IPA info.
+
+fllc-allocate
+Common Var(flag_llc_allocate) Init(-1) Optimization
+Generate LLC hint instructions.
 
 fprofile
 Common Var(profile_flag)

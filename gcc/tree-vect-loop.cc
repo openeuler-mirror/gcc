@@ -9735,8 +9735,11 @@ vect_transform_loop (loop_vec_info loop_vinfo, gimple *loop_vectorized_call)
 
   if (LOOP_REQUIRES_VERSIONING (loop_vinfo))
     {
-      class loop *sloop
-	= vect_loop_versioning (loop_vinfo, loop_vectorized_call);
+      class loop *sloop;
+      if (!(optimize >= 2 && flag_llc_allocate > 0)) 
+	sloop = vect_loop_versioning (loop_vinfo, loop_vectorized_call);
+      else 
+	sloop = vect_loop_versioning_2 (loop_vinfo, loop_vectorized_call);
       sloop->force_vectorize = false;
       check_profitability = false;
     }
@@ -9989,7 +9992,8 @@ vect_transform_loop (loop_vec_info loop_vinfo, gimple *loop_vectorized_call)
 			   niters_vector_mult_vf, !niters_no_overflow);
 
   unsigned int assumed_vf = vect_vf_for_cost (loop_vinfo);
-  scale_profile_for_vect_loop (loop, assumed_vf);
+  if (!(optimize >= 2 && flag_llc_allocate > 0))
+    scale_profile_for_vect_loop (loop, assumed_vf);
 
   /* True if the final iteration might not handle a full vector's
      worth of scalar iterations.  */

@@ -21,7 +21,8 @@ along with GCC; see the file COPYING3.  If not see
 #ifndef GCC_TREE_SCALAR_EVOLUTION_H
 #define GCC_TREE_SCALAR_EVOLUTION_H
 
-extern tree number_of_latch_executions (class loop *);
+extern tree number_of_latch_executions (class loop *,
+					bool guarantee = true);
 extern gcond *get_loop_exit_condition (const class loop *);
 
 extern void scev_initialize (void);

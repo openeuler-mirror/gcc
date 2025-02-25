@@ -925,6 +925,45 @@
   [(set_attr "type" "load_4")]
 )
 
+(define_insn "prefetch_full"
+  [(prefetch_full (match_operand:DI 0 "aarch64_prefetch_operand" "Dp")
+            (match_operand:QI 1 "const_int_operand" "")
+            (match_operand:QI 2 "const_int_operand" ""))]
+  ""
+  {
+    const char * pftype[2][8] =
+    {
+      {"prfm\\tPLDL1KEEP, %0",
+       "prfm\\tPLDL1STRM, %0",
+       "prfm\\tPLDL2KEEP, %0",
+       "prfm\\tPLDL2STRM, %0",
+       "prfm\\tPLDL3KEEP, %0",
+       "prfm\\tPLDL3STRM, %0",
+       "prfm\\tPLDL4KEEP, %0",
+       "prfm\\tPLDL4STRM, %0"},
+      {"prfm\\tPSTL1KEEP, %0",
+       "prfm\\tPSTL1STRM, %0",
+       "prfm\\tPSTL2KEEP, %0",
+       "prfm\\tPSTL2STRM, %0",
+       "prfm\\tPSTL3KEEP, %0",
+       "prfm\\tPSTL3STRM, %0",
+       "prfm\\tPSTL4KEEP, %0",
+       "prfm\\tPSTL4STRM, %0"},
+    };
+
+    int prfop = INTVAL (operands[2]);
+
+    gcc_assert (IN_RANGE (prfop, 0, 7));
+
+    /* PRFM accepts the same addresses as a 64-bit LDR so wrap
+       the address into a DImode MEM so that aarch64_print_operand knows
+       how to print it.  */
+    operands[0] = gen_rtx_MEM (DImode, operands[0]);
+    return pftype[INTVAL (operands[1])][prfop];
+  }
+  [(set_attr "type" "load_4")]
+)
+
 (define_insn "trap"
   [(trap_if (const_int 1) (const_int 8))]
   ""

@@ -1262,4 +1262,66 @@ Range for depended ldp search in split-ldp-stp path.
 Common Joined UInteger Var(semi_relayout_level) Init(13) IntegerRange(11, 15) Param Optimization
 Set capacity of each bucket to semi-relayout to (1 << semi-relayout-level) / 8 .
 
+-param=mem-access-ratio=
+Common Joined UInteger Var(param_mem_access_ratio) Init(20) IntegerRange(0, 100) Param Optimization
+Memory access ratio (in percent).
+
+-param=mem-access-num=
+Common Joined UInteger Var(param_mem_access_num) Init(3) Param Optimization
+Memory access num.
+
+-param=prefetch-offset=
+Common Joined UInteger Var(param_prefetch_offset) Init(1024)
+IntegerRange(1, 999999) Param Optimization
+Prefetch Offset, which is usually a power of two due to cache line size.
+
+-param=branch-prob-threshold=
+Common Joined UInteger Var(param_branch_prob_threshold) Init(80) IntegerRange(50, 100)
+Param Optimization
+High Execution Rate Branch Threshold.
+
+-param=issue-topn=
+Common Joined UInteger Var(param_issue_topn) Init(1) Param Optimization
+Issue topn LLC mem_ref hint.
+
+-param=force-issue=
+Common Joined UInteger Var(param_force_issue) Init(0) IntegerRange(0, 1) Param
+Force issue the topn LLC mem_ref hint, without generating dynamic multi-branches.
+
+-param=llc-capacity-per-core=
+Common Joined UInteger Var(param_llc_capacity_per_core) Init(107) IntegerRange(0, 999999) Param
+LLC capacity per core.
+
+-param=filter-kernels=
+Common Joined UInteger Var(param_filter_kernels) Init(1) IntegerRange(0, 1) Param
+Allow LLC allocate pass to greedily filter kernels by traversing the corresponding basic blocks
+through edges with branch probability no less than param_branch_prob_threshold.
+
+-param=outer-loop-nums=
+Common Joined UInteger Var(param_outer_loop_num) Init(1) IntegerRange(1, 10) Param
+Maximum number of outer loops allowed to extend outer loops for loops that
+cannot recognize inner loop boundaries.
+
+-param=llc-level=
+Common Joined UInteger Var(param_llc_level) Init(3) IntegerRange(3, 4)
+Param Optimization
+Specifies the HBM cache level.
+
+-param=filter-mode=
+Common Joined UInteger Var(param_filter_mode) Init(1) IntegerRange(0, 1) Param
+Set kernel filtering mode. Use basic block count by default; use branch probability mode when filter mode is turned off.
+
+-param=transfer-footprint=
+Common Joined UInteger Var(param_transfer_footprint) Init(1) IntegerRange(0, 1) Param
+Allow transferring the firstly calculated footprint expression to the target memory reference
+from which it is impossible to retrieve the foortprint.
+
+-param=llc-allocate-func-topn=
+Common Joined UInteger Var(param_llc_allocate_func_topn) Init(0) Param Optimization
+TopN functions of pmu counts to be analyzed in LLC allocation.
+
+-param=llc-allocate-func-counts-threshold=
+Common Joined UInteger Var(param_llc_allocate_func_counts_threshold) Init(1) Param Optimization
+Threshold functions of pmu counts to be analyzed in LLC allocation.
+
 ; This comment is to ensure we retain the blank line above.

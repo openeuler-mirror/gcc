@@ -49,6 +49,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "auto-profile.h"
 #include "tree-pretty-print.h"
 #include "gimple-pretty-print.h"
+#include <map>
+#include <vector>
+#include <algorithm>
 
 /* The following routines implements AutoFDO optimization.
 
@@ -95,6 +98,8 @@ along with GCC; see the file COPYING3.  If not see
 */
 
 #define DEFAULT_AUTO_PROFILE_FILE "fbdata.afdo"
+#define DEFAULT_CACHE_MISSES_PROFILE_FILE "cmsdata.gcov"
+#define DEFAULT_ADDITIONAL_PROFILE_FILE "addldata.gcov"
 #define AUTO_PROFILE_VERSION 2
 
 namespace autofdo
@@ -116,6 +121,14 @@ private:
   profile_count count_;
   bool annotated_;
 };
+
+/* pair <func_decl, count>  */
+static bool
+event_count_cmp (std::pair<unsigned, gcov_type> &a,
+		 std::pair<unsigned, gcov_type> &b)
+{
+  return a.second > b.second;
+}
 
 /* Represent a source location: (function_decl, lineno).  */
 typedef std::pair<tree, unsigned> decl_lineno;
@@ -311,6 +324,9 @@ public:
   /* Mark LOC as annotated.  */
   void mark_annotated (location_t loc);
 
+  /* Compute total count threshold of top functions in sampled data.  */
+  gcov_type calc_topn_function_total_count_thres (unsigned topn) const;
+
 private:
   /* Map from function_instance name index (in string_table) to
      function_instance.  */
@@ -337,6 +353,244 @@ static autofdo_source_profile *afdo_source_profile;
 
 /* gcov_summary structure to store the profile_info.  */
 static gcov_summary *afdo_profile_info;
+
+/* Check opts->x_flags and put file name into EVENT_FILES.  */
+
+static bool
+get_all_profile_names (const char **event_files)
+{
+  if (!(flag_auto_profile
+        || (flag_cache_misses_profile || flag_additional_profile)))
+    {
+      return false;
+    }
+
+  event_files[INST_EXEC] = auto_profile_file;
+
+  if (flag_cache_misses_profile)
+    {
+      if (cache_misses_profile_file == NULL)
+        {
+          if (additional_profile_file == NULL)
+        {
+          additional_profile_file = DEFAULT_ADDITIONAL_PROFILE_FILE;
+        }
+      event_files[PMU_EVENT] = additional_profile_file;
+        }
+      event_files[CACHE_MISSES] = cache_misses_profile_file;
+    }
+  else if (flag_additional_profile)
+    {
+      if (additional_profile_file == NULL)
+        {
+          additional_profile_file = DEFAULT_ADDITIONAL_PROFILE_FILE;
+        }
+      event_files[PMU_EVENT] = additional_profile_file;
+    }
+
+  return true;
+}
+
+static void read_profile (void);
+
+/* Maintain multiple profile data of different events with event_loc_count_map
+   and event_func_count_map.  */
+
+class extend_auto_profile
+{
+public:
+  bool auto_profile_exist (enum event_type type);
+  gcov_type get_loc_count (location_t, event_type);
+  gcov_type get_func_count (unsigned, event_type);
+  gcov_type get_topn_function_total_count_thres () const;
+  struct rank_info get_func_rank (unsigned, enum event_type);
+  /* There should be only one instance of class EXTEND_AUTO_PROFILE.  */
+  static extend_auto_profile *create ()
+    {
+      extend_auto_profile *map = new extend_auto_profile ();
+      if (map->read ())
+	{
+	  return map;
+	}
+      delete map;
+      return NULL;
+    }
+private:
+  /* Basic maps of extend_auto_profile.  */
+  typedef std::map<location_t, gcov_type> loc_count_map;
+  typedef std::map<unsigned, gcov_type> func_count_map;
+
+  /* Map of function_uid to its descending order rank of counts.  */
+  typedef std::map<unsigned, unsigned> rank_map;
+
+  /* Mapping hardware events to corresponding basic maps.  */
+  typedef std::map<event_type, loc_count_map> event_loc_count_map;
+  typedef std::map<event_type, func_count_map> event_func_count_map;
+  typedef std::map<event_type, rank_map> event_rank_map;
+
+  extend_auto_profile () {}
+  bool read ();
+  void set_loc_count ();
+  void process_extend_source_profile ();
+  void read_extend_afdo_file (const char*, event_type);
+  void rank_all_func ();
+  void dump_event ();
+  event_loc_count_map event_loc_map;
+  event_func_count_map event_func_map;
+  event_rank_map func_rank;
+  event_type profile_type;
+  gcov_type topn_function_total_count_thres;
+};
+
+/* Member functions for extend_auto_profile.  */
+
+bool
+extend_auto_profile::auto_profile_exist (enum event_type type)
+{
+  switch (type)
+    {
+      case INST_EXEC:
+	return event_func_map.count (INST_EXEC) != 0
+	       || event_loc_map.count (INST_EXEC) != 0;
+      case CACHE_MISSES:
+	return event_func_map.count (CACHE_MISSES) != 0
+	       || event_loc_map.count (CACHE_MISSES) != 0;
+      case PMU_EVENT:
+	return event_func_map.count (PMU_EVENT) != 0
+	       || event_loc_map.count (PMU_EVENT) != 0;
+      default:
+	  return false;
+    }
+}
+
+void
+extend_auto_profile::dump_event ()
+{
+  if (dump_file)
+    {
+      switch (profile_type)
+	{
+	  case INST_EXEC:
+	    fprintf (dump_file, "Processing event instruction execution.\n");
+	    break;
+	  case CACHE_MISSES:
+	    fprintf (dump_file, "Processing event cache misses.\n");
+	    break;
+        case PMU_EVENT:
+	    fprintf (dump_file, "Processing other PMU events.\n");
+	    break;
+	  default:
+	    break;
+	}
+    }
+}
+
+/* Return true if any profile data was read.  */
+
+bool
+extend_auto_profile::read ()
+{
+  const char *event_files[EVENT_NUMBER] = {NULL};
+  if (!get_all_profile_names (event_files))
+    {
+      return false;
+    }
+
+  /* Backup AFDO_STRING_TABLE and AFDO_SOURCE_PROFILE since we will create
+     new ones for each event_type.  */
+  autofdo::string_table *string_table_afdo = afdo_string_table;
+  autofdo::autofdo_source_profile *source_profile_afdo = afdo_source_profile;
+
+  for (unsigned i = 0; i < EVENT_NUMBER; i++)
+    {
+      if (event_files[i] == NULL)
+	{
+	  continue;
+	}
+      profile_type = (enum event_type) i;
+      dump_event ();
+      gcov_close ();
+      auto_profile_file = event_files[i];
+      read_profile ();
+      gcov_close ();
+
+      topn_function_total_count_thres = param_llc_allocate_func_counts_threshold;
+      if (param_llc_allocate_func_topn > 0 && profile_type == PMU_EVENT)
+        {
+	  topn_function_total_count_thres
+	    = afdo_source_profile->calc_topn_function_total_count_thres (
+		param_llc_allocate_func_topn);
+        }
+
+      process_extend_source_profile ();
+
+      delete afdo_source_profile;
+      delete afdo_string_table;
+    }
+
+  /* Restore AFDO_STRING_TABLE and AFDO_SOURCE_PROFILE.  Function
+     END_AUTO_PROFILE will free them at the end of compilation.  */
+  afdo_string_table = string_table_afdo;
+  afdo_source_profile = source_profile_afdo;
+  return true;
+}
+
+/* Helper functions.  */
+
+gcov_type
+extend_auto_profile::get_loc_count (location_t loc, event_type type)
+{
+  event_loc_count_map::iterator event_iter = event_loc_map.find (type);
+  if (event_iter != event_loc_map.end ())
+    {
+      loc_count_map::iterator loc_iter = event_iter->second.find (loc);
+      if (loc_iter != event_iter->second.end ())
+	{
+	  return loc_iter->second;
+	}
+    }
+  return 0;
+}
+
+struct rank_info
+extend_auto_profile::get_func_rank (unsigned decl_uid, enum event_type type)
+{
+  struct rank_info info = {0, 0};
+  event_rank_map::iterator event_iter = func_rank.find (type);
+  if (event_iter != func_rank.end ())
+    {
+      rank_map::iterator func_iter = event_iter->second.find (decl_uid);
+      if (func_iter != event_iter->second.end ())
+	{
+	  info.rank = func_iter->second;
+	  info.total = event_iter->second.size ();
+	}
+    }
+  return info;
+}
+
+gcov_type
+extend_auto_profile::get_func_count (unsigned decl_uid, event_type type)
+{
+  event_func_count_map::iterator event_iter = event_func_map.find (type);
+  if (event_iter != event_func_map.end ())
+    {
+      func_count_map::iterator func_iter = event_iter->second.find (decl_uid);
+      if (func_iter != event_iter->second.end ())
+	{
+	  return func_iter->second;
+	}
+    }
+  return 0;
+}
+
+gcov_type
+extend_auto_profile::get_topn_function_total_count_thres () const
+{
+  return topn_function_total_count_thres;
+}
+
+static extend_auto_profile *extend_profile;
 
 /* Helper functions.  */
 
@@ -483,7 +737,7 @@ string_table::get_index (const char *name) const
   return iter->second;
 }
 
-/* Return the index of a given function DECL. Return -1 if DECL is not 
+/* Return the index of a given function DECL. Return -1 if DECL is not
    found in string table.  */
 
 int
@@ -915,6 +1169,31 @@ autofdo_source_profile::get_function_instance_by_inline_stack (
         return NULL;
     }
   return s;
+}
+
+/* Compute total count threshold of top functions in sampled data.  */
+
+gcov_type
+autofdo_source_profile::calc_topn_function_total_count_thres (
+    unsigned topn) const
+{
+  std::set<gcov_type> func_counts;
+  for (name_function_instance_map::const_iterator iter = map_.begin ();
+       iter != map_.end (); ++iter)
+    {
+      if (func_counts.size () < topn)
+        func_counts.insert (iter->second->total_count ());
+      else if (*func_counts.begin () < iter->second->total_count ())
+        {
+          func_counts.erase (func_counts.begin ());
+          func_counts.insert (iter->second->total_count ());
+        }
+    }
+ 
+  gcov_type func_counts_topn = *func_counts.begin ();
+  if (func_counts.size () == topn
+      && param_llc_allocate_func_counts_threshold < func_counts_topn)
+    return func_counts_topn;
 }
 
 /* Module profile is only used by LIPO. Here we simply ignore it.  */
@@ -1842,6 +2121,132 @@ auto_profile (void)
 
   return TODO_rebuild_cgraph_edges;
 }
+
+
+void
+extend_auto_profile::rank_all_func ()
+{
+  std::vector<std::pair<unsigned, gcov_type> > func_sorted;
+  event_func_count_map::iterator event_iter
+				 = event_func_map.find (profile_type);
+  if (event_iter != event_func_map.end ())
+    {
+      func_count_map::iterator func_iter;
+      for (func_iter = event_iter->second.begin ();
+	   func_iter != event_iter->second.end (); func_iter++)
+	{
+	  func_sorted.push_back (std::make_pair (func_iter->first,
+						 func_iter->second));
+	}
+
+      std::sort (func_sorted.begin (), func_sorted.end (), event_count_cmp);
+
+      for (unsigned i = 0; i < func_sorted.size (); ++i)
+	{
+	  func_rank[profile_type][func_sorted[i].first] = i + 1;
+	}
+    }
+}
+
+/* Iterate stmts in cfun and maintain its count to EVENT_LOC_MAP.  */
+
+void
+extend_auto_profile::set_loc_count ()
+{
+  basic_block bb;
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      gimple_stmt_iterator gsi;
+      for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
+	{
+	  count_info info;
+	  gimple *stmt = gsi_stmt (gsi);
+	  if (gimple_clobber_p (stmt) || is_gimple_debug (stmt))
+	    {
+	      continue;
+	    }
+	  if (afdo_source_profile->get_count_info (stmt, &info))
+	    {
+	      location_t loc = gimple_location (stmt);
+	      event_loc_map[profile_type][loc] += info.count;
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file, "stmt ");
+		  print_gimple_stmt (dump_file, stmt, 0, TDF_SLIM);
+		  fprintf (dump_file, "counts %ld\n",
+			   event_loc_map[profile_type][loc]);
+		}
+	    }
+	}
+    }
+}
+
+/* Process data in extend_auto_source_profile, save them into two maps.
+   1. gimple_location to count.
+   2. function_index to count.  */
+void
+extend_auto_profile::process_extend_source_profile ()
+{
+  struct cgraph_node *node;
+  if (symtab->state == FINISHED)
+    {
+      return;
+    }
+  FOR_EACH_FUNCTION (node)
+    {
+      if (!gimple_has_body_p (node->decl) || node->inlined_to)
+	{
+	  continue;
+	}
+
+      /* Don't profile functions produced for builtin stuff.  */
+      if (DECL_SOURCE_LOCATION (node->decl) == BUILTINS_LOCATION)
+	{
+	  continue;
+	}
+
+      function *fn = DECL_STRUCT_FUNCTION (node->decl);
+      push_cfun (fn);
+
+      const function_instance *s
+      = afdo_source_profile->get_function_instance_by_decl (
+	  current_function_decl);
+
+      if (s == NULL)
+	{
+	  pop_cfun ();
+	  continue;
+	}
+      unsigned int decl_uid = DECL_UID (current_function_decl);
+      gcov_type count = s->total_count ();
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Extend auto-profile for function %s.\n",
+			       node->dump_name ());
+	}
+      event_func_map[profile_type][decl_uid] += count;
+      set_loc_count ();
+      pop_cfun ();
+    }
+  rank_all_func ();
+}
+
+/* Main entry of extend_auto_profile.  */
+
+static void
+extend_source_profile ()
+{
+  extend_profile = autofdo::extend_auto_profile::create ();
+  if (dump_file)
+    {
+      if (extend_profile == NULL)
+	{
+	  fprintf (dump_file, "No profile file is found.\n");
+	  return;
+	}
+      fprintf (dump_file, "Extend profile info generated.\n");
+    }
+}
 } /* namespace autofdo.  */
 
 /* Read the profile from the profile data file.  */
@@ -1868,6 +2273,48 @@ end_auto_profile (void)
   delete autofdo::afdo_source_profile;
   delete autofdo::afdo_string_table;
   profile_info = NULL;
+}
+
+/* Extern function to get profile info in other passes.  */
+
+bool
+profile_exist (enum event_type type)
+{
+  return autofdo::extend_profile != NULL
+	 && autofdo::extend_profile->auto_profile_exist (type);
+}
+
+gcov_type
+event_get_loc_count (location_t loc, event_type type)
+{
+  return autofdo::extend_profile->get_loc_count (loc, type);
+}
+
+gcov_type
+event_get_func_count (unsigned decl_uid, event_type type)
+{
+  return autofdo::extend_profile->get_func_count (decl_uid, type);
+}
+
+struct rank_info
+event_get_func_rank (unsigned decl_uid, enum event_type type)
+{
+  return autofdo::extend_profile->get_func_rank (decl_uid, type);
+}
+
+gcov_type
+event_get_topn_function_total_count_thres ()
+{
+  return autofdo::extend_profile->get_topn_function_total_count_thres ();
+}
+
+void
+free_extend_profile_info ()
+{
+  if (autofdo::extend_profile != NULL)
+    {
+      delete autofdo::extend_profile;
+    }
 }
 
 /* Returns TRUE if EDGE is hot enough to be inlined early.  */
@@ -1931,8 +2378,50 @@ public:
 
 } // anon namespace
 
+namespace
+{
+const pass_data pass_data_ipa_extend_auto_profile =
+{
+  SIMPLE_IPA_PASS, /* type */
+  "ex-afdo", /* name */
+  OPTGROUP_NONE, /* optinfo_flags */
+  TV_IPA_EXTEND_AUTO_PROFILE, /* tv_id */
+  0, /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  0, /* todo_flags_finish */
+};
+
+class pass_ipa_extend_auto_profile : public simple_ipa_opt_pass
+{
+public:
+  pass_ipa_extend_auto_profile (gcc::context *ctxt)
+    : simple_ipa_opt_pass (pass_data_ipa_extend_auto_profile, ctxt)
+  {}
+
+  /* opt_pass methods: */
+  virtual bool gate (function *) {return (flag_ipa_extend_auto_profile > 0);}
+  virtual unsigned int execute (function *);
+
+};
+
+unsigned int
+pass_ipa_extend_auto_profile::execute (function *fun)
+{
+  autofdo::extend_source_profile ();
+  return 0;
+}
+} // anon namespace
+
 simple_ipa_opt_pass *
 make_pass_ipa_auto_profile (gcc::context *ctxt)
 {
   return new pass_ipa_auto_profile (ctxt);
+}
+
+simple_ipa_opt_pass *
+make_pass_ipa_extend_auto_profile (gcc::context *ctxt)
+{
+  return new pass_ipa_extend_auto_profile (ctxt);
 }
