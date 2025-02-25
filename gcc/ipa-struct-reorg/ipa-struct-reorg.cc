@@ -8970,7 +8970,8 @@ void
 ipa_struct_reorg::classify_fields (fc_type_info *info)
 {
   for (auto *srf : info->type->fields)
-    info->record_field_class (srf);
+    if (!srf->dead_field_p ())
+      info->record_field_class (srf);
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
@@ -8997,6 +8998,10 @@ ipa_struct_reorg::find_static_fc_fields (fc_type_info *info)
 
   for (auto *srf : info->type->fields)
     {
+      /* Skip dead field.  */
+      if (srf->dead_field_p ())
+	continue;
+
       /* Avoid compressing non-integer type.  */
       if (TREE_CODE (srf->fieldtype) != INTEGER_TYPE)
 	continue;
@@ -10064,7 +10069,8 @@ ipa_struct_reorg::execute (unsigned int opt)
 	check_and_prune_struct_for_pointer_compression ();
       if (opt >= SEMI_RELAYOUT)
 	check_and_prune_struct_for_semi_relayout ();
-      if (flag_ipa_struct_sfc)
+      /* Avoid doing static field compression in STRUCT_SPLIT.  */
+      if (opt >= STRUCT_REORDER_FIELDS && flag_ipa_struct_sfc)
 	check_and_prune_struct_for_field_compression ();
       ret = rewrite_functions ();
     }
@@ -10147,6 +10153,9 @@ public:
 
     if (level >= STRUCT_REORDER_FIELDS)
       ret = ipa_struct_reorg ().execute (level);
+
+    if (ret & TODO_remove_functions)
+      symtab->remove_unreachable_nodes (dump_file);
 
     if (level >= COMPLETE_STRUCT_RELAYOUT)
       {
