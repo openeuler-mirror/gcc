@@ -1305,7 +1305,7 @@ cannot recognize inner loop boundaries.
 -param=llc-level=
 Common Joined UInteger Var(param_llc_level) Init(3) IntegerRange(3, 4)
 Param Optimization
-Specifies the HBM cache level.
+Specifies the LLC cache level.
 
 -param=filter-mode=
 Common Joined UInteger Var(param_filter_mode) Init(1) IntegerRange(0, 1) Param
