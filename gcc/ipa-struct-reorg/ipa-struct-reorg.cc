@@ -1695,6 +1695,7 @@ public:
   hash_set <cgraph_node *> safe_functions;
   auto_vec<srtype *> ext_func_types;
   auto_vec_del<fc_type_info> fc_infos;
+  auto_vec <tree> release_ssa_names;
 
   bool done_recording;
 
@@ -8391,6 +8392,7 @@ ipa_struct_reorg::rewrite_phi (gphi *phi)
 
   gsi = gsi_for_phi (phi);
   remove_phi_node (&gsi, false);
+  release_ssa_names.safe_push (gimple_phi_result (phi));
 
   return true;
 }
@@ -8621,6 +8623,8 @@ ipa_struct_reorg::rewrite_functions (void)
 		}
 	    }
 	}
+      for (unsigned i = 0; i < release_ssa_names.length (); i++)
+	release_ssa_name (release_ssa_names[i]);
 
       update_ssa (TODO_update_ssa_only_virtuals);
 
