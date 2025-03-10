@@ -47,7 +47,7 @@ arc_t **ap = NULL;
 int
 main ()
 {
-  ap = (arc_t**) malloc(MAX * sizeof(arc_t*));
+  ap = (arc_t**) calloc(MAX, sizeof(arc_t*));
   (*ap)[0].id = 300;
   return 0;
 }

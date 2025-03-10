@@ -4042,7 +4042,6 @@ ipa_struct_reorg::handled_allocation_stmt (gimple *stmt)
 {
   if ((current_layout_opt_level & STRUCT_REORDER_FIELDS)
       && (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
-	  || gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_CALLOC)))
     return true;
   if ((current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT
