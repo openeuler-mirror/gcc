@@ -3822,7 +3822,7 @@ issue_llc_hint (std::vector<ref_group> &ref_groups,
 			  "ref_group(s) is found for llc hint.\n",
 	       num_issue_var, param_issue_topn);
     }
-  if (param_force_issue)
+  if (param_force_issue == 1 || param_force_issue == 0)
     {
       static_issue (ref_groups, num_issue_var);
       return;
