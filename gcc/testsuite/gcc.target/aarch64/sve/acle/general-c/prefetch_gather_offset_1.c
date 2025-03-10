@@ -46,8 +46,8 @@ f1 (svbool_t pg, int32_t *s32_ptr, void *void_ptr, void **ptr_ptr,
   svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) -1); /* { dg-error {passing 4294967295 to argument 4 of 'svprfb_gather_offset', which expects a valid 'enum svprfop' value} } */
   svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 0);
   svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 5);
-  svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 6); /* { dg-error {passing 6 to argument 4 of 'svprfb_gather_offset', which expects a valid 'enum svprfop' value} } */
-  svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 7); /* { dg-error {passing 7 to argument 4 of 'svprfb_gather_offset', which expects a valid 'enum svprfop' value} } */
+  svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 6);
+  svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 7);
   svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 8);
-  svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 14); /* { dg-error {passing 14 to argument 4 of 'svprfb_gather_offset', which expects a valid 'enum svprfop' value} } */
+  svprfb_gather_offset (pg, s32_ptr, s32, (enum svprfop) 14);
 }
