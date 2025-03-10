@@ -394,11 +394,11 @@ tail_duplicate (void)
 	  if (ignore_bb_p (bb))
 	    break;
 	}
-      if (dump_file)
+      if (dump_file && (!flag_tracer_static || weighted_insns))
 	fprintf (dump_file, " covered now %.1f\n\n",
 		 traced_insns * 100.0 / weighted_insns);
     }
-  if (dump_file)
+  if (dump_file && (!flag_tracer_static || ninsns))
     fprintf (dump_file, "Duplicated %i insns (%i%%)\n", nduplicated,
 	     nduplicated * 100 / ninsns);
 
