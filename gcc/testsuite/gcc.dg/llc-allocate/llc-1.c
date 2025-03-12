@@ -58,4 +58,4 @@ main (int argc, char *argv[])
 /* { dg-final { scan-tree-dump       "\\d\\tuPtr\\t\\(1.466660, 1, 1, 0\\)" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "runtime issue" 1 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "static issue" 2 "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "insert svprfd" 4 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "insert svprfd" 2 "llc_allocate" } } */

@@ -1285,7 +1285,7 @@ Common Joined UInteger Var(param_issue_topn) Init(1) Param Optimization
 Issue topn LLC mem_ref hint.
 
 -param=force-issue=
-Common Joined UInteger Var(param_force_issue) Init(0) IntegerRange(0, 1) Param
+Common Joined UInteger Var(param_force_issue) Init(1) IntegerRange(0, 1) Param
 Force issue the topn LLC mem_ref hint, without generating dynamic multi-branches.
 
 -param=llc-capacity-per-core=
