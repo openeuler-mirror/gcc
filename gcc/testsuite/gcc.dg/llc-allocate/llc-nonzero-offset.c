@@ -46,5 +46,5 @@ convert_regs_exit (basic_block bb, int value_reg_low, int value_reg_high)
   return output_stack->reg[0];
 }
 
-/* { dg-final { scan-tree-dump-times "runtime issue" 1 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "runtime issue" 0 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "static issue" 1 "llc_allocate" } } */

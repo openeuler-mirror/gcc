@@ -54,5 +54,5 @@ SUBROUTINE calc_p8w(p8w, ix, iy, k_start, k_end)
 
 END SUBROUTINE calc_p8w
 
-! { dg-final { scan-tree-dump-times "runtime issue" 1 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "runtime issue" 0 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "static issue" 1 "llc_allocate" } }

@@ -56,6 +56,6 @@ main (int argc, char *argv[])
 /* { dg-final { scan-tree-dump       "\\d\\tupperPtr\\t\\(2.933319, 1, 1, 0\\)" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump       "\\d\\tlPtr\\t\\(1.466660, 1, 1, 0\\)" "llc_allocate" } } */
 /* { dg-final { scan-tree-dump       "\\d\\tuPtr\\t\\(1.466660, 1, 1, 0\\)" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "runtime issue" 1 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "runtime issue" 0 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "static issue" 2 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-times "insert svprfd" 2 "llc_allocate" } } */

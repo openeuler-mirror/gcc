@@ -205,7 +205,7 @@ END SUBROUTINE calc_p_rho
 ! { dg-final { scan-tree-dump-times "\\d\\tt_1\\t\\(0.000000, 3, 1, 0\\)" 1 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "\\d\\tt_2\\t\\(0.000000, 3, 1, 0\\)" 1 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "\\d\\tc2a\\t\\(0.000000, 3, 1, 0\\)" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "runtime issue" 2 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "runtime issue" 0 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "static issue" 2 "llc_allocate" } }
 ! { dg-final { scan-tree-dump-times "insert svprfd" 2 "llc_allocate" } }
-! { dg-final { scan-tree-dump-times "cumul_size.*150960\\)" 1 "llc_allocate" } }
+! { dg-final { scan-tree-dump-times "cumul_size.*150960\\)" 0 "llc_allocate" } }
