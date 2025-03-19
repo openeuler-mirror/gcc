@@ -59,4 +59,4 @@ main (int argc, char *argv[])
 
 /* { dg-final { scan-tree-dump-times "Tracing succeeded" 24 "llc_allocate" } } */
 /* { dg-final { scan-tree-dump-not "Tracing failed" "llc_allocate" } } */
-/* { dg-final { scan-tree-dump-times "unhandled issue scene" 2 "llc_allocate" } } */
+/* { dg-final { scan-tree-dump-times "unhandled issue scene" 0 "llc_allocate" } } */
