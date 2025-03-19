@@ -4042,6 +4042,7 @@ ipa_struct_reorg::handled_allocation_stmt (gimple *stmt)
 {
   if ((current_layout_opt_level & STRUCT_REORDER_FIELDS)
       && (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
+	  || gimple_call_builtin_p (stmt, BUILT_IN_MALLOC)
 	  || gimple_call_builtin_p (stmt, BUILT_IN_CALLOC)))
     return true;
   if ((current_layout_opt_level == COMPLETE_STRUCT_RELAYOUT
@@ -4850,12 +4851,13 @@ ipa_struct_reorg::check_alloc_num (gimple *stmt, srtype *type, bool ptrptr)
       tree arg0 = gimple_call_arg (stmt, 0);
       basic_block bb = gimple_bb (stmt);
       cgraph_node *node = current_function->node;
-      if (!ptrptr && current_layout_opt_level >= SEMI_RELAYOUT
+      if (!ptrptr && current_layout_opt_level >= POINTER_COMPRESSION_SAFE
 	  && gimple_call_builtin_p (stmt, BUILT_IN_MALLOC))
 	{
 	  /* Malloc is commonly used for allocations of
-	  a single struct and semi-relayout will waste
-	  a mess of memory, so we skip it.  */
+	  a single struct, it is no meaning to do pointer
+	  compression, and semi-relayout will waste a mess
+	  of memory, so we skip it.  */
 	  type->has_alloc_array = -4;
 	  return;
 	}

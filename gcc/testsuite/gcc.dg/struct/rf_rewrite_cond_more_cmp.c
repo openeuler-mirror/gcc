@@ -44,8 +44,8 @@ struct arc
 int
 main()
 {
-  arc_p **ap = (arc_p**) calloc(1, sizeof(arc_p*));
-  arc_p **arcs_pointer_sorted = (arc_p**) calloc(1, sizeof(arc_p*));
+  arc_p **ap = (arc_p**) malloc(1 * sizeof(arc_p*));
+  arc_p **arcs_pointer_sorted = (arc_p**) malloc(1 * sizeof(arc_p*));
   arcs_pointer_sorted[0] = (arc_p*) calloc (1, sizeof(arc_p));
 
   if (arcs_pointer_sorted >= ap)
