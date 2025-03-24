@@ -30332,6 +30332,7 @@ aarch64_mode_emit_local_sme_state (aarch64_local_sme_state mode,
 	  || prev_mode == aarch64_local_sme_state::ACTIVE_DEAD
 	  || prev_mode == aarch64_local_sme_state::INACTIVE_CALLER)
 	{
+	  emit_insn (gen_aarch64_smstart_za ());
 	  /* A transition from ACTIVE_LIVE to INACTIVE_LOCAL is the usual
 	     case of setting up a lazy save buffer before a call.
 	     A transition from INACTIVE_CALLER is similar, except that
