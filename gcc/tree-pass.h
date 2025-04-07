@@ -503,6 +503,7 @@ extern gimple_opt_pass *make_pass_modref (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_coroutine_lower_builtins (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_coroutine_early_expand_ifns (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_adjust_alignment (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_find_with_sve (gcc::context *ctx);
 
 /* IPA Passes */
 extern simple_ipa_opt_pass *make_pass_ipa_lower_emutls (gcc::context *ctxt);
