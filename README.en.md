@@ -8,7 +8,7 @@ The GCC for openEuler compiler is a high-performance compiler based on the open 
 
 The binary can be downloaded from [here](https://www.hikunpeng.com/developer/devkit/compiler/gcc).
 
-For the user guide and new features, see [Wiki](https://support.huaweicloud.com/ug-hgcc-kunpengdevps/kunpenghgcc_06_0001.html) for details.
+For the user guide and new features, see [Wiki](https://www.hikunpeng.com/document/detail/en/kunpengdevps/compiler/ug-hgcc/kunpenghgcc_06_0001.html) for details.
 
 ## Version planning
 

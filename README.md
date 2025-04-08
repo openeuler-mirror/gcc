@@ -8,7 +8,7 @@ GCC for openEuler 编译器是基于开源 GCC 的高性能编译器，GCC for o
 
 二进制可以从[这里](https://www.hikunpeng.com/developer/devkit/compiler/gcc)下载。
 
-用户指南和新特性，详见[Wiki](https://support.huaweicloud.com/ug-hgcc-kunpengdevps/kunpenghgcc_06_0001.html)。
+用户指南和新特性，详见[Wiki](https://www.hikunpeng.com/document/detail/zh/kunpengdevps/compiler/ug-hgcc/kunpenghgcc_06_0001.html)。
 
 ## 版本节奏
 
