@@ -1592,9 +1592,9 @@ static const cpu_prefetch_tune hip09_prefetch_tune =
 static const cpu_prefetch_tune hip10a_prefetch_tune =
 {
   0,                    /* num_slots  */
-  64,                   /* l1_cache_size  */
+  128,                  /* l1_cache_size  */
   64,                   /* l1_cache_line_size  */
-  512,                  /* l2_cache_size  */
+  1024,                 /* l2_cache_size  */
   true,                 /* prefetch_dynamic_strides */
   -1,                   /* minimum_stride */
   -1                    /* default_opt_level  */
@@ -1603,9 +1603,9 @@ static const cpu_prefetch_tune hip10a_prefetch_tune =
 static const cpu_prefetch_tune hip10c_prefetch_tune =
 {
   0,                    /* num_slots  */
-  64,                   /* l1_cache_size  */
+  96,                   /* l1_cache_size  */
   64,                   /* l1_cache_line_size  */
-  512,                  /* l2_cache_size  */
+  1024,                 /* l2_cache_size  */
   true,                 /* prefetch_dynamic_strides */
   -1,                   /* minimum_stride */
   -1                    /* default_opt_level  */
