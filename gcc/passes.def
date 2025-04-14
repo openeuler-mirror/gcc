@@ -70,6 +70,7 @@ along with GCC; see the file COPYING3.  If not see
   PUSH_INSERT_PASSES_WITHIN (pass_local_optimization_passes)
       NEXT_PASS (pass_fixup_cfg);
       NEXT_PASS (pass_rebuild_cgraph_edges);
+      NEXT_PASS (pass_find_with_sve);
       NEXT_PASS (pass_local_fn_summary);
       NEXT_PASS (pass_early_inline);
       NEXT_PASS (pass_warn_recursion);
