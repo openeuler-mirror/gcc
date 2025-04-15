@@ -276,12 +276,13 @@ void test12(volatile int *ptr) __arm_inout("za")
 **	msr	tpidr2_el0, xzr
 **	bl	inout_za
 **	...
+**	smstart	za
+**	...
 **	msr	tpidr2_el0, x[0-9]+
 **	...
 **	bl	private_za
 **	ldr	[^\n]+
 **	cbnz	[^\n]+
-**	smstart	za
 **	msr	tpidr2_el0, xzr
 **	bl	out_za
 **	bl	in_za
