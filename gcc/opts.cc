@@ -2125,6 +2125,7 @@ enable_cfgo_optimizations (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, flag_modulo_sched, value);
   SET_OPTION_IF_UNSET (opts, opts_set, flag_selective_scheduling, value);
   SET_OPTION_IF_UNSET (opts, opts_set, flag_rename_registers, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_partial_training, value);
 
   SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_auto, 185);
   SET_OPTION_IF_UNSET (opts, opts_set, param_inline_unit_growth, 66);
