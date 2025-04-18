@@ -561,6 +561,24 @@ static const struct cpu_addrcost_table hip11_addrcost_table =
   0, /* imm_offset  */
 };
 
+static const struct cpu_addrcost_table hip12_addrcost_table =
+{
+    {
+      1, /* hi  */
+      0, /* si  */
+      0, /* di  */
+      1, /* ti  */
+    },
+  0, /* pre_modify  */
+  0, /* post_modify  */
+  2, /* post_modify_ld3_st3  */
+  2, /* post_modify_ld4_st4  */
+  0, /* register_offset  */
+  0, /* register_sextend  */
+  0, /* register_zextend  */
+  0, /* imm_offset  */
+};
+
 static const struct cpu_addrcost_table qdf24xx_addrcost_table =
 {
     {
@@ -753,6 +771,16 @@ static const struct cpu_regmove_cost hip11_regmove_cost =
      their cost higher than memmov_cost.  */
   2, /* GP2FP  */
   3, /* FP2GP  */
+  2  /* FP2FP  */
+};
+
+static const struct cpu_regmove_cost hip12_regmove_cost =
+{
+  1, /* GP2GP  */
+  /* Avoid the use of slow int<->fp moves for spilling by setting
+     their cost higher than memmov_cost.  */
+  6, /* GP2FP  */
+  2, /* FP2GP  */
   2  /* FP2FP  */
 };
 
@@ -1231,6 +1259,143 @@ static const struct cpu_vector_cost hip11_vector_cost =
   nullptr /* issue_info  */
 };
 
+static const advsimd_vec_cost hip12_advsimd_vector_cost =
+{
+  2, /* int_stmt_cost  */
+  2, /* fp_stmt_cost  */
+  2, /* ld2_st2_permute_cost  */
+  2, /* ld3_st3_permute_cost  */
+  3, /* ld4_st4_permute_cost  */
+  2, /* permute_cost  */
+  9, /* reduc_i8_cost  */
+  7, /* reduc_i16_cost  */
+  5, /* reduc_i32_cost  */
+  3, /* reduc_i64_cost  */
+  3, /* reduc_f16_cost  */
+  3, /* reduc_f32_cost  */
+  3, /* reduc_f64_cost  */
+  3, /* store_elt_extra_cost  */
+  2, /* vec_to_scalar_cost  */
+  5, /* scalar_to_vec_cost  */
+  8, /* align_load_cost  */
+  8, /* unalign_load_cost  */
+  1, /* unalign_store_cost  */
+  1  /* store_cost  */
+};
+
+static const sve_vec_cost hip12_sve_vector_cost =
+{
+  {
+    2, /* int_stmt_cost  */
+    2, /* fp_stmt_cost  */
+    2, /* ld2_st2_permute_cost  */
+    3, /* ld3_st3_permute_cost  */
+    3, /* ld4_st4_permute_cost  */
+    2, /* permute_cost  */
+    /* Theoretically, a reduction involving 31 scalar ADDs could
+       complete in ~6 cycles and would have a cost of 31.  [SU]ADDV
+       completes in 13 cycles, so give it a cost of 31 + 7.  */
+    38, /* reduc_i8_cost  */
+    /* Likewise for 15 scalar ADDs (~3 cycles) vs. 10: 15 + 7.  */
+    22, /* reduc_i16_cost  */
+    /* Likewise for 7 scalar ADDs (~2 cycles) vs. 7: 7 + 5.  */
+    12, /* reduc_i32_cost  */
+    /* Likewise for 3 scalar ADDs (~1 cycles) vs. 4: 3 + 3.  */
+    6, /* reduc_i64_cost  */
+    /* Theoretically, a reduction involving 15 scalar FADDs could
+       complete in ~8 cycles and would have a cost of 30.  FADDV
+       completes in 15 cycles, so give it a cost of 30 + 7.  */
+    37, /* reduc_f16_cost  */
+    /* Likewise for 7 scalar FADDs (~4 cycles) vs. 12: 14 + 8.  */
+    22, /* reduc_f32_cost  */
+    /* Likewise for 3 scalar FADDs (~2 cycles) vs. 9: 6 + 7.  */
+    13, /* reduc_f64_cost  */
+    2, /* store_elt_extra_cost  */
+    /* This value is just inherited from the Cortex-A57 table.  */
+    2, /* vec_to_scalar_cost  */
+    /* See the comment above the Advanced SIMD versions.  */
+    5, /* scalar_to_vec_cost  */
+    8, /* align_load_cost  */
+    8, /* unalign_load_cost  */
+    /* Although stores have a latency of 2 and compete for the
+       vector pipes, in practice it's better not to model that.  */
+    1, /* unalign_store_cost  */
+    1  /* store_cost  */
+  },
+  3, /* clast_cost  */
+  42, /* fadda_f16_cost  */
+  26, /* fadda_f32_cost  */
+  20, /* fadda_f64_cost  */
+  6, /* gather_load_x32_cost  */
+  6, /* gather_load_x64_cost  */
+  1 /* scatter_store_elt_cost  */
+};
+
+static const aarch64_scalar_vec_issue_info hip12_scalar_issue_info =
+{
+  5, /* loads_stores_per_cycle  */
+  2, /* stores_per_cycle  */
+  8, /* general_ops_per_cycle  */
+  0, /* fp_simd_load_general_ops  */
+  1 /* fp_simd_store_general_ops  */
+};
+
+static const aarch64_advsimd_vec_issue_info hip12_advsimd_issue_info =
+{
+  {
+    5, /* loads_stores_per_cycle  */
+    2, /* stores_per_cycle  */
+    4, /* general_ops_per_cycle  */
+    0, /* fp_simd_load_general_ops  */
+    1 /* fp_simd_store_general_ops  */
+  },
+  2, /* ld2_st2_general_ops  */
+  2, /* ld3_st3_general_ops  */
+  3 /* ld4_st4_general_ops  */
+};
+
+static const aarch64_sve_vec_issue_info hip12_sve_issue_info =
+{
+  {
+    {
+      5, /* loads_per_cycle  */
+      2, /* stores_per_cycle  */
+      4, /* general_ops_per_cycle  */
+      0, /* fp_simd_load_general_ops  */
+      1 /* fp_simd_store_general_ops  */
+    },
+    2, /* ld2_st2_general_ops  */
+    2, /* ld3_st3_general_ops  */
+    3 /* ld4_st4_general_ops  */
+  },
+  2, /* pred_ops_per_cycle  */
+  1, /* while_pred_ops  */
+  0, /* int_cmp_pred_ops  */
+  0, /* fp_cmp_pred_ops  */
+  1, /* gather_scatter_pair_general_ops  */
+  1 /* gather_scatter_pair_pred_ops  */
+};
+
+static const aarch64_vec_issue_info hip12_vec_issue_info =
+{
+  &hip12_scalar_issue_info,
+  &hip12_advsimd_issue_info,
+  &hip12_sve_issue_info
+};
+
+static const struct cpu_vector_cost hip12_vector_cost =
+{
+  1, /* scalar_int_stmt_cost  */
+  2, /* scalar_fp_stmt_cost  */
+  4, /* scalar_load_cost  */
+  1, /* scalar_store_cost  */
+  1, /* cond_taken_branch_cost  */
+  1, /* cond_not_taken_branch_cost  */
+  &hip12_advsimd_vector_cost, /* advsimd  */
+  &hip12_sve_vector_cost, /* sve  */
+  &hip12_vec_issue_info /* issue_info  */
+};
+
 static const advsimd_vec_cost cortexa57_advsimd_vector_cost =
 {
   2, /* int_stmt_cost  */
@@ -1612,6 +1777,17 @@ static const cpu_prefetch_tune hip10c_prefetch_tune =
 };
 
 static const cpu_prefetch_tune hip11_prefetch_tune =
+{
+  0,                    /* num_slots  */
+  64,                   /* l1_cache_size  */
+  64,                   /* l1_cache_line_size  */
+  512,                  /* l2_cache_size  */
+  true,                 /* prefetch_dynamic_strides */
+  -1,                   /* minimum_stride */
+  -1                    /* default_opt_level  */
+};
+
+static const cpu_prefetch_tune hip12_prefetch_tune =
 {
   0,                    /* num_slots  */
   64,                   /* l1_cache_size  */
@@ -2119,6 +2295,39 @@ static const struct tune_params hip11_tunings =
   (AARCH64_EXTRA_TUNE_USE_NEW_VECTOR_COSTS
    | AARCH64_EXTRA_TUNE_MATCHED_VECTOR_THROUGHPUT),     /* tune_flags.  */
   &hip11_prefetch_tune
+};
+
+static const struct tune_params hip12_tunings =
+{
+  &hip12_extra_costs,
+  &hip12_addrcost_table,
+  &hip12_regmove_cost,
+  &hip12_vector_cost,
+  &generic_branch_cost,
+  &generic_approx_modes,
+  SVE_256, /* sve_width  */
+  { 4, /* load_int.  */
+    1, /* store_int.  */
+    6, /* load_fp.  */
+    1, /* store_fp.  */
+    6, /* load_pred.  */
+    1 /* store_pred.  */
+  }, /* memmov_cost.  */
+  16,    /* issue_rate  */
+  (AARCH64_FUSE_AES_AESMC | AARCH64_FUSE_ALU_BRANCH
+   | AARCH64_FUSE_ALU_CBZ), /* fusible_ops  */
+  "16", /* function_align.  */
+  "4",  /* jump_align.  */
+  "8",  /* loop_align.  */
+  4,    /* int_reassoc_width.  */
+  4,    /* fp_reassoc_width.  */
+  4,    /* vec_reassoc_width.  */
+  2,    /* min_div_recip_mul_sf.  */
+  2,    /* min_div_recip_mul_df.  */
+  0,    /* max_case_values.  */
+  tune_params::AUTOPREFETCHER_WEAK,     /* autoprefetcher_model.  */
+  (AARCH64_EXTRA_TUNE_NONE),     /* tune_flags.  */
+  &generic_prefetch_tune
 };
 
 static const struct tune_params xgene1_tunings =
