@@ -3180,6 +3180,14 @@ common_handle_option (struct gcc_options *opts,
       }
       break;
 
+    case OPT_foeaware_policy_:
+      opts->x_oeaware_optimize_policy = value;
+      /* No break here - do -foeaware processing.  */
+      /* FALLTHRU.  */
+    case OPT_foeaware_policy:
+      opts->x_flag_oeaware = value;
+      break;
+
     case OPT_fipa_reorder_fields:
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_struct_reorg, value);
       break;

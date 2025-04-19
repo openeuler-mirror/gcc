@@ -22898,6 +22898,10 @@ output file being linked.  See man ld(1) for more information.
 When passed this option, GCC produces a dynamic library instead of
 an executable when linking, using the Darwin @file{libtool} command.
 
+@item -foeaware-policy=@var{n}
+@opindex foeaware-policy
+Emit optimization policy value @var{n} into .GCC4OE_oeAware section.
+
 @item -force_cpusubtype_ALL
 @opindex force_cpusubtype_ALL
 This causes GCC's output file to have the @samp{ALL} subtype, instead of

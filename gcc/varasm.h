@@ -81,4 +81,6 @@ extern rtx assemble_trampoline_template (void);
 
 extern void switch_to_comdat_section (section *, tree);
 
+extern void create_oeaware_section ();
+
 #endif  // GCC_VARASM_H

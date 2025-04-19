@@ -3130,6 +3130,14 @@ foptimize-strlen
 Common Var(flag_optimize_strlen) Optimization
 Enable string length optimizations on trees.
 
+foeaware-policy
+Common Var(flag_oeaware) Init(0) Optimization
+Perform oeAware-gcc co-optimization.
+
+foeaware-policy=
+Common RejectNegative Joined UInteger Var(oeaware_optimize_policy) Init(1) IntegerRange(1, 7)
+Select the optimization policy.
+
 fisolate-erroneous-paths-dereference
 Common Var(flag_isolate_erroneous_paths_dereference) Optimization
 Detect paths that trigger erroneous or undefined behavior due to
