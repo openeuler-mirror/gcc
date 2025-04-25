@@ -1790,9 +1790,9 @@ static const cpu_prefetch_tune hip11_prefetch_tune =
 static const cpu_prefetch_tune hip12_prefetch_tune =
 {
   0,                    /* num_slots  */
-  64,                   /* l1_cache_size  */
+  128,                  /* l1_cache_size  */
   64,                   /* l1_cache_line_size  */
-  512,                  /* l2_cache_size  */
+  1024,                 /* l2_cache_size  */
   true,                 /* prefetch_dynamic_strides */
   -1,                   /* minimum_stride */
   -1                    /* default_opt_level  */
@@ -2327,7 +2327,7 @@ static const struct tune_params hip12_tunings =
   0,    /* max_case_values.  */
   tune_params::AUTOPREFETCHER_WEAK,     /* autoprefetcher_model.  */
   (AARCH64_EXTRA_TUNE_NONE),     /* tune_flags.  */
-  &generic_prefetch_tune
+  &hip12_prefetch_tune
 };
 
 static const struct tune_params xgene1_tunings =

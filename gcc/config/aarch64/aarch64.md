@@ -552,6 +552,7 @@
 (include "hip10a.md")
 (include "hip10c.md")
 (include "hip11.md")
+(include "hip12.md")
 
 ;; -------------------------------------------------------------------
 ;; Jumps and other miscellaneous insns
