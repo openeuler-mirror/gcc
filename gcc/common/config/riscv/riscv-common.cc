@@ -394,6 +394,8 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
   {"ssstateen", ISA_SPEC_CLASS_NONE, 1, 0},
   {"sstc",      ISA_SPEC_CLASS_NONE, 1, 0},
 
+  {"svade",   ISA_SPEC_CLASS_NONE, 1, 0},
+  {"svadu",   ISA_SPEC_CLASS_NONE, 1, 0},
   {"svinval", ISA_SPEC_CLASS_NONE, 1, 0},
   {"svnapot", ISA_SPEC_CLASS_NONE, 1, 0},
   {"svpbmt",  ISA_SPEC_CLASS_NONE, 1, 0},
@@ -1784,6 +1786,8 @@ static const riscv_ext_flag_table_t riscv_ext_flag_table[] =
   {"zcmp",    &gcc_options::x_riscv_zc_subext, MASK_ZCMP},
   {"zcmt",    &gcc_options::x_riscv_zc_subext, MASK_ZCMT},
 
+  {"svade",   &gcc_options::x_riscv_sv_subext, MASK_SVADE},
+  {"svadu",   &gcc_options::x_riscv_sv_subext, MASK_SVADU},
   {"svinval", &gcc_options::x_riscv_sv_subext, MASK_SVINVAL},
   {"svnapot", &gcc_options::x_riscv_sv_subext, MASK_SVNAPOT},
 
