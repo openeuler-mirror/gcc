@@ -4699,6 +4699,9 @@ rest_of_handle_final (void)
         dump_profile_to_elf_sections ();
       }
 
+  if (flag_oeaware)
+    create_oeaware_section ();
+
   return 0;
 }
 
