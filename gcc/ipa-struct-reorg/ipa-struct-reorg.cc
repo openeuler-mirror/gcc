@@ -75,7 +75,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "config.h"
 #include "system.h"
 #include "coretypes.h"
-#include "tm.h"
 #include "tree.h"
 #include "tree-pass.h"
 #include "cgraph.h"
@@ -99,16 +98,17 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-cfg.h"
 #include "alloc-pool.h"
 #include "symbol-summary.h"
-#include "ipa-prop.h"
+#include "bitmap.h"
 #include "ipa-struct-reorg.h"
 #include "tree-eh.h"
-#include "bitmap.h"
 #include "tree-ssa-live.h"  /* For remove_unused_locals.  */
 #include "ipa-param-manipulation.h"
 #include "gimplify-me.h"
 #include "cfgloop.h"
 #include "langhooks.h"
 #include "cfgexpand.h"
+#include "gimplify.h"
+#include <map>
 
 /* Check whether in C language or LTO with only C language.  */
 
@@ -149,16 +149,30 @@ using namespace struct_relayout;
 #define VOID_POINTER_P(type) \
   (POINTER_TYPE_P (type) && VOID_TYPE_P (TREE_TYPE (type)))
 
-#define FC_DUMP_MSG(message) \
+#define FC_DUMP_MSG(...) \
   do \
     { \
       if (dump_file && (dump_flags & TDF_DETAILS)) \
-	fprintf (dump_file, "[field compress] %s", (message)); \
+	{ \
+	  fprintf (dump_file, "[field compress] "); \
+	  fprintf (dump_file, __VA_ARGS__); \
+	} \
     } while (0)
+
+#define STRING_STARTS_WITH(s, suffix) \
+  (strncmp (s, suffix, sizeof (suffix) - 1) == 0)
 
 /* Flags for operand_equal_p to treat decls with the same name equal.  */
 
 #define COMPARE_DECL_FLAGS (OEP_DECL_NAME | OEP_LEXICOGRAPHIC)
+
+#define APPEND_GASSIGN_1(gsi, lhs, op, rhs) \
+  gsi_insert_after (&gsi, gimple_build_assign (lhs, op, rhs), \
+		    GSI_NEW_STMT)
+
+#define APPEND_GASSIGN_2(gsi, lhs, op, rhs1, rhs2) \
+  gsi_insert_after (&gsi, gimple_build_assign (lhs, op, rhs1, rhs2), \
+		    GSI_NEW_STMT)
 
 static void
 set_var_attributes (tree var)
@@ -349,6 +363,212 @@ gimple_assign_rhs_code_p (gimple *stmt, enum tree_code code)
 	 && gimple_assign_rhs_code (stmt) == code;
 }
 
+static fc_field *
+find_fc_field (const auto_vec<fc_field *> &fc_fields, tree field)
+{
+  for (auto *fc_f : fc_fields)
+    if (fc_f->field == field)
+      return fc_f;
+
+  return NULL;
+}
+
+/* Return true if the stmt is a copy/convert to integer.  */
+
+static bool
+is_copy_int (const gimple *stmt)
+{
+  if (!is_gimple_assign (stmt))
+    return NULL_TREE;
+
+  tree rhs = gimple_assign_rhs1 (stmt);
+
+  if (gimple_assign_single_p (stmt))
+    if (TREE_CODE (rhs) == SSA_NAME)
+      return true;
+
+  if (CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (stmt)))
+    {
+      tree lhs = gimple_assign_lhs (stmt);
+
+      if (TREE_CODE (rhs) == SSA_NAME
+	  && TREE_CODE (TREE_TYPE (lhs)) == INTEGER_TYPE)
+	return true;
+    }
+
+  return false;
+}
+
+/* Strip the copy with typecasting of int or unsigned int.  */
+
+static gimple *
+strip_copy_stmts (gimple *stmt)
+{
+  while (is_copy_int (stmt))
+    stmt = SSA_NAME_DEF_STMT (gimple_assign_rhs1 (stmt));
+
+  return stmt;
+}
+
+const char *
+get_func_name (tree decl)
+{
+  if (!decl || TREE_CODE (decl) != FUNCTION_DECL || !DECL_NAME (decl))
+    return NULL;
+
+  tree decl_name = DECL_NAME (decl);
+  if (TREE_CODE (decl_name) != IDENTIFIER_NODE)
+    return NULL;
+
+  return IDENTIFIER_POINTER (decl_name);
+}
+
+/* Compare the gimple order of input_ssa for fc fields.  */
+
+static int
+input_order_cmp (const void *p, const void *q)
+{
+  const fc_field *a = *static_cast<const fc_field *const *> (p);
+  const fc_field *b = *static_cast<const fc_field *const *> (q);
+
+  gimple *ga = SSA_NAME_DEF_STMT (a->input_ssa);
+  gimple *gb = SSA_NAME_DEF_STMT (b->input_ssa);
+
+  if (gimple_uid (ga) < gimple_uid (gb))
+    return -1;
+  else if (gimple_uid (ga) > gimple_uid (gb))
+    return 1;
+  else
+    return 0;
+}
+
+/* Called by walk_tree to check if ssa_name DATA exists in an expression.  */
+
+static tree
+check_for_ssa (tree *opnd_ptr, int *walk_subtrees ATTRIBUTE_UNUSED, void *data)
+{
+  tree ssa = (tree) data;
+  if (*opnd_ptr == ssa)
+    return ssa;
+
+  return NULL_TREE;
+}
+
+/* Helper to create a function declaration together with arguments and result
+   declarations.  */
+
+static tree
+create_new_fn_decl (char *fn_name, int n_args, tree *arg_types,
+		    tree return_type)
+{
+  tree fn_type = build_function_type_array (return_type, n_args, arg_types);
+  tree fndecl = build_fn_decl (fn_name, fn_type);
+  tree id = get_identifier (fn_name);
+  SET_DECL_ASSEMBLER_NAME (fndecl, id);
+  DECL_NAME (fndecl) = id;
+  DECL_ARTIFICIAL (fndecl) = 1;
+  DECL_EXTERNAL (fndecl) = 0;
+  DECL_CONTEXT (fndecl) = NULL_TREE;
+  DECL_INITIAL (fndecl) = make_node (BLOCK);
+  DECL_STATIC_CONSTRUCTOR (fndecl) = 0;
+
+  /* Function result declairation.  */
+  tree resdecl
+    = build_decl (UNKNOWN_LOCATION, RESULT_DECL, NULL_TREE, return_type);
+  DECL_RESULT (fndecl) = resdecl;
+
+  /* Function arguments.  */
+  tree prev_arg = NULL_TREE;
+  for (int i = 0; i < n_args; i++)
+    {
+      tree arg_decl
+	= build_decl (UNKNOWN_LOCATION, PARM_DECL, NULL, arg_types[i]);
+      DECL_ARTIFICIAL (arg_decl) = 1;
+      DECL_IGNORED_P (arg_decl) = 1;
+      TREE_USED (arg_decl) = 1;
+      DECL_CONTEXT (arg_decl) = fndecl;
+      DECL_ARG_TYPE (arg_decl) = arg_types[i];
+      TREE_READONLY (arg_decl) = 1;
+      if (prev_arg)
+	TREE_CHAIN (prev_arg) = arg_decl;
+      else
+	DECL_ARGUMENTS (fndecl) = arg_decl;
+      prev_arg = arg_decl;
+    }
+
+  return fndecl;
+}
+
+static void
+release_srdecl_ssa_name (srdecl *srd)
+{
+  if (!srd->has_new_decl ())
+    return;
+
+  tree ssa_name = NULL_TREE;
+  if (srd->argumentnum >= 0)
+    ssa_name = ssa_default_def (cfun, srd->decl);
+  else if (TREE_CODE (srd->decl) == SSA_NAME)
+    ssa_name = srd->decl;
+
+  if (ssa_name && num_imm_uses (ssa_name) == 0)
+    release_ssa_name (ssa_name);
+}
+
+static char *
+append_suffix (const char *s1, unsigned suffix)
+{
+  char s2[32];
+  sprintf (s2, "%u", suffix);
+  return concat (s1, s2, NULL);
+}
+
+static unsigned HOST_WIDE_INT
+get_bitsize (tree field)
+{
+  tree bitsize = DECL_BIT_FIELD (field) ? DECL_SIZE (field)
+					: TYPE_SIZE (TREE_TYPE (field));
+  return tree_to_uhwi (bitsize);
+}
+
+/* Generate SSA_NAME for the given var.  */
+
+static tree
+generate_ssa_name (tree var, gimple_stmt_iterator *gsi)
+{
+  if (TREE_CODE (var) == SSA_NAME)
+    return var;
+
+  tree name = make_ssa_name (TREE_TYPE (var));
+  gimple *stmt = gimple_build_assign (name, var);
+  gsi_insert_after (gsi, stmt, GSI_NEW_STMT);
+
+  return name;
+}
+
+/* Get type node by bit precision and sign.  */
+
+static tree
+get_integer_type_node (unsigned precision, bool is_unsigned)
+{
+  switch (precision)
+    {
+      case 64:
+	return is_unsigned ? long_long_unsigned_type_node
+			   : long_long_integer_type_node;
+      case 32:
+	return is_unsigned ? unsigned_type_node : integer_type_node;
+      case 16:
+	return is_unsigned ? short_unsigned_type_node
+			   : short_integer_type_node;
+      case 8:
+	return is_unsigned ? unsigned_char_type_node
+			   : signed_char_type_node;
+      default:
+	return NULL_TREE;
+    }
+}
+
 /* Enum the struct layout optimize level,
    which should be the same as the option -fstruct-reorg=.  */
 
@@ -363,6 +583,15 @@ enum struct_layout_opt_level
   POINTER_COMPRESSION_UNSAFE = 1 << 5,
   SEMI_RELAYOUT = 1 << 6
 };
+
+enum class fc_level
+{
+  NONE,
+  STATIC,
+  DYNAMIC
+};
+
+fc_level current_fc_level;
 
 srfunction *current_function;
 vec<srfunction *> csrfun_stack;
@@ -386,6 +615,31 @@ public:
 };
 
 #define SET_CFUN(srfn) csrfun_context csrfn_ctx(srfn);
+
+/* RAII class to change current dump_file and dump_flags,
+   and restore when the object goes out of scope.  */
+
+class dump_file_saver
+{
+public:
+  dump_file_saver (FILE *file, dump_flags_t flags)
+  {
+    old_dump_file = dump_file;
+    old_dump_flags = dump_flags;
+    dump_file = file;
+    dump_flags = flags;
+  }
+  ~dump_file_saver ()
+  {
+    dump_file = old_dump_file;
+    dump_flags = old_dump_flags;
+  }
+private:
+  FILE *old_dump_file;
+  dump_flags_t old_dump_flags;
+};
+
+#define SET_DUMP_FILE(file, flags) dump_file_saver fd_saver(file, flags);
 
 /* Defines the target pointer size of compressed pointer, which should be 8,
    16, 32.  */
@@ -502,7 +756,7 @@ srfield::srfield (tree field, srtype *base)
     type (NULL),
     clusternum (0),
     field_access (EMPTY_FIELD),
-    static_fc_field (NULL),
+    fc_f (NULL),
     field_class (NULL)
 {
   for (int i = 0; i < max_split; i++)
@@ -531,7 +785,8 @@ srtype::srtype (tree type)
     {
       if (TREE_CODE (field) == FIELD_DECL)
 	{
-	  if (DECL_BIT_FIELD (field))
+	  if (current_fc_level != fc_level::DYNAMIC
+	      && DECL_BIT_FIELD (field))
 	    {
 	      escapes = escape_bitfields;
 	      continue;
@@ -698,6 +953,20 @@ srfunction::record_decl (srtype *type, tree decl, int arg, tree orig_type)
   return decl1;
 }
 
+/* A function is either partially cloned or fully cloned (versioning).  */
+
+bool
+srfunction::partial_clone_p ()
+{
+  return fc_path.start_stmt != NULL;
+}
+
+bool
+srfunction::entry_function_p ()
+{
+  return strcmp (node->name (), "main") == 0 && !node->callers;
+}
+
 /* Find the field at OFF offset.  */
 
 srfield *
@@ -713,6 +982,17 @@ srtype::find_field (unsigned HOST_WIDE_INT off)
       if (off == field->offset)
 	return field;
     }
+  return NULL;
+}
+
+/* Find the field according to field decl.  */
+srfield *
+srtype::find_field_by_decl (tree fielddecl)
+{
+  for (auto *field : fields)
+    if (operand_equal_p (fielddecl, field->fielddecl, COMPARE_DECL_FLAGS))
+      return field;
+
   return NULL;
 }
 
@@ -900,8 +1180,9 @@ srfield::reorder_fields (tree newfields[max_split], tree newlast[max_split],
   else
     {
       tree tmp = newfields[clusternum];
-      if (tree_to_uhwi (TYPE_SIZE (TREE_TYPE (field)))
-	  > tree_to_uhwi (TYPE_SIZE (TREE_TYPE (tmp))))
+      auto field_bitsize = get_bitsize (field);
+      auto tmp_bitsize = get_bitsize (tmp);
+      if (field_bitsize > tmp_bitsize)
 	{
 	  DECL_CHAIN (field) = tmp;
 	  newfields[clusternum] = field;
@@ -909,9 +1190,7 @@ srfield::reorder_fields (tree newfields[max_split], tree newlast[max_split],
       else
 	{
 	  while (DECL_CHAIN (tmp)
-		 && (tree_to_uhwi (TYPE_SIZE (TREE_TYPE (field)))
-		     <= tree_to_uhwi (
-				TYPE_SIZE (TREE_TYPE (DECL_CHAIN (tmp))))))
+		 && field_bitsize <= get_bitsize (DECL_CHAIN (tmp)))
 	    tmp = DECL_CHAIN (tmp);
 
 	  /* Now tmp size > field size
@@ -932,11 +1211,18 @@ srfield::create_new_reorder_fields (tree newtype[max_split],
 				    tree newfields[max_split],
 				    tree newlast[max_split])
 {
+  /* For dynamic shadow.  */
+  if (current_fc_level == fc_level::DYNAMIC && fc_f && fc_f->original)
+    {
+      newfield[0] = NULL_TREE;
+      return;
+    }
+
   /* newtype, corresponding to newtype[max_split] in srtype.  */
   tree nt = NULL_TREE;
   if (type == NULL)
     /* Common var.  */
-    nt = static_fc_field ? static_fc_field->new_type : fieldtype;
+    nt = fc_f ? fc_f->new_type : fieldtype;
   else
     /* RECORD_TYPE var.  */
     nt = type->has_escaped () ? type->type : type->newtype[0];
@@ -986,24 +1272,28 @@ srfield::create_new_reorder_fields (tree newtype[max_split],
   TREE_THIS_VOLATILE (field) = TREE_THIS_VOLATILE (fielddecl);
   DECL_CONTEXT (field) = newtype[clusternum];
 
-  if (flag_ipa_struct_sfc && base->fc_info && base->fc_info->static_fc_p)
+  fc_type_info *info = base->fc_info;
+  if (info && (info->static_fc_p || info->dynamic_fc_p))
     {
       DECL_PACKED (field) = 1;
+      DECL_BIT_FIELD (field) = DECL_BIT_FIELD (fielddecl);
+      if (DECL_BIT_FIELD (field))
+	DECL_SIZE (field) = DECL_SIZE (fielddecl);
 
-      if (static_fc_field)
+      if (fc_f)
 	{
 	  /* Always not align compressed fields.  */
 	  SET_DECL_ALIGN (field, 0);
 
-	  if (static_fc_field->bits)
+	  if (fc_f->bits)
 	    {
 	      DECL_BIT_FIELD (field) = 1;
-	      DECL_SIZE (field) = bitsize_int (static_fc_field->bits);
+	      DECL_SIZE (field) = bitsize_int (fc_f->bits);
 	      DECL_NONADDRESSABLE_P (field) = 1;
 	      /* Build unsigned bitfield integer type.  */
-	      nt = build_nonstandard_integer_type (static_fc_field->bits, 1);
+	      nt = build_nonstandard_integer_type (fc_f->bits, 1);
 	      TREE_TYPE (field) = nt;
-	      static_fc_field->new_type = nt;
+	      fc_f->new_type = nt;
 	    }
 	}
     }
@@ -1020,6 +1310,19 @@ srfield::dead_field_p ()
   return current_layout_opt_level & DEAD_FIELD_ELIMINATION
 	       && !(field_access & READ_FIELD)
 	       && !FUNCTION_POINTER_TYPE_P (fieldtype);
+}
+
+bool
+srfield::dfc_type_change_p ()
+{
+  return fc_f && fc_f->cond
+	 && fc_f->cond->old_type != TREE_TYPE (newfield[0]);
+}
+
+fc_closure *
+srfield::get_closure ()
+{
+  return &(field_class->closure);
 }
 
 /* Given a struct s whose fields has already reordered by size, we try to
@@ -1095,20 +1398,36 @@ srtype::has_recursive_field_type ()
 void
 srtype::check_fc_fields ()
 {
-  if (!fc_info || !fc_info->static_fc_p)
+  if (!fc_info || (!fc_info->static_fc_p && !fc_info->dynamic_fc_p))
     return;
 
-  for (unsigned i = 0; i < fields.length (); i++)
+  for (auto *srf : fields)
     {
-      fc_field *fc_f;
-      unsigned j;
-      FOR_EACH_VEC_ELT (fc_info->static_fc_fields, j, fc_f)
-      if (fields[i]->fielddecl == fc_f->field)
+      tree field = srf->fielddecl;
+      if (fc_info->static_fc_p)
+	srf->fc_f = find_fc_field (fc_info->static_fc_fields, field);
+      else
 	{
-	  fields[i]->static_fc_field = fc_f;
-	  break;
+	  srf->fc_f = find_fc_field (fc_info->dynamic_shadow_fields, field);
+	  if (!srf->fc_f)
+	    srf->fc_f = find_fc_field (fc_info->dynamic_fc_fields, field);
 	}
     }
+}
+
+bool
+srtype::reorg_name_p ()
+{
+  const char *name = get_type_name (type);
+  return name && strstr (name, ".reorg");
+}
+
+bool
+srtype::has_escaped ()
+{
+  return escapes != does_not_escape
+	 && (current_fc_level != fc_level::DYNAMIC
+	     || !reorg_name_p ());
 }
 
 /* Create the new TYPE corresponding to THIS type.  */
@@ -1124,7 +1443,7 @@ srtype::create_new_type (void)
 
   visited = true;
 
-  if (escapes != does_not_escape)
+  if (has_escaped ())
     {
       newtype[0] = type;
       return false;
@@ -1176,10 +1495,10 @@ srtype::create_new_type (void)
       if (tname)
 	{
 	  name = concat (tname, ".reorg.", id, NULL);
-	  TYPE_NAME (newtype[i]) = build_decl (UNKNOWN_LOCATION,
-					       TYPE_DECL,
-					       get_identifier (name),
-					       newtype[i]);
+	  tree name_id = get_identifier (name);
+	  TYPE_STUB_DECL (newtype[i])
+	    = build_decl (UNKNOWN_LOCATION, TYPE_DECL, name_id, newtype[i]);
+	  TYPE_NAME (newtype[i]) = name_id;
 	  free (name);
 	}
     }
@@ -1206,8 +1525,12 @@ srtype::create_new_type (void)
     {
       TYPE_FIELDS (newtype[i]) = newfields[i];
       layout_type (newtype[i]);
-      if (TYPE_NAME (newtype[i]) != NULL)
-	layout_decl (TYPE_NAME (newtype[i]), 0);
+    }
+
+  if (current_fc_level == fc_level::DYNAMIC)
+    {
+      gcc_assert (maxclusters == 1);
+      fc_info->variant->new_type = newtype[0];
     }
 
   warn_padded = save_warn_padded;
@@ -1277,7 +1600,7 @@ srfunction::create_new_decls (void)
     return;
 
   if (node)
-    set_cfun (DECL_STRUCT_FUNCTION (node->decl));
+    push_cfun (DECL_STRUCT_FUNCTION (node->decl));
 
   for (unsigned i = 0; i < decls.length (); i++)
     {
@@ -1388,7 +1711,8 @@ srfunction::create_new_decls (void)
 	}
     }
 
-  set_cfun (NULL);
+  if (node)
+    pop_cfun ();
 }
 
 /* Dump out the field structure to FILE.  */
@@ -1459,34 +1783,34 @@ sraccess::dump (FILE *f) const
   fprintf (f, "}\n");
 }
 
-/* Check if it's an assignment to the given type.  */
-
-bool
-sraccess::write_type_p (tree type) const
-{
-  return this->type && this->type->type == type
-	 && is_gimple_assign (stmt)
-	 && index == 0;
-}
-
-/* Check if it's an assignment to the given field.  */
+/* Check if it's an assignment to the given field(fielddecl != NULL_TREE)
+   or any field(fielddecl == NULL_TREE).  */
 
 bool
 sraccess::write_field_p (tree fielddecl) const
 {
-  return field && field->fielddecl == fielddecl
-	 && is_gimple_assign (stmt)
-	 && index == 0;
+  return write_p () && field && (!fielddecl || field->fielddecl == fielddecl);
 }
 
-/* Check if it's an assignment that read the given field.  */
+/* Check if it's an assignment that read the given
+   field(fielddecl != NULL_TREE) or any field(fielddecl == NULL_TREE).  */
 
 bool
 sraccess::read_field_p (tree fielddecl) const
 {
-  return field && field->fielddecl == fielddecl
-	 && is_gimple_assign (stmt)
-	 && index > 0;
+  return read_p () && field && (!fielddecl || field->fielddecl == fielddecl);
+}
+
+bool
+sraccess::write_p () const
+{
+  return is_gimple_assign (stmt) && index == 0;
+}
+
+bool
+sraccess::read_p () const
+{
+  return is_gimple_assign (stmt) && index > 0;
 }
 
 /* Dump out the decl structure to FILE.  */
@@ -1502,6 +1826,133 @@ srdecl::dump (FILE *file)
   print_generic_expr (file, decl);
   fprintf (file, " type: ");
   type->simple_dump (file);
+}
+
+void
+fc_closure::add_read_change (gimple *stmt)
+{
+  if (!read_change_set.contains (stmt))
+    read_change_set.add (stmt);
+}
+
+bool
+fc_closure::read_change_p (gimple *stmt)
+{
+  return read_change_set.contains (stmt);
+}
+
+void
+fc_closure::add_read_unchange (gimple *stmt)
+{
+  if (!read_unchange_set.contains (stmt))
+    read_unchange_set.add (stmt);
+}
+
+bool
+fc_closure::read_unchange_p (gimple *stmt)
+{
+  return read_unchange_set.contains (stmt);
+}
+
+void
+fc_closure::add_write_change (gimple *stmt)
+{
+  if (!write_change_set.contains (stmt))
+    write_change_set.add (stmt);
+}
+
+bool
+fc_closure::write_change_p (gimple *stmt)
+{
+  return write_change_set.contains (stmt);
+}
+
+void
+fc_closure::add_write_unchange (gimple *stmt)
+{
+  if (!write_unchange_set.contains (stmt))
+    write_unchange_set.add (stmt);
+}
+
+bool
+fc_closure::write_unchange_p (gimple *stmt)
+{
+  return write_unchange_set.contains (stmt);
+}
+
+bool
+fc_closure::change_p (gimple *stmt)
+{
+  return write_change_p (stmt) || read_change_p (stmt);
+}
+
+bool
+fc_closure::unchange_p (gimple *stmt)
+{
+  return write_unchange_p (stmt) || read_unchange_p (stmt);
+}
+
+/* Call compress/decompress function for rhs.  */
+
+tree
+fc_closure::convert_rhs (tree rhs, tree fn)
+{
+  tree newrhs = build_call_expr (fn, 1, rhs);
+  cgraph_node *callee = cgraph_node::get (fn);
+  cgraph_node *node = cgraph_node::get (current_function_decl);
+  node->create_edge (callee, NULL, profile_count::zero ());
+
+  return newrhs;
+}
+
+void
+closure_helper::record_origin_closure (basic_block bb)
+{
+  for (auto si = gsi_start_bb (bb); !gsi_end_p (si); gsi_next (&si))
+    {
+      gimple *stmt = gsi_stmt (si);
+      if (!is_gimple_assign (stmt))
+	continue;
+
+      uid++;
+
+      if (cinfo->read_change_p (stmt))
+	bitmap_set_bit (read_change_map, uid);
+      else if (cinfo->write_change_p (stmt))
+	bitmap_set_bit (write_change_map, uid);
+      else if (cinfo->read_unchange_p (stmt))
+	bitmap_set_bit (read_unchange_map, uid);
+      else if (cinfo->write_unchange_p (stmt))
+	bitmap_set_bit (write_unchange_map, uid);
+    }
+}
+
+void
+closure_helper::add_cloned_closure (basic_block bb)
+{
+  for (auto si = gsi_start_bb (bb); !gsi_end_p (si); gsi_next (&si))
+    {
+      gimple *stmt = gsi_stmt (si);
+      if (!is_gimple_assign (stmt))
+	continue;
+
+      uid++;
+
+      if (bitmap_bit_p (read_change_map, uid))
+	cinfo->add_read_change (stmt);
+      else if (bitmap_bit_p (write_change_map, uid))
+	cinfo->add_write_change (stmt);
+      else if (bitmap_bit_p (read_unchange_map, uid))
+	cinfo->add_read_unchange (stmt);
+      else if (bitmap_bit_p (write_unchange_map, uid))
+	cinfo->add_write_unchange (stmt);
+    }
+}
+
+void
+closure_helper::reset_uid ()
+{
+  uid = 0;
 }
 
 void
@@ -1545,6 +1996,37 @@ fc_field_class::get_field_index (srfield *field) const
   return -1;
 }
 
+void
+fc_ref::dump (FILE *file) const
+{
+  fprintf (file, "var: ");
+  print_generic_expr (dump_file, var);
+  fprintf (dump_file, ", type: ");
+  print_generic_expr (dump_file, orig_type ? orig_type : TREE_TYPE (var));
+  fprintf (dump_file, ", array: ");
+  print_generic_expr (dump_file, source->var);
+  if (size)
+    {
+      fprintf (dump_file, ", array size: ");
+      print_generic_expr (dump_file, size);
+    }
+  if (field)
+    {
+      fprintf (dump_file, ", field: ");
+      print_generic_expr (dump_file, field);
+    }
+  fprintf (dump_file, "\n");
+}
+
+fc_type_info::~fc_type_info ()
+{
+  if (variant)
+    {
+      delete variant;
+      variant = NULL;
+    }
+}
+
 fc_field_class *
 fc_type_info::find_field_class_by_type (tree type) const
 {
@@ -1575,6 +2057,125 @@ fc_type_info::record_field_class (srfield *srf)
   field_class->srfields.safe_push (srf);
 
   return field_class;
+}
+
+fc_cond *
+fc_type_info::find_cond (tree type) const
+{
+  for (auto *cond : fc_conds)
+    {
+      if (cond->old_type == type)
+	return cond;
+    }
+
+  return NULL;
+}
+
+fc_cond *
+fc_type_info::create_cond (tree type)
+{
+  fc_cond *cond = find_cond (type);
+  if (cond)
+    return cond;
+
+  /* New cond will be stored in an auto_delete_vec(fc_conds).  */
+  cond = new fc_cond (type);
+  fc_conds.safe_push (cond);
+
+  /* Record the fc_cond to corresponding fc_field_class.  */
+  fc_field_class *field_class = find_field_class_by_type (type);
+  gcc_assert (field_class);
+  field_class->cond = cond;
+  cond->field_class = field_class;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Create new fc_cond, type: ");
+      print_generic_expr (dump_file, type);
+      fprintf (dump_file, "\n");
+    }
+
+  return cond;
+}
+
+void
+fc_type_info::record_cond (fc_field *fc_f)
+{
+  if (fc_f->cond)
+    return;
+
+  fc_cond *cond = create_cond (TREE_TYPE (fc_f->field));
+  fc_f->cond = cond;
+  cond->fields.safe_push (fc_f);
+}
+
+fc_path_info::~fc_path_info ()
+{
+  if (cloned_func)
+    delete cloned_func;
+}
+
+/* Search and store basic_blocks that:
+   1) can reach STMT (when DIRECTION == PRED);
+   2) can be reached from STMT (when DIRECTION == SUCC).
+   Return false if field compression cannot be performed.  */
+
+bool
+fc_path_info::collect_blocks (gimple *stmt, direction dir)
+{
+  basic_block start_bb = gimple_bb (stmt);
+  if (!start_bb)
+    return false;
+
+  /* The start block should not be in a loop.  */
+  if (start_bb->loop_father != NULL
+      && loop_outer (start_bb->loop_father) != NULL)
+    return false;
+
+  bool prev = dir == direction::PRED;
+  basic_block stop_bb = prev ? ENTRY_BLOCK_PTR_FOR_FN (cfun)
+			     : EXIT_BLOCK_PTR_FOR_FN (cfun);
+  auto *store_list = prev ? &pre_bbs : &reach_bbs;
+
+  auto_bitmap visited;
+  auto_vec<basic_block> worklist;
+  worklist.safe_push (start_bb);
+  bool exit_p = false;
+
+  while (!worklist.is_empty ())
+    {
+      basic_block bb = worklist.pop ();
+      if (!bitmap_set_bit (visited, bb->index))
+	continue;
+
+      if (bb != stop_bb)
+	store_list->safe_push (bb);
+      else
+	exit_p = true;
+
+      if (prev)
+	for (auto *e : bb->preds)
+	  worklist.safe_push (e->src);
+      else
+	for (auto *e : bb->succs)
+	  worklist.safe_push (e->dest);
+    }
+
+  if (!exit_p)
+    return false;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "Found %d blocks in func ", store_list->length ());
+      print_generic_expr (dump_file, cfun->decl);
+      fprintf (dump_file, " %s:\n",
+	       prev ? "before start-point" : "to be cloned");
+      for (auto *bb : store_list)
+	fprintf (dump_file, "%d ", bb->index);
+      fprintf (dump_file, "\n\n");
+    }
+
+  return true;
 }
 
 } // namespace struct_reorg
@@ -1680,7 +2281,11 @@ struct const_map
 struct ipa_struct_reorg
 {
 private:
+  /* The current srfield set in rewrite_expr.  For dfc.  */
+  srfield *cur_srfd;
+
   auto_vec_del<const_map> global_consts;
+  hash_set<tree> visited_vars;
 
 public:
   // Constructors
@@ -1712,6 +2317,8 @@ public:
   void detect_cycles (void);
   bool walk_field_for_cycles (srtype *);
   void prune_escaped_types (void);
+  void prune_function (srfunction *);
+  void prune_globals ();
   void propagate_escape (void);
   void propagate_escape_via_original (void);
   void propagate_escape_via_empty_with_no_original (void);
@@ -1725,11 +2332,12 @@ public:
   void create_new_functions (void);
   void create_new_args (cgraph_node *new_node);
   unsigned rewrite_functions (void);
+  void rewrite_block (basic_block);
   srdecl *record_var (tree decl,
 		      escape_type escapes = does_not_escape,
 		      int arg = -1);
   void record_safe_func_with_void_ptr_parm (void);
-  srfunction *record_function (cgraph_node *node);
+  srfunction *record_function (cgraph_node *node, srfunction *sfn = NULL);
   srfunction *find_function (cgraph_node *node);
   void record_field_type (tree field, srtype *base_srtype);
   void record_struct_field_types (tree base_type, srtype *base_srtype);
@@ -1856,8 +2464,8 @@ public:
 			     const auto_vec<unsigned> &);
   srfield *read_field_in_fc_class_p (gimple *, fc_field_class *);
   srfield *write_field_in_fc_class_p (gimple *, fc_field_class *);
-  fc_field *fc_fields_contains (auto_vec<fc_field *> &, tree);
   bool fc_pair_stmts_rhs_equal_p (const auto_vec<gimple *> &);
+  bool unique_init_const_p (const fc_shadow_info &);
   bool fc_operand_equal_p (tree, tree);
   bool fc_global_const_p (tree, HOST_WIDE_INT &);
   bool fc_peephole_const_p (tree, HOST_WIDE_INT &);
@@ -1873,10 +2481,92 @@ public:
   bool find_hot_access (fc_type_info *, auto_vec<fc_field *> &);
   void cleanup_shadow_write (fc_type_info *);
   void rewrite_shadow_read (fc_type_info *);
-  void insert_shadow_stmt (gimple *, unsigned, fc_field *, tree);
+  void modify_shadow_read (gimple *, unsigned, fc_field *, tree);
   bool compress_fields_static (fc_type_info *info);
-  void compress_to_bitfields (fc_type_info *info);
+  bool compress_to_bitfield_static (fc_type_info *info);
+  bool compress_to_bitfield_dynamic (fc_type_info *info);
   auto_vec<basic_block> collect_all_predecessor (gimple *);
+  bool types_fc_equal_p (tree, tree);
+  bool types_fc_compatible_p (tree, tree);
+  bool find_dynamic_fc_fields (fc_type_info *);
+  bool find_fields_in_input_stmt (fc_type_info *);
+  bool find_input_stmt (gimple *, gimple *&, gimple *&);
+  tree find_file_handler (gimple *);
+  bool find_fopen_fclose (fc_type_info *);
+  bool check_dynamic_shadow_fields (fc_type_info *);
+  bool find_fc_paths (fc_type_info *);
+  bool find_fc_data (fc_type_info *);
+  bool find_fc_arrays (fc_type_info *);
+  bool find_fc_array (fc_type_info *, tree, varpool_node *);
+  bool duplicative_array_p (fc_type_info *, tree);
+  bool is_stmt_before_fclose (fc_type_info *, gimple *, symtab_node *);
+  bool reorg_ptr_p (tree);
+  bool get_allocate_size_iterate (tree, gimple *, tree &, tree * = NULL);
+  bool get_allocate_size_assign (tree, gassign *, tree &, tree *);
+  bool get_allocate_size_call (tree, gcall *, tree &, tree *);
+  bool get_allocate_size_reorg_ptr (gimple *, tree &);
+  tree get_allocate_size (tree, tree, tree, gimple *);
+  bool find_fc_refs (fc_type_info *);
+  bool find_fc_refs_iterate (fc_type_info *, fc_array *, tree, bool);
+  bool find_fc_refs_ssa_name (fc_type_info *, fc_array *, tree, bool);
+  bool find_fc_refs_mem_ref (fc_type_info *, fc_array *, tree);
+  bool find_fc_refs_component_ref (fc_type_info *, fc_array *, tree);
+  bool fc_type_pointer_p (fc_type_info *, tree);
+  bool add_fc_ref (fc_type_info *, fc_array *, tree, tree);
+  check_ref_result check_duplicative_ref (fc_type_info *, fc_array *, tree,
+  					  tree, tree &, tree &);
+  gimple *find_def_stmt_before_fclose (fc_type_info *, tree);
+  tree get_ptr_decl (tree);
+  bool check_fc_array_uses (fc_type_info *);
+  void calc_fc_ref_count (fc_type_info *);
+  bool compress_fields_dynamic (fc_type_info *);
+  bool calc_dynamic_boundary (fc_type_info *);
+  bool fc_cond_field_p (tree, const fc_cond *);
+  bool fc_input_ssa_p (tree, const fc_cond *);
+  bool fc_field_load_p (tree, const fc_cond *);
+  void update_high_bound (fc_cond *, HOST_WIDE_INT);
+  bool check_closure (fc_type_info *);
+  bool check_closure (fc_type_info *, fc_cond *);
+  bool write_field_class_only_p (fc_type_info *, fc_field_class *, tree);
+  void collect_closure_read_change (fc_type_info *, fc_field_class *);
+  unsigned execute_dynamic_field_compression ();
+  unsigned dynamic_fc_rewrite ();
+  bool create_dynamic_fc_newtypes ();
+  void create_dynamic_fc_variant (fc_type_info *);
+  void create_global_var_dfc_path (fc_type_info *);
+  void create_dynamic_fc_convert_fn (fc_type_info *);
+  tree create_convert_fn (fc_cond *, unsigned, bool);
+  edge create_normal_part (fc_cond *);
+  void create_conversion_part (fc_cond *, edge, bool);
+  void clone_dynamic_fc_path (fc_type_info *);
+  void clone_partial_func (fc_type_info *, srfunction *);
+  void clone_whole_func (srfunction *);
+  void rewrite_dynamic_shadow_fields (fc_type_info *);
+  void rewrite_dynamic_fc_path ();
+  void record_dfc_path_info (fc_type_info *);
+  void collect_closure_info_dynamic (fc_type_info *);
+  void collect_closure_info_partial (srfunction *, fc_closure *);
+  void collect_closure_info_whole (srfunction *, fc_closure *);
+  void rewrite_partial_func (srfunction *);
+  void rewrite_whole_func (srfunction *);
+  void clean_func_after_rewrite (srfunction *);
+  void dynamic_fc_rewrite_assign (gimple *, tree, tree &, tree &);
+  void add_dynamic_checking (fc_type_info *);
+  void insert_code_calc_dfc_path (fc_type_info *);
+  void insert_code_calc_max_min_val (fc_type_info *);
+  tree insert_code_calc_cond (fc_type_info *, gimple_stmt_iterator *);
+  void insert_code_check_init_const (fc_type_info *, gimple_stmt_iterator *,
+				     tree &);
+  void insert_code_compress_data (fc_type_info *, edge);
+  void insert_code_compress_variant (fc_type_info *, basic_block,
+				     const auto_vec<tree> &,
+				     const auto_vec<tree> &);
+  void insert_code_compress_array (fc_type_info *, edge &,
+				   const auto_vec<tree> &,
+				   const auto_vec<tree> &);
+  void insert_code_modify_refs (fc_type_info *, edge);
+  void create_compress_object_fn (fc_type_info *);
+  edge insert_code_modify_single_ref (edge, tree, fc_array *, tree, tree);
 };
 
 struct ipa_struct_relayout
@@ -2248,6 +2938,8 @@ ipa_struct_relayout::rewrite_address (tree xhs, gimple_stmt_iterator *gsi)
   /* Emit gimple _X4 = gptr[I].  */
   tree gptr_field_ssa = create_ssa (gptr[field_num], gsi);
   tree new_address = make_ssa_name (TREE_TYPE (gptr[field_num]));
+  tree new_address_type = TREE_TYPE (new_address);
+  tree new_type = TREE_TYPE (new_address_type);
   gassign *new_stmt = gimple_build_assign (new_address, POINTER_PLUS_EXPR,
 					   gptr_field_ssa, step3);
   gsi_insert_before (gsi, new_stmt, GSI_SAME_STMT);
@@ -2257,9 +2949,15 @@ ipa_struct_relayout::rewrite_address (tree xhs, gimple_stmt_iterator *gsi)
      should be transformed to
        MEM[gptr + sizeof (member)] = 0B
   */
-  HOST_WIDE_INT size
-    = tree_to_shwi (TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (new_address))));
-  tree new_size = rewrite_offset (pointer_offset, size);
+  tree new_size = NULL_TREE;
+  if (integer_zerop (pointer_offset))
+    new_size = build_int_cst (TREE_TYPE (new_address), 0);
+  else
+    {
+      HOST_WIDE_INT size = tree_to_shwi (TYPE_SIZE_UNIT (new_type));
+      new_size = rewrite_offset (pointer_offset, size);
+    }
+
   if (new_size)
     TREE_OPERAND (mem_ref, 1) = new_size;
 
@@ -2531,7 +3229,7 @@ ipa_struct_reorg::dump_newtypes (FILE *f)
     srtype *type = NULL;
     FOR_EACH_VEC_ELT (types, i, type)
     {
-	if (type->has_escaped ())
+	if (!type->has_new_type ())
 	  continue;
 	fprintf (f, "======= the %dth newtype: ======\n", i);
 	fprintf (f, "type : ");
@@ -3134,7 +3832,7 @@ check_each_call (cgraph_node *node, cgraph_edge *caller)
 	return false;
     }
 
-  if (!check_node_def (ptr_layers))
+  if (current_fc_level != fc_level::DYNAMIC && !check_node_def (ptr_layers))
     return false;
   return true;
 }
@@ -4066,61 +4764,10 @@ ipa_struct_reorg::handled_allocation_stmt (gimple *stmt)
 tree
 ipa_struct_reorg::allocate_size (srtype *type, srdecl *decl, gimple *stmt)
 {
-  if (!stmt
-      || gimple_code (stmt) != GIMPLE_CALL
-      || !handled_allocation_stmt (stmt))
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	{
-	  fprintf (dump_file, "\nNot a allocate statment:\n");
-	  print_gimple_stmt (dump_file, stmt, 0);
-	  fprintf (dump_file, "\n");
-	}
-      return NULL;
-    }
-
   if (type->has_escaped ())
     return NULL;
 
-  tree struct_size = TYPE_SIZE_UNIT (type->type);
-
-  /* Specify the correct size to relax multi-layer pointer.  */
-  if (TREE_CODE (decl->decl) == SSA_NAME && isptrptr (decl->orig_type))
-    struct_size = TYPE_SIZE_UNIT (decl->orig_type);
-
-  tree size = gimple_call_arg (stmt, 0);
-
-  if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
-      || gimple_call_builtin_p (stmt, BUILT_IN_ALIGNED_ALLOC))
-    size = gimple_call_arg (stmt, 1);
-  else if (gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
-    {
-      tree arg1;
-      arg1 = gimple_call_arg (stmt, 1);
-      /* Check that second argument is a constant equal to
-	 the size of structure.  */
-      if (operand_equal_p (arg1, struct_size, 0))
-	return size;
-      /* ??? Check that first argument is a constant
-	 equal to the size of structure.  */
-      /* If the allocated number is equal to the value of struct_size,
-	 the value of arg1 is changed to the allocated number.  */
-      if (operand_equal_p (size, struct_size, 0))
-	return arg1;
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	{
-	  fprintf (dump_file, "\ncalloc the correct size:\n");
-	  print_gimple_stmt (dump_file, stmt, 0);
-	  fprintf (dump_file, "\n");
-	}
-      return NULL;
-    }
-
-  tree num;
-  if (!is_result_of_mult (size, &num, struct_size))
-    return NULL;
-
-  return num;
+  return get_allocate_size (type->type, decl->decl, decl->orig_type, stmt);
 }
 
 void
@@ -4423,18 +5070,6 @@ ipa_struct_reorg::get_type_field (tree expr, tree &base, bool &indirect,
       base = TREE_OPERAND (base, 0);
     }
 
-  if (offset != 0 && accesstype)
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	{
-	  fprintf (dump_file, "Non zero offset (%d) with MEM.\n", (int)offset);
-	  print_generic_expr (dump_file, expr);
-	  fprintf (dump_file, "\n");
-	  print_generic_expr (dump_file, base);
-	  fprintf (dump_file, "\n");
-	}
-    }
-
   srdecl *d = find_decl (base);
   srtype *t;
 
@@ -4546,7 +5181,14 @@ ipa_struct_reorg::get_type_field (tree expr, tree &base, bool &indirect,
       return true;
     }
 
-  srfield *f = t->find_field (offset);
+  srfield *f = NULL;
+  if (TREE_CODE (expr) == COMPONENT_REF
+      && DECL_BIT_FIELD (TREE_OPERAND (expr, 1)))
+    /* Static field compression may create bitfield.  In this case,
+       byte position is not reliable.  */
+    f = t->find_field_by_decl (TREE_OPERAND (expr, 1));
+  else
+    f = t->find_field (offset);
   if (!f)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
@@ -4751,8 +5393,15 @@ srfunction *
 ipa_struct_reorg::find_function (cgraph_node *node)
 {
   for (unsigned i = 0; i < functions.length (); i++)
-    if (functions[i]->node == node)
-      return functions[i];
+    {
+      if (functions[i]->node == node)
+	return functions[i];
+
+      srfunction *cloned_func = functions[i]->fc_path.cloned_func;
+      if (current_fc_level == fc_level::DYNAMIC
+	  && cloned_func && cloned_func->node == node)
+	return cloned_func;
+    }
   return NULL;
 }
 
@@ -5383,12 +6032,11 @@ ipa_struct_reorg::check_uses (srdecl *decl, vec<srdecl *> &worklist)
 /* Record function corresponding to NODE.  */
 
 srfunction *
-ipa_struct_reorg::record_function (cgraph_node *node)
+ipa_struct_reorg::record_function (cgraph_node *node, srfunction *sfn)
 {
   function *fn;
   tree parm, var;
   unsigned int i;
-  srfunction *sfn = NULL;
   escape_type escapes = does_not_escape;
 
   if (dump_file  && (dump_flags & TDF_DETAILS))
@@ -5408,8 +6056,11 @@ ipa_struct_reorg::record_function (cgraph_node *node)
   if (!fn)
     return sfn;
 
-  sfn = new srfunction (node);
-  functions.safe_push (sfn);
+  if (!sfn)
+    {
+      sfn = new srfunction (node);
+      functions.safe_push (sfn);
+    }
 
   current_function = sfn;
 
@@ -5935,38 +6586,7 @@ ipa_struct_reorg::prune_escaped_types (void)
   for (unsigned i = 0; i < functions.length ();)
     {
       srfunction *function = functions[i];
-
-      /* Prune function arguments of types that escape.  */
-      for (unsigned j = 0; j < function->args.length ();)
-	{
-	  if (function->args[j]->type->has_escaped ())
-	    function->args.ordered_remove (j);
-	  else
-	    j++;
-	}
-
-      /* Prune global variables that the function uses of types
-	 that escape.  */
-      for (unsigned j = 0; j < function->globals.length ();)
-	{
-	  if (function->globals[j]->type->has_escaped ())
-	    function->globals.ordered_remove (j);
-	  else
-	    j++;
-	}
-
-      /* Prune variables that the function uses of types that escape.  */
-      for (unsigned j = 0; j < function->decls.length ();)
-	{
-	  srdecl *decl = function->decls[j];
-	  if (decl->type->has_escaped ())
-	    {
-	      function->decls.ordered_remove (j);
-	      delete decl;
-	    }
-	  else
-	    j++;
-	}
+      prune_function (function);
 
       /* Prune functions which don't refer to any variables any more.  */
       if (function->args.is_empty ()
@@ -5981,19 +6601,7 @@ ipa_struct_reorg::prune_escaped_types (void)
 	i++;
     }
 
-  /* Prune globals of types that escape, all references to those decls
-     will have been removed in the first loop.  */
-  for (unsigned j = 0; j < globals.decls.length ();)
-    {
-      srdecl *decl = globals.decls[j];
-      if (decl->type->has_escaped ())
-	{
-	  globals.decls.ordered_remove (j);
-	  delete decl;
-	}
-      else
-	j++;
-    }
+  prune_globals ();
 
   /* Prune types that escape, all references to those types
      will have been removed in the above loops.  */
@@ -6023,6 +6631,62 @@ ipa_struct_reorg::prune_escaped_types (void)
       dump_types (dump_file);
       fprintf (dump_file, "======== all functions (after pruning): ========\n");
       dump_functions (dump_file);
+    }
+}
+
+/* Prune the decls in function SRFN.  */
+
+void
+ipa_struct_reorg::prune_function (srfunction *srfn)
+{
+  /* Prune function arguments of types that escape.  */
+  for (unsigned i = 0; i < srfn->args.length ();)
+    {
+      if (srfn->args[i]->type->has_escaped ())
+	srfn->args.ordered_remove (i);
+      else
+	i++;
+    }
+
+  /* Prune global variables that the function uses of types that escape.  */
+  for (unsigned i = 0; i < srfn->globals.length ();)
+    {
+      if (srfn->globals[i]->type->has_escaped ())
+	srfn->globals.ordered_remove (i);
+      else
+	i++;
+    }
+
+  /* Prune variables that the function uses of types that escape.  */
+  for (unsigned i = 0; i < srfn->decls.length ();)
+    {
+      srdecl *decl = srfn->decls[i];
+      if (decl->type->has_escaped ())
+	{
+	  srfn->decls.ordered_remove (i);
+	  delete decl;
+	}
+      else
+	i++;
+    }
+}
+
+/* Prune globals of types that escape, all references to those decls
+   will have been removed in the first loop.  */
+
+void
+ipa_struct_reorg::prune_globals ()
+{
+  for (unsigned i = 0; i < globals.decls.length ();)
+    {
+      srdecl *decl = globals.decls[i];
+      if (decl->type->has_escaped ())
+	{
+	  globals.decls.ordered_remove (i);
+	  delete decl;
+	}
+      else
+	i++;
     }
 }
 
@@ -6242,7 +6906,6 @@ ipa_struct_reorg::create_new_functions (void)
       bool anyargchanges = false;
       cgraph_node *new_node;
       cgraph_node *node = f->node;
-      int newargs = 0;
       if (f->old)
 	continue;
 
@@ -6254,10 +6917,7 @@ ipa_struct_reorg::create_new_functions (void)
 	  srdecl *d = f->args[j];
 	  srtype *t = d->type;
 	  if (t->has_new_type ())
-	    {
-	      newargs += t->newtype[1] != NULL;
-	      anyargchanges = true;
-	    }
+	    anyargchanges = true;
 	}
       if (!anyargchanges)
 	continue;
@@ -6389,6 +7049,7 @@ ipa_struct_reorg::rewrite_expr (tree expr,
 	}
       return true;
     }
+  cur_srfd = f;
 
   tree newdecl = newbase[f->clusternum];
   for (unsigned i = 0; i < max_split && f->newfield[i]; i++)
@@ -6959,8 +7620,6 @@ ipa_struct_reorg::decompress_candidate_without_check (gimple_stmt_iterator *gsi,
 						      tree &new_lhs,
 						      tree &new_rhs)
 {
-  imm_use_iterator imm_iter;
-  use_operand_p use_p;
   bool processed = false;
 
   if (!gsi_one_before_end_p (*gsi))
@@ -7695,10 +8354,13 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 
       if (!rewrite_lhs_rhs (lhs, rhs1, newlhs, newrhs))
 	return false;
-      tree size = TYPE_SIZE_UNIT (TREE_TYPE (TREE_TYPE (lhs)));
-      tree num;
+      tree struct_type = TREE_TYPE (TREE_TYPE (lhs));
+      tree size = TYPE_SIZE_UNIT (struct_type);
+      tree num = NULL_TREE;
       /* Check if rhs2 is a multiplication of the size of the type.  */
-      if (!is_result_of_mult (rhs2, &num, size)
+      if ((current_fc_level != fc_level::DYNAMIC
+	   || !POINTER_TYPE_P (struct_type))
+	  && !is_result_of_mult (rhs2, &num, size)
 	  && !(current_layout_opt_level & SEMI_RELAYOUT))
 	internal_error (
 	  "The rhs of pointer is not a multiplicate and it slips through");
@@ -7836,6 +8498,7 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	}
       tree newlhs[max_split];
       tree newrhs[max_split];
+      cur_srfd = NULL;
       if (!rewrite_lhs_rhs (lhs, rhs, newlhs, newrhs))
 	{
 	  if (dump_file && (dump_flags & TDF_DETAILS))
@@ -7853,6 +8516,9 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	  if (current_layout_opt_level >= POINTER_COMPRESSION_SAFE)
 	    try_rewrite_with_pointer_compression (stmt, gsi, lhs, rhs,
 						  newlhs[i], newrhs[i]);
+	  if (current_fc_level == fc_level::DYNAMIC
+	      && cur_srfd && cur_srfd->dfc_type_change_p ())
+	    dynamic_fc_rewrite_assign (stmt, rhs, newlhs[i], newrhs[i]);
 	  remove = true;
 	  if (fields_copied)
 	    continue;
@@ -7862,7 +8528,10 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
 	  tree conv_rhs = build_convert_gimple (lhs_expr, rhs_expr, gsi);
 	  if (conv_rhs)
 	    rhs_expr = conv_rhs;
-
+	  if (rhs_expr && get_gimple_rhs_class (TREE_CODE (rhs_expr))
+			  == GIMPLE_INVALID_RHS)
+	    rhs_expr = gimplify_build1 (gsi, NOP_EXPR, TREE_TYPE (rhs_expr),
+					rhs_expr);
 	  gimple *newstmt = gimple_build_assign (lhs_expr, rhs_expr);
 	  if (dump_file && (dump_flags & TDF_DETAILS))
 	    {
@@ -7997,6 +8666,9 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
       if (!decl || !decl->type)
 	return false;
       srtype *type = decl->type;
+      if (type->has_escaped () || !type->has_new_type ())
+	return false;
+
       tree num = allocate_size (type, decl, stmt);
       gcc_assert (num);
       memset (newrhs1, 0, sizeof (newrhs1));
@@ -8114,9 +8786,9 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
 	{
 	  if (t && t->semi_relayout)
 	    newexpr[0] = get_real_allocated_ptr (newexpr[0], gsi);
-	    gimple_call_set_arg (stmt, 0, newexpr[0]);
-	    update_stmt (stmt);
-	    return false;
+	  gimple_call_set_arg (stmt, 0, newexpr[0]);
+	  update_stmt (stmt);
+	  return false;
 	}
 
       for (unsigned i = 0; i < max_split && newexpr[i]; i++)
@@ -8142,6 +8814,7 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
 
   /* Add a safe func mechanism.  */
   if (current_layout_opt_level >= STRUCT_REORDER_FIELDS
+      && current_fc_level != fc_level::DYNAMIC
       && f && f->is_safe_func)
     {
       tree expr = gimple_call_arg (stmt, 0);
@@ -8160,8 +8833,34 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
 
   /* Did not find the function or had not cloned it return saying don't
      change the function call.  */
-  if (!f || !f->newf)
+  if (!f)
     return false;
+
+  if (current_fc_level == fc_level::DYNAMIC)
+    {
+      if (f->partial_clone_p ())
+	return false;
+      f = f->fc_path.cloned_func;
+    }
+  else
+    {
+      if (!f->newf)
+	return false;
+      /* Move over to the new function.  */
+      f = f->newf;
+    }
+
+  if (current_fc_level == fc_level::DYNAMIC && f->is_safe_func)
+    {
+      tree expr = gimple_call_arg (stmt, 0);
+      tree newexpr[max_split] = {NULL_TREE};
+      if (rewrite_expr (expr, newexpr) && newexpr[1] == NULL_TREE)
+	gimple_call_set_arg (stmt, 0, newexpr[0]);
+
+      gimple_call_set_fndecl (stmt, f->node->decl);
+      update_stmt (stmt);
+      return false;
+    }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
@@ -8169,9 +8868,6 @@ ipa_struct_reorg::rewrite_call (gcall *stmt, gimple_stmt_iterator *gsi)
       print_gimple_expr (dump_file, stmt, 0);
       fprintf (dump_file, "\n");
     }
-
-  /* Move over to the new function.  */
-  f = f->newf;
 
   tree chain = gimple_call_chain (stmt);
   unsigned nargs = gimple_call_num_args (stmt);
@@ -8456,9 +9152,8 @@ ipa_struct_reorg::rewrite_functions (void)
 
   if (flag_ipa_struct_sfc_shadow)
     {
-      for (unsigned i = 0; i < fc_infos.length (); i++)
+      for (auto *info : fc_infos)
 	{
-	  fc_type_info *info = fc_infos[i];
 	  if (!info || !info->static_fc_p)
 	    continue;
 	  cleanup_shadow_write (info);
@@ -8571,39 +9266,7 @@ ipa_struct_reorg::rewrite_functions (void)
 		   i, f->node->name ());
 	}
       FOR_EACH_BB_FN (bb, cfun)
-	{
-	  for (gphi_iterator si = gsi_start_phis (bb); !gsi_end_p (si);)
-	    {
-	      if (rewrite_phi (si.phi ()))
-		si = gsi_start_phis (bb);
-	      else
-		gsi_next (&si);
-	    }
-
-	  for (gimple_stmt_iterator si = gsi_start_bb (bb); !gsi_end_p (si);)
-	    {
-	      gimple *stmt = gsi_stmt (si);
-	      if (rewrite_stmt (stmt, &si))
-		gsi_remove (&si, true);
-	      else
-		gsi_next (&si);
-	    }
-	}
-
-      /* Debug statements need to happen after all other statements
-	 have changed.  */
-      FOR_EACH_BB_FN (bb, cfun)
-	{
-	  for (gimple_stmt_iterator si = gsi_start_bb (bb); !gsi_end_p (si);)
-	    {
-	      gimple *stmt = gsi_stmt (si);
-	      if (gimple_code (stmt) == GIMPLE_DEBUG
-		  && rewrite_debug (stmt, &si))
-		gsi_remove (&si, true);
-	      else
-		gsi_next (&si);
-	    }
-	}
+	rewrite_block (bb);
 
       /* Release the old SSA_NAMES for old arguments.  */
       if (f->old)
@@ -8657,6 +9320,39 @@ ipa_struct_reorg::rewrite_functions (void)
     }
 
   return retval | TODO_verify_all;
+}
+
+void
+ipa_struct_reorg::rewrite_block (basic_block bb)
+{
+  for (gphi_iterator si = gsi_start_phis (bb); !gsi_end_p (si);)
+    {
+      if (rewrite_phi (si.phi ()))
+	si = gsi_start_phis (bb);
+      else
+	gsi_next (&si);
+    }
+
+  for (gimple_stmt_iterator si = gsi_start_bb (bb); !gsi_end_p (si);)
+    {
+      gimple *stmt = gsi_stmt (si);
+      if (rewrite_stmt (stmt, &si))
+	gsi_remove (&si, true);
+      else
+	gsi_next (&si);
+    }
+
+  /* Debug statements need to happen after all other statements
+     have changed.  */
+  for (gimple_stmt_iterator si = gsi_start_bb (bb); !gsi_end_p (si);)
+    {
+      gimple *stmt = gsi_stmt (si);
+      if (gimple_code (stmt) == GIMPLE_DEBUG
+	  && rewrite_debug (stmt, &si))
+	gsi_remove (&si, true);
+      else
+	gsi_next (&si);
+    }
 }
 
 unsigned int
@@ -8919,7 +9615,7 @@ ipa_struct_reorg::check_and_prune_struct_for_field_compression (void)
       if (!find_field_compression_candidate (type))
 	continue;
 
-      gcc_assert (type->fc_info->static_fc_p);
+      gcc_assert (type->fc_info->static_fc_p ^ type->fc_info->dynamic_fc_p);
       if (dump_file)
 	{
 	  fprintf (dump_file, "[field compress] Found candidate: ");
@@ -8948,13 +9644,19 @@ ipa_struct_reorg::find_field_compression_candidate (srtype *type)
   /* Classify fields by field type firstly.  */
   classify_fields (info);
 
-  if (flag_ipa_struct_sfc)
+  if (current_fc_level == fc_level::STATIC)
     {
       FC_DUMP_MSG ("Looking for static fc fields\n");
       info->static_fc_p = find_static_fc_fields (info);
     }
 
-  if (!info->static_fc_p)
+  if (current_fc_level == fc_level::DYNAMIC)
+    {
+      FC_DUMP_MSG ("Looking for dynamic fc fields\n");
+      info->dynamic_fc_p = find_dynamic_fc_fields (info);
+    }
+
+  if (!info->static_fc_p && !info->dynamic_fc_p)
     {
       FC_DUMP_MSG ("Fail finding field compression candidate\n");
       return false;
@@ -8963,6 +9665,8 @@ ipa_struct_reorg::find_field_compression_candidate (srtype *type)
   if (!compress_fields (info))
     {
       FC_DUMP_MSG ("Fail compressing fields\n");
+      info->static_fc_p = false;
+      info->dynamic_fc_p = false;
       return false;
     }
 
@@ -9012,7 +9716,7 @@ ipa_struct_reorg::find_static_fc_fields (fc_type_info *info)
 	continue;
 
       /* We have marked these fields as shadow, so skip them.  */
-      if (fc_fields_contains (info->static_fc_fields, srf->fielddecl))
+      if (find_fc_field (info->static_fc_fields, srf->fielddecl))
 	continue;
 
       found_static_compress |= static_compress_p (info, srf->fielddecl);
@@ -9041,15 +9745,20 @@ ipa_struct_reorg::find_static_fc_fields (fc_type_info *info)
 bool
 ipa_struct_reorg::compress_fields (fc_type_info *info)
 {
-  if (info->static_fc_p && !compress_fields_static (info))
-    info->static_fc_p = false;
+  gcc_assert (info->static_fc_p ^ info->dynamic_fc_p);
 
-  if (!info->static_fc_p)
-    return false;
-
-  compress_to_bitfields (info);
-
-  return true;
+  if (info->static_fc_p)
+    {
+      return compress_fields_static (info)
+	     && compress_to_bitfield_static (info);
+    }
+  else
+    {
+      return compress_fields_dynamic (info)
+	     && compress_to_bitfield_dynamic (info)
+	     && calc_dynamic_boundary (info)
+	     && check_closure (info);
+    }
 }
 
 /* Check if the type has any field that can be shadowed.  */
@@ -9101,6 +9810,7 @@ ipa_struct_reorg::find_shadow_fields (fc_type_info *info,
   /* Unpair assignment checking.  */
   auto &srfields = field_class->srfields;
   unsigned original_index = 0;
+  tree init_const = NULL_TREE;
   if (shadow_info.unpair_stmt)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
@@ -9117,6 +9827,19 @@ ipa_struct_reorg::find_shadow_fields (fc_type_info *info,
 	return false;
     }
 
+  if (current_fc_level == fc_level::DYNAMIC)
+    {
+      if (!shadow_info.unpair_stmt)
+	return false;
+      /* We have proved that the unpair_stmt is single assign.  */
+      init_const = gimple_assign_rhs1 (shadow_info.unpair_stmt);
+      if (TREE_CODE (init_const) != INTEGER_CST)
+	return false;
+
+      if (!unique_init_const_p (shadow_info))
+	return false;
+    }
+
   /* Add a new static fc_field.  */
   srfield *original_srf = srfields[original_index];
 
@@ -9128,7 +9851,10 @@ ipa_struct_reorg::find_shadow_fields (fc_type_info *info,
 	continue;
 
       fc_field *fc_f = new fc_field (shadow_srf->fielddecl, 1, original_srf);
-      info->static_fc_fields.safe_push (fc_f);
+      auto &fc_fields = current_fc_level == fc_level::STATIC
+		      ? info->static_fc_fields : info->dynamic_shadow_fields;
+      fc_fields.safe_push (fc_f);
+      fc_f->init_const = init_const; /* Not NULL only in dynamic.  */
 
       /* Record all shadow stmts to fc_field.  */
       unsigned j;
@@ -9289,15 +10015,30 @@ ipa_struct_reorg::write_field_in_fc_class_p (gimple *stmt,
   return field;
 }
 
-fc_field *
-ipa_struct_reorg::fc_fields_contains (auto_vec<fc_field *> &fc_fields,
-				      tree field)
-{
-  for (auto *fc_f : fc_fields)
-    if (fc_f->field == field)
-      return fc_f;
+/* Check if the init_const is a unique constant, which is different from all
+   constant rhs of pair statements.  */
 
-  return NULL;
+bool
+ipa_struct_reorg::unique_init_const_p (const fc_shadow_info &shadow_info)
+{
+  tree init_const = gimple_assign_rhs1 (shadow_info.unpair_stmt);
+  HOST_WIDE_INT value = tree_to_shwi (init_const);
+  for (auto *stmts : shadow_info.pair_stmts_groups)
+    {
+      /* We have prove all rhs in a group are equal, checking one of them
+	 is enough.  */
+      tree rhs = gimple_assign_rhs1 ((*stmts)[0]);
+      if (TREE_CODE (rhs) != INTEGER_CST)
+	continue;
+
+      if (tree_to_shwi (rhs) == value)
+	{
+	  FC_DUMP_MSG ("Init const is not unique.\n");
+	  return false;
+	}
+    }
+
+  return true;
 }
 
 /* Check if the right operands of all assignments are equal.  */
@@ -9363,12 +10104,6 @@ ipa_struct_reorg::fc_operand_equal_p (tree var1, tree var2)
 bool
 ipa_struct_reorg::fc_global_const_p (tree var, HOST_WIDE_INT &value)
 {
-  srtype *type;
-  srfield *field;
-  tree base;
-  if (!get_base_type (var, base, type, field) || type->has_escaped ())
-    return false;
-
   const_map *cm = find_global_const (var);
   if (cm)
     {
@@ -9376,33 +10111,44 @@ ipa_struct_reorg::fc_global_const_p (tree var, HOST_WIDE_INT &value)
       return true;
     }
 
+  if (visited_vars.contains (var))
+    return false;
+  visited_vars.add (var);
+
   bool is_const = false;
   HOST_WIDE_INT const_value = 0;
-  for (auto *access : type->accesses)
+  for (auto *srfn : functions)
     {
-      SET_CFUN (access->function);
-
-      gimple *stmt = access->stmt;
-      if (!gimple_assign_single_p (stmt)
-	  || !operand_equal_p (gimple_assign_lhs (stmt), var))
-	continue;
-
-      if (!fc_peephole_const_p (gimple_assign_rhs1 (stmt), value))
-	return false;
-
-      /* Make sure the value is never changed.  */
-      if (is_const)
+      SET_CFUN (srfn);
+      basic_block bb = NULL;
+      FOR_EACH_BB_FN (bb, cfun)
 	{
-	  if (value != const_value)
-	    return false;
-	  continue;
+	  for (gimple_stmt_iterator si = gsi_start_bb (bb); !gsi_end_p (si);
+	       gsi_next (&si))
+	    {
+	      gimple *stmt = gsi_stmt (si);
+	      if (!gimple_assign_single_p (stmt)
+		  || !operand_equal_p (gimple_assign_lhs (stmt), var))
+		continue;
+
+	      if (!fc_peephole_const_p (gimple_assign_rhs1 (stmt), value))
+		return false;
+
+	      /* Make sure the value is never changed.  */
+	      if (is_const)
+		{
+		  if (value != const_value)
+		    return false;
+		  continue;
+		}
+
+	      is_const = true;
+	      const_value = value;
+
+	      /* Record a global constant here.  */
+	      global_consts.safe_push (new const_map (var, value));
+	    }
 	}
-
-      is_const = true;
-      const_value = value;
-
-      /* Record a global constant here.  */
-      global_consts.safe_push (new const_map (var, value));
     }
 
   return is_const;
@@ -9785,7 +10531,7 @@ ipa_struct_reorg::struct_copy_p (gimple *stmt, tree type)
 {
   if (!gimple_assign_single_p (stmt)
       || TREE_TYPE (gimple_assign_lhs (stmt)) != type
-      || !types_compatible_p (TREE_TYPE (gimple_assign_rhs1 (stmt)), type))
+      || !types_fc_compatible_p (TREE_TYPE (gimple_assign_rhs1 (stmt)), type))
     return false;
 
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -9815,8 +10561,7 @@ ipa_struct_reorg::find_hot_access (fc_type_info *info,
       SET_CFUN (access->function);
 
       basic_block bb = access->stmt->bb;
-      if (!bb->loop_father->num
-	  || !access->write_type_p (type->type))
+      if (!bb->loop_father->num || !access->write_p ())
 	continue;
 
       /* Case (1).  */
@@ -9828,7 +10573,7 @@ ipa_struct_reorg::find_hot_access (fc_type_info *info,
 	continue;
 
       tree fielddecl = access->field->fielddecl;
-      if (!fielddecl || !fc_fields_contains (fc_fields, fielddecl))
+      if (!fielddecl || !find_fc_field (fc_fields, fielddecl))
 	continue;
 
       auto &set = write_map.get_or_insert (bb);
@@ -9859,8 +10604,8 @@ ipa_struct_reorg::cleanup_shadow_write (fc_type_info *info)
 	{
 	  SET_CFUN (fc_f->shadow_stmts_func[i]);
 	  gcc_assert (gimple_assign_single_p (stmt));
-	  gimple_assign_set_rhs1 (
-	    stmt, build_int_cst (TREE_TYPE (fc_f->field), 1));
+	  tree newrhs = build_int_cst (TREE_TYPE (fc_f->field), 1);
+	  gimple_assign_set_rhs1 (stmt, newrhs);
 	  update_stmt (stmt);
 	}
     }
@@ -9882,7 +10627,7 @@ ipa_struct_reorg::rewrite_shadow_read (fc_type_info *info)
 	    continue;
 
 	  SET_CFUN (access->function);
-	  insert_shadow_stmt (access->stmt, access->index,
+	  modify_shadow_read (access->stmt, access->index,
 			      fc_f, access->base);
 	}
     }
@@ -9891,14 +10636,16 @@ ipa_struct_reorg::rewrite_shadow_read (fc_type_info *info)
 /* Insert the followings for shadow data read before STMT.
    The IDX operand is the shadow data.
 
-   * For static: (shadow_field == true) ? original_field : 0 */
+   * For static:  (shadow_field == true) ? original_field : 0
+   * For dynamic: (original_field != init_const) ? original_field : 0
+ */
 
 void
-ipa_struct_reorg::insert_shadow_stmt (gimple *stmt, unsigned idx,
-				      fc_field *fc_field, tree base)
+ipa_struct_reorg::modify_shadow_read (gimple *stmt, unsigned idx,
+				      fc_field *field, tree base)
 {
   tree shadow = gimple_op (stmt, idx);
-  tree original = build_field_ref (base, fc_field->original->fielddecl);
+  tree original = build_field_ref (base, field->original->fielddecl);
 
   /* Insert new stmt immediately before stmt.  */
   gimple_stmt_iterator gsi = gsi_for_stmt (stmt);
@@ -9909,15 +10656,26 @@ ipa_struct_reorg::insert_shadow_stmt (gimple *stmt, unsigned idx,
   gsi_insert_before (&gsi, original_stmt, GSI_SAME_STMT);
   update_stmt (original_stmt);
 
-  /* shadow_ssa = shadow */
-  tree shadow_ssa = make_temp_ssa_name (TREE_TYPE (shadow), NULL, "");
-  gimple *shadow_stmt = gimple_build_assign (shadow_ssa, shadow);
-  gsi_insert_before (&gsi, shadow_stmt, GSI_SAME_STMT);
-  update_stmt (shadow_stmt);
+  tree cond = NULL_TREE;
+  if (current_fc_level == fc_level::DYNAMIC)
+    {
+      field->original->get_closure ()->add_read_change (original_stmt);
+      /* new_shadow_ssa = (original_ssa != init_const ? original_ssa : 0) */
+      cond = fold_build2 (NE_EXPR, boolean_type_node, original_ssa,
+			  field->init_const);
+    }
+  else
+    {
+      /* shadow_ssa = shadow */
+      tree shadow_ssa = make_temp_ssa_name (TREE_TYPE (shadow), NULL, "");
+      gimple *shadow_stmt = gimple_build_assign (shadow_ssa, shadow);
+      gsi_insert_before (&gsi, shadow_stmt, GSI_SAME_STMT);
+      update_stmt (shadow_stmt);
 
-  /* new_shadow_ssa = (shadow_ssa == true ? original_ssa : 0) */
-  tree cond = fold_build2 (EQ_EXPR, boolean_type_node, shadow_ssa,
-			   build_int_cst (TREE_TYPE (shadow), 1));
+      /* new_shadow_ssa = (shadow_ssa == true ? original_ssa : 0) */
+      cond = fold_build2 (EQ_EXPR, boolean_type_node, shadow_ssa,
+			  build_int_cst (TREE_TYPE (shadow), 1));
+    }
 
   tree new_shadow = build_cond_expr (cond, original_ssa,
 				     build_int_cst (TREE_TYPE (shadow), 0));
@@ -9970,34 +10728,97 @@ ipa_struct_reorg::compress_fields_static (fc_type_info *info)
 
 /* Compress fields to bitfield, for which bits will be the width.  */
 
-void
-ipa_struct_reorg::compress_to_bitfields (fc_type_info *info)
+bool
+ipa_struct_reorg::compress_to_bitfield_static (fc_type_info *info)
 {
-  /* For static compression.  Calculate bitsize for static field.  */
-  if (flag_ipa_struct_sfc_bitfield && info->static_fc_p)
+  if (!flag_ipa_struct_sfc_bitfield)
+    return true;
+
+  for (auto *fc_f : info->static_fc_fields)
     {
-      for (auto *fc_f : info->static_fc_fields)
+      HOST_WIDE_INT max_value = fc_f->max_value;
+      gcc_assert (max_value > 0 && max_value <= UINT_MAX);
+
+      /* Calculate bitsize.  */
+      fc_f->bits = 0;
+      while (max_value)
 	{
-	  HOST_WIDE_INT max_value = fc_f->max_value;
-	  gcc_assert (max_value > 0 && max_value <= UINT_MAX);
+	  fc_f->bits++;
+	  max_value >>= 1;
+	}
 
-	  /* Calculate bitsize.  */
-	  fc_f->bits = 0;
-	  while (max_value)
-	    {
-	      fc_f->bits++;
-	      max_value >>= 1;
-	    }
-
-	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    {
-	      FC_DUMP_MSG ("Bitfield: ");
-	      print_generic_expr (dump_file, fc_f->field);
-	      fprintf (dump_file, ":%d", fc_f->bits);
-	      fprintf (dump_file, "\n");
-	    }
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Static bitfield: ");
+	  print_generic_expr (dump_file, fc_f->field);
+	  fprintf (dump_file, ":%d", fc_f->bits);
+	  fprintf (dump_file, "\n");
 	}
     }
+
+  return true;
+}
+
+/* Compress fields to bitfield for dynamic field compression.  */
+
+bool
+ipa_struct_reorg::compress_to_bitfield_dynamic (fc_type_info *info)
+{
+  if (!flag_ipa_struct_dfc_bitfield)
+    return true;
+
+  calc_fc_ref_count (info);
+
+  /* Collect existing bitfields.  */
+  unsigned total_static_bits = 0;
+  for (auto *srf : info->type->fields)
+    {
+      tree field = srf->fielddecl;
+      if (DECL_BIT_FIELD (field))
+	total_static_bits += tree_to_uhwi (DECL_SIZE (field));
+    }
+
+  unsigned max_ref_cnt = 0;
+  fc_field *max_f = NULL;
+  fc_cond *max_cond = NULL;
+  for (auto *cond : info->fc_conds)
+    {
+      /* Heuristically, only try bit field for big data size.  */
+      if (TYPE_MAIN_VARIANT (cond->old_type) != long_integer_type_node)
+	continue;
+
+      /* Find the hottest field.  */
+      for (auto *fc_f : cond->fields)
+	{
+	  if (fc_f->ref_cnt <= max_ref_cnt)
+	    continue;
+
+	  max_ref_cnt = fc_f->ref_cnt;
+	  max_f = fc_f;
+	  max_cond = cond;
+	}
+    }
+
+  /* Choose the hottest candidate to try bitfield.  */
+  unsigned new_type_bits = TYPE_PRECISION (max_f->new_type);
+  if (new_type_bits <= total_static_bits)
+    return false;
+
+  /* The fc condition covering this field is marked as bitfield,
+     although not all of the fields for this condition are marked as
+     bitfield.  */
+  max_f->bits = new_type_bits - total_static_bits;
+  max_cond->bits = max_f->bits;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Dynamic bitfield: ");
+      print_generic_expr (dump_file, max_f->field);
+      fprintf (dump_file, ":%d", max_f->bits);
+      fprintf (dump_file, "\n");
+    }
+
+  return true;
 }
 
 /* Collect all blocks that can reach stmt.  */
@@ -10029,6 +10850,2804 @@ ipa_struct_reorg::collect_all_predecessor (gimple *stmt)
     }
 
   return blocks;
+}
+
+bool
+ipa_struct_reorg::types_fc_equal_p (tree type1, tree type2)
+{
+  if (type1 == type2)
+    return true;
+  if (TREE_CODE (type1) != TREE_CODE (type2))
+    return false;
+
+  const char *tname1;
+  const char *tname2;
+  size_t len1;
+  size_t len2;
+  const char *p;
+
+  switch (TREE_CODE (type1))
+    {
+      case POINTER_TYPE:
+	return types_fc_equal_p (inner_type (type1), inner_type (type2));
+
+      case RECORD_TYPE:
+	tname1 = get_type_name (type1);
+	tname2 = get_type_name (type2);
+	if (!tname1 || !tname2)
+	  return false;
+
+	len1 = strlen (tname1);
+	len2 = strlen (tname2);
+	if (len1 > len2)
+	  {
+	    std::swap (len1, len2);
+	    std::swap (tname1, tname2);
+	  }
+
+	p = strstr (tname2, tname1);
+	if (!p)
+	  return false;
+	p += len1;
+
+	/* As suffixes with '.' are generated by compiler, should be safe to
+	   skip the rest of p.  */
+	return STRING_STARTS_WITH (p, ".reorg");
+
+      default:
+	return false;
+    }
+}
+
+bool
+ipa_struct_reorg::types_fc_compatible_p (tree type1, tree type2)
+{
+  return types_compatible_p (type1, type2) || types_fc_equal_p (type1, type2);
+}
+
+/* Scan all of fields to check whether each can be dynamically
+   compressed or not.  */
+
+bool
+ipa_struct_reorg::find_dynamic_fc_fields (fc_type_info *info)
+{
+  if (flag_ipa_struct_dfc_shadow)
+    find_shadow_fields (info);
+
+  if (!find_fields_in_input_stmt (info))
+    {
+      FC_DUMP_MSG ("Fail finding fields in input stmt\n");
+      return false;
+    }
+
+  if (!find_fopen_fclose (info))
+    {
+      FC_DUMP_MSG ("Fail finding fopen/fclose stmt\n");
+      return false;
+    }
+
+  /* Avoid compressing fields without hot access.  */
+  if (!find_hot_access (info, info->dynamic_fc_fields))
+    {
+      FC_DUMP_MSG ("Fail finding hot access for dynamic\n");
+      return false;
+    }
+
+  if (!check_dynamic_shadow_fields (info))
+    {
+      FC_DUMP_MSG ("Fail checking dynamic shadow fields\n");
+      return false;
+    }
+
+  if (!find_fc_paths (info))
+    {
+      FC_DUMP_MSG ("Fail finding fc paths\n");
+      return false;
+    }
+
+  if (!find_fc_data (info))
+    {
+      FC_DUMP_MSG ("Fail finding fc data\n");
+      return false;
+    }
+
+  return true;
+}
+
+/* Find the stmt that read data from a file, the fields that can be affected
+   by the input data will be treated as the dynamic field compression
+   candidate fields.  */
+
+bool
+ipa_struct_reorg::find_fields_in_input_stmt (fc_type_info *info)
+{
+  basic_block input_bb = NULL;
+
+  for (auto *access : info->type->accesses)
+    {
+      if (!access->write_field_p ())
+	continue;
+
+      srfield *field = access->field;
+      if (find_fc_field (info->dynamic_shadow_fields, field->fielddecl)
+	  || find_fc_field (info->dynamic_fc_fields, field->fielddecl))
+	continue;
+
+      /* Skip dead field.  */
+      if (field->dead_field_p ())
+	continue;
+
+      if (TREE_CODE (field->fieldtype) != INTEGER_TYPE)
+	continue;
+
+      SET_CFUN (access->function);
+      /* Guarantee this struct field is from a file.  */
+      gimple *input_stmt = NULL;
+      gimple *var_stmt = NULL;
+      if (!find_input_stmt (access->stmt, input_stmt, var_stmt)
+	  || gimple_bb (input_stmt)->loop_father->num == 0)
+	continue;
+
+      tree var = gimple_assign_rhs1 (var_stmt);
+
+      if (!info->input_stmt)
+	{
+	  info->input_stmt = input_stmt;
+	  info->input_var = access->base;
+	  info->input_file_handler = find_file_handler (input_stmt);
+	  if (!info->input_file_handler)
+	    return false;
+	}
+
+      /* Support only one input stmt now.  */
+      if (info->input_stmt != input_stmt
+	  || info->input_var != access->base)
+	return false;
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Found a dynamic compression field: ");
+	  print_generic_expr (dump_file, field->fielddecl);
+	  fprintf (dump_file, ", input var: ");
+	  print_generic_expr (dump_file, var);
+	  fprintf (dump_file, "\n");
+	}
+
+      tree in_ssa = gimple_assign_rhs1 (access->stmt);
+      fc_field *fc_f = new fc_field (field->fielddecl, var, in_ssa);
+      info->dynamic_fc_fields.safe_push (fc_f);
+
+      /* All fc fields should define their ssas in the same block.  */
+      if (!input_bb)
+	input_bb = gimple_bb (SSA_NAME_DEF_STMT (in_ssa));
+      else if (input_bb != gimple_bb (SSA_NAME_DEF_STMT (in_ssa)))
+	return false;
+
+      info->start_srfn = access->function;
+    }
+
+  if (info->dynamic_fc_fields.is_empty ())
+    return false;
+
+  /* Sort all fields in the order of input ssa position.  This is required
+     to simplify the min_val and max_val calculation.  */
+  SET_CFUN (info->start_srfn);
+  renumber_gimple_stmt_uids_in_blocks (&input_bb, 1);
+  info->dynamic_fc_fields.qsort (input_order_cmp);
+
+  return true;
+}
+
+/* Find the input stmt for the rhs of the given stmt.
+   Now we only support sscanf.  */
+
+bool
+ipa_struct_reorg::find_input_stmt (gimple *stmt, gimple *&input_stmt,
+				   gimple *&var_stmt)
+{
+  /* Check pattern fc_type->field = _ssa_name.  */
+  if (!gimple_assign_single_p (stmt)
+      || TREE_CODE (gimple_assign_rhs1 (stmt)) != SSA_NAME)
+    return false;
+
+  stmt = strip_copy_stmts (SSA_NAME_DEF_STMT (gimple_assign_rhs1 (stmt)));
+  /* Check pattern _ssa_name = var.  */
+  if (!gimple_assign_single_p (stmt)
+      || !VAR_P (gimple_assign_rhs1 (stmt)))
+    return false;
+
+  var_stmt = stmt;
+  tree var = gimple_assign_rhs1 (stmt);
+
+  /* Search backward to find a sscanf stmt.  */
+  while (gimple_bb (stmt))
+    {
+      tree vuse = gimple_vuse (stmt);
+      if (!vuse)
+	break;
+
+      stmt = SSA_NAME_DEF_STMT (vuse);
+      if (!gimple_call_builtin_p (stmt, BUILT_IN_SSCANF))
+	continue;
+
+      /* Search '&var' from the 3th arguments.  */
+      for (unsigned i = 2; i < gimple_call_num_args (stmt); i++)
+	{
+	  tree arg = gimple_call_arg (stmt, i);
+	  if (TREE_CODE (arg) != ADDR_EXPR
+	      || TREE_OPERAND (arg, 0) != var)
+	    continue;
+
+	  input_stmt = stmt;
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      FC_DUMP_MSG ("Found input stmt: ");
+	      print_gimple_stmt (dump_file, stmt, 0);
+	    }
+	  return true;
+	}
+
+      /* The sscanf stmt doesn't contain 'var', so the check failed.  */
+      break;
+    }
+
+  return false;
+}
+
+/* Find the file handler, which holds the file from which the given stmt
+   read data.
+   Now only support sscanf.  */
+
+tree
+ipa_struct_reorg::find_file_handler (gimple *input_stmt)
+{
+  if (!gimple_call_builtin_p (input_stmt, BUILT_IN_SSCANF))
+    return NULL_TREE;
+
+  /* Find fgets stmt.  */
+  gimple *stmt = SSA_NAME_DEF_STMT (gimple_vuse (input_stmt));
+  if (gimple_code (stmt) != GIMPLE_CALL)
+    return NULL_TREE;
+
+  tree callee = gimple_call_fn (stmt);
+  if (callee && TREE_CODE (callee) == OBJ_TYPE_REF)
+    return NULL_TREE;
+
+  callee = gimple_call_fndecl (stmt);
+  const char *fn_name = get_func_name (callee);
+  if (!fn_name || strcmp (fn_name, "fgets") != 0)
+    return NULL_TREE;
+
+  /* Check fget is using the string for sscanf.  */
+  tree fget_arg0 = gimple_call_arg (stmt, 0);
+  tree sscanf_arg0 = gimple_call_arg (input_stmt, 0);
+  if (TREE_OPERAND (fget_arg0, 0) != TREE_OPERAND (sscanf_arg0, 0))
+    return NULL_TREE;
+
+  return gimple_call_arg (stmt, 2);
+}
+
+/* Find fclose in start function.  */
+
+bool
+ipa_struct_reorg::find_fopen_fclose (fc_type_info *info)
+{
+  SET_CFUN (info->start_srfn);
+
+  basic_block bb;
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      for (auto si = gsi_start_bb (bb); !gsi_end_p (si); gsi_next (&si))
+	{
+	  gimple *stmt = gsi_stmt (si);
+	  if (!is_gimple_call (stmt))
+	    continue;
+
+	  tree decl = gimple_call_fndecl (stmt);
+	  const char *callee = get_func_name (decl);
+	  if (!callee || strcmp (callee, "fclose") != 0)
+	    continue;
+
+	  /* The fclose must use the same file handler as the fget,
+	     which reads data for sscanf.  */
+	  tree fh = gimple_call_arg (stmt, 0);
+	  if (fh != info->input_file_handler)
+	    continue;
+
+	  info->fclose_stmt = stmt;
+	  renumber_gimple_stmt_uids_in_blocks (&bb, 1);
+
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file, "\nFound fclose in function %s:\n",
+		       get_func_name (info->start_srfn->node->decl));
+	      print_gimple_stmt (dump_file, stmt, 0);
+	    }
+
+	  return true;
+	}
+    }
+
+  return false;
+}
+
+/* Check whether the original of a dynamic shadow field is one of
+   dynamic_fc_fields.  */
+
+bool
+ipa_struct_reorg::check_dynamic_shadow_fields (fc_type_info *info)
+{
+  for (auto *shadow_field : info->dynamic_shadow_fields)
+    {
+      srfield *original = shadow_field->original;
+      fc_field *input_field = find_fc_field (info->dynamic_fc_fields,
+					     original->fielddecl);
+      if (!input_field)
+	return false;
+
+      shadow_field->input_field = input_field;
+      shadow_field->input_ssa = input_field->input_ssa;
+    }
+
+  return true;
+}
+
+bool
+ipa_struct_reorg::find_fc_paths (fc_type_info *info)
+{
+  /* Start point function.  */
+  srfunction *srfn = info->start_srfn;
+  gimple *start_stmt = info->fclose_stmt;
+
+  while (srfn)
+    {
+      /* Already seen.  */
+      if (srfn->fc_path.start_stmt)
+	return false;
+
+      SET_CFUN (srfn);
+
+      srfn->fc_path.start_stmt = start_stmt;
+      if (!srfn->fc_path.collect_blocks (start_stmt, fc_path_info::PRED)
+	  || !srfn->fc_path.collect_blocks (start_stmt, fc_path_info::SUCC))
+	return false;
+
+      /* Start at the entry function.  */
+      if (srfn->entry_function_p ())
+	return true;
+
+      /* The current function should only be called once.  */
+      cgraph_edge *edge = srfn->node->callers;
+      if (!edge || edge->next_caller || !edge->call_stmt)
+	return false;
+
+      srfn = find_function (edge->caller);
+      start_stmt = edge->call_stmt;
+    }
+
+  return false;
+}
+
+bool
+ipa_struct_reorg::find_fc_data (fc_type_info *info)
+{
+  if (!find_fc_arrays (info))
+    {
+      FC_DUMP_MSG ("Fail finding fc arrays\n");
+      return false;
+    }
+
+  if (!check_fc_array_uses (info))
+    {
+      FC_DUMP_MSG ("Fail checking fc array uses\n");
+      return false;
+    }
+
+  if (!find_fc_refs (info))
+    {
+      FC_DUMP_MSG ("Fail finding fc refs\n");
+      return false;
+    }
+
+  return true;
+}
+
+/* Find all arrays to be cached:
+   1. Defined by malloc/calloc (before start-point)
+   2. Will be used after fclose (e.g. global variables)  */
+
+bool
+ipa_struct_reorg::find_fc_arrays (fc_type_info *info)
+{
+  varpool_node *vnode;
+  tree type = info->type->type;
+
+  /* 1) Process all global vars, search for arrays of cached objects.  */
+  FOR_EACH_VARIABLE (vnode)
+    {
+      tree node = vnode->decl;
+      tree node_type = TREE_TYPE (node);
+      /* Global object is not supported.  */
+      if (types_fc_compatible_p (node_type, type))
+	return false;
+
+      switch (TREE_CODE (node_type))
+	{
+	  /* POINTER->RECORD(fc_type) */
+	  case POINTER_TYPE:
+	    if (types_fc_compatible_p (TREE_TYPE (node_type), type)
+		&& !find_fc_array (info, node, vnode))
+	      return false;
+	    break;
+	  /* RECORD->POINTER->RECORD(fc_type) */
+	  case RECORD_TYPE:
+	    for (tree t = TYPE_FIELDS (node_type); t; t = DECL_CHAIN (t))
+	      {
+		if (TREE_CODE (t) != FIELD_DECL)
+		  continue;
+
+		tree field_type = TREE_TYPE (t);
+		if (TREE_CODE (field_type) == RECORD_TYPE)
+		  {
+		    FC_DUMP_MSG ("RECORD->RECORD->... not supported\n");
+		    return false;
+		  }
+
+		if (POINTER_TYPE_P (field_type)
+		    && types_fc_compatible_p (TREE_TYPE (field_type), type))
+		  {
+		    tree field_node = build3 (COMPONENT_REF, field_type, node,
+					      t, NULL_TREE);
+		    if (!find_fc_array (info, field_node, vnode))
+		      return false;
+		  }
+		/* More safe: trace-back following VDEF/VUSE.  */
+	      }
+	    break;
+	  case ARRAY_TYPE:
+	  case UNION_TYPE:
+	  case QUAL_UNION_TYPE:
+	    if (dump_file && (dump_flags & TDF_DETAILS))
+	      {
+		FC_DUMP_MSG ("node_type not handled: ");
+		print_generic_expr (dump_file, node_type);
+		fprintf (dump_file, "\n");
+	      }
+	    return false;
+	  default:
+	    break;
+	}
+    }
+
+  return !info->fc_arrays.is_empty ();
+}
+
+/* Check if node is a array to be cached, if so, record it.
+   vnode contains referrring to node.  */
+
+bool
+ipa_struct_reorg::find_fc_array (fc_type_info *info, tree node,
+				 varpool_node *vnode)
+{
+  tree size_expr = NULL_TREE;
+  tree ssa_def = NULL_TREE;
+
+  ipa_ref *ref = NULL;
+  for (unsigned i = 0; vnode->iterate_referring (i, ref); i++)
+    {
+      /* Filter for writes to NODE.  */
+      if (ref->use != IPA_REF_STORE)
+	continue;
+      /* Ignore assignments after start-point.  */
+      if (!is_stmt_before_fclose (info, ref->stmt, ref->referring))
+	continue;
+      tree lhs = gimple_get_lhs (ref->stmt);
+      if (!operand_equal_p (lhs, node, COMPARE_DECL_FLAGS))
+	continue;
+
+      tree new_size_expr = NULL_TREE;
+      if (!get_allocate_size_iterate (info->type->type, ref->stmt,
+				      new_size_expr, &ssa_def))
+	return false;
+
+      if (new_size_expr)
+	{
+	  if (size_expr)
+	    {
+	      FC_DUMP_MSG ("fc_array allocated twice before start-point\n");
+	      return false;
+	    }
+	  size_expr = new_size_expr;
+
+	  /* Allocation must happen at start function.  */
+	  if (ref->referring != info->start_srfn->node)
+	    return false;
+
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      FC_DUMP_MSG ("Add array: ");
+	      print_generic_expr (dump_file, node);
+	      fprintf (dump_file, ", size: ");
+	      print_generic_expr (dump_file, size_expr);
+	      fprintf (dump_file, ", ssa_def: ");
+	      print_generic_expr (dump_file, ssa_def);
+	      fprintf (dump_file, "\n");
+	    }
+	}
+    }
+
+  if (size_expr)
+    {
+      if (duplicative_array_p (info, ssa_def))
+	return false;
+
+      fc_array *array = new fc_array (node, size_expr, ssa_def, vnode);
+      info->fc_arrays.safe_push (array);
+    }
+
+  return true;
+}
+
+/* Give the SSA_DEF of a array, check if it's duplicative.  */
+
+bool
+ipa_struct_reorg::duplicative_array_p (fc_type_info *info, tree ssa_def)
+{
+  for (auto *array : info->fc_arrays)
+    {
+      if (array->ssa_def != ssa_def)
+	continue;
+
+      FC_DUMP_MSG ("Array assigned to multiple variable\n");
+      return true;
+    }
+
+  return false;
+}
+
+bool
+ipa_struct_reorg::is_stmt_before_fclose (fc_type_info *info, gimple *stmt,
+					 symtab_node *node)
+{
+  gcc_assert (info->fclose_stmt);
+  srfunction *f = find_function (as_a<cgraph_node *> (node));
+  gcc_assert (f);
+
+  if (gimple_bb (stmt) == gimple_bb (info->fclose_stmt))
+    return gimple_uid (stmt) < gimple_uid (info->fclose_stmt);
+
+  /* If array allocations are outside start-point's function, we may need to
+     create global vars to record the sizes.  */
+  return f->fc_path.pre_bbs.contains (gimple_bb (stmt));
+}
+
+/* Check if the VAR is a global pointer created by reorg.  */
+
+bool
+ipa_struct_reorg::reorg_ptr_p (tree var)
+{
+  if (TREE_CODE (var) != VAR_DECL)
+    return false;
+
+  const char *decl_name = IDENTIFIER_POINTER (DECL_NAME (var));
+  if (!decl_name)
+    return false;
+
+  const char *reorg_name = strstr (decl_name, ".reorg");
+  if (!reorg_name)
+    return false;
+
+  return strstr (reorg_name, "_gptr");
+}
+
+/* Return number of objects of TYPE following define chain from STMT.
+   If the number is not certain, set ERROR so we can abort field compression.
+   If SSA_DEF is not NULL, the ssa_name of allocated ptr will be assigned to it.
+ */
+
+bool
+ipa_struct_reorg::get_allocate_size_iterate (tree type, gimple *stmt,
+					     tree &size, tree *ssa_def)
+{
+  if (!stmt)
+    return false;
+
+  switch (gimple_code (stmt))
+    {
+      case GIMPLE_ASSIGN:
+	return get_allocate_size_assign (type, as_a<gassign *> (stmt),
+					 size, ssa_def);
+      case GIMPLE_CALL:
+	return get_allocate_size_call (type, as_a<gcall *> (stmt),
+				       size, ssa_def);
+      default:
+	return false;
+    }
+}
+
+bool
+ipa_struct_reorg::get_allocate_size_assign (tree type, gassign *stmt,
+					    tree &size, tree *ssa_def)
+{
+  tree rhs = gimple_assign_rhs1 (stmt);
+  if ((!gimple_assign_single_p (stmt) && !gimple_assign_cast_p (stmt))
+      || TREE_CODE (rhs) != SSA_NAME)
+    return true;
+
+  gimple *def_stmt = SSA_NAME_DEF_STMT (rhs);
+  /* Handle the global arrays split by struct_reorg.  */
+  if (reorg_ptr_p (gimple_assign_lhs (stmt)))
+    return get_allocate_size_reorg_ptr (def_stmt, size);
+
+  return get_allocate_size_iterate (type, def_stmt, size, ssa_def);
+}
+
+bool
+ipa_struct_reorg::get_allocate_size_call (tree type, gcall *stmt,
+					  tree &size, tree *ssa_def)
+{
+  tree lhs = gimple_call_lhs (stmt);
+  gcc_assert (TREE_CODE (lhs) == SSA_NAME);
+  if (ssa_def)
+    *ssa_def = lhs;
+
+  size = get_allocate_size (type, lhs, NULL_TREE, stmt);
+
+  return size != NULL_TREE;
+}
+
+/* Handle the global arrays split by struct_reorg:
+   1) The new array ptrs are marked with suffix "_gptr".
+   2) The array ptr are calculated with form:
+      _gptr0 = calloc (NUM, size_all);
+      _gptr1 = _gptr0 + NUM * sizeof (TREE_TYPE (_gptr0));
+      _gptr2 = _gptr1 + NUM * sizeof (TREE_TYPE (_gptr1));
+      ...
+ */
+
+bool
+ipa_struct_reorg::get_allocate_size_reorg_ptr (gimple *plus_stmt, tree &size)
+{
+  /* Check the POINTER_PLUS_EXPR.  */
+  if (!is_gimple_assign (plus_stmt)
+      || gimple_assign_rhs_code (plus_stmt) != POINTER_PLUS_EXPR)
+    return false;
+
+  tree rhs1 = gimple_assign_rhs1 (plus_stmt);
+  tree rhs2 = gimple_assign_rhs2 (plus_stmt);
+  tree prev_type = TREE_TYPE (rhs1);
+
+  /* Check the MULT_EXPR.  */
+  gcc_assert (TREE_CODE (rhs2) == SSA_NAME);
+  gimple *mul_stmt = SSA_NAME_DEF_STMT (rhs2);
+  if (!is_gimple_assign (mul_stmt)
+      || gimple_assign_rhs_code (mul_stmt) != MULT_EXPR)
+    return false;
+
+  tree num = gimple_assign_rhs1 (mul_stmt);
+  tree mul_by = gimple_assign_rhs2 (mul_stmt);
+  if (TREE_CODE (mul_by) == SSA_NAME)
+    std::swap (num, mul_by);
+
+  if (TREE_CODE (num) != SSA_NAME || TREE_CODE (mul_by) != INTEGER_CST
+      || !operand_equal_p (mul_by, TYPE_SIZE_UNIT (prev_type)))
+    return false;
+
+  /* We can trace to original calloc/malloc to make this safer.  */
+
+  size = num;
+
+  return true;
+}
+
+/* Returns the allocated size / T size for STMT.  That is the number of
+   elements in the array allocated.  */
+
+tree
+ipa_struct_reorg::get_allocate_size (tree type, tree decl, tree orig_type,
+				     gimple *stmt)
+{
+  if (!stmt
+      || gimple_code (stmt) != GIMPLE_CALL
+      || !handled_allocation_stmt (stmt))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "\nNot an allocate statement:\n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	  fprintf (dump_file, "\n");
+	}
+      return NULL_TREE;
+    }
+
+  tree struct_size = TYPE_SIZE_UNIT (type);
+
+  /* Specify the correct size to relax multi-layer pointer.  */
+  if (TREE_CODE (decl) == SSA_NAME && orig_type && isptrptr (orig_type))
+    struct_size = TYPE_SIZE_UNIT (orig_type);
+
+  tree size = gimple_call_arg (stmt, 0);
+
+  if (gimple_call_builtin_p (stmt, BUILT_IN_REALLOC)
+      || gimple_call_builtin_p (stmt, BUILT_IN_ALIGNED_ALLOC))
+    size = gimple_call_arg (stmt, 1);
+  else if (gimple_call_builtin_p (stmt, BUILT_IN_CALLOC))
+    {
+      tree arg1;
+      arg1 = gimple_call_arg (stmt, 1);
+      /* Check that second argument is a constant equal to
+	 the size of structure.  */
+      if (operand_equal_p (arg1, struct_size, 0))
+	return size;
+      /* ??? Check that first argument is a constant
+	 equal to the size of structure.  */
+      /* If the allocated number is equal to the value of struct_size,
+	 the value of arg1 is changed to the allocated number.  */
+      if (operand_equal_p (size, struct_size, 0))
+	return arg1;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "\ncalloc the correct size:\n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	  fprintf (dump_file, "\n");
+	}
+      return NULL_TREE;
+    }
+
+  tree num;
+  if (!is_result_of_mult (size, &num, struct_size))
+    return NULL_TREE;
+
+  return num;
+}
+
+/* Find all fc_refs (variables/arrays to be modified according to some
+   fc_array):
+   - Will be used after fclose (e.g. global variables).
+   - Before fclose, value or array content is assigned with references to some
+     recognized fc_array. (If there are multiple fc_array variables referenced
+     by one fc_ref, quit field compression.  Because we don't know how to
+     modify it then.)  */
+
+bool
+ipa_struct_reorg::find_fc_refs (fc_type_info *info)
+{
+  /* For each fc_array, follow the use chains and search for fc_refs.  */
+  for (auto *array : info->fc_arrays)
+    {
+      gcc_assert (array->ssa_def);
+      SET_CFUN (info->start_srfn);
+      if (!find_fc_refs_iterate (info, array, array->ssa_def, true))
+	return false;
+
+      ipa_ref *ref = NULL;
+      for (unsigned i = 0; array->vnode->iterate_referring (i, ref); i++)
+	{
+	  /* Filter for memory loads.  */
+	  if (ref->use != IPA_REF_LOAD)
+	    continue;
+	  /* Ignore assignments after start-point.  */
+	  if (!is_stmt_before_fclose (info, ref->stmt, ref->referring))
+	    continue;
+	  if (!gimple_assign_single_p (ref->stmt))
+	    return false;
+	  tree rhs = gimple_assign_rhs1 (ref->stmt);
+	  if (!operand_equal_p (rhs, array->var, COMPARE_DECL_FLAGS))
+	    continue;
+
+	  SET_CFUN (find_function (as_a<cgraph_node *> (ref->referring)));
+	  tree lhs = gimple_assign_lhs (ref->stmt);
+	  if (!find_fc_refs_iterate (info, array, lhs, true))
+	    return false;
+	}
+    }
+
+  return true;
+}
+
+/* Given a fc_array ARRAY and a variable VAR referring to ARRAY,
+   find fc_refs iteratively follow the use chain of VAR.  */
+
+bool
+ipa_struct_reorg::find_fc_refs_iterate (fc_type_info *info, fc_array *array,
+					tree var, bool loop_back)
+{
+  switch (TREE_CODE (var))
+    {
+      /* 1) For SSA_NAME, iterate through use chain.  */
+      case SSA_NAME:
+	return find_fc_refs_ssa_name (info, array, var, loop_back);
+
+      /* 2) For VAR_DECL, submit a fc_ref.  */
+      case VAR_DECL:
+	return add_fc_ref (info, array, var, NULL_TREE);
+
+      /* 3) For MEM_REF, find fc_ref following base's def chain.  */
+      case MEM_REF:
+	return find_fc_refs_mem_ref (info, array, var);
+
+      case COMPONENT_REF:
+	return find_fc_refs_component_ref (info, array, var);
+
+      default:
+	if (dump_file && (dump_flags & TDF_DETAILS))
+	  {
+	    FC_DUMP_MSG ("Unknown use kind, code: %s, var: ",
+			 get_tree_code_name (TREE_CODE (var)));
+	    print_generic_expr (dump_file, var);
+	    fprintf (dump_file, "\n");
+	  }
+	return false;
+    }
+}
+
+/* Find all fc_refs of a SSA_NAME var through its use chain.  */
+
+bool
+ipa_struct_reorg::find_fc_refs_ssa_name (fc_type_info *info, fc_array *array,
+					 tree var, bool loop_back)
+{
+  use_operand_p use_p;
+  imm_use_iterator iter;
+  FOR_EACH_IMM_USE_FAST (use_p, iter, var)
+    {
+      gimple *stmt = USE_STMT (use_p);
+      cgraph_node *cnode = current_function->node;
+      if (!is_stmt_before_fclose (info, stmt, cnode))
+	{
+	  gimple *def_stmt = SSA_NAME_DEF_STMT (var);
+	  if (!is_stmt_before_fclose (info, def_stmt, cnode))
+	    continue;
+
+	  /* If a local ptr of compressed type is defined before start-point
+	     and used after start-point, quit field compression. (Otherwise we
+	     need to clone and version the ptr's define statement.)  */
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      FC_DUMP_MSG ("Local usage not handled: ");
+	      print_gimple_stmt (dump_file, stmt, 0);
+	      fprintf (dump_file, "  Defined at: ");
+	      print_gimple_stmt (dump_file, def_stmt, 0);
+	    }
+
+	  return false;
+	}
+
+      tree lhs = gimple_get_lhs (stmt);
+      switch (gimple_code (stmt))
+	{
+	  case GIMPLE_ASSIGN:
+	    /* Rule out: expr(var) = X.  */
+	    if (walk_tree (&lhs, check_for_ssa, var, NULL)
+		|| !fc_type_pointer_p (info, lhs))
+	      break;
+	    if (!find_fc_refs_iterate (info, array, lhs, loop_back))
+	      return false;
+	    break;
+	  case GIMPLE_PHI:
+	    {
+	      /* Check if VAR is from back_edge.  */
+	      bool loop_var = false;
+	      gphi *phi = as_a<gphi *> (stmt);
+	      for (unsigned i = 0; i < gimple_phi_num_args (phi); i++)
+		{
+		  if (gimple_phi_arg_def (phi, i) != var)
+		    continue;
+		  edge e = gimple_phi_arg_edge (phi, i);
+		  if (e->flags & EDGE_DFS_BACK)
+		    {
+		      loop_var = true;
+		      break;
+		    }
+		}
+
+	      if (!loop_var)
+		{
+		  if (!find_fc_refs_iterate (info, array, lhs, loop_back))
+		    return false;
+		}
+	      else if (loop_back)
+		{
+		  if (!find_fc_refs_iterate (info, array, lhs, false))
+		    return false;
+		}
+	      break;
+	    }
+	  case GIMPLE_DEBUG:
+	  case GIMPLE_COND:
+	  case GIMPLE_SWITCH:
+	  case GIMPLE_NOP:
+	    break;
+	  default:
+	    /* Cannot be sure how fc_array is used, like GIMPLE_CALL?  */
+	    if (dump_file && (dump_flags & TDF_DETAILS))
+	      {
+		FC_DUMP_MSG ("fc_array usage not handled: ");
+		print_gimple_stmt (dump_file, stmt, 0);
+	      }
+	    return false;
+	}
+    }
+  return true;
+}
+
+/* Find all fc_refs of a MEM_REF var through its base's def chain.  */
+
+bool
+ipa_struct_reorg::find_fc_refs_mem_ref (fc_type_info *info, fc_array *array,
+					tree var)
+{
+  if (!integer_zerop (TREE_OPERAND (var, 1)))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("MEM_REF offset not handled: ");
+	  print_generic_expr (dump_file, var);
+	  fprintf (dump_file, "\n");
+	}
+      return false;
+    }
+
+  if (!fc_type_pointer_p (info, var))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Type not compatible: ");
+	  print_generic_expr (dump_file, TREE_TYPE (var));
+	  fprintf (dump_file, "\n");
+	}
+      return false;
+    }
+
+  tree base = TREE_OPERAND (var, 0);
+  tree ref = get_ptr_decl (base);
+  if (!ref)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Failed to get array decl from: ");
+	  print_generic_expr (dump_file, base);
+	  fprintf (dump_file, "\n");
+	}
+      return false;
+    }
+
+  return add_fc_ref (info, array, ref, NULL_TREE);
+}
+
+/* Find fc_refs of a COMPONENT_REF var.  */
+
+bool
+ipa_struct_reorg::find_fc_refs_component_ref (fc_type_info *info,
+					      fc_array *array, tree var)
+{
+  tree base = TREE_OPERAND (var, 0);
+
+  if (TREE_CODE (base) == VAR_DECL)
+    return add_fc_ref (info, array, var, NULL_TREE);
+  else if (TREE_CODE (base) == MEM_REF)
+    base = TREE_OPERAND (base, 0);
+
+  tree ref = get_ptr_decl (base);
+  if (!ref)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Failed to get array decl from: ");
+	  print_generic_expr (dump_file, base);
+	  fprintf (dump_file, "\n");
+	}
+      return false;
+    }
+
+  tree field = TREE_OPERAND (var, 1);
+  return add_fc_ref (info, array, ref, field);
+}
+
+/* Return the top level fc_type pointer tree node.  */
+
+bool
+ipa_struct_reorg::fc_type_pointer_p (fc_type_info *info, tree t)
+{
+  tree type = TREE_TYPE (t);
+
+  return POINTER_TYPE_P (type)
+	 && types_fc_compatible_p (TREE_TYPE (type), info->type->type);
+}
+
+/* Add VAR as a fc_ref entry into INFO.
+   1) VAR is a single pointer: fc_ref::size = NULL, fc_ref::field = NULL
+   2) VAR is an array of pointers: fc_ref::size is the size of array,
+				   fc_ref::field = NULL
+   3) VAR is an array of records(e.g. struct {fc_type *p;}):
+	fc_ref::size is the size of array, fc_ref::field is p
+ */
+
+bool
+ipa_struct_reorg::add_fc_ref (fc_type_info *info, fc_array *array, tree var,
+			      tree field)
+{
+  /* The way we're searching for fc_refs, fc_array vars will also meet the
+     requirements.  Rule out them.  */
+  for (auto *d : info->fc_arrays)
+    if (operand_equal_p (var, d->var, COMPARE_DECL_FLAGS))
+      return true;
+
+  tree type = NULL_TREE;
+  tree size_expr = NULL_TREE;
+
+  /* Rule out duplicants.  */
+  switch (check_duplicative_ref (info, array, var, field, type, size_expr))
+    {
+      case check_ref_result::NEW: break;
+      case check_ref_result::DUPLICATIVE: return true;
+      case check_ref_result::ERROR: return false;
+    }
+
+  if (!type)
+    {
+      type = TREE_TYPE (var);
+      /* Use the "real" type for void*.  */
+      if (VOID_POINTER_P (type))
+	{
+	  srdecl *decl = find_decl (var);
+	  if (!decl || !decl->orig_type || !POINTER_TYPE_P (decl->orig_type))
+	    return false;
+	  type = decl->orig_type;
+	}
+    }
+
+  /* If REF is an array, get the size it is allocated with.  */
+  if ((!size_expr) && POINTER_TYPE_P (type)
+      && !types_fc_compatible_p (TREE_TYPE (type), info->type->type))
+    {
+      gimple *stmt = NULL;
+      if (TREE_CODE (var) == SSA_NAME)
+	stmt = SSA_NAME_DEF_STMT (var);
+      else
+	stmt = find_def_stmt_before_fclose (info, var);
+
+      if (!get_allocate_size_iterate (TREE_TYPE (type), stmt, size_expr))
+	return false;
+    }
+
+  fc_ref *ref = new fc_ref (var, type, array, size_expr, field);
+  info->fc_refs.safe_push (ref);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Add fc_ref: ");
+      ref->dump (dump_file);
+    }
+
+  return true;
+}
+
+/* Check if we have found another fc_ref with the same var.  */
+
+check_ref_result
+ipa_struct_reorg::check_duplicative_ref (fc_type_info *info, fc_array *array,
+					 tree var, tree field,
+					 tree &type, tree &size_expr)
+{
+  for (auto *ref : info->fc_refs)
+    {
+      if (!operand_equal_p (var, ref->var, COMPARE_DECL_FLAGS))
+	continue;
+
+      /* The var refers to multiple fc_array.  */
+      if (ref->source != array)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      FC_DUMP_MSG ("Variable ");
+	      print_generic_expr (dump_file, var);
+	      fprintf (dump_file, " referring to multiple arrays: ");
+	      print_generic_expr (dump_file, ref->source->var);
+	      fprintf (dump_file, " and ");
+	      print_generic_expr (dump_file, array->var);
+	      fprintf (dump_file, "\n");
+	    }
+	  return check_ref_result::ERROR;
+	}
+
+      if (ref->field)
+	{
+	  gcc_assert (field);
+	  /* Different fields in an array of structures.  */
+	  if (!operand_equal_p (field, ref->field, COMPARE_DECL_FLAGS))
+	    {
+	      type = ref->orig_type ? ref->orig_type : TREE_TYPE (var);
+	      size_expr = ref->size;
+	      continue;
+	    }
+	}
+
+      return check_ref_result::DUPLICATIVE;
+    }
+
+  return check_ref_result::NEW;
+}
+
+/* Find the single defination stmt before start-point for a var.  */
+
+gimple *
+ipa_struct_reorg::find_def_stmt_before_fclose (fc_type_info *info, tree var)
+{
+  tree base = TREE_CODE (var) == COMPONENT_REF ? TREE_OPERAND (var, 0) : var;
+  if (TREE_CODE (base) != VAR_DECL)
+    return NULL;
+
+  varpool_node *vnode = varpool_node::get (base);
+  /* Local array is not handled yet.  */
+  if (!vnode)
+    return NULL;
+
+  gimple *def_stmt = NULL;
+  ipa_ref *ref = NULL;
+  for (unsigned i = 0; vnode->iterate_referring (i, ref); i++)
+    {
+      if (ref->use != IPA_REF_STORE)
+	continue;
+
+      gimple *stmt = ref->stmt;
+      tree lhs = gimple_get_lhs (stmt);
+      if (!operand_equal_p (lhs, var, COMPARE_DECL_FLAGS)
+	  || !is_stmt_before_fclose (info, stmt, ref->referring))
+	continue;
+
+      if (gimple_assign_single_p (stmt)
+	  && integer_zerop (gimple_assign_rhs1 (stmt)))
+	continue;
+
+      if (def_stmt)
+	{
+	  FC_DUMP_MSG ("Multiple definations before start-point?\n");
+	  return NULL;
+	}
+
+      def_stmt = stmt;
+    }
+
+  return def_stmt;
+}
+
+/* VAR is an ssa_name defined by some array + offset.
+   1) For global variables, returns declaration of the array.
+   2) For arrays locally allocated with recogized functions, returns the
+      ssa_name it is assigned with.
+   3) Return NULL_TREE if cannot decide.  */
+
+tree
+ipa_struct_reorg::get_ptr_decl (tree var)
+{
+  if (TREE_CODE (var) != SSA_NAME)
+    return NULL_TREE;
+
+  gimple *stmt = SSA_NAME_DEF_STMT (var);
+  tree var_type = TREE_TYPE (var);
+
+  if (gimple_code (stmt) == GIMPLE_ASSIGN)
+    {
+      gassign *assign = as_a<gassign *> (stmt);
+      switch (gimple_assign_rhs_class (assign))
+	{
+	  case GIMPLE_BINARY_RHS:
+	    {
+	      if (gimple_assign_rhs_code (assign) != POINTER_PLUS_EXPR)
+		return NULL_TREE;
+	      tree lhs = gimple_assign_rhs1 (assign);
+	      if (types_fc_compatible_p (TREE_TYPE (lhs), var_type)
+		  || VOID_POINTER_P (TREE_TYPE (lhs)))
+		return get_ptr_decl (lhs);
+	      return NULL_TREE;
+	    }
+
+	  case GIMPLE_UNARY_RHS:
+	  case GIMPLE_SINGLE_RHS:
+	    {
+	      tree rhs = gimple_assign_rhs1 (stmt);
+	      if (TREE_CODE (rhs) == SSA_NAME)
+		return get_ptr_decl (rhs);
+	      else if (TREE_CODE (rhs) == VAR_DECL)
+		return rhs;
+	      else if (TREE_CODE (rhs) == COMPONENT_REF)
+		{
+		  tree base = TREE_OPERAND (rhs, 0);
+		  return DECL_P (base) ? rhs : NULL_TREE;
+		}
+	      else
+		return NULL_TREE;
+	    }
+	  default:
+	    return NULL_TREE;
+	}
+    }
+  else if (gimple_code (stmt) == GIMPLE_CALL)
+    return handled_allocation_stmt (stmt) ? gimple_get_lhs (stmt) : NULL_TREE;
+  else
+    return NULL_TREE;
+
+  /* TODO: GIMPLE_PHI can be supported (not affecting correctness).  */
+}
+
+/* Search info->input_var backward using def/use chain until finding one of
+   the arrays we have found in find_fc_arrays.  */
+
+bool
+ipa_struct_reorg::check_fc_array_uses (fc_type_info *info)
+{
+  hash_set<tree> visited;
+  auto_vec<tree> worklist;
+
+  visited.add (info->input_var);
+  worklist.safe_push (info->input_var);
+
+  while (!worklist.is_empty ())
+    {
+      tree t = worklist.pop ();
+      tree_code code = TREE_CODE (t);
+      if (code != SSA_NAME && code != VAR_DECL)
+	continue;
+
+      for (auto *array : info->fc_arrays)
+	if (t == array->ssa_def || t == array->var)
+	  return true;
+
+      /* If we reach a global variable, it must match a fc_array.  */
+      if (code == VAR_DECL)
+	return false;
+
+      gimple *stmt = SSA_NAME_DEF_STMT (t);
+      if (gimple_code (stmt) == GIMPLE_PHI)
+	{
+	  for (unsigned i = 0; i < gimple_phi_num_args (stmt); ++i)
+	    {
+	      tree arg = gimple_phi_arg_def (stmt, i);
+	      if (!visited.add (arg))
+		worklist.safe_push (arg);
+	    }
+	}
+      else if (gimple_assign_single_p (stmt)
+	       || gimple_assign_rhs_code_p (stmt, POINTER_PLUS_EXPR))
+	{
+	  tree rhs = gimple_assign_rhs1 (stmt);
+	  if (!visited.add (rhs))
+	    worklist.safe_push (rhs);
+	}
+    }
+
+  return false;
+}
+
+/* Calculate the reference count of all fc fields.  */
+
+void
+ipa_struct_reorg::calc_fc_ref_count (fc_type_info *info)
+{
+  for (auto *access : info->type->accesses)
+    {
+      if (!access->field)
+	continue;
+
+      fc_field *fc_f = find_fc_field (info->dynamic_fc_fields,
+				      access->field->fielddecl);
+      if (fc_f)
+	fc_f->ref_cnt++;
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Reference count:\n");
+      for (auto *fc_f : info->dynamic_fc_fields)
+	{
+	  print_generic_expr (dump_file, fc_f->field);
+	  fprintf (dump_file, " : %d\n", fc_f->ref_cnt);
+	}
+    }
+}
+
+/* For dynamic fields, we heuristically change data type.  */
+
+bool
+ipa_struct_reorg::compress_fields_dynamic (fc_type_info *info)
+{
+  const std::map<unsigned, unsigned> precision_map{
+    {64, 16}, {32, 16}, {16, 8}
+  };
+
+  for (auto *fc_f : info->dynamic_fc_fields)
+    {
+      tree old_type = TREE_TYPE (fc_f->field);
+      bool is_unsigned = TYPE_UNSIGNED (old_type);
+      gcc_assert (TREE_CODE (old_type) == INTEGER_TYPE);
+
+      auto iter = precision_map.find (TYPE_PRECISION (old_type));
+      if (iter == precision_map.cend ())
+	return false;
+
+      fc_f->new_type = get_integer_type_node (iter->second, is_unsigned);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Change the type of ");
+	  print_generic_expr (dump_file, fc_f->field);
+	  fprintf (dump_file, " from (prec=%d) to ", TYPE_PRECISION (old_type));
+	  print_generic_expr (dump_file, fc_f->new_type);
+	  fprintf (dump_file, "(prec=%d)\n", TYPE_PRECISION (fc_f->new_type));
+	}
+
+      info->record_cond (fc_f);
+      fc_f->cond->new_type = fc_f->new_type;
+    }
+
+    return true;
+}
+
+/* Tune the upper boundary for dynamic fields.  The data field may be
+   assigned a constant that is larger than the maximum value.  For this
+   case, we can reserve a special value for it, and then we can
+   compress/decompress it by creating a map between this reserved value
+   and the real big value.  In the meantime, we will have to reduce the
+   upper boundary for this specific field.  */
+
+bool
+ipa_struct_reorg::calc_dynamic_boundary (fc_type_info *info)
+{
+  /* Initialize the low_bound and high_bound.  */
+  for (auto *cond : info->fc_conds)
+    {
+      tree ssa_type = TREE_TYPE (cond->fields[0]->input_ssa);
+
+      /* Low bound is always zero.  */
+      cond->low_bound = fold_convert (ssa_type, integer_zero_node);
+
+      /* High bound is the max value of the type.  */
+      unsigned bits = cond->bits ? cond->bits
+				 : TYPE_PRECISION (cond->new_type);
+      unsigned max_value = wi::max_value (bits, UNSIGNED).to_uhwi ();
+      cond->high_bound = build_int_cst (ssa_type, max_value);
+
+      auto_vec<HOST_WIDE_INT> special_values;
+      /* Calculate upper bound.  */
+      for (auto *access : info->type->accesses)
+	{
+	  gimple *stmt = access->stmt;
+	  if (!gimple_assign_single_p (stmt))
+	    continue;
+
+	  /* Skip if it is not an assignment to fc field.  */
+	  if (!fc_cond_field_p (gimple_assign_lhs (stmt), cond))
+	    continue;
+
+	  /* Skip if it is loaded from a fc field.  */
+	  tree rhs = gimple_assign_rhs1 (stmt);
+	  if (fc_field_load_p (rhs, cond))
+	    continue;
+
+	  /* Skip if it is from input_ssa.  */
+	  if (fc_input_ssa_p (rhs, cond))
+	    continue;
+
+	  /* Make sure the assignment is a constant.  If possible, we
+	     try to find all possible costants by peephole.  */
+	  HOST_WIDE_INT value;
+	  if (fc_peephole_const_p (rhs, value))
+	    {
+	      special_values.safe_push (value);
+	      cond->field_class->closure.write_special_rhs.put (rhs, value);
+	      continue;
+	    }
+	}
+
+      /* Execute multiple rounds cause we didn't sort the special_values. */
+      while (true)
+	{
+	  unsigned size = cond->special_values.length ();
+	  for (auto value : special_values)
+	    update_high_bound (cond, value);
+	  if (size == cond->special_values.length ())
+	    break;
+	}
+    }
+
+  return true;
+}
+
+/* Return true if the VAR is a mem reference of fc_field in the fc_cond.  */
+
+bool
+ipa_struct_reorg::fc_cond_field_p (tree var, const fc_cond *cond)
+{
+  if (TREE_CODE (var) != COMPONENT_REF)
+    return false;
+
+  /* Find the stmt assigning to the fc field.  */
+  tree field = TREE_OPERAND (var, 1);
+  return find_fc_field (cond->fields, field);
+}
+
+/* Return true if var is one of cond's input_ssa.  */
+
+bool
+ipa_struct_reorg::fc_input_ssa_p (tree var, const fc_cond *cond)
+{
+  if (TREE_CODE (var) != SSA_NAME)
+    return false;
+
+  for (auto *fc_f : cond->fields)
+    if (fc_f->input_ssa == var)
+      return true;
+
+  return false;
+}
+
+/* Return true the VAR is loaded from another fc field.  */
+
+bool
+ipa_struct_reorg::fc_field_load_p (tree var, const fc_cond *cond)
+{
+  if (TREE_CODE (var) != SSA_NAME)
+    return false;
+
+  gimple *stmt = SSA_NAME_DEF_STMT (var);
+  return gimple_assign_load_p (stmt)
+	 && fc_cond_field_p (gimple_assign_rhs1 (stmt), cond);
+}
+
+/* Reduce the high_bound of COND by 1, if the value is larger
+   than the high_bound.  */
+
+void
+ipa_struct_reorg::update_high_bound (fc_cond *cond, HOST_WIDE_INT value)
+{
+  HOST_WIDE_INT high_bound = tree_to_uhwi (cond->high_bound);
+  if (value >= 0 && value <= high_bound)
+    return;
+
+  if (cond->special_values.contains (value))
+    return;
+
+  high_bound--;
+  cond->high_bound = build_int_cst (TREE_TYPE (cond->high_bound), high_bound);
+  cond->special_values.safe_push (value);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    FC_DUMP_MSG ("Found special value %ld, and reduce high_bound to 0x%lx\n",
+		 value, high_bound);
+}
+
+/* Check all data in fc_cond refer to a closure.  */
+bool
+ipa_struct_reorg::check_closure (fc_type_info *info)
+{
+  for (auto *cond : info->fc_conds)
+    {
+      if (!check_closure (info, cond))
+	{
+	  FC_DUMP_MSG ("Fail checking closure\n");
+	  return false;
+	}
+    }
+
+  return true;
+}
+
+/* All write stmts could be
+   (1) unchange, i.e. optimize away compress/decompress
+   (2) change, i.e. use unoptimized compress
+
+   For case (2), we may have the scenario like below,
+
+     B = A->field;
+     ... = B;
+     C->field = B;
+
+   We still can prove C->field is from A->field, so they are
+   in a closure, but we must decompress A->field and compress
+   C->field, because B may be used outside the clsoure, for
+   which we don't care about.  */
+
+bool
+ipa_struct_reorg::check_closure (fc_type_info *info, fc_cond *cond)
+{
+  fc_field_class *field_class = cond->field_class;
+
+  for (auto *access : info->type->accesses)
+    {
+      if (!access->write_field_p ()
+	  || access->field->field_class != field_class
+	  || !fc_cond_field_p (access->expr, cond))
+	continue;
+
+      SET_CFUN (access->function);
+
+      gimple *stmt = access->stmt;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Check closure: ");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	}
+
+      /* Skip if we have already analyzed this stmt.  */
+      if (field_class->closure.write_unchange_p (stmt)
+	  || field_class->closure.write_change_p (stmt))
+	continue;
+
+      tree rhs = gimple_assign_rhs1 (stmt);
+      HOST_WIDE_INT *value = field_class->closure.write_special_rhs.get (rhs);
+      if (fc_input_ssa_p (rhs, cond)
+	  || (value && cond->special_values.contains (*value)))
+	{
+	  /* Case (2) */
+	  field_class->closure.add_write_change (stmt);
+	  FC_DUMP_MSG ("Need to change.\n");
+	  continue;
+	}
+      if (value && !cond->special_values.contains (*value))
+	{
+	  /* Case (2) */
+	  field_class->closure.add_write_unchange (stmt);
+	  FC_DUMP_MSG ("No need to change.\n");
+	  continue;
+	}
+
+      if (!gimple_assign_single_p (stmt)
+	  || TREE_CODE (rhs) != SSA_NAME)
+	return false;
+
+      gimple *def_stmt = SSA_NAME_DEF_STMT (rhs);
+      if (gimple_assign_single_p (def_stmt))
+	{
+	  /* Check if RHS is from the the same fc class.  */
+	  srtype *type = NULL;
+	  srfield *field = NULL;
+	  tree base = NULL_TREE;
+	  if (get_base_type (gimple_assign_rhs1 (def_stmt), base, type, field)
+	      && field->field_class == field_class)
+	    {
+	      if (write_field_class_only_p (info, field_class, rhs))
+		{
+		  /* Case (1).  */
+		  field_class->closure.add_write_unchange (stmt);
+		  field_class->closure.add_read_unchange (def_stmt);
+
+		  if (dump_file && (dump_flags & TDF_DETAILS))
+		    {
+		      FC_DUMP_MSG ("No need to change: ");
+		      print_gimple_stmt (dump_file, def_stmt, 0);
+		    }
+		}
+	      else
+		{
+		  /* Case (2).  */
+		  field_class->closure.add_write_change (stmt);
+		  FC_DUMP_MSG ("Need to change. \n");
+		}
+
+	      continue;
+	    }
+	}
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  FC_DUMP_MSG ("Check closure fail: ");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	}
+
+      return false;
+    }
+
+  collect_closure_read_change (info, field_class);
+
+  return true;
+}
+
+/* Return true if all stmts using ssa_def are to write a fc field.  */
+
+bool
+ipa_struct_reorg::write_field_class_only_p (fc_type_info *info,
+					    fc_field_class *field_class,
+					    tree ssa_def)
+{
+  imm_use_iterator imm_iter;
+  gimple *stmt;
+  FOR_EACH_IMM_USE_STMT (stmt, imm_iter, ssa_def)
+    {
+      if (gimple_code (stmt) == GIMPLE_DEBUG)
+	continue;
+
+      /* We don't know if it is PHI.  */
+      if (!is_gimple_assign (stmt))
+	return false;
+
+      srtype *type = NULL;
+      srfield *field = NULL;
+      tree base = NULL_TREE;
+      if (!get_base_type (gimple_assign_lhs (stmt), base, type, field)
+	  || type != info->type
+	  || !field_class->srfields.contains (field))
+	return false;
+    }
+
+  return true;
+}
+
+/* Collect read_change.  */
+
+void
+ipa_struct_reorg::collect_closure_read_change (fc_type_info *info,
+					       fc_field_class *field_class)
+{
+  for (auto *access : info->type->accesses)
+    {
+      if (!access->read_field_p ()
+	  || access->field->field_class != field_class)
+	continue;
+
+      /* Skip statement that has been marked as unchanged.  */
+      if (field_class->closure.read_unchange_p (access->stmt))
+	continue;
+
+      field_class->closure.add_read_change (access->stmt);
+    }
+}
+
+unsigned
+ipa_struct_reorg::execute_dynamic_field_compression ()
+{
+  if (current_fc_level != fc_level::DYNAMIC)
+    return 0;
+
+  current_layout_opt_level = STRUCT_REORDER_FIELDS;
+  replace_type_map.empty ();
+  record_accesses ();
+  prune_escaped_types ();
+  check_and_prune_struct_for_field_compression ();
+
+  return dynamic_fc_rewrite ();
+}
+
+unsigned
+ipa_struct_reorg::dynamic_fc_rewrite ()
+{
+  if (!create_dynamic_fc_newtypes ())
+    {
+      FC_DUMP_MSG ("Failed to create newtypes for dfc\n");
+      return 0;
+    }
+
+  for (auto *info : fc_infos)
+    {
+      if (!info->dynamic_fc_p)
+	continue;
+      create_dynamic_fc_convert_fn (info);
+      clone_dynamic_fc_path (info);
+      record_dfc_path_info (info);
+      if (flag_ipa_struct_dfc_shadow)
+	rewrite_dynamic_shadow_fields (info);
+      rewrite_dynamic_fc_path ();
+      add_dynamic_checking (info);
+    }
+
+  return TODO_verify_all;
+}
+
+bool
+ipa_struct_reorg::create_dynamic_fc_newtypes ()
+{
+  bool created = false;
+  for (auto *info : fc_infos)
+    {
+      if (!info->dynamic_fc_p)
+	continue;
+
+      create_dynamic_fc_variant (info);
+      if (info->type->create_new_type ())
+	created = true;
+      else
+	info->dynamic_fc_p = false;
+    }
+
+  if (!created)
+    return false;
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "=========== all created newtypes ===========\n\n");
+      dump_newtypes (dump_file);
+    }
+
+  return true;
+}
+
+/* Create a new fc_variant for the given fc_type in terms of fc_conds.  */
+
+void
+ipa_struct_reorg::create_dynamic_fc_variant (fc_type_info *info)
+{
+  create_global_var_dfc_path (info);
+  info->variant = new fc_variant ();
+}
+
+/* Create a global variable to identify the current dynamic path.  */
+
+void
+ipa_struct_reorg::create_global_var_dfc_path (fc_type_info *info)
+{
+  tree name = get_identifier ("dfc.path");
+  tree var = build_decl (BUILTINS_LOCATION, VAR_DECL, name,
+			 boolean_type_node);
+
+  TREE_PUBLIC (var) = 1;
+  TREE_STATIC (var) = 1;
+  DECL_IGNORED_P (var) = 1;
+  DECL_ARTIFICIAL (var) = 1;
+  DECL_INITIAL (var) = boolean_false_node;
+  SET_DECL_ASSEMBLER_NAME (var, name);
+
+  varpool_node::finalize_decl (var);
+  info->dfc_path = var;
+}
+
+/* Insert compress/decompress functions.  */
+
+void
+ipa_struct_reorg::create_dynamic_fc_convert_fn (fc_type_info *info)
+{
+  for (unsigned i = 0; i < info->fc_conds.length (); i++)
+    {
+      fc_cond *cond = info->fc_conds[i];
+      cond->compress_fn = create_convert_fn (cond, i, false);
+      cond->decompress_fn = create_convert_fn (cond, i, true);
+    }
+}
+
+/* Create function to further compress fields with special_values.
+   - DECOMP == 0: create function to compress the field.
+   - DECOMP != 0: create function to decompress the field.
+   IDX is an unique number for function name.
+   Return declaration of created function.  */
+
+tree
+ipa_struct_reorg::create_convert_fn (fc_cond *fcond, unsigned idx,
+				     bool decompress)
+{
+  if (fcond->special_values.is_empty ())
+    return NULL_TREE;
+
+  push_cfun (NULL);
+
+  /* Init declarations.  */
+  char fn_name[64];
+  const char *name = decompress ? "dfc.decompress." : "dfc.compress.";
+  sprintf (fn_name, "%s%d", name, idx);
+
+  tree arg_type = decompress ? fcond->new_type : fcond->old_type;
+  tree return_type = decompress ? fcond->old_type : fcond->new_type;
+  tree fn_decl = create_new_fn_decl (fn_name, 1, &arg_type, return_type);
+
+  basic_block return_bb = init_lowered_empty_function (
+			    fn_decl, true, profile_count::uninitialized ());
+  calculate_dominance_info (CDI_DOMINATORS);
+
+  split_edge (single_pred_edge (return_bb));
+  tree result = make_ssa_name (return_type);
+  create_phi_node (result, return_bb);
+
+  /* Create compress/decompress function body.  */
+  edge exit_e = create_normal_part (fcond);
+  create_conversion_part (fcond, exit_e, decompress);
+
+  /* Return stmt.  */
+  update_stmt (gsi_start_phis (return_bb).phi ());
+  gimple *return_stmt = gimple_build_return (result);
+  gimple_stmt_iterator gsi = gsi_last_bb (return_bb);
+  gsi_insert_after (&gsi, return_stmt, GSI_NEW_STMT);
+
+  free_dominance_info (CDI_DOMINATORS);
+  update_ssa (TODO_update_ssa);
+
+  cgraph_node::create (fn_decl);
+  cgraph_node::add_new_function (fn_decl, true);
+  cgraph_edge::rebuild_edges ();
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Create %s field function:\n",
+		   decompress ? "decompress" : "compress");
+      dump_function_to_file (cfun->decl, dump_file, dump_flags);
+    }
+
+  pop_cfun ();
+
+  return fn_decl;
+}
+
+/* Insert code for values in the bound:
+    if (arg <= high_bound && arg >= low_bound)
+      return arg;
+
+   Return the exit_edge of the if region, whose dest is the return block.
+ */
+
+edge
+ipa_struct_reorg::create_normal_part (fc_cond *fcond)
+{
+  edge true_e = NULL;
+  edge false_e = NULL;
+  tree arg = DECL_ARGUMENTS (cfun->decl);
+
+  /* Create 'arg <= high_bound'.  */
+  basic_block bb = single_succ (ENTRY_BLOCK_PTR_FOR_FN (cfun));
+  tree tmp_arg = fold_convert (TREE_TYPE (fcond->high_bound), arg);
+  tree cond = build2 (LE_EXPR, boolean_type_node, tmp_arg, fcond->high_bound);
+  edge exit_e = create_empty_if_region_on_edge (single_succ_edge (bb), cond);
+  extract_true_false_edges_from_block (single_succ (bb), &true_e, &false_e);
+
+  /* Create 'arg >= low_bound'.  */
+  bb = true_e->dest;
+  tmp_arg = fold_convert (TREE_TYPE (fcond->low_bound), arg);
+  cond = build2 (GE_EXPR, boolean_type_node, tmp_arg, fcond->low_bound);
+  create_empty_if_region_on_edge (single_succ_edge (bb), cond);
+  extract_true_false_edges_from_block (single_succ (bb), &true_e, &false_e);
+
+  /* Return the original value on true_edge.  */
+  bb = true_e->dest;
+  tree return_type = TREE_TYPE (TREE_TYPE (cfun->decl));
+  tree val = make_ssa_name (return_type);
+  gimple_stmt_iterator gsi = gsi_last_bb (bb);
+  APPEND_GASSIGN_1 (gsi, val, NOP_EXPR, arg);
+
+  basic_block return_bb = single_pred (EXIT_BLOCK_PTR_FOR_FN (cfun));
+  redirect_edge_succ (single_succ_edge (bb), return_bb);
+  gphi *phi = gsi_start_phis (return_bb).phi ();
+  add_phi_arg (phi, val, single_succ_edge (bb), UNKNOWN_LOCATION);
+
+  return exit_e;
+}
+
+/* Insert conversion code to compress/decompress special values.  */
+
+void
+ipa_struct_reorg::create_conversion_part (fc_cond *fcond, edge e, bool decomp)
+{
+  edge exit_e = e;
+  basic_block return_bb = single_pred (EXIT_BLOCK_PTR_FOR_FN (cfun));
+  HOST_WIDE_INT reserved_value = tree_to_uhwi (fcond->high_bound) + 1;
+  for (unsigned i = 0; i < fcond->special_values.length (); i++)
+    {
+      basic_block bb = exit_e->src;
+      tree special_cst = build_int_cst (signed_type_for (fcond->old_type),
+					fcond->special_values[i]);
+      tree compressed_cst = build_int_cst (fcond->new_type, reserved_value);
+
+      if (i == fcond->special_values.length () - 1)
+	{
+	  /* Omit condition check for the last special value.  */
+	  redirect_edge_and_branch (single_succ_edge (bb), return_bb);
+	  gphi *phi = gsi_start_phis (return_bb).phi ();
+	  add_phi_arg (phi, decomp ? special_cst : compressed_cst,
+		       single_succ_edge (bb), UNKNOWN_LOCATION);
+	}
+      else
+	{
+	  tree arg = DECL_ARGUMENTS (cfun->decl);
+	  tree cond = build2 (EQ_EXPR, boolean_type_node, arg,
+			      decomp ? compressed_cst : special_cst);
+	  exit_e = create_empty_if_region_on_edge (exit_e, cond);
+	  edge true_e = NULL;
+	  edge false_e = NULL;
+	  extract_true_false_edges_from_block (single_succ (bb), &true_e,
+					       &false_e);
+	  redirect_edge_and_branch (single_succ_edge (true_e->dest),
+				    return_bb);
+	  gphi *phi = gsi_start_phis (return_bb).phi ();
+	  add_phi_arg (phi, decomp ? special_cst : compressed_cst,
+		       single_succ_edge (true_e->dest), UNKNOWN_LOCATION);
+	  reserved_value++;
+	}
+    }
+}
+
+void
+ipa_struct_reorg::clone_dynamic_fc_path (fc_type_info *info)
+{
+  SET_DUMP_FILE (NULL, TDF_NONE);
+  for (auto *srfn : functions)
+    {
+      SET_CFUN (srfn);
+
+      if (srfn->partial_clone_p ())
+	clone_partial_func (info, srfn);
+      else
+	clone_whole_func (srfn);
+    }
+}
+
+/* start_bb:   if (dfc.path)
+		  /        \
+	       false       true
+		/            \
+	   origin-bbs     clone-bbs
+ */
+void
+ipa_struct_reorg::clone_partial_func (fc_type_info *info, srfunction *srfn)
+{
+  calculate_dominance_info (CDI_DOMINATORS);
+
+  fc_path_info &path = srfn->fc_path;
+  auto_vec<basic_block> &reach_bbs = path.reach_bbs;
+  gimple *start_stmt = path.start_stmt;
+  basic_block fclose_bb = reach_bbs[0];
+
+  gcc_assert (fclose_bb == gimple_bb (start_stmt));
+  edge e = split_block (fclose_bb, start_stmt);
+  reach_bbs[0] = e->dest;
+
+  unsigned n = reach_bbs.length ();
+  basic_block *origin_bbs = new basic_block[n];
+  for (unsigned i = 0; i < reach_bbs.length (); i++)
+    origin_bbs[i] = reach_bbs[i];
+
+  /* 1. Clone blocks reachable from start point.  */
+  initialize_original_copy_tables ();
+  basic_block *cloned_bbs = new basic_block[n];
+  copy_bbs (origin_bbs, n, cloned_bbs, NULL, 0, NULL, fclose_bb->loop_father,
+	    fclose_bb, true);
+  delete[] origin_bbs;
+
+  /* Add phis for edges from copied bbs.  */
+  add_phi_args_after_copy (cloned_bbs, n, NULL);
+  free_original_copy_tables ();
+
+  path.cloned_bbs.reserve (n);
+  for (unsigned i = 0; i < n; i++)
+    path.cloned_bbs.safe_push (cloned_bbs[i]);
+  delete[] cloned_bbs;
+
+  /* 2. Add if-else on dfc.path.  */
+  basic_block checking_bb = split_edge (e);
+  gimple_stmt_iterator gsi = gsi_last_bb (checking_bb);
+  tree dfc_path_ssa = make_ssa_name (info->dfc_path);
+  gassign *assign = gimple_build_assign (dfc_path_ssa, info->dfc_path);
+  gsi_insert_after (&gsi, assign, GSI_NEW_STMT);
+  gcond *dfc_path_cond = gimple_build_cond_from_tree (dfc_path_ssa,
+						      NULL_TREE, NULL_TREE);
+  gsi_insert_after (&gsi, dfc_path_cond, GSI_NEW_STMT);
+
+  e = single_succ_edge (checking_bb);
+  e->flags = (e->flags & ~EDGE_FALLTHRU) | EDGE_FALSE_VALUE;
+
+  make_edge (checking_bb, path.cloned_bbs[0], EDGE_TRUE_VALUE);
+
+  /* Necessary for visiting call stmts.  */
+  cgraph_edge::rebuild_edges ();
+  free_dominance_info (CDI_DOMINATORS);
+
+  if (loops_state_satisfies_p (LOOPS_NEED_FIXUP))
+    {
+      calculate_dominance_info (CDI_DOMINATORS);
+      fix_loop_structure (NULL);
+    }
+
+  update_ssa (TODO_update_ssa);
+}
+
+void
+ipa_struct_reorg::clone_whole_func (srfunction *srfn)
+{
+  cgraph_node *new_node;
+  cgraph_node *node = srfn->node;
+
+  statistics_counter_event (NULL, "Create new function", 1);
+  new_node = node->create_version_clone_with_body (vNULL, NULL, NULL, NULL,
+						   NULL, "dfc");
+  new_node->can_change_signature = node->can_change_signature;
+  new_node->make_local ();
+
+  srfunction *new_srfn = new srfunction (new_node);
+  if (srfn->is_safe_func)
+    {
+      safe_functions.add (new_srfn->node);
+      new_srfn->is_safe_func = true;
+    }
+
+  srfn->fc_path.cloned_func = new_srfn;
+}
+
+/* Rewrite dynamic shadow fields in cloned path.  */
+
+void
+ipa_struct_reorg::rewrite_dynamic_shadow_fields (fc_type_info *info)
+{
+  if (info->dynamic_shadow_fields.is_empty ())
+    return;
+
+  for (auto *access : info->type->accesses)
+    {
+      srfield *srf = access->field;
+      if (!srf || !srf->fc_f || !srf->fc_f->original)
+	continue;
+
+      /* Skip statements in original path.  */
+      srfunction *srfn = access->function;
+      gimple *stmt = access->stmt;
+      if (srfn->fc_path.cloned_func
+	  || (srfn->partial_clone_p ()
+	      && !srfn->fc_path.cloned_bbs.contains (gimple_bb (stmt))))
+	continue;
+
+      SET_CFUN (srfn);
+
+      if (access->write_p ())
+	{
+	  /* Remove stmt by replacing lhs by a dummy ssa.  */
+	  tree lhs = gimple_assign_lhs (stmt);
+	  tree dummy_ssa = make_ssa_name (TREE_TYPE (lhs));
+	  gimple_assign_set_lhs (stmt, dummy_ssa);
+	  update_stmt (stmt);
+	}
+      else if (access->read_p ())
+	modify_shadow_read (stmt, access->index, srf->fc_f, access->base);
+      else
+	gcc_unreachable ();
+    }
+}
+
+/* Rewrite functions either partially or wholely.  */
+
+void
+ipa_struct_reorg::rewrite_dynamic_fc_path ()
+{
+  for (auto *srfn : functions)
+    {
+      if (srfn->partial_clone_p ())
+	{
+	  SET_CFUN (srfn);
+
+	  /* 2.1 rewrite the original function for each path.  */
+	  rewrite_partial_func (srfn);
+	  clean_func_after_rewrite (srfn);
+	}
+      else
+	{
+	  /* 2.2 rewrite the cloned function for each path.  */
+	  srfunction *cloned_func = srfn->fc_path.cloned_func;
+	  SET_CFUN (cloned_func);
+
+	  rewrite_whole_func (cloned_func);
+	  clean_func_after_rewrite (cloned_func);
+	}
+    }
+}
+
+void
+ipa_struct_reorg::record_dfc_path_info (fc_type_info *info)
+{
+  /* 1. record accesse info for cloned stmts.  */
+  for (auto *srfn : functions)
+    {
+      SET_DUMP_FILE (NULL, TDF_NONE);
+      if (srfn->partial_clone_p ())
+	{
+	  record_function (srfn->node, srfn);
+	}
+      else
+	{
+	  srfunction *cloned_srfn = srfn->fc_path.cloned_func;
+	  record_function (cloned_srfn->node, cloned_srfn);
+	  prune_function (cloned_srfn);
+	}
+    }
+
+  prune_globals ();
+  gcc_assert (!info->type->has_escaped ());
+
+  /* 2. collect closure info for cloned paths.  */
+  collect_closure_info_dynamic (info);
+}
+
+/* Collect the closure info for all dynamic-fc cloned paths.  */
+
+void
+ipa_struct_reorg::collect_closure_info_dynamic (fc_type_info *info)
+{
+  for (auto *cond : info->fc_conds)
+    {
+      fc_field_class *field_class = cond->field_class;
+      for (auto *srfn : functions)
+	{
+	  if (srfn->partial_clone_p ())
+	    collect_closure_info_partial (srfn, &field_class->closure);
+	  else
+	    collect_closure_info_whole (srfn, &field_class->closure);
+	}
+    }
+}
+
+/* Collect closure info for partially cloned function SRFN in dynamic fc.  */
+
+void
+ipa_struct_reorg::collect_closure_info_partial (srfunction *srfn,
+						fc_closure *cinfo)
+{
+  closure_helper helper (cinfo);
+
+  for (auto *bb : srfn->fc_path.reach_bbs)
+    helper.record_origin_closure (bb);
+
+  helper.reset_uid ();
+
+  for (unsigned i = 0; i < srfn->fc_path.reach_bbs.length (); i++)
+    helper.add_cloned_closure (srfn->fc_path.cloned_bbs[i]);
+}
+
+/* Collect closure info for wholely cloned function SRFN in dfc.  */
+
+void
+ipa_struct_reorg::collect_closure_info_whole (srfunction *srfn,
+					      fc_closure *cinfo)
+{
+  closure_helper helper (cinfo);
+
+  basic_block bb = NULL;
+  FOR_EACH_BB_FN (bb, DECL_STRUCT_FUNCTION (srfn->node->decl))
+    helper.record_origin_closure (bb);
+
+  helper.reset_uid ();
+
+  srfunction *cloned_srfn = srfn->fc_path.cloned_func;
+  FOR_EACH_BB_FN (bb, DECL_STRUCT_FUNCTION (cloned_srfn->node->decl))
+    helper.add_cloned_closure (bb);
+}
+
+void
+ipa_struct_reorg::rewrite_partial_func (srfunction *srfn)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Before rewrite: %s\n", srfn->node->name ());
+      dump_function_to_file (current_function_decl, dump_file,
+			     dump_flags | TDF_VOPS);
+      FC_DUMP_MSG ("Start to rewrite: %s\n", srfn->node->name ());
+      fprintf (dump_file, "\n\n");
+    }
+
+  srfn->create_new_decls ();
+
+  /* Rewrite each related stmts in the current path.  */
+  for (unsigned i = 0; i < srfn->fc_path.reach_bbs.length (); i++)
+    rewrite_block (srfn->fc_path.cloned_bbs[i]);
+}
+
+void
+ipa_struct_reorg::rewrite_whole_func (srfunction *srfn)
+{
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Before rewrite: %s\n", srfn->node->name ());
+      dump_function_to_file (current_function_decl, dump_file,
+			     dump_flags | TDF_VOPS);
+      FC_DUMP_MSG ("Start to rewrite: %s\n", srfn->node->name ());
+    }
+
+  create_new_args (srfn->node);
+  srfn->create_new_decls ();
+
+  basic_block bb = NULL;
+  FOR_EACH_BB_FN (bb, cfun)
+    rewrite_block (bb);
+}
+
+void
+ipa_struct_reorg::clean_func_after_rewrite (srfunction *srfn)
+{
+  if (!srfn->partial_clone_p ())
+    for (auto *srd : srfn->args)
+      release_srdecl_ssa_name (srd);
+
+  for (auto *srd : srfn->decls)
+    release_srdecl_ssa_name (srd);
+
+  {
+    SET_DUMP_FILE (NULL, TDF_NONE);
+    update_ssa (TODO_update_ssa_only_virtuals);
+
+    unsigned i;
+    tree ssa_name;
+    FOR_EACH_SSA_NAME (i, ssa_name, cfun)
+      {
+	if (SSA_NAME_IN_FREE_LIST (ssa_name))
+	  continue;
+
+	gimple *stmt = SSA_NAME_DEF_STMT (ssa_name);
+
+	if (!stmt || (!SSA_NAME_IS_DEFAULT_DEF (ssa_name)
+		      && !gimple_bb (stmt)))
+	  release_ssa_name (ssa_name);
+      }
+
+    if (flag_tree_pta)
+      compute_may_aliases ();
+
+    remove_unused_locals ();
+    cgraph_edge::rebuild_edges ();
+    free_dominance_info (CDI_DOMINATORS);
+  }
+
+  if (dump_file)
+    {
+      FC_DUMP_MSG ("After rewrite: %s\n", srfn->node->name ());
+      dump_function_to_file (current_function_decl, dump_file,
+			     dump_flags | TDF_VOPS);
+      fprintf (dump_file, "\n\n");
+    }
+}
+
+void
+ipa_struct_reorg::dynamic_fc_rewrite_assign (gimple *stmt, tree rhs,
+					     tree &newlhs, tree &newrhs)
+{
+  fc_closure *closure = cur_srfd->get_closure ();
+  if (closure->write_change_p (stmt))
+    {
+      /* For a write stmt _0->fld = rhs, should only rewrite lhs.  */
+      gcc_assert (newrhs == NULL_TREE);
+      tree compress_fn = cur_srfd->fc_f->cond->compress_fn;
+      if (compress_fn)
+	newrhs = closure->convert_rhs (rhs, compress_fn);
+    }
+  else if (closure->read_change_p (stmt))
+    {
+      /* For a read stmt lhs = _0->fld, should only rewrite rhs.  */
+      gcc_assert (newlhs == NULL_TREE);
+      tree decompress_fn = cur_srfd->fc_f->cond->decompress_fn;
+      if (decompress_fn)
+	newrhs = closure->convert_rhs (newrhs, decompress_fn);
+    }
+  else if (!closure->unchange_p (stmt))
+    gcc_unreachable ();
+}
+
+/* Add code for dynamic checking and data compressing.  */
+
+void
+ipa_struct_reorg::add_dynamic_checking (fc_type_info *info)
+{
+  basic_block bb = gimple_bb (info->fclose_stmt);
+  gcc_assert (single_succ_p (bb));
+
+  SET_CFUN (info->start_srfn);
+
+  insert_code_calc_dfc_path (info);
+  insert_code_compress_data (info, single_succ_edge (bb));
+
+  SET_DUMP_FILE (NULL, TDF_NONE);
+  cgraph_edge::rebuild_edges ();
+  update_ssa (TODO_update_ssa_only_virtuals);
+}
+
+/* Insert dynamic checking code to calculate info->dfc_path.  */
+
+void
+ipa_struct_reorg::insert_code_calc_dfc_path (fc_type_info *info)
+{
+  insert_code_calc_max_min_val (info);
+  gimple_stmt_iterator gsi = gsi_for_stmt (info->fclose_stmt);
+  tree dfc_path = insert_code_calc_cond (info, &gsi);
+  insert_code_check_init_const (info, &gsi, dfc_path);
+
+  /* Store dfc_path to global var.  */
+  gimple *dfc_path_stmt = gimple_build_assign (info->dfc_path, dfc_path);
+  gsi_insert_after (&gsi, dfc_path_stmt, GSI_NEW_STMT);
+
+  basic_block bb = gimple_bb (info->fclose_stmt);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      fprintf (dump_file, "\n");
+      FC_DUMP_MSG ("Insert code to calculate dfc.path\n");
+      dump_bb (dump_file, bb, 0, TDF_DETAILS);
+    }
+}
+
+/* Insert code to calculate min and max after input_ssa inside the loop.  */
+
+void
+ipa_struct_reorg::insert_code_calc_max_min_val (fc_type_info *info)
+{
+  basic_block bb = gimple_bb (info->input_stmt);
+  loop *loop = bb->loop_father;
+  edge latch_edge = loop_latch_edge (loop);
+  for (unsigned i = 0; i < info->fc_conds.length (); i++)
+    {
+      fc_cond *cond = info->fc_conds[i];
+      /* Use the old type for min and max value, as they will be used to
+	 compare with the input ssa, which is with old type.  */
+      tree ssa_type = TREE_TYPE (cond->fields[0]->input_ssa);
+      char *min_name = append_suffix ("dfc.min_cond.", i);
+      char *max_name = append_suffix ("dfc.max_cond.", i);
+      cond->min_val = make_temp_ssa_name (ssa_type, NULL, min_name);
+      cond->max_val = make_temp_ssa_name (ssa_type, NULL, max_name);
+
+      /* Insert phi for min and max in loop header.  */
+      gphi *min_phi = create_phi_node (cond->min_val, loop->header);
+      gphi *max_phi = create_phi_node (cond->max_val, loop->header);
+
+      /* For the input_ssa of each fc fields, we calculate min and max.
+	 Assume all of the fc_fields have been sorted in terms of the
+	 position of input_ssa.  We should always access an input_ssa in
+	 forward direction.  This way, all fields' input will be used to
+	 update min_val and max_val in order.  */
+      tree min_val = cond->min_val;
+      tree max_val = cond->max_val;
+      hash_set<tree> input_ssa;
+      for (auto *fc_f : cond->fields)
+	{
+	  /* We handle the same input_ssa only once.  */
+	  if (input_ssa.contains (fc_f->input_ssa))
+	    continue;
+
+	  input_ssa.add (fc_f->input_ssa);
+	  gcc_assert (TREE_TYPE (fc_f->input_ssa) == ssa_type);
+
+	  /* Insert new stmt immediately after input_ssa.  */
+	  gimple *def_stmt = SSA_NAME_DEF_STMT (fc_f->input_ssa);
+	  gimple_stmt_iterator input_gsi = gsi_for_stmt (def_stmt);
+	  bb = gimple_bb (def_stmt);
+
+	  /* min = (input < min) ? input : min_phi */
+	  tree min_cmp = fold_build2 (LT_EXPR, boolean_type_node,
+				      fc_f->input_ssa, min_val);
+	  tree input_min_rhs = build_cond_expr (min_cmp, fc_f->input_ssa,
+						min_val);
+	  min_val = make_temp_ssa_name (ssa_type, NULL, min_name);
+	  gimple *min_stmt = gimple_build_assign (min_val, input_min_rhs);
+	  gsi_insert_after (&input_gsi, min_stmt, GSI_NEW_STMT);
+
+	  /* max = (input < max) ? input : max_phi */
+	  tree max_cmp = fold_build2 (GT_EXPR, boolean_type_node,
+				      fc_f->input_ssa, max_val);
+	  tree input_max_rhs = build_cond_expr (max_cmp, fc_f->input_ssa,
+						max_val);
+	  max_val = make_temp_ssa_name (ssa_type, NULL, max_name);
+	  gimple *max_stmt = gimple_build_assign (max_val, input_max_rhs);
+	  gsi_insert_after (&input_gsi, max_stmt, GSI_NEW_STMT);
+	}
+      free (min_name);
+      free (max_name);
+
+      /* Add input_min_rhs and input_max_rhs phis.  */
+      add_phi_arg (min_phi, min_val, latch_edge, UNKNOWN_LOCATION);
+      add_phi_arg (max_phi, max_val, latch_edge, UNKNOWN_LOCATION);
+      edge entry_edge = NULL;
+      edge_iterator ei;
+      FOR_EACH_EDGE (entry_edge, ei, loop->header->preds)
+	{
+	  if (entry_edge == latch_edge)
+	    continue;
+	  add_phi_arg (min_phi, build_zero_cst (ssa_type), entry_edge,
+		       UNKNOWN_LOCATION);
+	  add_phi_arg (max_phi, build_zero_cst (ssa_type), entry_edge,
+		       UNKNOWN_LOCATION);
+	}
+    }
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Insert min/max calculation\n");
+      dump_bb (dump_file, loop->header, 0, TDF_DETAILS);
+      dump_bb (dump_file, bb, 0, TDF_DETAILS);
+    }
+}
+
+/* Insert code to calculate fc_cond after fclose.  */
+
+tree
+ipa_struct_reorg::insert_code_calc_cond (fc_type_info *info,
+					 gimple_stmt_iterator *gsi)
+{
+  tree dfc_path = boolean_true_node;
+  for (auto *cond : info->fc_conds)
+    {
+      /* min >= low_bound */
+      tree cmp_min = fold_build2 (GE_EXPR, boolean_type_node,
+				  cond->min_val, cond->low_bound);
+
+      /* max <= high_bound */
+      tree cmp_max = fold_build2 (LE_EXPR, boolean_type_node,
+				  cond->max_val, cond->high_bound);
+
+      /* ret = ((min >= low_bound) && (max <= high_bound)) */
+      tree cmp_ret = fold_build2 (TRUTH_AND_EXPR, boolean_type_node,
+				  cmp_min, cmp_max);
+
+      /* dfc.path.tmp = dfc.path.tmp && ret */
+      tree tmp = fold_build2 (TRUTH_AND_EXPR, boolean_type_node, dfc_path,
+			      cmp_ret);
+      dfc_path = force_gimple_operand_gsi (gsi, tmp, true, NULL, false,
+					   GSI_CONTINUE_LINKING);
+    }
+
+  return dfc_path;
+}
+
+/* Insert code to check init_const for dynamic shadow fields.  */
+
+void
+ipa_struct_reorg::insert_code_check_init_const (fc_type_info *info,
+						gimple_stmt_iterator *gsi,
+						tree &dfc_path)
+{
+  basic_block bb = gimple_bb (info->input_stmt);
+  loop *loop = bb->loop_father;
+  edge latch_edge = loop_latch_edge (loop);
+
+  for (auto *fc_f : info->dynamic_shadow_fields)
+    {
+      gcc_assert (fc_f->init_const);
+
+      /* Skip a init_const that is in special_values, because the boundary
+	 check for fc_cond should have cover that.  */
+      tree init_const = fc_f->init_const;
+      if (fc_f->input_field->cond->special_values.contains (
+	    tree_to_uhwi (init_const)))
+	continue;
+
+      tree shadow_valid = make_temp_ssa_name (boolean_type_node, NULL,
+					      "dfc.shadow_valid");
+      gphi *shadow_valid_phi = create_phi_node (shadow_valid, loop->header);
+
+      auto input_gsi = gsi_for_stmt (SSA_NAME_DEF_STMT (fc_f->input_ssa));
+      /* input != init_const */
+      tree ne_ret = fold_build2 (NE_EXPR, boolean_type_node, fc_f->input_ssa,
+			      init_const);
+      tree ne_tmp = force_gimple_operand_gsi (&input_gsi, ne_ret, true, NULL,
+					      false, GSI_CONTINUE_LINKING);
+
+      /* shadow_valid = shadow_valid && (input != init_const) */
+      tree and_ret = fold_build2 (TRUTH_AND_EXPR, boolean_type_node,
+				  shadow_valid, ne_tmp);
+      tree and_tmp = force_gimple_operand_gsi (&input_gsi, and_ret, true,
+					       NULL, false,
+					       GSI_CONTINUE_LINKING);
+
+      /* Insert phi for shadow_valid in loop header.  */
+      add_phi_arg (shadow_valid_phi, and_tmp, latch_edge, UNKNOWN_LOCATION);
+      edge entry_edge = NULL;
+      edge_iterator ei;
+      FOR_EACH_EDGE (entry_edge, ei, loop->header->preds)
+	{
+	  if (entry_edge == latch_edge)
+	    continue;
+	  add_phi_arg (shadow_valid_phi, boolean_true_node, entry_edge,
+		       UNKNOWN_LOCATION);
+	}
+
+      /* dfc.path.tmp = dfc.path.tmp && shadow_valid */
+      tree tmp = fold_build2 (TRUTH_AND_EXPR, boolean_type_node, dfc_path,
+			      shadow_valid);
+      dfc_path = force_gimple_operand_gsi (gsi, tmp, true, NULL, false,
+					   GSI_CONTINUE_LINKING);
+    }
+}
+
+/* Split edge E and insert code to compress data.  */
+
+void
+ipa_struct_reorg::insert_code_compress_data (fc_type_info *info, edge e)
+{
+  if (!dom_info_available_p (CDI_DOMINATORS))
+    calculate_dominance_info (CDI_DOMINATORS);
+  if (!loops_state_satisfies_p (LOOPS_HAVE_PREHEADERS))
+    loop_optimizer_init (LOOPS_HAVE_PREHEADERS);
+  record_loop_exits ();
+
+  auto_vec<tree> array_names;
+  auto_vec<tree> size_names;
+  basic_block bb = e->src;
+  gimple_stmt_iterator gsi = gsi_last_bb (bb);
+
+  /* Generate SSA_NAMEs for fc_array, if they are global addresses.  */
+  for (auto *array : info->fc_arrays)
+    {
+      array_names.safe_push (generate_ssa_name (array->var, &gsi));
+      size_names.safe_push (generate_ssa_name (array->size, &gsi));
+    }
+
+  insert_code_compress_variant (info, bb, array_names, size_names);
+}
+
+/* Insert code tot compress hot data for a fc_variant.  */
+
+void
+ipa_struct_reorg::insert_code_compress_variant (
+  fc_type_info *info, basic_block bb, const auto_vec<tree> &array_names,
+  const auto_vec<tree> &size_names)
+{
+  edge true_e = NULL;
+  edge false_e = NULL;
+  edge entry_e = single_succ_edge (bb);
+  create_empty_if_region_on_edge (entry_e, info->dfc_path);
+  extract_true_false_edges_from_block (entry_e->dest, &true_e, &false_e);
+
+  /* Create function decl and node for compressed single object.  */
+  create_compress_object_fn (info);
+
+  edge current_e = true_e;
+  insert_code_compress_array (info, current_e, array_names, size_names);
+  insert_code_modify_refs (info, current_e);
+}
+
+/* For each variable(array) to compress, insert loop like:
+     <bb START> :
+       _1 = ARRAY_BASE;
+       _2 = ARRAY_SIZE;
+       goto <bb COND>;
+
+     <bb COND> :
+       # i_1 = PHI <0, i_2(THEN)>
+       if (i_1 < _2)
+	 goto <bb THEN>;
+       else
+	 goto <bb ELSE>;
+
+     <bb THEN> :
+       dfc.compress_obj (_1, i_1);
+       i_2 = i_1 + 1;
+
+     <bb ELSE> :
+   */
+
+void
+ipa_struct_reorg::insert_code_compress_array (
+  fc_type_info *info, edge &e, const auto_vec<tree> &data_names,
+  const auto_vec<tree> &size_names)
+{
+  loop_p outer_loop = gimple_bb (info->fclose_stmt)->loop_father;
+  for (size_t i = 0; i < size_names.length (); ++i)
+    {
+      tree iv_before, iv_after;
+      tree size_type = TREE_TYPE (size_names[i]);
+      tree iv = create_tmp_reg (size_type, "dfc.compress_idx");
+      loop_p loop
+	= create_empty_loop_on_edge (e, build_zero_cst (size_type),
+				     build_int_cst (size_type, 1),
+				     size_names[i], iv, &iv_before,
+				     &iv_after, outer_loop);
+
+      /* Build call statement to compress a single object.  */
+      basic_block latch_bb = loop->latch;
+      auto gsi = gsi_last_bb (latch_bb);
+      tree fndecl = info->variant->compress_object_fn;
+      gcall *call = gimple_build_call (fndecl, 2, data_names[i], iv_before);
+      gsi_insert_after (&gsi, call, GSI_NEW_STMT);
+      cgraph_node *node = cgraph_node::get (current_function_decl);
+      cgraph_node *new_node = cgraph_node::get (fndecl);
+      node->create_edge (new_node, call, latch_bb->count);
+
+      e = single_exit (loop);
+    }
+}
+
+/* Insert code to modify all fc_refs.  */
+
+void
+ipa_struct_reorg::insert_code_modify_refs (fc_type_info *info, edge current_e)
+{
+  fc_variant *variant = info->variant;
+  loop_p outer_loop = gimple_bb (info->fclose_stmt)->loop_father;
+  for (auto *dr : info->fc_refs)
+    {
+      if (!dr->size)
+	{
+	  /* 1) fc_ref is a single ptr.  */
+	  current_e = insert_code_modify_single_ref (
+			current_e, dr->var, dr->source,
+			TYPE_SIZE_UNIT (info->type->type),
+			TYPE_SIZE_UNIT (variant->new_type));
+	  continue;
+	}
+
+      /* 2) fc_ref is an array, create a loop.  */
+      tree iv_before, iv_after;
+      tree ptr_type = dr->orig_type ? dr->orig_type : TREE_TYPE (dr->var);
+      tree size_type = TREE_TYPE (dr->size);
+      loop_p loop = create_empty_loop_on_edge (
+		      current_e, build_zero_cst (size_type),
+		      build_int_cst (size_type, 1), dr->size,
+		      create_tmp_reg (size_type, NULL), &iv_before,
+		      &iv_after, outer_loop);
+      /* Fetch array element.  */
+      auto gsi = gsi_last_bb (loop->latch);
+      tree var1 = make_ssa_name (ptr_type);
+      gsi_insert_after (&gsi, gimple_build_assign (var1, dr->var),
+			GSI_NEW_STMT);
+      tree var_mul = make_ssa_name (long_unsigned_type_node);
+      APPEND_GASSIGN_2 (gsi, var_mul, MULT_EXPR, iv_before,
+			TYPE_SIZE_UNIT (TREE_TYPE (ptr_type)));
+      tree var_plus = make_ssa_name (ptr_type);
+      APPEND_GASSIGN_2 (gsi, var_plus, POINTER_PLUS_EXPR, var1, var_mul);
+      tree ref_expr = build2 (MEM_REF, TREE_TYPE (ptr_type), var_plus,
+			      build_int_cst (ptr_type, 0));
+      if (dr->field)
+	ref_expr = build3 (COMPONENT_REF, TREE_TYPE (dr->field), ref_expr,
+			   dr->field, NULL_TREE);
+      /* Modify the ref's value.  */
+      insert_code_modify_single_ref (single_succ_edge (loop->latch),
+				     ref_expr, dr->source,
+				     TYPE_SIZE_UNIT (info->type->type),
+				     TYPE_SIZE_UNIT (variant->new_type));
+      current_e = single_exit (loop);
+    }
+}
+
+/* Create function to compress a single object.  Return function decl.  */
+
+void
+ipa_struct_reorg::create_compress_object_fn (fc_type_info *info)
+{
+  /* Function declairation.  */
+  tree orig_struct_type = info->type->type;
+  tree orig_struct_size = TYPE_SIZE_UNIT (orig_struct_type);
+  tree orig_ptr_type = build_pointer_type (orig_struct_type);
+  tree size_type = TREE_TYPE (orig_struct_size);
+  tree arg_types[2] = {orig_ptr_type, size_type};
+  char fn_name[32];
+  sprintf (fn_name, "%s", "dfc.compress_obj");
+  tree fndecl = create_new_fn_decl (fn_name, 2, arg_types, void_type_node);
+
+  /* Function arguments.  */
+  tree struct_array = DECL_ARGUMENTS (fndecl);
+  tree idx = TREE_CHAIN (struct_array);
+
+  /* Push NULL cfun.  */
+  push_cfun (NULL);
+  basic_block bb = init_lowered_empty_function (
+		     fndecl, true, profile_count::uninitialized ());
+
+  /* Function body.  */
+  /* Use a temporary struct to avoid overlapping.  */
+  tree tmp_obj = create_tmp_var (orig_struct_type, "tmp");
+  /* tmp = start[i];
+     =>
+     idx_1 = (long unsigned int) idx;
+     _2 = idx_1 * sizeof (orig_struct);
+     _3 = start + _2;
+     tmp = *_3;
+    */
+  gimple_stmt_iterator gsi = gsi_last_bb (bb);
+  tree offset = make_ssa_name (long_unsigned_type_node);
+  APPEND_GASSIGN_2 (gsi, offset, MULT_EXPR, idx, orig_struct_size);
+  tree address = make_ssa_name (orig_ptr_type);
+  APPEND_GASSIGN_2 (gsi, address, POINTER_PLUS_EXPR, struct_array, offset);
+  tree rhs = build2 (MEM_REF, orig_struct_type, address,
+		     build_int_cst (orig_ptr_type, 0));
+  APPEND_GASSIGN_1 (gsi, tmp_obj, MEM_REF, rhs);
+
+  /* Init: new_struct* ptr = start + idx_1 * sizeof (new_struct) */
+  fc_variant *variant = info->variant;
+  tree new_type = variant->new_type;
+  tree new_ptr_type = build_pointer_type (new_type);
+  tree new_ptr = create_tmp_var (new_ptr_type, "ptr");
+  offset = make_ssa_name (long_unsigned_type_node);
+  APPEND_GASSIGN_2 (gsi, offset, MULT_EXPR, idx, TYPE_SIZE_UNIT (new_type));
+  APPEND_GASSIGN_2 (gsi, new_ptr, POINTER_PLUS_EXPR, struct_array, offset);
+  tree ref = build2 (MEM_REF, new_type, new_ptr,
+		     build_int_cst (new_ptr_type, 0));
+
+  /* Compress and assign the fields.  */
+  for (auto *field : info->type->fields)
+    {
+      /* Skip shadow fields.  */
+      if (field->fc_f && field->fc_f->original)
+	continue;
+
+      tree old_field = field->fielddecl;
+      tree old_field_type = field->fieldtype;
+      tree new_field = field->newfield[0] ? field->newfield[0] : old_field;
+      tree new_field_type = TREE_TYPE (new_field);
+
+      tree var = make_ssa_name (old_field_type);
+      tree rhs = build3 (COMPONENT_REF, old_field_type, tmp_obj, old_field,
+			 NULL_TREE);
+      APPEND_GASSIGN_1 (gsi, var, COMPONENT_REF, rhs);
+      if (new_field_type != old_field_type)
+	{
+	  fc_cond *cond = field->fc_f->cond;
+	  if (cond && cond->compress_fn)
+	    {
+	      /* Need compressing.  */
+	      /* As we may have bitfield, so cond->new_type and new_type
+		 can be different.  */
+	      tree compressed_var = make_ssa_name (cond->new_type);
+	      gcall *stmt = gimple_build_call (cond->compress_fn, 1, var);
+	      gimple_call_set_lhs (stmt, compressed_var);
+	      gsi_insert_after (&gsi, stmt, GSI_NEW_STMT);
+	      var = compressed_var;
+	    }
+	  tree converted_var = make_ssa_name (new_field_type);
+	  APPEND_GASSIGN_1 (gsi, converted_var, NOP_EXPR, var);
+	  var = converted_var;
+	}
+      tree lhs = build3 (COMPONENT_REF, new_field_type, ref, new_field,
+			 NULL_TREE);
+      APPEND_GASSIGN_1 (gsi, lhs, MEM_REF, var);
+    }
+
+  /* Clobber and return.  */
+  tree clobber = build_clobber (orig_struct_type);
+  gimple *stmt = gimple_build_assign (tmp_obj, clobber);
+  gsi_insert_after (&gsi, stmt, GSI_NEW_STMT);
+  stmt = gimple_build_return (NULL);
+  gsi_insert_after (&gsi, stmt, GSI_NEW_STMT);
+
+  {
+    SET_DUMP_FILE (NULL, TDF_NONE);
+    update_ssa (TODO_update_ssa);
+  }
+
+  cgraph_node::create (fndecl);
+  cgraph_node::add_new_function (fndecl, true);
+  cgraph_edge::rebuild_edges ();
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      FC_DUMP_MSG ("Create compress object function:\n");
+      dump_function_to_file (cfun->decl, dump_file, dump_flags);
+    }
+  pop_cfun ();
+
+  info->variant->compress_object_fn = fndecl;
+}
+
+/* Split edge E and insert codes to modify a single fc_ref expression.
+   Return the exit edge of created codes.  */
+
+edge
+ipa_struct_reorg::insert_code_modify_single_ref (edge e, tree ref,
+						 fc_array *array,
+						 tree orig_size,
+						 tree new_size)
+{
+  /* For each fc_ref, create code like:
+     if (REF)
+	REF = (long) ARRAY + ((long) REF - (long) ARRAY)
+			     / sizeof(old_type) * sizeof(new_type);
+   */
+
+  /* 1) Create ssa_name for fc_ref.  */
+  tree ref_ssa_name = create_tmp_reg (TREE_TYPE (ref));
+  gimple *stmt = gimple_build_assign (ref_ssa_name, unshare_expr (ref));
+  basic_block bb = split_edge (e);
+  gimple_stmt_iterator gsi = gsi_last_bb (bb);
+  gsi_insert_after (&gsi, stmt, GSI_NEW_STMT);
+
+  /* 2) Create the if-else structure.  */
+  tree cmp = build2 (EQ_EXPR, boolean_type_node, ref_ssa_name,
+		     null_pointer_node);
+  edge exit_e = create_empty_if_region_on_edge (single_succ_edge (bb), cmp);
+  edge true_e = NULL;
+  edge false_e = NULL;
+  extract_true_false_edges_from_block (single_succ (bb), &true_e, &false_e);
+  gsi = gsi_last_bb (false_e->dest);
+
+  /* 3) Create conversion codes.  */
+  tree ssa_def = array->ssa_def;
+  tree sub_var = make_ssa_name (ptrdiff_type_node);
+  APPEND_GASSIGN_2 (gsi, sub_var, POINTER_DIFF_EXPR, ref_ssa_name, ssa_def);
+  tree div_var = make_ssa_name (ptrdiff_type_node);
+  APPEND_GASSIGN_2 (gsi, div_var, TRUNC_DIV_EXPR, sub_var,
+		    fold_convert (ptrdiff_type_node, orig_size));
+  tree mul_var = make_ssa_name (ptrdiff_type_node);
+  APPEND_GASSIGN_2 (gsi, mul_var, MULT_EXPR, div_var,
+		    fold_convert (ptrdiff_type_node, new_size));
+  tree mul_var2 = make_ssa_name (size_type_node);
+  APPEND_GASSIGN_1 (gsi, mul_var2, NOP_EXPR, mul_var);
+  tree add_var = make_ssa_name (TREE_TYPE (ssa_def));
+  APPEND_GASSIGN_2 (gsi, add_var, POINTER_PLUS_EXPR, ssa_def, mul_var2);
+
+  /* 4) Store.  */
+  gsi_insert_after (&gsi, gimple_build_assign (unshare_expr (ref), add_var),
+		    GSI_NEW_STMT);
+  return exit_e;
 }
 
 /* Init pointer size from parameter param_pointer_compression_size.  */
@@ -10075,7 +13694,8 @@ ipa_struct_reorg::execute (unsigned int opt)
       if (opt >= SEMI_RELAYOUT)
 	check_and_prune_struct_for_semi_relayout ();
       /* Avoid doing static field compression in STRUCT_SPLIT.  */
-      if (opt >= STRUCT_REORDER_FIELDS && flag_ipa_struct_sfc)
+      if (opt >= STRUCT_REORDER_FIELDS
+	  && current_fc_level == fc_level::STATIC)
 	check_and_prune_struct_for_field_compression ();
       ret = rewrite_functions ();
     }
@@ -10151,6 +13771,10 @@ public:
 	relayout_part_size = 1 << semi_relayout_level;
       }
 
+    current_fc_level = fc_level::NONE;
+    if (flag_ipa_struct_sfc)
+      current_fc_level = fc_level::STATIC;
+
     /* Preserved for backward compatibility, reorder fields needs run before
        struct split and complete struct relayout.  */
     if (flag_ipa_reorder_fields && level < STRUCT_REORDER_FIELDS)
@@ -10158,6 +13782,9 @@ public:
 
     if (level >= STRUCT_REORDER_FIELDS)
       ret = ipa_struct_reorg ().execute (level);
+
+    /* Reset current_fc_level before struct_split and csr.  */
+    current_fc_level = fc_level::NONE;
 
     if (ret & TODO_remove_functions)
       symtab->remove_unreachable_nodes (dump_file);
@@ -10172,6 +13799,13 @@ public:
 	if (!ret_reorg)
 	  ret_reorg = ipa_struct_reorg ().execute (COMPLETE_STRUCT_RELAYOUT);
       }
+
+    if (ret && flag_ipa_struct_dfc)
+      {
+	current_fc_level = fc_level::DYNAMIC;
+	ret = ipa_struct_reorg ().execute_dynamic_field_compression ();
+      }
+
     return ret | ret_reorg;
   }
 

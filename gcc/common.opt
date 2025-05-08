@@ -2094,6 +2094,18 @@ fipa-struct-sfc-shadow
 Common Var(flag_ipa_struct_sfc_shadow) Init(0) Optimization
 Enable field shadowing optimization in static struct field compression.
 
+fipa-struct-dfc
+Common Var(flag_ipa_struct_dfc) Init(0) Optimization
+Perform dynamic structure field compression.
+
+fipa-struct-dfc-bitfield
+Common Var(flag_ipa_struct_dfc_bitfield) Init(0) Optimization
+Enable compressing to bitfield in dynamic struct field compression.
+
+fipa-struct-dfc-shadow
+Common Var(flag_ipa_struct_dfc_shadow) Init(0) Optimization
+Enable field shadowing optimization in dynamic struct field compression.
+
 fipa-extend-auto-profile
 Common Var(flag_ipa_extend_auto_profile)
 Use sample profile information for source code.

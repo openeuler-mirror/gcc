@@ -311,7 +311,9 @@ decode_options (struct gcc_options *opts, struct gcc_options *opts_set,
 		  global_options.x_param_l2_cache_size,
 		  global_options.x_param_prefetch_latency,
 		  global_options.x_param_ipa_prefetch_distance_factor);
+		  
   const char *tune_native = getenv ("GCC_AI4C_TUNE_INFO");
+
   if (tune_native != nullptr)
     {
       prepare_native_tune_str (tune_native);
@@ -347,6 +349,31 @@ decode_options (struct gcc_options *opts, struct gcc_options *opts_set,
 
       FOR_EACH_VEC_ELT (help_option_arguments, i, arg)
 	print_help (opts, lang_mask, arg);
+    }
+}
+
+/* handle lto options according to model inference result */
+void handle_lto_options(struct gcc_options *opts, char* compiler)
+{
+  const char *model_infer_level = getenv ("AI_INFER_LEVEL");
+  if (model_infer_level)
+    {
+      char *lan = strrchr (compiler, '/');
+      if (lan != NULL)
+        lan ++;
+      else
+        lan = compiler;
+      if (strstr (lan, "cc1") != NULL || strstr (lan, "lto1") != NULL)
+        {
+          global_options.x_flag_generate_lto = 1;
+          global_options.x_flag_lto_partition = LTO_PARTITION_ONE;
+          global_options.x_flag_lto = "8";
+        }
+      else if (strstr (lan, "gfortran") || strstr (lan, "cc1plus") || strstr (lan, "f951"))
+        {
+          global_options.x_flag_generate_lto = 1;
+          global_options.x_flag_lto = "8";
+        }
     }
 }
 

@@ -77,6 +77,14 @@ gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc-bitfield_*.c]] \
 gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc-shadow_*.c]] \
 	"" "-fipa-reorder-fields -fipa-struct-sfc -fipa-struct-sfc-shadow -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
 
+# -fipa-struct-dfc
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/dfc_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-dfc -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
+# -fipa-struct-dfc -fipa-struct-dfc-shadow
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/dfc-shadow_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-dfc -fipa-struct-dfc-shadow -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
 # All done.
 torture-finish
 dg-finish
