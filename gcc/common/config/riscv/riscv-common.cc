@@ -238,6 +238,10 @@ static const riscv_implied_info_t riscv_implied_info[] =
   {"svadu", "zicsr"},
   {"svade", "zicsr"},
 
+  {"ssnpm", "zicsr"},
+  {"smnpm", "zicsr"},
+  {"smmpm", "zicsr"},
+
   {NULL, NULL}
 };
 
@@ -429,6 +433,12 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
   {"sstvala",   ISA_SPEC_CLASS_NONE, 1, 0},
   {"sstvecd",   ISA_SPEC_CLASS_NONE, 1, 0},
   {"ssu64xl",   ISA_SPEC_CLASS_NONE, 1, 0},
+
+  {"ssnpm",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"smnpm",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"smmpm",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"sspm",      ISA_SPEC_CLASS_NONE, 1, 0},
+  {"supm",      ISA_SPEC_CLASS_NONE, 1, 0},
 
   {"svade",   ISA_SPEC_CLASS_NONE, 1, 0},
   {"svadu",   ISA_SPEC_CLASS_NONE, 1, 0},
@@ -1410,6 +1420,26 @@ riscv_subset_list::check_conflict_ext ()
     error_at (m_loc, "%<-march=%s%>: zcf extension supports in rv32 only",
 	      m_arch);
 
+  if (lookup ("ssnpm") && m_xlen == 32)
+    error_at (m_loc, "%<-march=%s%>: ssnpm extension supports in rv64 only",
+	      m_arch);
+
+  if (lookup ("smnpm") && m_xlen == 32)
+    error_at (m_loc, "%<-march=%s%>: smnpm extension supports in rv64 only",
+	      m_arch);
+
+  if (lookup ("smmpm") && m_xlen == 32)
+    error_at (m_loc, "%<-march=%s%>: smmpm extension supports in rv64 only",
+	      m_arch);
+
+  if (lookup ("sspm") && m_xlen == 32)
+    error_at (m_loc, "%<-march=%s%>: sspm extension supports in rv64 only",
+	      m_arch);
+
+  if (lookup ("supm") && m_xlen == 32)
+    error_at (m_loc, "%<-march=%s%>: supm extension supports in rv64 only",
+	      m_arch);
+
   if (lookup ("zfinx") && lookup ("f"))
     error_at (m_loc,
 	      "%<-march=%s%>: z*inx conflicts with floating-point "
@@ -1824,8 +1854,15 @@ static const riscv_ext_flag_table_t riscv_ext_flag_table[] =
 
   {"svade",   &gcc_options::x_riscv_sv_subext, MASK_SVADE},
   {"svadu",   &gcc_options::x_riscv_sv_subext, MASK_SVADU},
+
   {"svinval", &gcc_options::x_riscv_sv_subext, MASK_SVINVAL},
   {"svnapot", &gcc_options::x_riscv_sv_subext, MASK_SVNAPOT},
+
+  {"ssnpm", &gcc_options::x_riscv_ss_subext, MASK_SSNPM},
+  {"smnpm", &gcc_options::x_riscv_sm_subext, MASK_SMNPM},
+  {"smmpm", &gcc_options::x_riscv_sm_subext, MASK_SMMPM},
+  {"sspm", &gcc_options::x_riscv_ss_subext, MASK_SSPM},
+  {"supm", &gcc_options::x_riscv_su_subext, MASK_SUPM},
 
   {"ztso", &gcc_options::x_riscv_ztso_subext, MASK_ZTSO},
 
