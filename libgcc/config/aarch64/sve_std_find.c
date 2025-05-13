@@ -1,3 +1,6 @@
+#include "auto-target.h"
+
+#if HAVE_STDINT_H
 #include <arm_sve.h>
 #include <stdint.h>
 
@@ -36,3 +39,4 @@ Tail:
 	}
 	return last;
 }
+#endif
