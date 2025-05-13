@@ -207,6 +207,23 @@ static const riscv_implied_info_t riscv_implied_info[] =
      return subset_list->xlen () == 32 && subset_list->lookup ("f");
    }},
 
+  {"sha", "h"},
+  {"sha", "shcounterenw"},
+  {"sha", "shgatpa"},
+  {"sha", "shtvala"},
+  {"sha", "shvstvala"},
+  {"sha", "shvstvecd"},
+  {"sha", "shvsatpa"},
+  {"sha", "ssstateen"},
+  {"shcounterenw", "h"},
+  {"shcounterenw", "zihpm"},
+  {"shgatpa", "h"},
+  {"shgatpa", "ssstateen"},
+  {"shtvala", "h"},
+  {"shvstvala", "h"},
+  {"shvstvecd", "h"},
+  {"shvsatpa", "h"},
+
   {"smaia", "ssaia"},
   {"smstateen", "ssstateen"},
   {"smepmp", "zicsr"},
@@ -384,6 +401,14 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
   {"zcd",  ISA_SPEC_CLASS_NONE, 1, 0},
   {"zcmp", ISA_SPEC_CLASS_NONE, 1, 0},
   {"zcmt", ISA_SPEC_CLASS_NONE, 1, 0},
+
+  {"sha",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"shcounterenw",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"shgatpa",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"shtvala",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"shvstvala",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"shvstvecd",     ISA_SPEC_CLASS_NONE, 1, 0},
+  {"shvsatpa",     ISA_SPEC_CLASS_NONE, 1, 0},
 
   {"smaia",     ISA_SPEC_CLASS_NONE, 1, 0},
   {"smepmp",    ISA_SPEC_CLASS_NONE, 1, 0},
