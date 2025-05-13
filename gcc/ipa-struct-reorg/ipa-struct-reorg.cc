@@ -13154,7 +13154,7 @@ void
 ipa_struct_reorg::insert_code_calc_max_min_val (fc_type_info *info)
 {
   basic_block bb = gimple_bb (info->input_stmt);
-  loop *loop = bb->loop_father;
+  class loop *loop = bb->loop_father;
   edge latch_edge = loop_latch_edge (loop);
   for (unsigned i = 0; i < info->fc_conds.length (); i++)
     {
@@ -13277,7 +13277,7 @@ ipa_struct_reorg::insert_code_check_init_const (fc_type_info *info,
 						tree &dfc_path)
 {
   basic_block bb = gimple_bb (info->input_stmt);
-  loop *loop = bb->loop_father;
+  class loop *loop = bb->loop_father;
   edge latch_edge = loop_latch_edge (loop);
 
   for (auto *fc_f : info->dynamic_shadow_fields)
