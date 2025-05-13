@@ -30,14 +30,14 @@ along with GCC; see the file COPYING3.  If not see
 #define M_OPTION_SIZE  11
 #define M_MODE_SIZE  6
 #define NATIVE_TUNE_SIZE  128
-#define CATS_STRINGS_ROW  34
+#define CATS_STRINGS_ROW  35
 #define CATS_STRINGS_COL  65
 #define CATS_STRINGS1_ROW  10
 #define CATS_STRINGS1_COL  65
 #define OFFSET_ROW  6
 #define SCALE_ROW  6
 #define UNITY_ROW  1
-#define COEFFICIENT_ROW  356
+#define COEFFICIENT_ROW  366
 #define COEFFICIENT_COL  10
 #define COEFFICIENT1_ROW  10
 #define COEFFICIENT1_COL  1
@@ -121,6 +121,7 @@ preprocess (int argc1, const char **argv1, const char *mops,
   char *m_options[m_size];
   char output_file[1024];
   int m_index = 0;
+
   for (int i = 0; i < argc1; i++)
     {
       if (strncmp (argv1[i], marco_prefix, 2) == 0)
@@ -344,9 +345,9 @@ graph_infer (int argc1, const char **argv1, const char *mops,
      the ONNX model. concat_result is a 1 × 18 matrix, and encoder_out is a
      1 × 12 matrix.  */
 
-  const int concat_out_size = 350;
+  const int concat_out_size = 360;
   float concat_result[concat_out_size];
-  const int encoder_out_size = 34;
+  const int encoder_out_size = 35;
   const int encoder_last_size = 10;
   int concat_size = 0;
   const int size = encoder_out_size;
@@ -378,7 +379,7 @@ graph_infer (int argc1, const char **argv1, const char *mops,
   /* This requires performing matrix multiplication between a 1 × 356 matrix
      and an 356 × 10 matrix  */
 
-  const int m = 1, k = 356, n = 10;
+  const int m = 1, k = 366, n = 10;
   float mul_result[n];
   matmul (transformed_column, coefficient[0], m, k, n, mul_result);  
 
@@ -412,7 +413,7 @@ graph_infer (int argc1, const char **argv1, const char *mops,
   return argmax_output;
 }
 
-int
+void
 get_optimize_decision_from_optimizer (int argc, const char **argv,
 				      const char *mops, int argc2,
 				      int64_t *argv2)
@@ -422,5 +423,4 @@ get_optimize_decision_from_optimizer (int argc, const char **argv,
     {
       putenv ("AI_INFER_LEVEL=1");
     }
-  return model_pred;
 }

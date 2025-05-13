@@ -45,6 +45,7 @@ compilation is specified by a string called a "spec".  */
 #include "filenames.h"
 #include "spellcheck.h"
 #include "opts-jobserver.h"
+#include "ai4c-infer.h"
 
 
 
@@ -5809,6 +5810,7 @@ do_self_spec (const char *spec)
     }
   setenv ("GCC_AI4C_TUNE_INFO", tune_native, 1);
 
+
   /* Mark %<S switches processed by do_self_spec to be ignored permanently.
      do_self_specs adds the replacements to switches array, so it shouldn't
      be processed afterwards.  */
@@ -8116,6 +8118,89 @@ driver::~driver ()
   XDELETEVEC (decoded_options);
 }
 
+/*set up to remember model inference result*/
+
+void 
+driver::putenv_AI_INFER_LEVEL(int argc, const char **argv)
+{
+  char native_tune_input[128];
+  const char *tune_native = secure_getenv ("GCC_AI4C_TUNE_INFO");
+
+  if (tune_native == NULL)
+    {
+      strcpy (native_tune_input, "=native+");
+    }
+  else
+    {
+      gcc_assert (strlen (tune_native) < 128);
+      strcpy (native_tune_input, tune_native);
+    }
+
+  char input[64];
+  if ((strchr (native_tune_input, '+') != NULL))
+    {
+      const char prefix = '=';
+      const char *start = strchr (native_tune_input, prefix);
+      if (start)
+	{
+	  start += 1;
+	  const char *end = strchr (start, '+');
+	  if (!end)
+	    end = native_tune_input + strlen (native_tune_input);
+	  size_t len = end - start;
+	  if (len >= sizeof (input))
+	    len = sizeof (input) - 1;
+	  strncpy (input, start, len);
+	  input[len] = '\0';
+	}
+    }
+  
+  bool flag_Om = false;
+  bool flag_O3 = false;
+  bool flag_mcpu = false;
+  bool flag_native = false;
+  char mcpu_name[64];
+
+  for (unsigned i = 1; i < argc; i ++)
+    {
+      if (strcmp (argv[i], "-Om") == 0)
+	flag_Om = true;
+      if (strstr (argv[i], "-O3") != NULL)
+	flag_O3 = true;
+      if (strstr (argv[i], "mcpu=native") != NULL)
+	flag_native = true;
+      if (strstr (argv[i], "mcpu=") != NULL)
+        {
+	  flag_mcpu = true;
+          const char* pos = strchr(argv[i], '=');
+	  int len = sizeof(mcpu_name) - 1;
+	  strncpy(mcpu_name, pos +1, len);
+	  mcpu_name[len] = '\0';
+        }
+    }
+
+  if ((!flag_native) & flag_mcpu)
+  {
+    strcpy(input, mcpu_name);
+  }
+
+  const int argc_hw = 6;
+  int64_t argv_hw[argc_hw] = {
+    global_options.x_param_simultaneous_prefetches,
+    global_options.x_param_l1_cache_size,
+    global_options.x_param_l1_cache_line_size,
+    global_options.x_param_l2_cache_size,
+    global_options.x_param_prefetch_latency,
+    global_options.x_param_ipa_prefetch_distance_factor};
+
+  const char *model_infer_level = secure_getenv ("AI_INFER_LEVEL");
+  
+  if ((flag_O3 || flag_Om) && (!model_infer_level) && (flag_mcpu || flag_native))
+  {
+    get_optimize_decision_from_optimizer (argc, argv, input, argc_hw, argv_hw);
+  }
+}
+
 /* driver::main is implemented as a series of driver:: method calls.  */
 
 int
@@ -8135,6 +8220,7 @@ driver::main (int argc, char **argv)
   maybe_putenv_OFFLOAD_TARGETS ();
   putenv_ONNX_FDATA ();
   handle_unrecognized_options ();
+  putenv_AI_INFER_LEVEL(argc, const_cast <const char **> (argv));
 
   if (completion)
     {

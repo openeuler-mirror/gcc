@@ -993,90 +993,6 @@ opts_concat (const char *first, ...)
   return newstr;
 }
 
-static int
-handle_lto_option (unsigned int lang_mask,
-		   unsigned int num_decoded_options,
-		   unsigned int argc,
-		   const char **argv,
-		   struct cl_decoded_option *&opt_array)
-{
-  int ret = 0;
-  char *compiler = xstrdup (argv[0]);
-  char *lan = strrchr (compiler, '/');
-  if (lan != NULL)
-    lan ++;
-  else
-    lan = compiler;
-  if (strstr (lan, "gcc") != NULL)
-    {
-      opt_array = XRESIZEVEC (struct cl_decoded_option, opt_array, argc + 2);
-      const char* lto_flag = "-flto=8";
-      decode_cmdline_option (&lto_flag, lang_mask,
-			     &opt_array[num_decoded_options]);
-      ret++;
-      const char* ltopartition_flag = "-flto-partition=one";
-      decode_cmdline_option (&ltopartition_flag, lang_mask,
-			     &opt_array[num_decoded_options + 1]);
-      ret++;
-    }
-  else if (strstr (lan, "g++") != NULL
-	   || strstr (lan, "gfortran") != NULL)
-    {
-      opt_array = XRESIZEVEC (struct cl_decoded_option, opt_array, argc + 1);
-      const char* lto_flag = "-flto=8";
-      decode_cmdline_option (&lto_flag, lang_mask,
-			     &opt_array[num_decoded_options]);
-      ret++;
-    }
-  if (compiler)
-    free (compiler);
-  return ret;
-}
-
-static int
-handle_machine_option (unsigned int lang_mask,
-		       unsigned int num_decoded_options,
-		       unsigned int argc,
-		       const char **argv,
-		       struct cl_decoded_option *&opt_array)
-{
-  int ret = 0;
-  bool flag_Om = false;
-  bool flag_hip09 = false;
-  for (unsigned i = 1; i < argc; i ++)
-    {
-      if (strcmp (argv[i], "-Om") == 0)
-	flag_Om = true;
-      if (strstr (argv[i], "mcpu=hip09") != NULL)
-	flag_hip09 = true;
-    }
-  if (!flag_hip09 || !flag_Om)
-    {
-      return ret;
-    }
-
-  const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
-  if (ai_infer_level)
-    {
-      return ret;
-    }
-  const int argc_hw = 6;
-  int64_t argv_hw[argc_hw] = {
-    global_options.x_param_simultaneous_prefetches,
-    global_options.x_param_l1_cache_size,
-    global_options.x_param_l1_cache_line_size,
-    global_options.x_param_l2_cache_size,
-    global_options.x_param_prefetch_latency,
-    global_options.x_param_ipa_prefetch_distance_factor};
-  int64_t output_pred = get_optimize_decision_from_optimizer (
-			  argc, argv, "hip09", argc_hw, argv_hw);
-  if (output_pred != 1)
-    return ret;
-
-  return handle_lto_option (lang_mask, num_decoded_options,
-			    argc, argv, opt_array);
-}
-
 /* Decode command-line options (ARGC and ARGV being the arguments of
    main) into an array, setting *DECODED_OPTIONS to a pointer to that
    array and *DECODED_OPTIONS_COUNT to the number of entries in the
@@ -1217,9 +1133,6 @@ decode_cmdline_options_to_array (unsigned int argc, const char **argv,
 				 &opt_array[num_decoded_options]);
       num_decoded_options++;
     }
-
-  num_decoded_options += handle_machine_option (lang_mask, num_decoded_options,
-						argc, argv, opt_array);
 
   if (lto_skip_stat == NEED_TO_SKIP)
     {

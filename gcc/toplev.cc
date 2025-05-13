@@ -88,7 +88,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "ipa-modref.h"
 #include "ipa-param-manipulation.h"
 #include "dbgcnt.h"
-
+#include "ai4c-infer.h"
 #include "selftest.h"
 
 #ifdef HAVE_isl
@@ -2249,6 +2249,9 @@ toplev::main (int argc, char **argv)
 		  save_decoded_options, save_decoded_options_count,
 		  UNKNOWN_LOCATION, global_dc,
 		  targetm.target_option.override);
+
+  char *compiler = xstrdup (argv[0]);
+  handle_lto_options(&global_options, compiler);
 
   handle_common_deferred_options ();
 

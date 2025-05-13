@@ -47,6 +47,7 @@ class driver
   void putenv_ONNX_FDATA () const;
   void maybe_putenv_OFFLOAD_TARGETS () const;
   void handle_unrecognized_options ();
+  void putenv_AI_INFER_LEVEL(int argc, const char **argv);
   int maybe_print_and_exit () const;
   bool prepare_infiles ();
   void do_spec_on_infiles () const;

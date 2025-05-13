@@ -37,7 +37,7 @@ execute_sha256 (const char *, char *, size_t);
 extern float read_float_from_file (FILE*);
 
 extern int get_optimize_decision_from_ai4c ();
-extern int get_optimize_decision_from_optimizer (int, const char **,
+extern void get_optimize_decision_from_optimizer (int, const char **,
 						 const char *, int ,
 						 int64_t *);
 extern void set_cache_info (int, int, int, int, int, int);

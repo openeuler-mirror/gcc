@@ -386,6 +386,7 @@ extern void decode_options (struct gcc_options *opts,
 			    location_t loc,
 			    diagnostic_context *dc,
 			    void (*target_option_override_hook) (void));
+extern void handle_lto_options(struct gcc_options *opts, char* compiler);
 extern int option_enabled (int opt_idx, unsigned lang_mask, void *opts);
 
 extern bool get_option_state (struct gcc_options *, int,

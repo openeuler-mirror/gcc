@@ -42,7 +42,7 @@ along with GCC; see the file COPYING3.  If not see
 
 /* Model info.  */
 static int64_t argv_hw1[M_MODE_SIZE];
-static char native_tune[NATIVE_TUNE_SIZE];
+char native_tune[NATIVE_TUNE_SIZE];
 
 /* Intermediate computation results from the ONNX model.  */
 static char cats_strings[CATS_STRINGS_ROW][CATS_STRINGS_COL];
