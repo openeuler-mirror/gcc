@@ -8572,11 +8572,13 @@ handle_vtv_comdat_section (section *sect, const_tree decl ATTRIBUTE_UNUSED)
 void
 create_oeaware_section ()
 {
-  /* To prevent inserting repeated segments and data,
-     we only perform the insertion in the file where the main
+  /* To prevent inserting repeated segments and data, we only perform
+     the insertion in the file where the GLOBAL main
      function is located.  */
   if (!cfun || TREE_CODE (cfun->decl) != FUNCTION_DECL
-      || !DECL_NAME (cfun->decl) || !MAIN_NAME_P (DECL_NAME (cfun->decl)))
+      || !DECL_NAME (cfun->decl) || !MAIN_NAME_P (DECL_NAME (cfun->decl))
+      || (DECL_CONTEXT (cfun->decl) != NULL_TREE &&
+	  TREE_CODE (DECL_CONTEXT (cfun->decl)) != TRANSLATION_UNIT_DECL))
     return;
 
   int flags = SECTION_STRINGS;
