@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cassert>
 #include <string>
+#include <set>
 
 void test_u64()
 {
@@ -122,6 +123,41 @@ void test_u16_point()
 	std::cout << "fail!\n";
 }
 
+void test_set()
+{
+	std::set<std::uint64_t> s = {1, 3, 5, 7, 9};
+	std::uint64_t ask = 4;
+
+	if (auto it = std::find (s.begin(), s.end(), ask); it != s.end()) // not matched
+		std::cout << "ok!\n";
+	else
+		std::cout << "fail!\n";
+}
+
+namespace myspace
+{
+    namespace std
+    {
+        struct Basic
+        {
+            ::std::uint64_t id;
+        };
+
+        ::std::uint64_t find(Basic *, Basic *, ::std::uint64_t &x)
+        {
+            return x;
+        }
+    }
+}
+
+void test_namespace()
+{
+    myspace::std::Basic b {1};
+    std::uint64_t y = 1;
+    std::uint64_t x = find(nullptr, &b, y);
+    printf("x = %d\n", x);
+}
+
 int main()
 {
     test_u64();
@@ -131,6 +167,8 @@ int main()
     test_s32();
     test_u16();
     test_u16_point();
+    test_set();
+    test_namespace();
     return 0;
 }
 
