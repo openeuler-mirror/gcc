@@ -534,6 +534,9 @@ extern ipa_opt_pass_d *make_pass_ipa_icp (gcc::context *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_odr (gcc::context *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_reference (gcc::context *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_pure_const (gcc::context *ctxt);
+extern simple_ipa_opt_pass *make_pass_ipa_alignment_propagation (gcc::context *ctxt);
+extern simple_ipa_opt_pass *make_pass_ipa_localize_array (gcc::context *ctxt);
+extern simple_ipa_opt_pass *make_pass_ipa_array_dse (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_hardware_detection (gcc::context *
 							      ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_prefetch (gcc::context *ctxt);

@@ -35,6 +35,30 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-vrp.h"
 #include "ipa-prop.h"
 #include "ipa-fnsummary.h"
+#include "cfgloop.h"
+
+cfun_saver::cfun_saver (cgraph_node *node)
+{
+  push_cfun (DECL_STRUCT_FUNCTION (node->decl));
+  calculate_dominance_info (CDI_DOMINATORS);
+  calculate_dominance_info (CDI_POST_DOMINATORS);
+}
+
+cfun_saver::cfun_saver (cgraph_node *node, unsigned loop_flags)
+  : cfun_saver (node)
+{
+  loop_optimizer_init (loop_flags);
+  need_finalize_loop_optimizer = true;
+}
+
+cfun_saver::~cfun_saver ()
+{
+  if (need_finalize_loop_optimizer)
+    loop_optimizer_finalize ();
+  free_dominance_info (CDI_POST_DOMINATORS);
+  free_dominance_info (CDI_DOMINATORS);
+  pop_cfun ();
+}
 
 /* Debugging function for postorder and inorder code. NOTE is a string
    that is printed before the nodes are printed.  ORDER is an array of
@@ -780,4 +804,24 @@ recursive_call_p (tree func, tree dest)
     if (!dest_node->semantically_equivalent_p (alias->referring))
       return false;
   return true;
+}
+
+/* Return true if NODE has only one non-recursive caller and no non-recursive
+   callee.  */
+bool
+leaf_recursive_node_p (cgraph_node *node)
+{
+  if (node->inlined_to || !node->has_gimple_body_p () || node->indirect_calls)
+    return false;
+
+  for (cgraph_edge *e = node->callees; e; e = e->next_callee)
+    if (node != e->callee)
+      return false;
+
+  unsigned non_recursive_caller_count = 0;
+  for (cgraph_edge *e = node->callers; e; e = e->next_caller)
+    if (node != e->caller)
+      non_recursive_caller_count++;
+
+  return non_recursive_caller_count == 1;
 }

@@ -19090,6 +19090,9 @@ extern bool lang_c_p (void);
 static void
 override_C_optimize_options (struct gcc_options *opts)
 {
+  opts->x_flag_ipa_alignment_propagation = 1;
+  opts->x_flag_ipa_localize_array = 1;
+  opts->x_flag_ipa_array_dse = 1;
   opts->x_flag_ipa_reorder_fields = 1;
   opts->x_flag_ipa_struct_reorg = 5;
   opts->x_struct_layout_optimize_level = 5;
@@ -19154,6 +19157,7 @@ override_CPP_optimize_options (struct gcc_options *opts)
   opts->x_param_inline_unit_growth = 256;
   opts->x_flag_cmlt_arith = 1;
   opts->x_flag_if_conversion_gimple = 1;
+  opts->x_flag_find_with_sve = 1;
 }
 
 static void
