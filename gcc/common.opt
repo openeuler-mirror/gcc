@@ -2069,6 +2069,18 @@ fipa-matrix-reorg
 Common Ignore
 Does nothing. Preserved for backward compatibility.
 
+fipa-alignment-propagation
+Common Var(flag_ipa_alignment_propagation) Init(0) Optimization
+Propagate alignment of local variable's address
+
+fipa-localize-array
+Common Var(flag_ipa_localize_array) Init(0) Optimization
+Transform global calloced array to be specific function local.
+
+fipa-array-dse
+Common Var(flag_ipa_array_dse) Init(0) Optimization
+Array dead and redundant store elimination.
+
 fipa-reorder-fields
 Common Var(flag_ipa_reorder_fields) Init(0) Optimization
 Perform structure fields reorder optimizations.

@@ -4356,6 +4356,14 @@ ipa_struct_reorg::find_vars (gimple *stmt)
 	  find_var (gimple_assign_rhs1 (stmt), stmt);
 	  find_var (gimple_assign_rhs2 (stmt), stmt);
 	}
+      else if (gimple_assign_rhs_code (stmt) == EQ_EXPR
+	       && types_compatible_p (
+		  TYPE_MAIN_VARIANT (TREE_TYPE (gimple_assign_rhs1 (stmt))),
+		  TYPE_MAIN_VARIANT (TREE_TYPE (gimple_assign_rhs2 (stmt)))))
+	{
+	  find_var (gimple_assign_rhs1 (stmt), stmt);
+	  find_var (gimple_assign_rhs2 (stmt), stmt);
+	}
       else
 	{
 	  /* Because we won't handle these stmts in rewrite phase,
@@ -8543,6 +8551,33 @@ ipa_struct_reorg::rewrite_assign (gassign *stmt, gimple_stmt_iterator *gsi)
       return remove;
     }
 
+  if (gimple_assign_cast_p (stmt))
+    {
+      tree rhs = gimple_assign_rhs1 (stmt);
+      tree newrhs[max_split];
+      if (!rewrite_expr (rhs, newrhs))
+	return false;
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "\nrewriting cast statement:\n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	}
+
+      tree lhs = gimple_assign_lhs (stmt);
+      tree conv_rhs = fold_convert (TREE_TYPE (lhs), newrhs[0]);
+      gimple *newstmt = gimple_build_assign (lhs, conv_rhs);
+      gsi_insert_before (gsi, newstmt, GSI_SAME_STMT);
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "replaced with:\n");
+	  print_gimple_stmt (dump_file, newstmt, 0);
+	  fprintf (dump_file, "\n");
+	}
+      return true;
+    }
+
   return remove;
 }
 
@@ -11203,7 +11238,7 @@ ipa_struct_reorg::find_fc_paths (fc_type_info *info)
     {
       /* Already seen.  */
       if (srfn->fc_path.start_stmt)
-	return false;
+	return srfn->fc_path.start_stmt == start_stmt;
 
       SET_CFUN (srfn);
 

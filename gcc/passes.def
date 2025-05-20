@@ -184,6 +184,20 @@ along with GCC; see the file COPYING3.  If not see
      passes are executed after partitioning and thus see just parts of the
      compiled unit.  */
   INSERT_PASSES_AFTER (all_late_ipa_passes)
+  NEXT_PASS (pass_ipa_alignment_propagation);
+  PUSH_INSERT_PASSES_WITHIN (pass_ipa_alignment_propagation)
+      NEXT_PASS (pass_ccp, true /* nonzero_p */);
+      NEXT_PASS (pass_early_vrp);
+      NEXT_PASS (pass_cd_dce);
+      NEXT_PASS (pass_forwprop);
+      NEXT_PASS (pass_rebuild_cgraph_edges);
+  POP_INSERT_PASSES ()
+  NEXT_PASS (pass_ipa_localize_array);
+  PUSH_INSERT_PASSES_WITHIN (pass_ipa_localize_array)
+      NEXT_PASS (pass_forwprop);
+      NEXT_PASS (pass_rebuild_cgraph_edges);
+  POP_INSERT_PASSES ()
+  NEXT_PASS (pass_ipa_array_dse);
   NEXT_PASS (pass_ipa_hardware_detection);
   NEXT_PASS (pass_ipa_pta);
   /* FIXME: this should be a normal IP pass.  */
