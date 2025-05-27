@@ -5014,35 +5014,21 @@ ipa_struct_reorg::wholeaccess (tree expr, tree base,
   if (TREE_CODE (expr) == ADDR_EXPR && TREE_OPERAND (expr, 0) == base)
     return true;
 
-  if (!accesstype)
+  if (!accesstype || !handled_type (TREE_TYPE (expr)) || !t || !t->type)
     return false;
+
+  /* T *_1; _2 = MEM[(T *)_1].  */
+  if (TREE_CODE (expr) == MEM_REF
+      && integer_zerop (TREE_OPERAND (expr, 1))
+      && POINTER_TYPE_P (TREE_TYPE (base))
+      && types_compatible_p (TREE_TYPE (TREE_TYPE (base)), t->type))
+    return POINTER_TYPE_P (accesstype)
+	   && types_compatible_p (TREE_TYPE (accesstype), t->type);
 
   if (!types_compatible_p (TREE_TYPE (expr), TREE_TYPE (accesstype)))
     return false;
 
-  if (!handled_type (TREE_TYPE (expr)))
-    return false;
-
-  if (!t || !t->type)
-    return false;
-
-  tree type = TYPE_MAIN_VARIANT (t->type);
-  if (TREE_CODE (expr) == MEM_REF
-      && POINTER_TYPE_P (TREE_TYPE (expr))
-      && POINTER_TYPE_P (accesstype)
-      && POINTER_TYPE_P (TREE_TYPE (accesstype))
-      && POINTER_TYPE_P (TREE_TYPE (base))
-      && TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (base))) == type
-      && TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (expr))) == type
-      && TYPE_MAIN_VARIANT (TREE_TYPE (TREE_TYPE (accesstype))) == type)
-    return false;
-
-  srtype *other_type = find_type (inner_type (TREE_TYPE (expr)));
-
-  if (t == other_type)
-    return true;
-
-  return false;
+  return t == find_type (inner_type (TREE_TYPE (expr)));
 }
 
 bool
