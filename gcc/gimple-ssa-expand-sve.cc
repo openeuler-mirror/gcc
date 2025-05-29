@@ -91,6 +91,7 @@ public:
 
   virtual bool gate (function *fun) override
   {
+#ifdef __aarch64__
     if (!flag_find_with_sve)
       return false;
 
@@ -98,10 +99,14 @@ public:
       return false;
 
     return true;
+#else
+    return false;
+#endif
   }
 
 virtual unsigned int execute (function *fun) override
 {
+#ifdef __aarch64__
   TRACE_FUNCTION (fun->decl);
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
@@ -114,11 +119,12 @@ virtual unsigned int execute (function *fun) override
 	replace_std_find (gsi);
     }
   }
-
+#endif
   return 0;
 }
 
 private:
+#ifdef __aarch64__
   uint8_t bit_width;
   const char *null_name = "";
 
@@ -272,6 +278,7 @@ private:
     update_stmt (gsi_stmt (gsi));
     TRACE_REPLACE_STMT (gsi_stmt (gsi));
   }
+#endif
 };
 }  // namespace
 
