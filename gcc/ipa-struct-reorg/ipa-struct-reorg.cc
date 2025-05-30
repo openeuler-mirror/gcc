@@ -5365,8 +5365,8 @@ ipa_struct_reorg::record_stmt_expr (tree expr, cgraph_node *node, gimple *stmt)
   srfield *field;
   bool realpart, imagpart, address;
   bool escape_from_base = false;
-  if (!get_type_field (expr, base, indirect, type, field,
-		       realpart, imagpart, address, escape_from_base))
+  if (!get_type_field (expr, base, indirect, type, field, realpart,
+		       imagpart, address, escape_from_base, false, true))
     return;
 
   if (current_layout_opt_level > NONE)
@@ -5374,7 +5374,6 @@ ipa_struct_reorg::record_stmt_expr (tree expr, cgraph_node *node, gimple *stmt)
       if (!opt_for_fn (current_function_decl, flag_ipa_struct_reorg))
 	type->mark_escape (escape_non_optimize, stmt);
     }
-
 
   /* Record it.  */
   type->add_access (new sraccess (expr, stmt, node, find_function (node),
@@ -6554,6 +6553,7 @@ ipa_struct_reorg::prune_escaped_types (void)
       /* If contains or is contained by the escape type,
 	 mark them as escaping.  */
       propagate_escape ();
+      propagate_escape_via_no_record_var ();
     }
   if (current_layout_opt_level >= STRUCT_REORDER_FIELDS)
     {
