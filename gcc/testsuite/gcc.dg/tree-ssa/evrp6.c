@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp-details" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-details" } */
 
 extern void abort (void);
 
@@ -18,4 +18,4 @@ foo (int k, int j)
 
   return j;
 }
-/* { dg-final { scan-tree-dump "\\\[12, \\+INF" "evrp" } } */
+/* { dg-final { scan-tree-dump "\\\[12, \\+INF" "evrp1" } } */

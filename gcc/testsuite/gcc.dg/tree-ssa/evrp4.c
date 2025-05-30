@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp-details" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-details" } */
 
 int foo (int *p);
 
@@ -17,4 +17,4 @@ int bar (struct st *s)
   foo (&s->a);
 }
 
-/* { dg-final { scan-tree-dump "\\\[1B, \\+INF\\\]" "evrp" } } */
+/* { dg-final { scan-tree-dump "\\\[1B, \\+INF\\\]" "evrp1" } } */

@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 extern void vrp_keep (void);
 extern void vrp_kill (void);
@@ -24,5 +24,5 @@ f2 (int s, int b)
     vrp_kill ();
 }
 
-/* { dg-final { scan-tree-dump-times "vrp_keep \\(" 1 "evrp"} } */
-/* { dg-final { scan-tree-dump-times "vrp_kill \\(" 0 "evrp"} } */
+/* { dg-final { scan-tree-dump-times "vrp_keep \\(" 1 "evrp1"} } */
+/* { dg-final { scan-tree-dump-times "vrp_kill \\(" 0 "evrp1"} } */

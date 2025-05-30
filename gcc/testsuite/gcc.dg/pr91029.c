@@ -1,6 +1,6 @@
 /* PR tree-optimization/91029 */
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 void kill (void);
 int xx;
@@ -45,4 +45,4 @@ void f4 (int i)
     }
 }
 
-/* { dg-final { scan-tree-dump-not "kill" "evrp" } }  */
+/* { dg-final { scan-tree-dump-not "kill" "evrp1" } }  */

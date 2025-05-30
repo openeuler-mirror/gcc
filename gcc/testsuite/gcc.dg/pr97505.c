@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-Os -fsanitize=signed-integer-overflow -fdump-tree-evrp" }
+// { dg-options "-Os -fsanitize=signed-integer-overflow -fdump-tree-evrp1" }
 
 // Test that .UBSAN_CHECK_SUB(y, x) is treated as y-x for range
 // purposes, where X and Y are related to each other.
@@ -20,4 +20,4 @@ int foobar(int x, int y)
   return 5;
 }
 
-// { dg-final { scan-tree-dump-not "unreachable" "evrp" } }
+// { dg-final { scan-tree-dump-not "unreachable" "evrp1" } }

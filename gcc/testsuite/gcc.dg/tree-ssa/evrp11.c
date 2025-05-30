@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp -fdelete-null-pointer-checks" } */
+/* { dg-options "-O2 -fdump-tree-evrp1 -fdelete-null-pointer-checks" } */
 
 extern void link_error ();
 
@@ -20,4 +20,4 @@ void bar (char *x, int a)
     }
 }
 
-/* { dg-final { scan-tree-dump-not "link_error" "evrp" } }  */
+/* { dg-final { scan-tree-dump-not "link_error" "evrp1" } }  */

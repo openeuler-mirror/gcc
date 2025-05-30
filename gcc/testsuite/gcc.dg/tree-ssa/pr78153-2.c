@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp-slim" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-slim" } */
 
 void f(const char *s)
 {
@@ -8,4 +8,4 @@ void f(const char *s)
     __builtin_abort ();
 }
 
-/* { dg-final { scan-tree-dump-not "__builtin_abort" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "__builtin_abort" "evrp1" } } */

@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -flto -fdump-tree-evrp" } */
+/* { dg-options "-O2 -flto -fdump-tree-evrp1" } */
 typedef struct rtx_def *rtx;
 typedef struct cselib_val_struct
 {
@@ -38,4 +38,4 @@ discard_useless_locs (x, info)
       n_useless_values++;
     }
 }
-/* { dg-final { scan-tree-dump-times "n_useless_values" 2 "evrp" } } */                 
+/* { dg-final { scan-tree-dump-times "n_useless_values" 2 "evrp1" } } */                 
