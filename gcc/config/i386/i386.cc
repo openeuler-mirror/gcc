@@ -4780,13 +4780,31 @@ ix86_gimplify_va_arg (tree valist, tree type, gimple_seq *pre_p,
 
       examine_argument (nat_mode, type, 0, &needed_intregs, &needed_sseregs);
 
-      need_temp = (!REG_P (container)
+      bool container_in_reg = false;
+      if (REG_P (container))
+	container_in_reg = true;
+      else if (GET_CODE (container) == PARALLEL
+	       && GET_MODE (container) == BLKmode
+	       && XVECLEN (container, 0) == 1)
+	{
+	  /* Check if it is a PARALLEL BLKmode container of an EXPR_LIST
+	     expression in a TImode register.  In this case, temp isn't
+	     needed.  Otherwise, the TImode variable will be put in the
+	     GPR save area which guarantees only 8-byte alignment.   */
+	  rtx x = XVECEXP (container, 0, 0);
+	  if (GET_CODE (x) == EXPR_LIST
+	      && REG_P (XEXP (x, 0))
+	      && XEXP (x, 1) == const0_rtx)
+	    container_in_reg = true;
+	}
+
+      need_temp = (!container_in_reg
 		   && ((needed_intregs && TYPE_ALIGN (type) > 64)
 		       || TYPE_ALIGN (type) > 128));
 
       /* In case we are passing structure, verify that it is consecutive block
          on the register save area.  If not we need to do moves.  */
-      if (!need_temp && !REG_P (container))
+      if (!need_temp && !container_in_reg)
 	{
 	  /* Verify that all registers are strictly consecutive  */
 	  if (SSE_REGNO_P (REGNO (XEXP (XVECEXP (container, 0, 0), 0))))
@@ -11768,7 +11786,7 @@ ix86_tls_address_pattern_p (rtx op)
 }
 
 /* Rewrite *LOC so that it refers to a default TLS address space.  */
-void
+static void
 ix86_rewrite_tls_address_1 (rtx *loc)
 {
   subrtx_ptr_iterator::array_type array;
@@ -11790,6 +11808,13 @@ ix86_rewrite_tls_address_1 (rtx *loc)
 		  if (GET_CODE (u) == UNSPEC
 		      && XINT (u, 1) == UNSPEC_TP)
 		    {
+		      /* NB: Since address override only applies to the
+			 (reg32) part in fs:(reg32), return if address
+			 override is used.  */
+		      if (Pmode != word_mode
+			  && REG_P (XEXP (*x, 1 - i)))
+			return;
+
 		      addr_space_t as = DEFAULT_TLS_SEG_REG;
 
 		      *x = XEXP (*x, 1 - i);
@@ -22581,6 +22606,13 @@ ix86_stack_protect_guard (void)
   return default_stack_protect_guard ();
 }
 
+static bool
+ix86_stack_protect_runtime_enabled_p (void)
+{
+  /* Naked functions should not enable stack protector.  */
+  return !ix86_function_naked (current_function_decl);
+}
+
 /* For 32-bit code we can save PIC register setup by using
    __stack_chk_fail_local hidden function instead of calling
    __stack_chk_fail directly.  64-bit code doesn't need to setup any PIC
@@ -24600,6 +24632,10 @@ ix86_libgcc_floating_mode_supported_p
 
 #undef TARGET_STACK_PROTECT_GUARD
 #define TARGET_STACK_PROTECT_GUARD ix86_stack_protect_guard
+
+#undef TARGET_STACK_PROTECT_RUNTIME_ENABLED_P
+#define TARGET_STACK_PROTECT_RUNTIME_ENABLED_P \
+  ix86_stack_protect_runtime_enabled_p
 
 #if !TARGET_MACHO
 #undef TARGET_STACK_PROTECT_FAIL
