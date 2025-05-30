@@ -22,7 +22,7 @@ void g (char *s1, char *s2)
      [1] n_6: size_t [0, 1023]
      [2] d_8: size_t [0, 1023]
 
-     Whereas evrp can't really:
+     Whereas evrp1 can't really:
      [1] n_6: size_t [0, 9223372036854775805]
      [2] d_8: size_t [0, 9223372036854775805]
 

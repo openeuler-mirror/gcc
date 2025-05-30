@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdisable-tree-evrp -fdump-tree-profile_estimate -fno-finite-loops -fdisable-tree-ethread" } */
+/* { dg-options "-O2 -fdisable-tree-evrp1 -fdump-tree-profile_estimate -fno-finite-loops -fdisable-tree-ethread" } */
 
 /* Note: Threader causes removal of for loop.  */
 

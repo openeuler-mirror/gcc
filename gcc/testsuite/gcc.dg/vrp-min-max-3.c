@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp -fdump-tree-fre1" } */
+/* { dg-options "-O2 -fdump-tree-evrp1 -fdump-tree-fre1" } */
 
 int bar (void);
 
@@ -23,5 +23,5 @@ int foo2 (int x, int y)
 
 /* { dg-final { scan-tree-dump-times "MIN_EXPR" 1 "fre1" } } */
 /* { dg-final { scan-tree-dump-times "MAX_EXPR" 1 "fre1" } } */
-/* { dg-final { scan-tree-dump-not "MIN_EXPR" "evrp" } } */
-/* { dg-final { scan-tree-dump-not "MAX_EXPR" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "MIN_EXPR" "evrp1" } } */
+/* { dg-final { scan-tree-dump-not "MAX_EXPR" "evrp1" } } */

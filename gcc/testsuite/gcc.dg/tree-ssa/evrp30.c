@@ -1,6 +1,6 @@
 /* Confirm the ranger is picking up a relationship with equivalences.  */
 /* { dg-do compile } */
-/* { dg-options "-O2  -fdump-tree-evrp" } */
+/* { dg-options "-O2  -fdump-tree-evrp1" } */
 
 extern void foo ();
 
@@ -12,5 +12,5 @@ void f (unsigned int a, unsigned int b)
 	foo (); /* Unreachable */
 }
 
-/* { dg-final { scan-tree-dump-times "foo\\(" 0 "evrp"} } */
+/* { dg-final { scan-tree-dump-times "foo\\(" 0 "evrp1"} } */
 

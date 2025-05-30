@@ -1,6 +1,6 @@
-/* { dg-options "-Os -fdump-tree-pre-details -fdisable-tree-evrp -fno-tree-dse" } */
+/* { dg-options "-Os -fdump-tree-pre-details -fdisable-tree-evrp1 -fno-tree-dse" } */
 
-/* Disable tree-evrp because the new version of evrp sees
+/* Disable tree-evrp1 because the new version of evrp1 sees
 <bb 3> :
   if (j_8(D) != 2147483647)
     goto <bb 4>; [50.00%]

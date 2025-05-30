@@ -1,5 +1,5 @@
 /* { dg-do compile} */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 
 unsigned char
@@ -22,6 +22,6 @@ baz (unsigned int x)
   return (-1U >> x) * 16;
 }
 
-/* { dg-final { scan-tree-dump-times  "254" 2 "evrp" } }  */
-/* { dg-final { scan-tree-dump "= PHI <32.*, 4294967280" "evrp" } }  */
+/* { dg-final { scan-tree-dump-times  "254" 2 "evrp1" } }  */
+/* { dg-final { scan-tree-dump "= PHI <32.*, 4294967280" "evrp1" } }  */
 

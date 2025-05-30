@@ -2,7 +2,7 @@
 /* { dg-options "-O2 -fgimple" } */
 
 __attribute__((noipa))
-void __GIMPLE (ssa,startwith("evrp"))
+void __GIMPLE (ssa,startwith("evrp1"))
 foo (int x, int minus_1)
 {
   int tem;

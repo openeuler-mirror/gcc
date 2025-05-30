@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-additional-options "-fdisable-tree-evrp" } */
+/* { dg-additional-options "-fdisable-tree-evrp1" } */
 
 unsigned char c;
 

@@ -1,6 +1,6 @@
 /* PR tree-optimization/61839.  */
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 /* { dg-require-effective-target int32plus } */
 
 __attribute__ ((noinline))
@@ -72,13 +72,13 @@ int mod (int a, int b)
 
 /* EVRP now makes transformations in all functions, leaving a single
  * builtin_abort call in bar2. */
-/* { dg-final { scan-tree-dump-times "__builtin_abort" 1 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "__builtin_abort" 1 "evrp1" } } */
 
 /* Make sure to optimize 972195717 / 0 in function foo.  */
-/* { dg-final { scan-tree-dump-times "972195717 / " 0  "evrp" } } */
+/* { dg-final { scan-tree-dump-times "972195717 / " 0  "evrp1" } } */
 /* Make sure  to optimize 972195717 % 0 in function bar.  */
-/* { dg-final { scan-tree-dump-times "972195717 % " 0 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "972195717 % " 0 "evrp1" } } */
 /* Make sure to optimize 972195717 % [1,2] function bar2.  */
-/* { dg-final { scan-tree-dump-times "972195715 % " 0 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "972195715 % " 0 "evrp1" } } */
 /* [12,12][24,24][48,48] % [0,0][3,3][6,6][12,12] == [0,0] */
-/* { dg-final { scan-tree-dump-times "%" 0 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "%" 0 "evrp1" } } */

@@ -1,5 +1,5 @@
 /* PR tree-optimization/102738 */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 /* { dg-do compile { target int128 } } */
 
 /* Remove arithmetic shift right when the LHS is known to be 0 or -1.  */
@@ -44,6 +44,6 @@ int a6(int f, int g)
     __builtin_unreachable();
 }
 
-/* { dg-final { scan-tree-dump-times " >> 127" 1 "evrp" } } */
-/* { dg-final { scan-tree-dump-times " >> 31" 1 "evrp" } } */
-/* { dg-final { scan-tree-dump-times " >> " 2 "evrp" } } */
+/* { dg-final { scan-tree-dump-times " >> 127" 1 "evrp1" } } */
+/* { dg-final { scan-tree-dump-times " >> 31" 1 "evrp1" } } */
+/* { dg-final { scan-tree-dump-times " >> " 2 "evrp1" } } */

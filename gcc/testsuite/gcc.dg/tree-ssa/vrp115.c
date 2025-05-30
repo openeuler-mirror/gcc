@@ -1,7 +1,7 @@
 /* PR tree-optimization/80558 */
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
-/* { dg-final { scan-tree-dump-not "link_error" "evrp" } } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
+/* { dg-final { scan-tree-dump-not "link_error" "evrp1" } } */
 
 void link_error (void);
 

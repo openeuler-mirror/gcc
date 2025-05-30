@@ -1,6 +1,6 @@
 /* See backwards thru casts if the range fits the LHS type. */
 /* { dg-do compile } */
-/* { dg-options "-O2  -fdump-tree-evrp" } */
+/* { dg-options "-O2  -fdump-tree-evrp1" } */
 
 extern void kill(int i);
 extern void keep(int i);
@@ -38,6 +38,6 @@ foo (int i)
     }
 }
 
-/* { dg-final { scan-tree-dump-times "kill \\(" 0 "evrp"} } */
-/* { dg-final { scan-tree-dump-times "keep \\(" 1 "evrp"} } */
+/* { dg-final { scan-tree-dump-times "kill \\(" 0 "evrp1"} } */
+/* { dg-final { scan-tree-dump-times "keep \\(" 1 "evrp1"} } */
 

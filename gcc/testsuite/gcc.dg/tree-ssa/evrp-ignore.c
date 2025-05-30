@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp -fno-tree-fre -fdisable-tree-ethread" } */
+/* { dg-options "-O2 -fdump-tree-evrp1 -fno-tree-fre -fdisable-tree-ethread" } */
 
 void kill(void);
 
@@ -25,4 +25,4 @@ void foo (int x, int y, int z)
     kill();
 
 }
-/* { dg-final { scan-tree-dump-not "kill" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "kill" "evrp1" } } */

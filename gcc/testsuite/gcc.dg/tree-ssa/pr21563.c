@@ -2,7 +2,7 @@
    Make sure VRP folds the second "if" statement.  */
 
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-thread-jumps -fdisable-tree-evrp -fdump-tree-vrp1-details" } */
+/* { dg-options "-O2 -fno-thread-jumps -fdisable-tree-evrp1 -fdump-tree-vrp1-details" } */
 
 int
 foo (int a)

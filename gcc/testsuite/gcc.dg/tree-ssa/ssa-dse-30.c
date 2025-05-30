@@ -28,8 +28,8 @@ void test_bzero (void)
 
 /* { dg-final { scan-tree-dump-times "builtin_memset" 1 "dse1" } } */
 
-/* Merging the evrp folder into substitute_and_fold_engine shuffled
-   the order of gimple_fold a bit, so evrp is no longer folding the
+/* Merging the evrp1 folder into substitute_and_fold_engine shuffled
+   the order of gimple_fold a bit, so evrp1 is no longer folding the
    memmove inline.  This folding is instead done by forwprop.  Thus, I
    have remmoved the |memmove in the test below as this is not done
    until after dse.

@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 void foo(void);
 
 static int a = 1;
@@ -18,4 +18,4 @@ int main() {
   }
 }
 
-/* { dg-final { scan-tree-dump-times "Folding predicate c_.* to 1" 1 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "Folding predicate c_.* to 1" 1 "evrp1" } } */
