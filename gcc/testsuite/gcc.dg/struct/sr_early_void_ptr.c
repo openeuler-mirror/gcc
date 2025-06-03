@@ -25,4 +25,4 @@ int main() {
     return 0;
 }
 
-/* { dg-final { scan-ipa-dump "struct S(\[0-9\]*) has escaped" "struct_reorg" } } */
+/* { dg-final { scan-ipa-dump "struct S(\\\(\[0-9\]*\\\))? has escaped" "struct_reorg" } } */

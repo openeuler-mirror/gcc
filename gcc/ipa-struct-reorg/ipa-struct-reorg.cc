@@ -5566,7 +5566,7 @@ ipa_struct_reorg::check_definition_assign (srdecl *decl,
 					  : TYPE_SIZE_UNIT (type->type)))
 	type->mark_escape (escape_non_multiply_size, stmt);
 
-      if (TREE_CODE (rhs) == SSA_NAME)
+      if (TREE_CODE (rhs) == SSA_NAME || TREE_CODE (rhs) == ADDR_EXPR)
 	check_type_and_push (rhs, decl, worklist, stmt);
       return;
     }
