@@ -8581,8 +8581,17 @@ create_oeaware_section ()
 	  TREE_CODE (DECL_CONTEXT (cfun->decl)) != TRANSLATION_UNIT_DECL))
     return;
 
-  int flags = SECTION_STRINGS;
-  section *oe_section = get_section (".GCC4OE_oeAware", flags, NULL, true);
+  const char *sect_name = ".GCC4OE_oeAware";
+
+  /* If section already exists, just skip.  */
+  section **slot
+    = section_htab->find_slot_with_hash (sect_name,
+					 htab_hash_string (sect_name),
+					 INSERT);
+  if (!slot || *slot != NULL)
+    return;
+
+  section *oe_section = get_section (sect_name, SECTION_STRINGS, NULL, false);
   switch_to_section (oe_section);
 
   gcc_assert (oeaware_optimize_policy <= UINT8_MAX);
