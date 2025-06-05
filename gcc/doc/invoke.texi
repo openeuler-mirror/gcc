@@ -31369,6 +31369,10 @@ to @samp{zvks} and @samp{zvkg}.
 @tab 1.0
 @tab PMP Enhancements for memory access and execution prevention on Machine mode.
 
+@item smrnmi
+@tab 1.0
+@tab Resumable non-maskable interrupts.
+
 @item smstateen
 @tab 1.0
 @tab State enable extension.
