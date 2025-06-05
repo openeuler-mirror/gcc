@@ -469,6 +469,8 @@ Mask(SSCOUNTERENW) Var(riscv_ss_subext)
 
 Mask(SSTVALA) Var(riscv_ss_subext)
 
+Mask(SSTVECD) Var(riscv_ss_subext)
+
 TargetVariable
 int riscv_sv_subext
 
