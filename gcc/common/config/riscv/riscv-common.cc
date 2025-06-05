@@ -232,6 +232,7 @@ static const riscv_implied_info_t riscv_implied_info[] =
   {"sscounterenw", "zicsr"},
   {"ssstateen", "zicsr"},
   {"sstc", "zicsr"},
+  {"sstvala", "zicsr"},
   {"svadu", "zicsr"},
   {"svade", "zicsr"},
 
@@ -423,6 +424,7 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
   {"sscounterenw", ISA_SPEC_CLASS_NONE, 1, 0},
   {"ssstateen", ISA_SPEC_CLASS_NONE, 1, 0},
   {"sstc",      ISA_SPEC_CLASS_NONE, 1, 0},
+  {"sstvala",   ISA_SPEC_CLASS_NONE, 1, 0},
 
   {"svade",   ISA_SPEC_CLASS_NONE, 1, 0},
   {"svadu",   ISA_SPEC_CLASS_NONE, 1, 0},
