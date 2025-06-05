@@ -461,6 +461,11 @@ Mask(SHVSTVECD) Var(riscv_sh_subext)
 Mask(SHVSATPA) Var(riscv_sh_subext)
 
 TargetVariable
+int riscv_ss_subext
+
+Mask(SSCCPTR) Var(riscv_ss_subext)
+
+TargetVariable
 int riscv_sv_subext
 
 Mask(SVADE) Var(riscv_sv_subext)
