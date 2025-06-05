@@ -30955,6 +30955,10 @@ to @samp{zvks} and @samp{zvkg}.
 @tab 1.0
 @tab Count overflow & filtering extension.
 
+@item sscounterenw
+@tab 1.0
+@tab Support writeable enables for any supported counter
+
 @item ssstateen
 @tab 1.0
 @tab State-enable extension for supervisor-mode.

@@ -465,6 +465,8 @@ int riscv_ss_subext
 
 Mask(SSCCPTR) Var(riscv_ss_subext)
 
+Mask(SSCOUNTERENW) Var(riscv_ss_subext)
+
 TargetVariable
 int riscv_sv_subext
 
