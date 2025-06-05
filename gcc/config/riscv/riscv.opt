@@ -471,6 +471,8 @@ Mask(SSTVALA) Var(riscv_ss_subext)
 
 Mask(SSTVECD) Var(riscv_ss_subext)
 
+Mask(SSU64XL) Var(riscv_ss_subext)
+
 TargetVariable
 int riscv_sv_subext
 

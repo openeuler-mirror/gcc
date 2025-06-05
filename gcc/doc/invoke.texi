@@ -30975,6 +30975,10 @@ to @samp{zvks} and @samp{zvkg}.
 @tab 1.0
 @tab Stvec supports Direct mode
 
+@item ssu64xl
+@tab 1.0
+@tab UXLEN=64 must be supported
+
 @item svade
 @tab 1.0
 @tab Cause exception when hardware updating of A/D bits is disabled
