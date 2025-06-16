@@ -907,7 +907,7 @@ array_dse_callee::find_candidate_array ()
       for (auto gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
 	{
 	  gimple *stmt = gsi_stmt (gsi);
-	  if (gimple_clobber_p (stmt))
+	  if (gimple_clobber_p (stmt) || is_gimple_debug (stmt))
 	    continue;
 
 	  /* There are 3 kind of stmts may have store ops: GIMPLE_ASSIGN,
@@ -2138,7 +2138,8 @@ array_dse_edge::collect_array_accesses ()
       for (auto gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
 	{
 	  gimple *stmt = gsi_stmt (gsi);
-	  if (gimple_clobber_p (stmt) || call_stmt_p (stmt))
+	  if (gimple_clobber_p (stmt) || call_stmt_p (stmt)
+	      || is_gimple_debug (stmt))
 	    continue;
 
 	  for (unsigned i = 0; i < gimple_num_ops (stmt); i++)
@@ -2495,7 +2496,8 @@ array_dse_edge::calc_read_bound ()
 	continue;
 
       auto range = calc_ref_range (var);
-      if (!integer_cst_p (range.max ()))
+      if (range.undefined_p() || range.varying_p()
+	  || !integer_cst_p (range.max ()))
 	return false;
 
       auto max = tree_to_shwi (range.max ());
@@ -3081,6 +3083,12 @@ ipa_array_dse::apply_array_dse (array_dse_edge *ad_edge)
 
       cfun_saver save (caller);
 
+      if (dump_file)
+	{
+	  fprintf (dump_file, "Remove fully redundant call:\n");
+	  print_gimple_stmt (dump_file, call_stmt, 0);
+	}
+
       auto gsi = gsi_for_stmt (call_stmt);
       basic_block call_bb = gimple_bb (call_stmt);
       tree fndecl = gimple_call_fndecl (call_stmt);
@@ -3102,6 +3110,12 @@ ipa_array_dse::apply_array_dse (array_dse_edge *ad_edge)
 
   if (!transform_new_callee (callee, new_callee))
     return false;
+
+  if (dump_file)
+    {
+      fprintf (dump_file, "Rewrite partial redundant call:\n");
+      print_gimple_stmt (dump_file, ad_edge->call_edge->call_stmt, 0);
+    }
 
   tree bound_addr = ad_edge->get_bound_addr ();
   rewrite_call_edge (ad_edge->call_edge, new_callee, bound_addr);
