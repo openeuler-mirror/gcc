@@ -35,6 +35,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "cfgloop.h"
 #include "gimple-ssa.h"
 #include "gimple-pretty-print.h"
+#ifdef __aarch64__
+#include "config/aarch64/aarch64.h"
+#endif
 
 namespace {
 
@@ -93,6 +96,9 @@ public:
   {
 #ifdef __aarch64__
     if (!flag_find_with_sve)
+      return false;
+
+    if (!TARGET_SVE)
       return false;
 
     if (!targetm.vector_mode_supported_p (V2DImode))
