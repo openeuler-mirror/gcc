@@ -194,7 +194,6 @@ pass_ipa_hardware_detection::gate (function *)
   const char *ai_infer_level = getenv ("AI_INFER_LEVEL");
   const char *ai_guided = getenv ("AI_GUIDED");
   return (ai_guided || (ai_infer_level
-	  && optimize_maximum > 0
 	  /* Only enable in lto or whole_program.  */
 	  && (in_lto_p || flag_whole_program)));
 }
