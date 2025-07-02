@@ -100,6 +100,32 @@ set_cpu_feature (struct __processor_model *cpu_model,
     }
 }
 
+/* Drop FEATURE from either CPU_MODEL or CPU_FEATURES2.  */
+
+static inline void
+reset_cpu_feature (struct __processor_model *cpu_model,
+		   unsigned int *cpu_features2,
+		   enum processor_features feature)
+{
+  unsigned index, offset;
+  unsigned f = feature;
+
+  if (f < 32)
+    {
+      /* The first 32 features.  */
+      cpu_model->__cpu_features[0] &= ~(1U << f);
+    }
+  else
+    {
+      /* The rest of features.  cpu_features2[i] contains features from
+	 (32 + i * 32) to (31 + 32 + i * 32), inclusively.  */
+      f -= 32;
+      index = f / 32;
+      offset = f % 32;
+      cpu_features2[index] &= ~(1U << offset);
+    }
+}
+
 /* Get the specific type of AMD CPU and return AMD CPU name.  Return
    NULL for unknown AMD CPU.  */
 
@@ -561,6 +587,51 @@ get_intel_cpu (struct __processor_model *cpu_model,
   return cpu;
 }
 
+/* Get the specific type of ZHAOXIN CPU and return ZHAOXIN CPU name.
+   Return NULL for unknown ZHAOXIN CPU.  */
+
+static inline const char *
+get_zhaoxin_cpu (struct __processor_model *cpu_model,
+		 struct __processor_model2 *cpu_model2,
+		 unsigned int *cpu_features2)
+{
+  const char *cpu = NULL;
+  unsigned int family = cpu_model2->__cpu_family;
+  unsigned int model = cpu_model2->__cpu_model;
+
+  switch (family)
+    {
+    /* ZHAOXIN family 7h.  */
+    case 0x07:
+      cpu_model->__cpu_type = ZHAOXIN_FAM7H;
+      if (model == 0x3b)
+        {
+	  cpu = "lujiazui";
+	  CHECK___builtin_cpu_is ("lujiazui");
+	  reset_cpu_feature (cpu_model, cpu_features2, FEATURE_AVX);
+	  reset_cpu_feature (cpu_model, cpu_features2, FEATURE_F16C);
+	  cpu_model->__cpu_subtype = ZHAOXIN_FAM7H_LUJIAZUI;
+        }
+      else if (model == 0x5b)
+        {
+	  cpu = "yongfeng";
+	  CHECK___builtin_cpu_is ("yongfeng");
+	  cpu_model->__cpu_subtype = ZHAOXIN_FAM7H_YONGFENG;
+        }
+      else if (model >= 0x6b)
+        {
+	  cpu = "shijidadao";
+	  CHECK___builtin_cpu_is ("shijidadao");
+	  cpu_model->__cpu_subtype = ZHAOXIN_FAM7H_SHIJIDADAO;
+        }
+      break;
+    default:
+      break;
+    }
+
+  return cpu;
+}
+
 /* ECX and EDX are output of CPUID at level one.  */
 static inline void
 get_available_features (struct __processor_model *cpu_model,
@@ -983,8 +1054,22 @@ cpu_indicator_init (struct __processor_model *cpu_model,
       get_amd_cpu (cpu_model, cpu_model2, cpu_features2);
       cpu_model->__cpu_vendor = VENDOR_AMD;
     }
-  else if (vendor == signature_CENTAUR_ebx)
+  else if (vendor == signature_CENTAUR_ebx && family < 0x07)
     cpu_model->__cpu_vendor = VENDOR_CENTAUR;
+  else if (vendor == signature_SHANGHAI_ebx
+	   || vendor == signature_CENTAUR_ebx)
+    {
+      /* Adjust model and family for ZHAOXIN CPUS.  */
+      if (family == 0x07)
+	model += extended_model;
+
+      cpu_model2->__cpu_family = family;
+      cpu_model2->__cpu_model = model;
+
+      /* Get CPU type.  */
+      get_zhaoxin_cpu (cpu_model, cpu_model2, cpu_features2);
+      cpu_model->__cpu_vendor = VENDOR_ZHAOXIN;
+    }
   else if (vendor == signature_CYRIX_ebx)
     cpu_model->__cpu_vendor = VENDOR_CYRIX;
   else if (vendor == signature_NSC_ebx)

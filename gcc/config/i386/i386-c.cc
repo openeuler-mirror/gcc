@@ -144,6 +144,18 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
       def_or_undef (parse_in, "__btver2");
       def_or_undef (parse_in, "__btver2__");
       break;
+    case PROCESSOR_LUJIAZUI:
+      def_or_undef (parse_in, "__lujiazui");
+      def_or_undef (parse_in, "__lujiazui__");
+      break;
+    case PROCESSOR_YONGFENG:
+      def_or_undef (parse_in, "__yongfeng");
+      def_or_undef (parse_in, "__yongfeng__");
+      break;
+    case PROCESSOR_SHIJIDADAO:
+      def_or_undef (parse_in, "__shijidadao");
+      def_or_undef (parse_in, "__shijidadao__");
+      break;
     case PROCESSOR_PENTIUM4:
       def_or_undef (parse_in, "__pentium4");
       def_or_undef (parse_in, "__pentium4__");
@@ -347,6 +359,15 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
       break;
     case PROCESSOR_BTVER2:
       def_or_undef (parse_in, "__tune_btver2__");
+       break;
+    case PROCESSOR_LUJIAZUI:
+      def_or_undef (parse_in, "__tune_lujiazui__");
+       break;
+    case PROCESSOR_YONGFENG:
+      def_or_undef (parse_in, "__tune_yongfeng__");
+       break;
+    case PROCESSOR_SHIJIDADAO:
+      def_or_undef (parse_in, "__tune_shijidadao__");
        break;
     case PROCESSOR_PENTIUM4:
       def_or_undef (parse_in, "__tune_pentium4__");

@@ -145,6 +145,11 @@ along with GCC; see the file COPYING3.  If not see
 	       | m_ICELAKE_CLIENT | m_ICELAKE_SERVER | m_CASCADELAKE \
 	       | m_TIGERLAKE | m_COOPERLAKE | m_ROCKETLAKE)
 
+#define m_LUJIAZUI (HOST_WIDE_INT_1U<<PROCESSOR_LUJIAZUI)
+#define m_YONGFENG (HOST_WIDE_INT_1U<<PROCESSOR_YONGFENG)
+#define m_SHIJIDADAO (HOST_WIDE_INT_1U<<PROCESSOR_SHIJIDADAO)
+#define m_ZHAOXIN  (m_LUJIAZUI | m_YONGFENG | m_SHIJIDADAO)
+
 #define m_GEODE (HOST_WIDE_INT_1U<<PROCESSOR_GEODE)
 #define m_K6 (HOST_WIDE_INT_1U<<PROCESSOR_K6)
 #define m_K6_GEODE (m_K6 | m_GEODE)
@@ -767,6 +772,9 @@ static const struct processor_costs *processor_cost_table[] =
   &icelake_cost,
   &icelake_cost,
   &intel_cost,
+  &lujiazui_cost,
+  &yongfeng_cost,
+  &shijidadao_cost,
   &geode_cost,
   &k6_cost,
   &athlon_cost,
