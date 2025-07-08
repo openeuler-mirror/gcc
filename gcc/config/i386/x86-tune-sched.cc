@@ -74,6 +74,8 @@ ix86_issue_rate (void)
     case PROCESSOR_HASWELL:
     case PROCESSOR_TREMONT:
     case PROCESSOR_ALDERLAKE:
+    case PROCESSOR_YONGFENG:
+    case PROCESSOR_SHIJIDADAO:
     case PROCESSOR_GENERIC:
       return 4;
 
@@ -428,6 +430,32 @@ ix86_adjust_cost (rtx_insn *insn, int dep_type, rtx_insn *dep_insn, int cost,
 	    cost = 0;
 	}
       break;
+
+    case PROCESSOR_YONGFENG:
+    case PROCESSOR_SHIJIDADAO:
+      /* Stack engine allows to execute push&pop instructions in parallel.  */
+      if ((insn_type == TYPE_PUSH || insn_type == TYPE_POP)
+	  && (dep_insn_type == TYPE_PUSH || dep_insn_type == TYPE_POP))
+	return 0;
+      /* FALLTHRU */
+
+    case PROCESSOR_LUJIAZUI:
+      memory = get_attr_memory (insn);
+
+      /* Show ability of reorder buffer to hide latency of load by executing
+	  in parallel with previous instruction in case
+	  previous instruction is not needed to compute the address.  */
+      if ((memory == MEMORY_LOAD || memory == MEMORY_BOTH)
+	  && !ix86_agi_dependent (dep_insn, insn))
+	  {
+	    int loadcost = 4;
+
+	    if (cost >= loadcost)
+	      cost -= loadcost;
+	    else
+	      cost = 0;
+	  }
+       break;
 
     case PROCESSOR_CORE2:
     case PROCESSOR_NEHALEM:
