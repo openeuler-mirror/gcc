@@ -395,6 +395,7 @@ static const struct aarch64_flag_desc aarch64_tuning_flags[] =
 #include "tuning_models/thunderxt88.h"
 #include "tuning_models/thunderx.h"
 #include "tuning_models/tsv110.h"
+#include "tuning_models/hip09.h"
 #include "tuning_models/xgene1.h"
 #include "tuning_models/emag.h"
 #include "tuning_models/qdf24xx.h"
@@ -18360,6 +18361,14 @@ aarch64_override_options_internal (struct gcc_options *opts)
      the *options_set structs anyway.  */
   SET_OPTION_IF_UNSET (opts, &global_options_set,
 		       param_sched_autopref_queue_depth, queue_depth);
+
+  /* If the core wants only AdvancedSIMD autovectorization, do this through
+     aarch64_autovec_preference.  If the user set it explicitly, they should
+     know what they want.  */
+  if (aarch64_tune_params.extra_tuning_flags
+      & AARCH64_EXTRA_TUNE_PREFER_ADVSIMD_AUTOVEC)
+    SET_OPTION_IF_UNSET (opts, &global_options_set,
+			 aarch64_autovec_preference, 1);
 
   /* Set up parameters to be used in prefetching algorithm.  Do not
      override the defaults unless we are tuning for a core we have
