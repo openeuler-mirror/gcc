@@ -90,6 +90,8 @@ along with GCC; see the file COPYING3.  If not see
 	 the need for offline copy of the function.  */
 
 #include "config.h"
+#define INCLUDE_SET
+#define INCLUDE_STRING
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -175,6 +177,7 @@ typedef fibonacci_node <inline_badness, cgraph_edge> edge_heap_node_t;
 static int overall_size;
 static profile_count max_count;
 static profile_count spec_rem;
+static std::set<std::string> force_inline_targets;
 
 /* Return false when inlining edge E would lead to violating
    limits on function unit growth or stack usage growth.  
@@ -358,6 +361,77 @@ sanitize_attrs_match_for_inline_p (const_tree caller, const_tree callee)
       (opts_for_fn (caller->decl)->x_##flag		\
        != opts_for_fn (callee->decl)->x_##flag)
 
+/* find related node that has lto_file_data.  */
+
+static cgraph_node *
+find_related_node_lto_file_data (cgraph_node *node)
+{
+  cgraph_node *cur = node;
+
+  while (cur->clone_of)
+    {
+      /* Switch to original node, for example xxx.constprop.x function.  */
+      cur = cur->clone_of;
+      if (cur->lto_file_data)
+	return cur;
+
+      /* Find the lto_file_data information of referring.  */
+      struct ipa_ref *ref = NULL;
+      for (int i = 0; cur->iterate_referring (i, ref); i++)
+	{
+	  struct cgraph_node *cnode = dyn_cast <cgraph_node *> (ref->referring);
+	  if (cnode && cnode->lto_file_data)
+	    return cnode;
+	}
+    }
+
+  return NULL;
+}
+
+/* Determines whether to force inline or force inline only the specified
+   object.  Use for 3 inline extensions:
+   1) CIF_TARGET_OPTION_MISMATCH: cancel the restriction that the target options
+      of different compilation units are different.
+   2) CIF_OVERWRITABLE: indicates that the function is available, which is
+      similar to the "inline" keyword indication.
+   3) CIF_OPTIMIZATION_MISMATCH: cancel the check in the case of fp_expressions,
+      which is similar to the "always_inline" attribute.
+   */
+
+static bool
+can_force_inline_p (cgraph_node *callee)
+{
+  if (!in_lto_p)
+    return false;
+  if (flag_inline_force)
+    return true;
+  if (force_inline_targets_string)
+    {
+      cgraph_node * node = callee;
+      std::string name = "";
+      if (callee->ultimate_alias_target () == NULL
+	  || callee->ultimate_alias_target ()->lto_file_data == NULL)
+	{
+	  node = find_related_node_lto_file_data (callee);
+	  if (node && node->lto_file_data)
+	    name = node->lto_file_data->file_name;
+	}
+      else
+	name = node->ultimate_alias_target ()->lto_file_data->file_name;
+      while (!name.empty () && name.back () == '/')
+	name.erase (name.length () - 1);
+      if (name.empty ())
+	return false;
+      size_t last_slash_pos = name.find_last_of ('/');
+      if (last_slash_pos != std::string::npos
+	  && last_slash_pos != name.length () - 1)
+	name = name.substr (last_slash_pos + 1);
+      if (force_inline_targets.find (name) != force_inline_targets.end ())
+	return true;
+    }
+  return false;
+}
+
 /* Decide if we can inline the edge and possibly update
    inline_failed reason.  
    We check whether inlining is possible at all and whether
@@ -400,7 +474,7 @@ can_inline_edge_p (struct cgraph_edge *e, bool report,
       e->inline_failed = CIF_USES_COMDAT_LOCAL;
       inlinable = false;
     }
-  else if (avail <= AVAIL_INTERPOSABLE)
+  else if (avail <= AVAIL_INTERPOSABLE && !can_force_inline_p (callee))
     {
       e->inline_failed = CIF_OVERWRITABLE;
       inlinable = false;
@@ -426,8 +500,8 @@ can_inline_edge_p (struct cgraph_edge *e, bool report,
       inlinable = false;
     }
   /* Check compatibility of target optimization options.  */
-  else if (!targetm.target_option.can_inline_p (caller->decl,
-						callee->decl))
+  else if (!can_force_inline_p (callee)
+	   && !targetm.target_option.can_inline_p (caller->decl, callee->decl))
     {
       e->inline_failed = CIF_TARGET_OPTION_MISMATCH;
       inlinable = false;
@@ -558,7 +632,8 @@ can_inline_edge_by_limits_p (struct cgraph_edge *e, int flags)
       bool always_inline =
 	     (DECL_DISREGARD_INLINE_LIMITS (callee->decl)
 	      && lookup_attribute ("always_inline",
-				   DECL_ATTRIBUTES (callee->decl)));
+				   DECL_ATTRIBUTES (callee->decl)))
+	     || can_force_inline_p (callee);
       ipa_fn_summary *caller_info = ipa_fn_summaries->get (caller);
       ipa_fn_summary *callee_info = ipa_fn_summaries->get (callee);
 
@@ -2775,6 +2850,27 @@ flatten_remove_node_hook (struct cgraph_node *node, void *data)
   removed->add (node);
 }
 
+/* Parse string that specify forced inlining, separated by commas.  */
+
+static void
+parse_force_inline_targets_string (const char* s)
+{
+  std::string target_string (s);
+  std::string delim = ",";
+  size_t start = 0;
+  size_t end = target_string.find (delim);
+  if (target_string.substr (start, end - start) == "")
+    return;
+
+  while (end != std::string::npos)
+    {
+      force_inline_targets.insert (target_string.substr (start, end - start));
+      start = end + delim.size ();
+      end = target_string.find (delim, start);
+    }
+  force_inline_targets.insert (target_string.substr (start, end - start));
+}
+
 /* Decide on the inlining.  We do so in the topological order to avoid
    expenses on updating data structures.  */
 
@@ -2787,6 +2883,9 @@ ipa_inline (void)
   int i, j;
   int cold;
   bool remove_functions = false;
+
+  if (force_inline_targets_string)
+    parse_force_inline_targets_string (force_inline_targets_string);
 
   order = XCNEWVEC (struct cgraph_node *, symtab->cgraph_count);
 
