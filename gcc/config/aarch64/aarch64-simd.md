@@ -6534,6 +6534,22 @@
 )
 
 ;; Use cmlt to replace vector arithmetic operations like this (SImode example):
+;; B = ((A >> 15) & 0x00010001) * 0x00001111
+(define_insn "*aarch64_cmlt_as_arith2<mode>"
+  [(set (match_operand:<V_INT_EQUIV> 0 "register_operand" "=w")
+      (mult:<V_INT_EQUIV>
+        (and:<V_INT_EQUIV>
+          (lshiftrt:<V_INT_EQUIV>
+            (match_operand:VDQHSD 1 "register_operand" "w")
+            (match_operand:VDQHSD 2 "half_size_minus_one_operand"))
+          (match_operand:VDQHSD 3 "cmlt_arith_mask_operand"))
+        (match_operand:VDQHSD 4 "half_bit_all_one_operand")))]
+  "TARGET_SIMD && flag_cmlt_arith"
+  "cmlt\t%<v>0.<V2ntype>, %<v>1.<V2ntype>, #0"
+  [(set_attr "type" "neon_compare_zero")]
+)
+
+;; Use cmlt to replace vector arithmetic operations like this (SImode example):
 ;; B = (((A >> 15) & 0x00010001) << 16) - ((A >> 15) & 0x00010001)
 ;; TODO: maybe extend to scalar operations or other cm** instructions.
 

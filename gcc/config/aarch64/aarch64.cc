@@ -2326,7 +2326,7 @@ static const struct tune_params hip12_tunings =
   2,    /* min_div_recip_mul_df.  */
   0,    /* max_case_values.  */
   tune_params::AUTOPREFETCHER_WEAK,     /* autoprefetcher_model.  */
-  (AARCH64_EXTRA_TUNE_NONE),     /* tune_flags.  */
+  (AARCH64_EXTRA_TUNE_PREFER_ADVSIMD_AUTOVEC),     /* tune_flags.  */
   &hip12_prefetch_tune
 };
 
@@ -17310,6 +17310,18 @@ cost_plus:
       return true;
 
     case MULT:
+	  op0 = XEXP (x, 0);
+	  op1 = XEXP (x, 1);
+	  if (flag_cmlt_arith && GET_CODE (op0) == AND)
+	{
+	  rtx op0_subop0 = XEXP (op0, 0);
+	  if (GET_CODE (op0_subop0) == LSHIFTRT)
+	    {
+	      *cost += rtx_cost (op0, mode, MULT, 0, speed);
+	      *cost += rtx_cost (op1, mode, MULT, 0, speed);
+	      return true;
+	    }
+	}
       *cost += aarch64_rtx_mult_cost (x, MULT, 0, speed);
       /* aarch64_rtx_mult_cost always handles recursion to its
 	 operands.  */
