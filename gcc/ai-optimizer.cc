@@ -285,14 +285,15 @@ static int
 graph_infer (int argc1, const char **argv1, const char *mops,
              int argc2, int64_t *argv2)
 {
-  char gcc_exec_prefix[512];
+  const int prefix_buff_len = 512;
+  char gcc_exec_prefix[prefix_buff_len] = {0};
   ssize_t len = readlink ("/proc/self/exe", gcc_exec_prefix,
   			  sizeof (gcc_exec_prefix) - 1);
   if (len == -1)
     return 0;
 
-  char native_file[512];
-  strncpy (native_file, gcc_exec_prefix, sizeof (native_file) - 1);
+  char native_file[prefix_buff_len] = {0};
+  strncpy (native_file, gcc_exec_prefix, len);
   const char *target = "bin/gcc";
   const char *target_cc1 = "cc1";
   const char *target_gpp = "bin/g++";
@@ -330,6 +331,8 @@ graph_infer (int argc1, const char **argv1, const char *mops,
 		   strlen (native_file) - 1);
 	}
     }
+  else
+	return 0;
 
   if (access (native_file, F_OK) == 0)
     fill_node (native_file);

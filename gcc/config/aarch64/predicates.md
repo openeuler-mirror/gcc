@@ -74,6 +74,15 @@
   return CONST_INT_P (op) && (UINTVAL (op) == mask);
 })
 
+(define_predicate "half_bit_all_one_operand"
+  (match_code "const_vector")
+{
+  op = unwrap_const_vec_duplicate (op);
+  unsigned int size = GET_MODE_UNIT_BITSIZE (mode) / 2;
+  unsigned long long mask = ((unsigned long long) 1 << size) - 1;
+  return CONST_INT_P (op) && (UINTVAL (op) == mask);
+})
+
 (define_predicate "subreg_lowpart_operator"
   (ior (match_code "truncate")
        (and (match_code "subreg")
