@@ -30999,6 +30999,10 @@ to @samp{zvks} and @samp{zvkg}.
 @tab 1.0
 @tab Page-based memory types extension.
 
+@item svbare
+@tab 1.0
+@tab Satp mode bare is supported
+
 @item xcvmac
 @tab 1.0
 @tab Core-V multiply-accumulate extension.

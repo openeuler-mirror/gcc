@@ -488,6 +488,8 @@ Mask(SVINVAL) Var(riscv_sv_subext)
 
 Mask(SVNAPOT) Var(riscv_sv_subext)
 
+Mask(SVBARE) Var(riscv_sv_subext)
+
 TargetVariable
 int riscv_sm_subext
 
