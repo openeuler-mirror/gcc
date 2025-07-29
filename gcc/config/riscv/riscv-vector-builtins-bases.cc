@@ -988,7 +988,15 @@ public:
 
   rtx expand (function_expander &e) const override
   {
-    return e.use_exact_insn (code_for_pred_popcount (e.vector_mode (), Pmode));
+    switch (e.op_info->op)
+    {
+      case OP_TYPE_v:
+	return e.use_exact_insn (code_for_pred_v (POPCOUNT, e.vector_mode ()));
+      case OP_TYPE_m:
+	return e.use_exact_insn (code_for_pred_popcount (e.vector_mode (), Pmode));
+      default:
+	gcc_unreachable ();
+    }
   }
 };
 

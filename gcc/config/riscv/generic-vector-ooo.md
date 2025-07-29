@@ -46,7 +46,7 @@
 (define_insn_reservation "vec_alu" 3
   (eq_attr "type" "vialu,viwalu,vext,vicalu,vshift,vnshift,viminmax,vicmp,\
 		   vimov,vsalu,vaalu,vsshift,vnclip,vmov,vfmov,vector,\
-		   vandn,vbrev,vbrev8,vrev8,vclz,vctz,vrol,vror,vwsll")
+		   vandn,vbrev,vbrev8,vrev8,vclz,vctz,vcpop,vrol,vror,vwsll")
   "vxu_ooo_issue,vxu_ooo_alu")
 
 ;; Vector float comparison, conversion etc.

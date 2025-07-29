@@ -344,7 +344,7 @@
   [(set_attr "type" "v<rev>")
    (set_attr "mode" "<MODE>")])
 
-;; vclz.v vctz.v
+;; vclz.v vctz.v vcpop.v
 (define_insn "@pred_v<bitmanip_optab><mode>"
   [(set (match_operand:V_VLSI 0	    "register_operand"      "=vd, vr")
      (clz_ctz_pcnt:V_VLSI

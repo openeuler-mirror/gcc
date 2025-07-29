@@ -659,6 +659,7 @@ DEF_RVV_FUNCTION (vlsegff, seg_fault_load, full_preds, tuple_v_scalar_const_ptr_
 DEF_RVV_FUNCTION (vbrev,  alu, full_preds, u_vv_ops)
 DEF_RVV_FUNCTION (vclz,   alu, none_m_preds, u_vv_ops)
 DEF_RVV_FUNCTION (vctz,   alu, none_m_preds, u_vv_ops)
+DEF_RVV_FUNCTION (vcpop,  alu, none_m_preds, u_vv_ops)
 DEF_RVV_FUNCTION (vwsll,  alu, full_preds, u_wvv_ops)
 DEF_RVV_FUNCTION (vwsll,  alu, full_preds, u_shift_wvx_ops)
 #undef REQUIRED_EXTENSIONS
