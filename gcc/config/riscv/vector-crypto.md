@@ -464,7 +464,7 @@
 ;; zvknh[ab] and zvkg instructions patterns.
 ;; vsha2ms.vv vsha2ch.vv vsha2cl.vv vghsh.vv
 (define_insn "@pred_v<vv_ins1_name><mode>"
-  [(set (match_operand:VQEXTI 0 "register_operand"     "=vr")
+  [(set (match_operand:VQEXTI 0 "register_operand"     "=&vr")
      (if_then_else:VQEXTI
        (unspec:<VM>
          [(match_operand 4 "vector_length_operand"     "rK")
@@ -615,7 +615,7 @@
 
 ;; vaeskf2.vi vsm3c.vi
 (define_insn "@pred_vi<vi_ins1_name><mode>_nomaskedoff_scalar"
-  [(set (match_operand:VSI 0 "register_operand"       "=vr")
+  [(set (match_operand:VSI 0 "register_operand"       "=&vr")
      (if_then_else:VSI
        (unspec:<VM>
          [(match_operand 4 "vector_length_operand"    "rK")
@@ -636,7 +636,7 @@
 ;; zvksh instructions patterns.
 ;; vsm3me.vv
 (define_insn "@pred_vsm3me<mode>"
-  [(set (match_operand:VSI 0 "register_operand"    "=vr, vr")
+  [(set (match_operand:VSI 0 "register_operand"    "=&vr, vr")
      (if_then_else:VSI
        (unspec:<VM>
          [(match_operand 4 "vector_length_operand" " rK, rK")
