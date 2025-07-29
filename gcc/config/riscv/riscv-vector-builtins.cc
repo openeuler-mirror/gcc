@@ -4542,6 +4542,10 @@ verify_type_context (location_t loc, type_context_kind context, const_tree type,
   if (!sizeless_type_p (type))
     return true;
 
+  /* Non-variable length type do not do things.  */
+  if (GET_MODE_SIZE (TYPE_MODE (type)).is_constant ())
+    return true;
+
   switch (context)
     {
     case TCTX_SIZEOF:
