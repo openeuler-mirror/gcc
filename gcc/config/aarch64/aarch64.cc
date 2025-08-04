@@ -19123,6 +19123,7 @@ override_C_optimize_options (struct gcc_options *opts)
   opts->x_flag_ipa_prefetch = 1;
   opts->x_flag_ipa_ic = 1;
   opts->x_flag_cmlt_arith = 1;
+  opts->x_flag_loop_sve_mode_opt = 1; 
 }
 
 /* Check whether in CPP language or LTO with only CPP language.  */
