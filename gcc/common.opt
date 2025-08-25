@@ -1134,6 +1134,10 @@ floop-crc
 Common Var(flag_loop_crc) Optimization
 Do the loop crc conversion.
 
+floop-sve-mode-opt
+Common Var(flag_loop_sve_mode_opt) Optimization
+Optimization of adding sve mode for some loop
+
 fauto-inc-dec
 Common Var(flag_auto_inc_dec) Init(1) Optimization
 Generate auto-inc/dec instructions.

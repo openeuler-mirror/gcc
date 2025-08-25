@@ -2958,6 +2958,161 @@ vect_analyze_loop_1 (class loop *loop, vec_info_shared *shared,
   return opt_loop_vec_info::success (loop_vinfo);
 }
 
+bool load_by_specific_width_p (gimple *stmt, unsigned int width)
+{
+  if (!is_gimple_assign (stmt))
+    return false;
+  
+  if (gimple_assign_rhs_code (stmt) != MEM_REF
+    && gimple_assign_rhs_code (stmt) != COMPONENT_REF)
+    return false;
+  
+  tree rhs = gimple_assign_rhs1 (stmt);
+  tree type = TREE_TYPE (rhs);
+  return TYPE_PRECISION (type) == width;
+}
+
+bool converse_by_specific_width_p (gimple *stmt,
+  unsigned int w1, unsigned int w2)
+{
+  if (!is_gimple_assign (stmt))
+    return false;
+  
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+  
+  if (code != NOP_EXPR && code != CONVERT_EXPR)
+    return false;
+  
+  tree rhs = gimple_assign_rhs1 (stmt);
+  tree lhs = gimple_assign_lhs (stmt);
+  tree rhs_type = TREE_TYPE (rhs);
+  tree lhs_type = TREE_TYPE (lhs);
+  bool rhs_is_width1 = INTEGRAL_TYPE_P (rhs_type)
+    && TYPE_PRECISION (rhs_type) == w1;
+  bool lhs_is_width2 = INTEGRAL_TYPE_P (lhs_type)
+    && TYPE_PRECISION (lhs_type) == w2;
+  
+  return rhs_is_width1 && lhs_is_width2;
+}
+
+bool multiply_by_specific_nodes_p (gimple *stmt, tree n1, tree n2)
+{
+  if (!is_gimple_assign (stmt))
+    return false;
+  
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+
+  if (code != MULT_EXPR)
+    return false;
+  
+  tree type = TREE_TYPE (gimple_assign_lhs (stmt));
+  
+  if (TREE_CODE (type) != INTEGER_TYPE)
+    return false;
+  
+  tree mul1 = gimple_assign_rhs1 (stmt);
+  tree mul2 = gimple_assign_rhs2 (stmt);
+
+  return ((mul1 == n1 && mul2 == n2)
+    || (mul1 == n2 && mul2 == n1));
+}
+
+bool plus_by_specific_node_p (gimple *stmt, tree n1)
+{
+  if (!is_gimple_assign (stmt))
+    return false;
+  
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+
+  if (code != PLUS_EXPR)
+    return false;
+  
+  tree type = TREE_TYPE (gimple_assign_lhs (stmt));
+  
+  if (TREE_CODE (type) != INTEGER_TYPE)
+    return false;
+  
+  tree addend1 = gimple_assign_rhs1 (stmt);
+  tree addend2 = gimple_assign_rhs2 (stmt);
+
+  return ((addend1 == n1) || (addend2 == n1));
+}
+
+bool converse_and_multiply_p (loop_p loop, gimple_stmt_iterator gsi)
+{
+  gimple *stmt = gsi_stmt (gsi);
+  if(!load_by_specific_width_p (stmt, 8))
+    return false;
+  
+  tree load1_lhs = gimple_assign_lhs (stmt);
+  tree conv_lhs = NULL_TREE, load2_lhs = NULL_TREE, mul_lhs = NULL_TREE;
+
+  while (!gsi_end_p (gsi))
+    {
+      stmt = gsi_stmt (gsi);
+      if (converse_by_specific_width_p (stmt, 8, 32))
+	{
+	  if (load1_lhs == gimple_assign_rhs1 (stmt))
+	    break;
+	    }
+      gsi_next (&gsi);
+    }
+  if (gsi_end_p (gsi))
+    return false;
+
+  conv_lhs = gimple_assign_lhs (stmt);
+
+  while (!gsi_end_p (gsi))
+    {
+      stmt = gsi_stmt (gsi);
+      if (load_by_specific_width_p (stmt, 32))
+	{
+	  load2_lhs = gimple_assign_lhs (stmt);
+	  break;
+	}
+      gsi_next (&gsi);
+    }
+  if (gsi_end_p (gsi))
+    return false;
+  
+  while (!gsi_end_p (gsi))
+    {
+      stmt = gsi_stmt (gsi);
+      if (multiply_by_specific_nodes_p (stmt, conv_lhs, load2_lhs))
+	{
+	  mul_lhs = gimple_assign_lhs (stmt);
+	  break;
+	}
+      gsi_next (&gsi);
+    }
+  if (gsi_end_p (gsi))
+    return false;
+
+  while (!gsi_end_p (gsi))
+    {
+      stmt = gsi_stmt (gsi);
+      if (plus_by_specific_node_p (stmt, mul_lhs))
+	break;
+      gsi_next (&gsi);
+    }
+
+  return !gsi_end_p (gsi);
+}
+
+bool sve_mode_opt_analyze_loop (loop_p loop)
+{
+  basic_block *bbs = get_loop_body (loop);
+  for (int i = 0; i < loop->num_nodes; i++) {
+    basic_block bb = bbs[i];
+    for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi)) {
+      if (converse_and_multiply_p (loop, gsi))
+	return true;
+    }
+  }
+  
+  return false;
+}
+
 /* Function vect_analyze_loop.
 
    Apply a set of analyses on LOOP, and create a loop_vec_info struct
@@ -3007,10 +3162,29 @@ vect_analyze_loop (class loop *loop, vec_info_shared *shared,
   auto_vector_modes vector_modes;
   /* Autodetect first vector size we try.  */
   vector_modes.safe_push (VOIDmode);
-  unsigned int autovec_flags
-    = targetm.vectorize.autovectorize_vector_modes (&vector_modes,
+
+#if !defined (CROSS_DIRECTORY_STRUCTURE) && defined (__aarch64__)
+  bool sve_chance = false;
+  if (flag_loop_sve_mode_opt && TARGET_SVE
+    && targetm.vector_mode_supported_p (VNx4QImode)
+    && sve_mode_opt_analyze_loop (loop))
+    {
+      if (dump_enabled_p ()) 
+	dump_printf (MSG_NOTE, "Loop sve mode optimization success\n");
+      sve_chance = true;
+      vector_modes.safe_push (VNx4QImode);
+    }
+#endif
+
+  unsigned int autovec_flags = targetm.vectorize.autovectorize_vector_modes (&vector_modes,
 						    loop->simdlen != 0);
-  bool pick_lowest_cost_p = ((autovec_flags & VECT_COMPARE_COSTS)
+
+#if !defined (CROSS_DIRECTORY_STRUCTURE) && defined (__aarch64__)
+  if (sve_chance)
+    autovec_flags |= VECT_COMPARE_COSTS;
+#endif
+
+  bool  pick_lowest_cost_p = ((autovec_flags & VECT_COMPARE_COSTS)
 			     && !unlimited_cost_model (loop));
   machine_mode autodetected_vector_mode = VOIDmode;
   opt_loop_vec_info first_loop_vinfo = opt_loop_vec_info::success (NULL);
