@@ -35,7 +35,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "cfgloop.h"
 #include "gimple-ssa.h"
 #include "gimple-pretty-print.h"
-#ifdef __aarch64__
+#if defined (__aarch64__) && !defined (CROSS_DIRECTORY_STRUCTURE)
 #include "config/aarch64/aarch64.h"
 #endif
 
@@ -94,7 +94,7 @@ public:
 
   virtual bool gate (function *fun) override
   {
-#ifdef __aarch64__
+#if defined (__aarch64__) && !defined (CROSS_DIRECTORY_STRUCTURE)
     if (!flag_find_with_sve)
       return false;
 
@@ -112,7 +112,7 @@ public:
 
 virtual unsigned int execute (function *fun) override
 {
-#ifdef __aarch64__
+#if defined (__aarch64__) && !defined (CROSS_DIRECTORY_STRUCTURE)
   TRACE_FUNCTION (fun->decl);
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
@@ -130,7 +130,7 @@ virtual unsigned int execute (function *fun) override
 }
 
 private:
-#ifdef __aarch64__
+#if defined (__aarch64__) && !defined (CROSS_DIRECTORY_STRUCTURE)
   uint8_t bit_width;
   const char *null_name = "";
 
