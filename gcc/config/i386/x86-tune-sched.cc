@@ -58,6 +58,7 @@ ix86_issue_rate (void)
     case PROCESSOR_K8:
     case PROCESSOR_AMDFAM10:
     case PROCESSOR_BTVER1:
+    case PROCESSOR_LUJIAZUI:
       return 3;
 
     case PROCESSOR_BDVER1:
