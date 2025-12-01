@@ -2126,23 +2126,6 @@ enable_cfgo_optimizations (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, flag_selective_scheduling, value);
   SET_OPTION_IF_UNSET (opts, opts_set, flag_rename_registers, value);
   SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_partial_training, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_alignment_propagation, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_localize_array, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_array_dse, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_gnu89_inline, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_convert_minmax, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_tree_slp_transpose_vectorize,
-		       value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_prefetch, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_ic, value);
-
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_find_with_sve, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_finite_loops, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_omit_frame_pointer, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_sized_deallocation, 0);
-
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_loop_elim, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_if_conversion_gimple, value);
 
   SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_auto, 331);
   SET_OPTION_IF_UNSET (opts, opts_set, param_inline_unit_growth, 60);
