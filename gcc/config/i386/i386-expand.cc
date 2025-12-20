@@ -13551,7 +13551,7 @@ ix86_expand_builtin (tree exp, rtx target, rtx subtarget,
 	for (i = 0; i < 3; i++)
 	  xmm_regs[i] = gen_rtx_REG (V2DImode, GET_SSE_REGNO (i));
 
-	if (target == 0)
+	if (target == 0 || !register_operand (target, SImode))
 	  target = gen_reg_rtx (SImode);
 
 	emit_insn (gen_encodekey128u32 (target, op0));
@@ -13594,7 +13594,7 @@ ix86_expand_builtin (tree exp, rtx target, rtx subtarget,
 	for (i = 0; i < 4; i++)
 	  xmm_regs[i] = gen_rtx_REG (V2DImode, GET_SSE_REGNO (i));
 
-	if (target == 0)
+	if (target == 0 || !register_operand (target, SImode))
 	  target = gen_reg_rtx (SImode);
 
 	emit_insn (gen_encodekey256u32 (target, op0));
@@ -13730,7 +13730,7 @@ ix86_expand_builtin (tree exp, rtx target, rtx subtarget,
 	  }
 	else
 	  {
-	    if (target == 0)
+	    if (target == 0 || !register_operand (target, DImode))
 	      target = gen_reg_rtx (DImode);
 	    icode = CODE_FOR_urdmsr;
 	    op1 = op0;
