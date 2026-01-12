@@ -9554,9 +9554,7 @@ ipa_struct_reorg::check_and_prune_struct_for_semi_relayout (void)
 	    }
 	    continue;
 	}
-      if (type->has_alloc_array == 0 || type->has_alloc_array == 1
-	  || type->has_alloc_array == -1 || type->has_alloc_array == -3
-	  || type->has_alloc_array == -4)
+      if (type->has_alloc_array <= 1 && type->has_alloc_array >= -4)
 	{
 	  if (dump_file)
 	    {

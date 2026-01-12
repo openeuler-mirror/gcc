@@ -8167,7 +8167,8 @@ driver::putenv_AI_INFER_LEVEL(int argc, const char **argv)
 	flag_Om = true;
       if (strstr (argv[i], "-O3") != NULL)
 	flag_O3 = true;
-      if (strstr (argv[i], "mcpu=native") != NULL)
+      if (strstr (argv[i], "mcpu=native") != NULL
+	  || strstr (argv[i], "march=native") != NULL)
 	flag_native = true;
       if (strstr (argv[i], "mcpu=") != NULL)
         {
