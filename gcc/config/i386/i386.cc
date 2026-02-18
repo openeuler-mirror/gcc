@@ -20023,7 +20023,7 @@ avx_vpermilp_parallel (rtx par, machine_mode mode)
 	}
       for (i = 2; i < 4; ++i)
 	{
-	  if (ipar[i] < 2)
+	  if (ipar[i] < 2 || ipar[i] >= 4)
 	    return 0;
 	  mask |= (ipar[i] - 2) << i;
 	}
