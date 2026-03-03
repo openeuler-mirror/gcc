@@ -6291,7 +6291,7 @@
 	  (match_dup 3)
 	  (const_int 1)))]
   "TARGET_AVX512F"
-  "vfmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
+  "vfmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
   [(set_attr "type" "ssemuladd")
    (set_attr "prefix" "evex")
    (set_attr "mode" "<MODE>")])
@@ -6365,7 +6365,7 @@
 	  (match_dup 3)
 	  (const_int 1)))]
   "TARGET_AVX512F"
-  "vfmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
+  "vfmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
   [(set_attr "type" "ssemuladd")
    (set_attr "prefix" "evex")
    (set_attr "mode" "<MODE>")])
@@ -6426,7 +6426,7 @@
 	  (match_dup 3)
 	  (const_int 1)))]
   "TARGET_AVX512F"
-  "vfnmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
+  "vfnmadd231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
   [(set_attr "type" "ssemuladd")
    (set_attr "prefix" "evex")
    (set_attr "mode" "<MODE>")])
@@ -6503,7 +6503,7 @@
 	  (match_dup 3)
 	  (const_int 1)))]
   "TARGET_AVX512F"
-  "vfnmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>3, %<iptr>2<round_op5>}"
+  "vfnmsub231<ssescalarmodesuffix>\t{<round_op5>%2, %1, %0%{%4%}|%0%{%4%}, %<iptr>1, %<iptr>2<round_op5>}"
   [(set_attr "type" "ssemuladd")
    (set_attr "prefix" "evex")
    (set_attr "mode" "<MODE>")])
