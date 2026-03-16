@@ -396,6 +396,7 @@ static const struct aarch64_flag_desc aarch64_tuning_flags[] =
 #include "tuning_models/thunderx.h"
 #include "tuning_models/tsv110.h"
 #include "tuning_models/hip09.h"
+#include "tuning_models/hip12.h"
 #include "tuning_models/xgene1.h"
 #include "tuning_models/emag.h"
 #include "tuning_models/qdf24xx.h"
@@ -27617,6 +27618,25 @@ aarch_macro_fusion_pair_p (rtx_insn *prev, rtx_insn *curr)
                               XEXP (SET_SRC (prev_set), 0)))
               return true;
         }
+    }
+  /* Fuse CMP and CSEL/CSET.  */
+  if (prev_set && curr_set
+      && GET_CODE (SET_SRC (prev_set)) == COMPARE
+      && SCALAR_INT_MODE_P (GET_MODE (XEXP (SET_SRC (prev_set), 0)))
+      && reg_referenced_p (SET_DEST (prev_set), PATTERN (curr)))
+    {
+      enum attr_type prev_type = get_attr_type (prev);
+      if ((prev_type == TYPE_ALUS_SREG || prev_type == TYPE_ALUS_IMM)
+	  && ((aarch64_fusion_enabled_p (AARCH64_FUSE_CMP_CSEL)
+	       && GET_CODE (SET_SRC (curr_set)) == IF_THEN_ELSE
+	       && aarch64_reg_or_zero (XEXP (SET_SRC (curr_set), 1), VOIDmode)
+	       && aarch64_reg_or_zero (XEXP (SET_SRC (curr_set), 2), VOIDmode)
+	       && SCALAR_INT_MODE_P (GET_MODE (XEXP (SET_SRC (curr_set), 1))))
+	      || (aarch64_fusion_enabled_p (AARCH64_FUSE_CMP_CSET)
+		  && GET_RTX_CLASS (GET_CODE (SET_SRC (curr_set)))
+		     == RTX_COMPARE
+		  && REG_P (SET_DEST (curr_set)))))
+	return true;
     }
 
   /* Fuse compare (CMP/CMN/TST/BICS) and conditional branch.  */
