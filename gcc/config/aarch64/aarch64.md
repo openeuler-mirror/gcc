@@ -580,6 +580,7 @@
 (include "tsv110.md")
 (include "thunderx3t110.md")
 (include "hip09.md")
+(include "hip12.md")
 
 ;; -------------------------------------------------------------------
 ;; Jumps and other miscellaneous insns
