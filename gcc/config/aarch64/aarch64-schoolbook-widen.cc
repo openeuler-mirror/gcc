@@ -39,8 +39,7 @@
    no __complex__ types).
 
    See aarch64-schoolbook-widen.cc inline comments for the matching
-   strategy.  Disable by setting AARCH64_SCHOOLBOOK_WIDEN_DISABLE in the
-   environment.  */
+   strategy.  Disable with -mno-schoolbook-widen.  */
 
 #define IN_TARGET_CODE 1
 
@@ -881,9 +880,7 @@ public:
 
   bool gate (function *) final override
   {
-    if (getenv ("AARCH64_SCHOOLBOOK_WIDEN_DISABLE"))
-      return false;
-    return optimize > 0;
+    return optimize > 0 && flag_aarch64_schoolbook_widen;
   }
 
   unsigned int execute (function *fun) final override

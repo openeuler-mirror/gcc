@@ -269,6 +269,10 @@ mcmlt-arith
 Target Var(flag_cmlt_arith) Optimization Init(0)
 Use SIMD cmlt instruction to perform some arithmetic/logic calculations.
 
+mschoolbook-widen
+Target Var(flag_aarch64_schoolbook_widen) Optimization Init(0)
+Enable recognition of schoolbook 64-bit widening multiplication idioms.
+
 TargetVariable
 long aarch64_stack_protector_guard_offset = 0
 
