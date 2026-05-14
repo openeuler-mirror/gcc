@@ -38,8 +38,8 @@
    pre-REASSOC2 / pre-UADDC-recognition (no .ADD_OVERFLOW intrinsics yet,
    no __complex__ types).
 
-   See aarch64-schoolbook-widen.cc inline comments for the matching
-   strategy.  Disable with -mno-schoolbook-widen.  */
+   See aarch64-mul-widen128.cc inline comments for the matching strategy.
+   Disable with -mno-mul-widen128.  */
 
 #define IN_TARGET_CODE 1
 
@@ -793,13 +793,13 @@ rewrite_match (const schoolbook_match &m)
 
   if (dump_file)
     {
-      fprintf (dump_file, "schoolbook_widen: rewrote schoolbook (X=");
+      fprintf (dump_file, "mul_widen128: rewrote schoolbook (X=");
       print_generic_expr (dump_file, m.X, TDF_SLIM);
       fprintf (dump_file, ", Y=");
       print_generic_expr (dump_file, m.Y, TDF_SLIM);
       fprintf (dump_file, ") -> WIDEN_MULT_EXPR\n");
       if (!m.lo_out_stmt)
-        fprintf (dump_file, "schoolbook_widen: HI-only match\n");
+        fprintf (dump_file, "mul_widen128: HI-only match\n");
     }
 }
 
@@ -853,15 +853,15 @@ process_function (function *fun)
   for (unsigned i = 0; i < matches.length (); ++i)
     rewrite_match (matches[i]);
   if (dump_file && !matches.is_empty ())
-    fprintf (dump_file, "schoolbook_widen: rewrote %u schoolbook(s) in %s\n",
+    fprintf (dump_file, "mul_widen128: rewrote %u schoolbook(s) in %s\n",
              matches.length (), function_name (fun));
   return matches.is_empty () ? 0 : (TODO_update_ssa | TODO_cleanup_cfg);
 }
 
-const pass_data pass_data_aarch64_schoolbook_widen =
+const pass_data pass_data_aarch64_mul_widen128 =
 {
   GIMPLE_PASS,
-  "schoolbook_widen",            /* name */
+  "mul_widen128",                /* name */
   OPTGROUP_NONE,                 /* optinfo_flags */
   TV_NONE,                       /* tv_id */
   PROP_ssa | PROP_cfg,           /* properties_required */
@@ -871,21 +871,21 @@ const pass_data pass_data_aarch64_schoolbook_widen =
   0,                             /* todo_flags_finish */
 };
 
-class pass_aarch64_schoolbook_widen : public gimple_opt_pass
+class pass_aarch64_mul_widen128 : public gimple_opt_pass
 {
 public:
-  pass_aarch64_schoolbook_widen (gcc::context *ctxt)
-    : gimple_opt_pass (pass_data_aarch64_schoolbook_widen, ctxt)
+  pass_aarch64_mul_widen128 (gcc::context *ctxt)
+    : gimple_opt_pass (pass_data_aarch64_mul_widen128, ctxt)
   {}
 
   opt_pass *clone () final override
   {
-    return new pass_aarch64_schoolbook_widen (m_ctxt);
+    return new pass_aarch64_mul_widen128 (m_ctxt);
   }
 
   bool gate (function *) final override
   {
-    return optimize > 0 && flag_aarch64_schoolbook_widen;
+    return optimize > 0 && flag_aarch64_mul_widen128;
   }
 
   unsigned int execute (function *fun) final override
@@ -897,7 +897,7 @@ public:
 } // anon namespace
 
 gimple_opt_pass *
-make_pass_aarch64_schoolbook_widen (gcc::context *ctxt)
+make_pass_aarch64_mul_widen128 (gcc::context *ctxt)
 {
-  return new pass_aarch64_schoolbook_widen (ctxt);
+  return new pass_aarch64_mul_widen128 (ctxt);
 }

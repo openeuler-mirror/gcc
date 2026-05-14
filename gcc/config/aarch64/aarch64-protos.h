@@ -1070,7 +1070,7 @@ rtl_opt_pass *make_pass_insert_bti (gcc::context *ctxt);
 rtl_opt_pass *make_pass_cc_fusion (gcc::context *ctxt);
 rtl_opt_pass *make_pass_switch_pstate_sm (gcc::context *ctxt);
 class gimple_opt_pass;
-gimple_opt_pass *make_pass_aarch64_schoolbook_widen (gcc::context *ctxt);
+gimple_opt_pass *make_pass_aarch64_mul_widen128 (gcc::context *ctxt);
 
 poly_uint64 aarch64_regmode_natural_size (machine_mode);
 

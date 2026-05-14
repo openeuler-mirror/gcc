@@ -1,11 +1,10 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -mschoolbook-widen -fdump-tree-schoolbook_widen-details" } */
+/* { dg-options "-O2 -mmul-widen128 -fdump-tree-mul_widen128-details" } */
 
 typedef unsigned long long uint64_t;
 
 void __attribute__((noipa))
-schoolbook_mul64_extra_use (uint64_t x, uint64_t y, uint64_t *hi,
-                            uint64_t *lo, uint64_t *extra)
+schoolbook_mul64 (uint64_t x, uint64_t y, uint64_t *hi, uint64_t *lo)
 {
   const uint64_t mask = 0xffffffffULL;
   uint64_t x_lo = x & mask;
@@ -21,9 +20,9 @@ schoolbook_mul64_extra_use (uint64_t x, uint64_t y, uint64_t *hi,
   uint64_t carry = (uint64_t) (hl > mid) << 32;
   uint64_t temp = (ll >> 32) + (mid & mask);
 
-  *extra = hh;
   *lo = (temp << 32) | (ll & mask);
   *hi = hh + (mid >> 32) + (temp >> 32) + carry;
 }
 
-/* { dg-final { scan-tree-dump-not "schoolbook_widen: rewrote schoolbook" "schoolbook_widen" } } */
+/* { dg-final { scan-tree-dump-times "mul_widen128: rewrote schoolbook" 1 "mul_widen128" } } */
+/* { dg-final { scan-assembler-times {\tumulh\t} 1 } } */
