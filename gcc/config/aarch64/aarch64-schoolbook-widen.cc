@@ -241,29 +241,49 @@ find_quadrant_mul (basic_block bb, tree X, tree Y, bool x_is_low, bool y_is_low,
   return NULL;
 }
 
-/* True if STMT's lhs has exactly one immediate use, and that use is a
-   PLUS_EXPR.  This is the relaxed contribution check: each of the four
-   HI components (HH, mid_hi, carry32, ts_hi) must contribute additively
-   to the eventual schoolbook HI sum, but the four PLUS_EXPRs do not have
-   to form a contiguous single-use chain -- accumulator-style code (e.g.
-   SEAL's dot_product_mod) interleaves them with other terms.
+/* Return the final PLUS_EXPR in the single-use addition chain that consumes
+   STMT's lhs.  Return NULL if STMT's lhs is not consumed by a PLUS_EXPR.
 
-   By replacing HH with (DI)(prod>>64) and the other three with 0 in
-   rewrite_match, we let downstream forwprop+DCE fold the additions:
-   `acc + 0 -> acc`, leaving the HI value flowing through as if a single
-   umulh had produced it.  */
-static bool
-single_use_in_plus (gimple *s)
+   The rewrite below replaces HH with the final high half and replaces the
+   other three high-half contributions with zero.  This is only correct if all
+   four contributions feed the same addition chain; otherwise unrelated sums
+   such as `hh + z` and `(mid >> 32) + z` would be changed independently.  */
+static gimple *
+plus_chain_root (gimple *s)
 {
   tree lhs = lhs_of (s);
   use_operand_p up;
   gimple *us;
   if (!single_imm_use (lhs, &up, &us))
-    return false;
+    return NULL;
   if (!is_gimple_assign (us)
       || gimple_assign_rhs_code (us) != PLUS_EXPR)
-    return false;
-  return true;
+    return NULL;
+
+  gimple *root = us;
+  while (true)
+    {
+      lhs = lhs_of (root);
+      if (!single_imm_use (lhs, &up, &us))
+        return root;
+      if (!is_gimple_assign (us)
+          || gimple_assign_rhs_code (us) != PLUS_EXPR)
+        return root;
+      root = us;
+    }
+}
+
+/* True if the four high-half contribution statements all feed the same
+   single-use addition chain.  */
+static bool
+same_plus_chain (gimple *hh_stmt, gimple *mid_hi_stmt, gimple *ts_hi_stmt,
+                 gimple *carry32_stmt)
+{
+  gimple *root = plus_chain_root (hh_stmt);
+  return root
+         && plus_chain_root (mid_hi_stmt) == root
+         && plus_chain_root (ts_hi_stmt) == root
+         && plus_chain_root (carry32_stmt) == root;
 }
 
 /* Find a `SOURCE >> 32` immediate user.  */
@@ -586,20 +606,8 @@ try_match (gimple *ior_stmt, schoolbook_match *m)
   if (!carry32_stmt)
     return false;
 
-  /* Each of the four HI components must have exactly ONE immediate use,
-     and that use must be a PLUS_EXPR.  This is weaker than requiring a
-     contiguous single-use chain (which only matches SEAL's standalone
-     multiply_uint64_generic) -- it also matches the accumulator-style
-     forms that the inliner produces in dot_product_mod, where the four
-     contributions are added at scattered points in a deeper chain.
-
-     Once HH is rewritten to `(DI)(prod>>64)` and the other three to 0,
-     downstream forwprop+DCE folds `acc + 0 -> acc`, removing the dead
-     additions regardless of where in the chain they sat.  */
-  if (!single_use_in_plus (HH_stmt)
-      || !single_use_in_plus (mid_hi_stmt)
-      || !single_use_in_plus (ts_hi_stmt)
-      || !single_use_in_plus (carry32_stmt))
+  /* The four HI components must contribute to the same additive result.  */
+  if (!same_plus_chain (HH_stmt, mid_hi_stmt, ts_hi_stmt, carry32_stmt))
     return false;
 
   /* All checks passed -- populate the match record.  */
@@ -676,10 +684,7 @@ try_match_hi_only (gimple *mid_stmt, schoolbook_match *m)
   if (!carry32_stmt)
     return false;
 
-  if (!single_use_in_plus (HH_stmt)
-      || !single_use_in_plus (mid_hi_stmt)
-      || !single_use_in_plus (ts_hi_stmt)
-      || !single_use_in_plus (carry32_stmt))
+  if (!same_plus_chain (HH_stmt, mid_hi_stmt, ts_hi_stmt, carry32_stmt))
     return false;
 
   m->X = X_root;
