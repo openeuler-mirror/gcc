@@ -146,6 +146,9 @@ private:
     if (TREE_CODE (type) != POINTER_TYPE)
       return false;
 
+    /* The u64 SVE helper reads pointer elements in 8-byte units.  Require
+       a 64-bit pointer representation; targets with a different pointer
+       size conservatively fall back to the scalar std::find path.  */
     tree size = TYPE_SIZE (type);
     return size && tree_fits_uhwi_p (size) && tree_to_uhwi (size) == 64;
   }
@@ -163,20 +166,29 @@ private:
     if (type == nullptr || TREE_CODE (type) != RECORD_TYPE)
       return nullptr;
 
+    tree pointer_field = nullptr;
+    unsigned field_count = 0;
     for (tree field = TYPE_FIELDS (type); field; field = DECL_CHAIN (field))
     {
       if (TREE_CODE (field) != FIELD_DECL)
 	continue;
 
-      tree field_type = TREE_TYPE (field);
-      if (field_type && TREE_CODE (field_type) == POINTER_TYPE)
-	return field_type;
+      pointer_field = field;
+      field_count++;
     }
 
-    return nullptr;
+    if (field_count != 1
+      || DECL_NAME (pointer_field) == nullptr
+      || strcmp (IDENTIFIER_POINTER (DECL_NAME (pointer_field)), "_M_current") != 0)
+      return nullptr;
+
+    tree field_type = TREE_TYPE (pointer_field);
+    return field_type && TREE_CODE (field_type) == POINTER_TYPE ? field_type : nullptr;
   }
 
-  bool record_pointer_type_p (tree type)
+  /* Return true if TYPE is a pointer to a record type.  Such values are
+     not valid element values for the u64 SVE find helper.  */
+  bool pointer_to_record_type_p (tree type)
   {
     if (type == nullptr || TREE_CODE (type) != POINTER_TYPE)
       return false;
@@ -245,7 +257,7 @@ private:
 
       this->bit_width = 64;
     } else if (TREE_CODE (main_type) == POINTER_TYPE) {
-      if (record_pointer_type_p (main_type))
+      if (pointer_to_record_type_p (main_type))
 	return false;
       this->bit_width = 64;
     }
@@ -255,20 +267,14 @@ private:
 
     tree arg1_type = TREE_TYPE (arg1);
     if (TREE_CODE (arg1_type) == POINTER_TYPE)
-    {
-      if (!pointer_to_64bit_find_element_p (arg1_type))
-	      return false;
-      return true;
-    }
+      return pointer_to_64bit_find_element_p (arg1_type);
     else if (TREE_CODE (arg1_type) == RECORD_TYPE)
     {
       const char *type_name = get_type_name_arg (arg1_type);
       if (strcmp (type_name, "__normal_iterator") == 0)
       {
 	      tree arg1_pointer_type = normal_iterator_pointer_type (arg1_type);
-	      if (!pointer_to_64bit_find_element_p (arg1_pointer_type))
-	        return false;
-	      return true;
+	      return pointer_to_64bit_find_element_p (arg1_pointer_type);
       }
     }
 
