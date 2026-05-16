@@ -1538,6 +1538,7 @@ OBJS = \
 	inchash.o \
 	incpath.o \
 	init-regs.o \
+	ipa-array-load-inline.o \
 	internal-fn.o \
 	ipa-struct-reorg/ipa-struct-reorg.o \
 	ipa-alignment-propagation.o \
