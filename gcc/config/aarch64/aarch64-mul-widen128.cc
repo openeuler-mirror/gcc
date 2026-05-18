@@ -201,7 +201,7 @@ struct schoolbook_match
 };
 
 /* Look up the SSA name for the lhs of a stmt.  */
-static inline tree
+static tree
 lhs_of (gimple *s)
 {
   return gimple_assign_lhs (s);
@@ -212,8 +212,7 @@ lhs_of (gimple *s)
    over its respective root.  */
 static gimple *
 find_quadrant_mul (basic_block bb, tree X, tree Y, bool x_is_low, bool y_is_low,
-                   gimple *exclude1, gimple *exclude2 = NULL,
-                   gimple *exclude3 = NULL)
+		   gimple *exclude1, gimple *exclude2, gimple *exclude3)
 {
   for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
        gsi_next (&gsi))
@@ -286,9 +285,9 @@ same_plus_chain (gimple *hh_stmt, gimple *mid_hi_stmt, gimple *ts_hi_stmt,
          && plus_chain_root (carry32_stmt) == root;
 }
 
-/* Find a `SOURCE >> 32` immediate user.  */
+/* Find a `SOURCE >> 32` immediate user in BB.  */
 static gimple *
-find_rshift32_user (gimple *source)
+find_rshift32_user (basic_block bb, gimple *source)
 {
   imm_use_iterator imm_iter;
   use_operand_p use_p;
@@ -296,7 +295,7 @@ find_rshift32_user (gimple *source)
     {
       gimple *u = USE_STMT (use_p);
       tree dummy;
-      if (is_rshift_const (u, 32, &dummy))
+      if (gimple_bb (u) == bb && is_rshift_const (u, 32, &dummy))
         return u;
     }
   return NULL;
@@ -409,6 +408,27 @@ match_cross_pair (tree lh_a, tree lh_b, tree hl_a, tree hl_b,
   return true;
 }
 
+/* True if CX * CY is the requested low/high cross product for X_ROOT and
+   Y_ROOT.  */
+static bool
+verify_cross (tree cx, tree cy, tree X_root, tree Y_root,
+	      bool need_x_low, bool need_y_low)
+{
+  bool cx_lo, cy_lo;
+  tree cx_root, cy_root;
+  if (!get_half (cx, &cx_lo, &cx_root))
+    return false;
+  if (!get_half (cy, &cy_lo, &cy_root))
+    return false;
+  if (ssa_eq (cx_root, X_root) && cx_lo == need_x_low
+      && ssa_eq (cy_root, Y_root) && cy_lo == need_y_low)
+    return true;
+  if (ssa_eq (cx_root, Y_root) && cx_lo == need_y_low
+      && ssa_eq (cy_root, X_root) && cy_lo == need_x_low)
+    return true;
+  return false;
+}
+
 /* Try to identify the schoolbook anchored at IOR_STMT.  */
 static bool
 try_match (gimple *ior_stmt, schoolbook_match *m)
@@ -488,31 +508,14 @@ try_match (gimple *ior_stmt, schoolbook_match *m)
   if (!is_unsigned_64 (X_root) || !is_unsigned_64 (Y_root))
     return false;
 
-  /* Find LH (X_lo * Y_hi) and HL (X_hi * Y_lo) among ma/mb.  */
-  auto verify_cross = [&](gimple *cand_stmt ATTRIBUTE_UNUSED,
-                          tree cx, tree cy,
-                          bool need_x_low, bool need_y_low) -> bool {
-    bool cx_lo, cy_lo;
-    tree cx_root, cy_root;
-    if (!get_half (cx, &cx_lo, &cx_root)) return false;
-    if (!get_half (cy, &cy_lo, &cy_root)) return false;
-    if (ssa_eq (cx_root, X_root) && cx_lo == need_x_low
-        && ssa_eq (cy_root, Y_root) && cy_lo == need_y_low)
-      return true;
-    if (ssa_eq (cx_root, Y_root) && cx_lo == need_y_low
-        && ssa_eq (cy_root, X_root) && cy_lo == need_x_low)
-      return true;
-    return false;
-  };
-
   gimple *LH_stmt = NULL, *HL_stmt = NULL;
   /* (ma is LH, mb is HL)?  */
-  if (verify_cross (ma_def, ma_x, ma_y, /*x_low=*/true, /*y_low=*/false)
-      && verify_cross (mb_def, mb_x, mb_y, /*x_low=*/false, /*y_low=*/true))
+  if (verify_cross (ma_x, ma_y, X_root, Y_root, true, false)
+      && verify_cross (mb_x, mb_y, X_root, Y_root, false, true))
     { LH_stmt = ma_def; HL_stmt = mb_def; }
   /* Or (ma is HL, mb is LH).  */
-  else if (verify_cross (ma_def, ma_x, ma_y, /*x_low=*/false, /*y_low=*/true)
-           && verify_cross (mb_def, mb_x, mb_y, /*x_low=*/true, /*y_low=*/false))
+  else if (verify_cross (ma_x, ma_y, X_root, Y_root, false, true)
+	   && verify_cross (mb_x, mb_y, X_root, Y_root, true, false))
     { LH_stmt = mb_def; HL_stmt = ma_def; }
   else
     return false;
@@ -535,28 +538,12 @@ try_match (gimple *ior_stmt, schoolbook_match *m)
      {mid_hi, carry32, ts_hi} in any order.  */
 
   /* Find mid_hi = mid >> 32 in the BB by scanning users of mid_stmt's lhs.  */
-  gimple *mid_hi_stmt = NULL;
-  imm_use_iterator imm_iter;
-  use_operand_p use_p;
-  FOR_EACH_IMM_USE_FAST (use_p, imm_iter, lhs_of (mid_stmt))
-    {
-      gimple *u = USE_STMT (use_p);
-      tree dummy;
-      if (is_rshift_const (u, 32, &dummy))
-        { mid_hi_stmt = u; break; }
-    }
+  gimple *mid_hi_stmt = find_rshift32_user (bb, mid_stmt);
   if (!mid_hi_stmt)
     return false;
 
   /* Find ts_hi = temp_sum >> 32.  */
-  gimple *ts_hi_stmt = NULL;
-  FOR_EACH_IMM_USE_FAST (use_p, imm_iter, lhs_of (temp_sum_stmt))
-    {
-      gimple *u = USE_STMT (use_p);
-      tree dummy;
-      if (is_rshift_const (u, 32, &dummy))
-        { ts_hi_stmt = u; break; }
-    }
+  gimple *ts_hi_stmt = find_rshift32_user (bb, temp_sum_stmt);
   if (!ts_hi_stmt)
     return false;
 
@@ -657,8 +644,7 @@ try_match_hi_only (gimple *mid_stmt, schoolbook_match *m)
   basic_block bb = gimple_bb (mid_stmt);
 
   gimple *LL_stmt = find_quadrant_mul (bb, X_root, Y_root,
-                                       /*x_low=*/true, /*y_low=*/true,
-                                       LH_stmt, HL_stmt);
+					true, true, LH_stmt, HL_stmt, NULL);
   if (!LL_stmt)
     return false;
 
@@ -672,11 +658,11 @@ try_match_hi_only (gimple *mid_stmt, schoolbook_match *m)
   if (!temp_sum_stmt)
     return false;
 
-  gimple *mid_hi_stmt = find_rshift32_user (mid_stmt);
+  gimple *mid_hi_stmt = find_rshift32_user (bb, mid_stmt);
   if (!mid_hi_stmt)
     return false;
 
-  gimple *ts_hi_stmt = find_rshift32_user (temp_sum_stmt);
+  gimple *ts_hi_stmt = find_rshift32_user (bb, temp_sum_stmt);
   if (!ts_hi_stmt)
     return false;
 
@@ -723,7 +709,8 @@ static void
 rewrite_match (const schoolbook_match &m)
 {
   /* TI = unsigned 128-bit.  */
-  tree ti_type = build_nonstandard_integer_type (128, 1);
+  tree ti_type = unsigned_intTI_type_node;
+  gcc_assert (ti_type);
 
   /* Anchor: earliest in BB order of the stmts we'll rewrite.  All
      should be in the same BB (try_match's scans are BB-local for HH
@@ -759,9 +746,9 @@ rewrite_match (const schoolbook_match &m)
 
   /* shifted = prod >> 64  */
   tree shifted_ssa = make_ssa_name (ti_type);
+  tree shift_count = build_int_cst (TREE_TYPE (prod_ssa), 64);
   gimple *shift_stmt = gimple_build_assign (shifted_ssa, RSHIFT_EXPR,
-                                            prod_ssa,
-                                            build_int_cst (integer_type_node, 64));
+					    prod_ssa, shift_count);
   gsi_insert_before (&anchor_gsi, shift_stmt, GSI_SAME_STMT);
 
   /* HH_stmt:  HH_lhs = (DI) shifted  */
@@ -804,7 +791,7 @@ rewrite_match (const schoolbook_match &m)
 }
 
 static bool
-same_schoolbook_mid (const auto_vec<schoolbook_match> &matches, gimple *mid_stmt)
+same_schoolbook_mid (const vec<schoolbook_match> &matches, gimple *mid_stmt)
 {
   for (unsigned i = 0; i < matches.length (); ++i)
     if (matches[i].mid_stmt == mid_stmt)
@@ -820,7 +807,7 @@ process_function (function *fun)
 {
   if (!fun)
     return 0;
-  auto_vec<schoolbook_match> matches;
+  vec<schoolbook_match> matches = vNULL;
   basic_block bb;
   FOR_EACH_BB_FN (bb, fun)
     {
@@ -850,12 +837,14 @@ process_function (function *fun)
             matches.safe_push (m);
         }
     }
+  bool changed = !matches.is_empty ();
   for (unsigned i = 0; i < matches.length (); ++i)
     rewrite_match (matches[i]);
-  if (dump_file && !matches.is_empty ())
+  if (dump_file && changed)
     fprintf (dump_file, "mul_widen128: rewrote %u schoolbook(s) in %s\n",
              matches.length (), function_name (fun));
-  return matches.is_empty () ? 0 : (TODO_update_ssa | TODO_cleanup_cfg);
+  matches.release ();
+  return changed ? TODO_update_ssa | TODO_cleanup_cfg : 0;
 }
 
 const pass_data pass_data_aarch64_mul_widen128 =
