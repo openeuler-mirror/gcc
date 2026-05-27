@@ -172,6 +172,10 @@ along with GCC; see the file COPYING3.  If not see
 #define m_ZNVER	(m_ZNVER1 | m_ZNVER2 | m_ZNVER3 | m_ZNVER4)
 #define m_AMD_MULTIPLE (m_ATHLON_K8 | m_AMDFAM10 | m_BDVER | m_BTVER \
 			| m_ZNVER)
+#define m_C86_4G_M4 (HOST_WIDE_INT_1U<<PROCESSOR_C86_4G_M4)
+#define m_C86_4G_M6 (HOST_WIDE_INT_1U<<PROCESSOR_C86_4G_M6)
+#define m_C86_4G_M7 (HOST_WIDE_INT_1U<<PROCESSOR_C86_4G_M7)
+#define m_C86_4G (m_C86_4G_M4 | m_C86_4G_M6 | m_C86_4G_M7)
 
 #define m_GENERIC (HOST_WIDE_INT_1U<<PROCESSOR_GENERIC)
 
@@ -789,7 +793,10 @@ static const struct processor_costs *processor_cost_table[] =
   &znver1_cost,
   &znver2_cost,
   &znver3_cost,
-  &znver4_cost
+  &znver4_cost,
+  &c86_4g_m4_cost,
+  &c86_4g_m6_cost,
+  &c86_4g_m7_cost
 };
 
 /* Guarantee that the array is aligned with enum processor_type.  */
