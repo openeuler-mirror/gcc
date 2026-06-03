@@ -543,6 +543,7 @@
   [(set_attr "isa" "*,x64")
    (set_attr "mmx_isa" "native,*")
    (set_attr "type" "mmxmov,ssemov")
+   (set_attr "c86_attr" "movnt")
    (set_attr "mode" "DI")])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1130,6 +1131,7 @@
    vblendvps\t{%3, %2, %1, %0|%0, %1, %2, %3}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "blendv")
    (set_attr "length_immediate" "1")
    (set_attr "prefix_data16" "1,1,*")
    (set_attr "prefix_extra" "1")
@@ -2030,6 +2032,7 @@
   [(set_attr "isa" "*,sse2_noavx,avx")
    (set_attr "mmx_isa" "native,*,*")
    (set_attr "type" "mmxmul,sseiadd,sseiadd")
+   (set_attr "c86_attr" "madd")
    (set_attr "mode" "DI,TI,TI")])
 
 (define_expand "mmx_pmulhrwv4hi3"
@@ -2702,6 +2705,7 @@
    vpblendvb\t{%3, %2, %1, %0|%0, %1, %2, %3}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "blendv")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "*,*,1")
    (set_attr "prefix" "orig,orig,vex")
@@ -2722,6 +2726,7 @@
    vpblendvb\t{%3, %2, %1, %0|%0, %1, %2, %3}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "blendv")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "*,*,1")
    (set_attr "prefix" "orig,orig,vex")
@@ -3223,6 +3228,7 @@
   "%vpmov<extsuffix>bw\t{%1, %0|%0, %1}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "vpmovx")
    (set_attr "prefix_extra" "1")
    (set_attr "prefix" "orig,orig,maybe_evex")
    (set_attr "mode" "TI")])
@@ -3237,6 +3243,7 @@
   "%vpmov<extsuffix>wd\t{%1, %0|%0, %1}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "vpmovx")
    (set_attr "prefix_extra" "1")
    (set_attr "prefix" "orig,orig,maybe_evex")
    (set_attr "mode" "TI")])
@@ -3251,6 +3258,7 @@
   "%vpmov<extsuffix>bw\t{%1, %0|%0, %1}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "vpmovx")
    (set_attr "prefix_extra" "1")
    (set_attr "prefix" "orig,orig,maybe_evex")
    (set_attr "mode" "TI")])
@@ -3360,6 +3368,7 @@
    (set_attr "prefix_data16" "1")
    (set_attr "prefix_extra" "1")
    (set_attr "type" "sselog")
+   (set_attr "c86_attr" "insr")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "orig,vex")
    (set_attr "mode" "TI")])
@@ -3411,6 +3420,7 @@
   [(set_attr "isa" "*,sse2_noavx,avx")
    (set_attr "mmx_isa" "native,*,*")
    (set_attr "type" "mmxcvt,sselog,sselog")
+   (set_attr "c86_attr" "insr")
    (set_attr "length_immediate" "1")
    (set_attr "mode" "DI,TI,TI")])
 
@@ -3444,6 +3454,7 @@
 }
   [(set_attr "isa" "noavx,avx")
    (set_attr "type" "sselog")
+   (set_attr "c86_attr" "insr")
    (set_attr "prefix_data16" "1")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
@@ -3464,6 +3475,7 @@
   [(set_attr "isa" "*,sse2,sse4")
    (set_attr "mmx_isa" "native,*,*")
    (set_attr "type" "mmxcvt,sselog1,sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "orig,maybe_vex,maybe_vex")
    (set_attr "mode" "DI,TI,TI")])
@@ -3482,6 +3494,7 @@
   [(set_attr "isa" "*,sse2")
    (set_attr "mmx_isa" "native,*")
    (set_attr "type" "mmxcvt,sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "orig,maybe_vex")
    (set_attr "mode" "DI,TI")])
@@ -3496,6 +3509,7 @@
    %vpextrb\t{%2, %1, %k0|%k0, %1, %2}
    %vpextrb\t{%2, %1, %0|%0, %1, %2}"
   [(set_attr "type" "sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "prefix_data16" "1")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
@@ -3638,6 +3652,7 @@
    vpblendw\t{%3, %2, %1, %0|%0, %1, %2, %3}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "blend")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "orig,orig,vex")
@@ -3656,6 +3671,7 @@
    vpblendw\t{%3, %2, %1, %0|%0, %1, %2, %3}"
   [(set_attr "isa" "noavx,noavx,avx")
    (set_attr "type" "ssemov")
+   (set_attr "c86_attr" "blend")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "orig,orig,vex")
@@ -3824,6 +3840,7 @@
   [(set_attr "isa" "*,sse4,sse2,noavx,*,*,*")
    (set_attr "mmx_isa" "native,*,*,*,native,*,*")
    (set_attr "type" "mmxcvt,ssemov,sseshuf1,sseshuf1,mmxmov,ssemov,imov")
+   (set_attr "c86_attr" "*,extr,*,*,*,*,*")
    (set (attr "length_immediate")
      (if_then_else (eq_attr "alternative" "1,2,3")
 		   (const_string "1")
@@ -3850,6 +3867,7 @@
    && TARGET_64BIT && TARGET_SSE4_1"
   "%vpextrd\t{$1, %1, %k0|%k0, %1, 1}"
   [(set_attr "type" "sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "maybe_vex")
@@ -3992,6 +4010,7 @@
 }
   [(set_attr "isa" "noavx,avx")
    (set_attr "type" "sselog")
+   (set_attr "c86_attr" "insr")
    (set_attr "length_immediate" "1")
    (set_attr "mode" "TI")])
 
@@ -4025,6 +4044,7 @@
 }
   [(set_attr "isa" "noavx,avx")
    (set_attr "type" "sselog")
+   (set_attr "c86_attr" "insr")
    (set_attr "prefix_data16" "1")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
@@ -4042,6 +4062,7 @@
    %vpextrw\t{%2, %1, %0|%0, %1, %2}"
   [(set_attr "isa" "*,sse4")
    (set_attr "type" "sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "maybe_vex")
    (set_attr "mode" "TI")])
@@ -4055,6 +4076,7 @@
   "TARGET_SSE2"
   "%vpextrw\t{%2, %1, %k0|%k0, %1, %2}"
   [(set_attr "type" "sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "length_immediate" "1")
    (set_attr "prefix" "maybe_vex")
    (set_attr "mode" "TI")])
@@ -4069,6 +4091,7 @@
    %vpextrb\t{%2, %1, %k0|%k0, %1, %2}
    %vpextrb\t{%2, %1, %0|%0, %1, %2}"
   [(set_attr "type" "sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "prefix_data16" "1")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
@@ -4084,6 +4107,7 @@
   "TARGET_SSE4_1"
   "%vpextrb\t{%2, %1, %k0|%k0, %1, %2}"
   [(set_attr "type" "sselog1")
+   (set_attr "c86_attr" "extr")
    (set_attr "prefix_data16" "1")
    (set_attr "prefix_extra" "1")
    (set_attr "length_immediate" "1")
@@ -4419,6 +4443,7 @@
   [(set_attr "isa" "*,sse2_noavx,avx")
    (set_attr "mmx_isa" "native,*,*")
    (set_attr "type" "mmxshft,sseiadd,sseiadd")
+   (set_attr "c86_attr" "sadbw")
    (set_attr "mode" "DI,TI,TI")])
 
 (define_expand "reduc_plus_scal_v8qi"
