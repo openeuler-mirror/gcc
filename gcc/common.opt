@@ -1872,6 +1872,10 @@ Common Var(flag_large_source_files) Init(0)
 Improve GCC's ability to track column numbers in large source files,
 at the expense of slower compilation.
 
+flim-after-jam
+Common Var(flag_lim_after_jam) Optimization
+Do loop-invariant-motion after unroll-and-jam.
+
 floop-parallelize-all
 Common Var(flag_loop_parallelize_all) Optimization
 Mark all loops as parallel.

@@ -584,6 +584,7 @@ Objective-C and Objective-C++ Dialects}.
 -fisolate-erroneous-paths-dereference  -fisolate-erroneous-paths-attribute
 -fivopts  -fkeep-inline-functions  -fkeep-static-functions
 -fkeep-static-consts  -flimit-function-alignment  -flive-range-shrinkage
+-flim-after-jam
 -floop-block  -floop-interchange  -floop-strip-mine
 -floop-unroll-and-jam  -floop-nest-optimize
 -floop-parallelize-all  -flra-remat  -flto  -flto-compression-level
@@ -13935,6 +13936,13 @@ Apply unroll and jam transformations on feasible loops.  In a loop
 nest this unrolls the outer loop by some factor and fuses the resulting
 multiple inner loops.  This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
+
+@opindex flim-after-jam
+@item -flim-after-jam
+Run tree loop invariant motion once after @option{-floop-unroll-and-jam}
+changes a function, before leaving the loop optimizer pipeline.  This can
+hoist invariants exposed by unroll-and-jam earlier than the later loop
+invariant motion pass.
 
 @opindex ftree-loop-im
 @item -ftree-loop-im
