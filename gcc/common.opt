@@ -3410,6 +3410,10 @@ ftree-loop-im
 Common Var(flag_tree_loop_im) Init(1) Optimization
 Enable loop invariant motion on trees.
 
+ftree-loop-invariant-split
+Common Var(flag_tree_loop_invariant_split) Optimization Init(0)
+Split loop nests around inner-loop invariant data blocks.
+
 ftree-loop-linear
 Common Alias(floop-nest-optimize)
 Enable loop nest transforms.  Same as -floop-nest-optimize.
