@@ -630,6 +630,7 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
 -ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
 -ftree-loop-vectorize
+-fpreserve-vect-idioms
 -ftree-parallelize-loops=@var{n}  -ftree-pre  -ftree-partial-pre  -ftree-pta
 -ftree-reassoc  -ftree-scev-cprop  -ftree-sink  -ftree-slsr  -ftree-sra
 -ftree-switch-conversion  -ftree-tail-merge
@@ -13951,6 +13952,13 @@ Create a canonical counter for number of iterations in loops for which
 determining number of iterations requires complicated analysis.  Later
 optimizations then may determine the number easily.  Useful especially
 in connection with unrolling.
+
+@item -fpreserve-vect-idioms
+@opindex fpreserve-vect-idioms
+Preserve loops containing vectorization idioms during early complete loop
+unrolling when they are likely to be handled better by later loop
+vectorization.  This can avoid hiding vectorizer idioms, such as widened
+integer multiply reductions, from the vectorizer.
 
 @opindex ftree-scev-cprop
 @item -ftree-scev-cprop

@@ -3418,6 +3418,10 @@ ftree-loop-ivcanon
 Common Var(flag_tree_loop_ivcanon) Init(1) Optimization
 Create canonical induction variables in loops.
 
+fpreserve-vect-idioms
+Common Var(flag_preserve_vect_idioms) Init(0) Optimization
+Preserve loops containing vectorization idioms during early complete unrolling.
+
 ftree-loop-optimize
 Common Var(flag_tree_loop_optimize) Init(1) Optimization
 Enable loop optimizations on tree level.
