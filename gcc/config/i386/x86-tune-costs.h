@@ -4146,3 +4146,5 @@ struct processor_costs c86_4g_m7_cost = {
   4,					/* Small unroll limit.  */
   2,					/* Small unroll factor.  */
 };
+
+struct processor_costs c86_4g_m8_cost = c86_4g_m7_cost;
