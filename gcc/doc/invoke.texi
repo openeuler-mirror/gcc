@@ -13112,6 +13112,17 @@ defaults to off.  On AVR and MSP430, this option is completely disabled.
 Passes that use the dataflow information
 are enabled independently at different optimization levels.
 
+@item -fdebruijn-clz
+@opindex fdebruijn-clz
+Recognize DeBruijn table-based count-leading-zero idioms and enable
+the backported extensions to table-based count-trailing-zero
+recognition, including fallback handling for zero inputs.
+The transformations preserve the original table result for zero.
+
+This option is disabled by default at all optimization levels.
+Without this option, or with @option{-fno-debruijn-clz}, GCC retains
+its original count-trailing-zero table recognition and zero handling.
+
 @opindex fdevirtualize
 @item -fdevirtualize
 Attempt to convert calls to virtual functions to direct calls.  This
