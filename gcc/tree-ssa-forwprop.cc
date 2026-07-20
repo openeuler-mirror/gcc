@@ -2593,8 +2593,20 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
 	{
 	  unsigned HOST_WIDE_INT mask
 	    = ((HOST_WIDE_INT_1U << (input_bits - shiftval)) - 1) << shiftval;
-	  return (((((HOST_WIDE_INT_1U << (data + 1)) - 1) * mulval) & mask)
-		  >> shiftval) == i;
+	  /* The OR-cascade produces a value with all bits from 0 to the
+	     original MSB set.  Compute (1 << (data + 1)) - 1 to simulate
+	     that value.  When data + 1 equals HOST_BITS_PER_WIDE_INT
+	     (i.e. data is the MSB position of a 64-bit input) the shift
+	     is undefined behavior, so handle that case explicitly using
+	     all-ones.  Without this, any well-formed 64-bit DeBruijn CLZ
+	     table is rejected because its entry for the all-ones input
+	     correctly maps to the MSB (e.g. table[...] == 63).
+	     PR tree-optimization/122569.  */
+	  unsigned HOST_WIDE_INT all_bits_below
+	    = (data + 1 == HOST_BITS_PER_WIDE_INT)
+	      ? HOST_WIDE_INT_M1U
+	      : ((HOST_WIDE_INT_1U << (data + 1)) - 1);
+	  return (((all_bits_below * mulval) & mask) >> shiftval) == i;
 	};
       if (!check_table (ctor, type, zero_val, input_bits, checkfn))
 	return false;
