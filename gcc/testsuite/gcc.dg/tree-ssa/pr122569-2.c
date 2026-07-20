@@ -40,4 +40,4 @@ stockfish_msb (uint64_t b)
   return magictable[(b * magic) >> 58];
 }
 
-/* { dg-final { scan-tree-dump "__builtin_clz|\\.CLZ" "forwprop1" } } */
+/* { dg-final { scan-tree-dump "__builtin_clz|\\.CLZ" "forwprop1" { target { clzll && { lp64 || llp64 } } } } } */

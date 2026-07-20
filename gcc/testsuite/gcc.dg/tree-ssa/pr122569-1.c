@@ -27,4 +27,4 @@ stockfish_lsb (uint64_t b)
   return magictable[((b & -b) * magic) >> 58];
 }
 
-/* { dg-final { scan-tree-dump "__builtin_ctz|\\.CTZ" "forwprop1" } } */
+/* { dg-final { scan-tree-dump "__builtin_ctz|\\.CTZ" "forwprop1" { target { ctzll && { lp64 || llp64 } } } } } */
