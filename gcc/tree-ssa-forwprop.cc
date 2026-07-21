@@ -2452,11 +2452,14 @@ check_table_array (tree ctor, HOST_WIDE_INT &zero_val, unsigned bits,
     {
       if (TREE_CODE (idx) != INTEGER_CST || TREE_CODE (elt) != INTEGER_CST)
 	return false;
-      if (i > bits * 2)
+      if (!tree_fits_shwi_p (idx) || !tree_fits_shwi_p (elt))
 	return false;
 
       unsigned HOST_WIDE_INT index = tree_to_shwi (idx);
       HOST_WIDE_INT val = tree_to_shwi (elt);
+
+      if (index > bits * 2)
+	return false;
 
       if (index == 0)
 	{
@@ -2510,7 +2513,7 @@ check_table (tree ctor, tree type, HOST_WIDE_INT &zero_val, unsigned bits,
   return false;
 }
 
-/* Match.pd function to match the clz expression.  */
+/* Match.pd functions to match the CLZ expressions.  */
 extern bool gimple_clz_table_index (tree, tree *, tree (*)(tree));
 extern bool gimple_clz_msb_iso_table_index (tree, tree *, tree (*)(tree));
 
@@ -2633,6 +2636,22 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
 	  return (((all_bits_below * mulval) & mask) >> shiftval) == i;
 	};
       if (!check_table (ctor, type, zero_val, input_bits, checkfn))
+	return false;
+    }
+
+  /* The count and its zero fallback are built in integer_type_node, even
+     when the table elements are wider.  Keep the lookup if its zero value
+     or the CLZ bias would be truncated.  Use an extra bit to check the bias
+     without overflowing HOST_WIDE_INT.  */
+  wide_int table_zero = wi::shwi (zero_val, HOST_BITS_PER_WIDE_INT + 1);
+  if (!wi::fits_to_tree_p (table_zero, integer_type_node))
+    return false;
+  if (fn == IFN_CLZ)
+    {
+      wide_int bias = wi::sub (wi::shwi (input_bits - 1,
+				       HOST_BITS_PER_WIDE_INT + 1), table_zero);
+      if (!wi::fits_shwi_p (bias)
+	  || !wi::fits_to_tree_p (bias, integer_type_node))
 	return false;
     }
 

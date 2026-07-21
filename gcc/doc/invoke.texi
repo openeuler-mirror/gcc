@@ -561,7 +561,8 @@ Objective-C and Objective-C++ Dialects}.
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules
 -fcx-limited-range
 -fdata-sections  -fdce  -fdelayed-branch
--fdelete-null-pointer-checks  -fdevirtualize  -fdevirtualize-speculatively
+-fdelete-null-pointer-checks  -fdebruijn-clz
+-fdevirtualize  -fdevirtualize-speculatively
 -fdevirtualize-at-ltrans  -fdse
 -fearly-inlining  -fipa-sra  -fexpensive-optimizations  -ffat-lto-objects
 -ffast-math  -ffinite-math-only  -ffloat-store  -fexcess-precision=@var{style}
@@ -13118,6 +13119,12 @@ Recognize DeBruijn table-based count-leading-zero idioms and enable
 the backported extensions to table-based count-trailing-zero
 recognition, including fallback handling for zero inputs.
 The transformations preserve the original table result for zero.
+
+Also recognize 64-bit count-leading-zero and count-trailing-zero
+operations implemented by selecting between operations on their
+32-bit halves, and replace them with the corresponding 64-bit
+target operation.  The transformation preserves the split-word
+implementation's result for zero inputs.
 
 This option is disabled by default at all optimization levels.
 Without this option, or with @option{-fno-debruijn-clz}, GCC retains
