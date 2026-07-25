@@ -1728,7 +1728,7 @@
    (match_operand:BLK 1 "memory_operand")
    (match_operand:DI 2 "general_operand")
    (match_operand:DI 3 "immediate_operand")]
-   "!STRICT_ALIGNMENT || TARGET_MOPS"
+   ""
 {
   if (aarch64_expand_cpymem (operands))
     DONE;

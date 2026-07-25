@@ -310,6 +310,18 @@ Constant memmove size in bytes above which to start using MOPS sequence.
 Target Joined UInteger Var(aarch64_mops_memset_size_threshold) Init(256) Param
 Constant memset size in bytes from which to start using MOPS sequence.
 
+maarch64-sve-memcall-inlining
+Target Var(aarch64_sve_memcall_inlining) Optimization Init(0)
+Replace calls to memsets/memcpy with an inline SVE loop.
+
+-param=aarch64-sve-memcall-size-threshold=
+Target Joined UInteger Var(aarch64_sve_memcall_size_threshold) Init(4096) Param
+Size threshold for expanding memset/memcpy calls to SVE loops.
+
+maarch64-sve-memcall-runtime-check
+Target Var(aarch64_sve_memcall_runtime_check) Optimization Init(1)
+Enable runtime check for small memsets/memcpy calls.
+
 -param=aarch64-vect-unroll-limit=
 Target Joined UInteger Var(aarch64_vect_unroll_limit) Init(4) Param
 Limit how much the autovectorizer may unroll a loop.
