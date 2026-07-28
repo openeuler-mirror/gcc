@@ -26709,8 +26709,10 @@ aarch64_expand_cpymem_sve (rtx *operands)
   {
     /* create standard memcpy as fallback */
     emit_label (fallback_label);
+    rtx dst_p = force_reg (Pmode, XEXP (dst, 0));
+    rtx src_p = force_reg (Pmode, XEXP (src, 0));
     emit_library_call (gen_rtx_SYMBOL_REF (Pmode, "memcpy"), LCT_NORMAL,
-                       VOIDmode, dst_addr_base, Pmode, src_addr_base, Pmode,
+                       VOIDmode, dst_p, Pmode, src_p, Pmode,
                        len, DImode);
   }
 
@@ -26967,9 +26969,9 @@ aarch64_expand_setmem_sve (rtx *operands)
   {
     /* create standard memcpy as fallback */
     emit_label (fallback_label);
-    rtx val_di = force_reg (DImode, gen_rtx_ZERO_EXTEND (DImode, val));
+    rtx dst_p = force_reg (Pmode, XEXP (dst, 0));
     emit_library_call (gen_rtx_SYMBOL_REF (Pmode, "memset"), LCT_NORMAL,
-                      VOIDmode, dst_addr_base, Pmode, val_di, DImode,
+                      VOIDmode, dst_p, Pmode, val, SImode,
                       len, DImode);
   }
 

@@ -372,7 +372,7 @@ Target Joined UInteger Var(aarch64_sve_memcall_size_threshold) Init(4096) Param
 Size threshold for expanding memset/memcpy calls to SVE loops.
 
 maarch64-sve-memcall-runtime-check
-Target Var(aarch64_sve_memcall_runtime_check) Optimization Init(0)
+Target Var(aarch64_sve_memcall_runtime_check) Optimization Init(1)
 Enable runtime check for small memsets/memcpy calls.
 
 -param=aarch64-vect-unroll-limit=
