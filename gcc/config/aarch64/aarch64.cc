@@ -26970,8 +26970,9 @@ aarch64_expand_setmem_sve (rtx *operands)
     /* create standard memcpy as fallback */
     emit_label (fallback_label);
     rtx dst_p = force_reg (Pmode, XEXP (dst, 0));
+    rtx val_qi = force_reg (QImode, val);
     emit_library_call (gen_rtx_SYMBOL_REF (Pmode, "memset"), LCT_NORMAL,
-                      VOIDmode, dst_p, Pmode, val, SImode,
+                      VOIDmode, dst_p, Pmode, val_qi, QImode,
                       len, DImode);
   }
 
