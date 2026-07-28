@@ -26654,25 +26654,21 @@ aarch64_expand_cpymem_sve (rtx *operands)
   machine_mode pred_mode = VNx16BImode;
   machine_mode data_mode = VNx16QImode;
 
-  /* Get SVE loop index size as 16 x vscale */
-  poly_int64 poly_size = GET_MODE_SIZE (data_mode);
+  if (!REG_P (len))
+    len = force_reg (DImode, len);
 
   if (aarch64_sve_memcall_runtime_check)
   {
-    /* Create runtime check based on runtime vector length */
-    rtx runtime_veclen = gen_reg_rtx(DImode);
-    emit_insn (gen_aarch64_sve_cnt_pat (runtime_veclen,
-                                        gen_int_mode (AARCH64_SV_ALL, DImode),
-                                        gen_int_mode (16, DImode),
-                                        gen_int_mode (1, DImode)));
-    emit_cmp_and_jump_insns (runtime_veclen, GEN_INT (16), LE, NULL_RTX,
-                             DImode, 0, fallback_label);
+    /* Create runtime check based on runtime memcall length */
+    emit_cmp_and_jump_insns (len,
+        GEN_INT ((unsigned HOST_WIDE_INT)aarch64_sve_memcall_size_threshold),
+                             GTU, NULL_RTX, DImode, 0, fallback_label);
   }
 
   rtx dst_addr_base = copy_to_mode_reg (Pmode, XEXP (dst, 0));
   rtx src_addr_base = copy_to_mode_reg (Pmode, XEXP (src, 0));
-  if (!REG_P (len))
-    len = force_reg (DImode, len);
+  /* Get SVE loop index size as 16 x vscale */
+  poly_int64 poly_size = GET_MODE_SIZE (data_mode);
 
   rtx index = gen_reg_rtx (DImode);
   emit_move_insn (index, const0_rtx);
@@ -26740,7 +26736,7 @@ aarch64_expand_cpymem (rtx *operands, bool is_memmove)
   /* Try SVE inline with variable-sized memcpy or const-size over threshold */
   /* Default threshold is 256 */
   if ((!CONST_INT_P (operands[2]) ||
-       INTVAL (operands[2]) >=
+       INTVAL (operands[2]) <=
            (unsigned HOST_WIDE_INT) aarch64_sve_memcall_size_threshold) &&
       aarch64_sve_memcall_inlining &&
       !(STRICT_ALIGNMENT && align < 16) &&
@@ -26916,24 +26912,20 @@ aarch64_expand_setmem_sve (rtx *operands)
   machine_mode pred_mode = VNx16BImode;
   machine_mode data_mode = VNx16QImode;
 
-  /* Get SVE loop index size as 16 x vscale */
-  poly_int64 poly_size = GET_MODE_SIZE (data_mode);
+  if (!REG_P (len))
+    len = force_reg (DImode, len);
 
   if (aarch64_sve_memcall_runtime_check)
   {
-    /* Create runtime check based on runtime vector length */
-    rtx runtime_veclen = gen_reg_rtx(DImode);
-    emit_insn (gen_aarch64_sve_cnt_pat (runtime_veclen,
-                                        gen_int_mode (AARCH64_SV_ALL, DImode),
-                                        gen_int_mode (16, DImode),
-                                        gen_int_mode (1, DImode)));
-    emit_cmp_and_jump_insns (runtime_veclen, GEN_INT (16), LE, NULL_RTX,
-                             DImode, 0, fallback_label);
+    /* Create runtime check based on runtime memcall length */
+    emit_cmp_and_jump_insns (len,
+        GEN_INT ((unsigned HOST_WIDE_INT)aarch64_sve_memcall_size_threshold),
+                             GTU, NULL_RTX, DImode, 0, fallback_label);
   }
 
   rtx dst_addr_base = copy_to_mode_reg (Pmode, XEXP (dst, 0));
-  if (!REG_P (len))
-    len = force_reg (DImode, len);
+  /* Get SVE loop index size as 16 x vscale */
+  poly_int64 poly_size = GET_MODE_SIZE (data_mode);
 
   /* Broadcast val to vector reg */
   rtx v_val = gen_reg_rtx (data_mode);
@@ -27001,7 +26993,8 @@ aarch64_expand_setmem (rtx *operands)
   machine_mode cur_mode = BLKmode, next_mode;
 
   if ((!CONST_INT_P (operands[1]) ||
-       INTVAL (operands[1]) >= (unsigned HOST_WIDE_INT) aarch64_sve_memcall_size_threshold) &&
+       INTVAL (operands[1]) <=
+           (unsigned HOST_WIDE_INT) aarch64_sve_memcall_size_threshold) &&
       aarch64_sve_memcall_inlining &&
       !(STRICT_ALIGNMENT && align < 16) &&
       TARGET_SVE)

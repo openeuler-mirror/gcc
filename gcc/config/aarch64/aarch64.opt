@@ -368,7 +368,7 @@ Target Var(aarch64_sve_memcall_inlining) Optimization Init(0)
 Replace calls to memsets/memcpy with an inline SVE loop.
 
 -param=aarch64-sve-memcall-size-threshold=
-Target Joined UInteger Var(aarch64_sve_memcall_size_threshold) Init(256) Param
+Target Joined UInteger Var(aarch64_sve_memcall_size_threshold) Init(4096) Param
 Size threshold for expanding memset/memcpy calls to SVE loops.
 
 maarch64-sve-memcall-runtime-check
