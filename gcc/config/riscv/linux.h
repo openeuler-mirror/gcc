@@ -62,6 +62,8 @@ along with GCC; see the file COPYING3.  If not see
     %{static:-static} %{static-pie:-static -pie --no-dynamic-linker -z text}}"
 
 #define STARTFILE_PREFIX_SPEC 			\
+   "/lib" XLEN_SPEC "/ " 			\
+   "/usr/lib" XLEN_SPEC "/ " 			\
    "/lib" XLEN_SPEC "/" ABI_SPEC "/ "		\
    "/usr/lib" XLEN_SPEC "/" ABI_SPEC "/ "	\
    "/lib/ "					\

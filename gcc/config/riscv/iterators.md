@@ -37,6 +37,9 @@
 ;; Likewise, but for XLEN-sized quantities.
 (define_mode_iterator X [(SI "!TARGET_64BIT") (DI "TARGET_64BIT")])
 
+;; Likewise, but for XLEN/2 -sized quantities.
+(define_mode_iterator HX [(HI "!TARGET_64BIT") (SI "TARGET_64BIT")])
+
 ;; Branches operate on XLEN-sized quantities, but for RV64 we accept
 ;; QImode values so we can force zero-extension.
 (define_mode_iterator BR [(QI "TARGET_64BIT") SI (DI "TARGET_64BIT")])
@@ -75,6 +78,12 @@
 ;; Iterator for floating-point modes that can be loaded into X registers.
 (define_mode_iterator SOFTF [SF (DF "TARGET_64BIT") (HF "TARGET_ZFHMIN")])
 
+;; Iterator for floating-point modes of BF16.
+(define_mode_iterator HFBF [HF BF])
+
+;; Conversion between floating-point modes and BF16.
+;; SF to BF16 have hardware instructions.
+(define_mode_iterator FBF [HF DF TF])
 
 ;; -------------------------------------------------------------------
 ;; Mode attributes
@@ -112,6 +121,9 @@
 
 ;; This attribute gives the format suffix for atomic memory operations.
 (define_mode_attr amo [(SI "w") (DI "d")])
+
+;; This attribute gives the format suffix for byte and halfword atomic memory operations.
+(define_mode_attr amobh [(QI "b") (HI "h")])
 
 ;; This attribute gives the upper-case mode name for one unit of a
 ;; floating-point mode.
@@ -195,6 +207,13 @@
 (define_code_iterator clz_ctz_pcnt [clz ctz popcount])
 
 (define_code_iterator bitmanip_rotate [rotate rotatert])
+
+;; These code iterators allow the signed and unsigned fix operations to use
+;; the same template.
+(define_code_iterator fix_ops [fix unsigned_fix])
+
+(define_code_attr fix_uns [(fix "fix") (unsigned_fix "fixuns")])
+
 
 ;; -------------------------------------------------------------------
 ;; Code Attributes
@@ -311,11 +330,6 @@
 ;; -------------------------------------------------------------------
 ;; Int Iterators.
 ;; -------------------------------------------------------------------
-
-;; Iterator and attributes for floating-point rounding instructions.
-(define_int_iterator RINT [UNSPEC_LRINT UNSPEC_LROUND])
-(define_int_attr rint_pattern [(UNSPEC_LRINT "rint") (UNSPEC_LROUND "round")])
-(define_int_attr rint_rm [(UNSPEC_LRINT "dyn") (UNSPEC_LROUND "rmm")])
 
 ;; Iterator and attributes for quiet comparisons.
 (define_int_iterator QUIET_COMPARISON [UNSPEC_FLT_QUIET UNSPEC_FLE_QUIET])

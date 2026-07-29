@@ -26,6 +26,7 @@
 #include "exception"
 #include <cxxabi.h>
 
+#ifndef _GLIBCXX_NONSHARED_CXX98
 std::exception::~exception() _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_USE_NOEXCEPT { }
 
 std::bad_exception::~bad_exception() _GLIBCXX_TXN_SAFE_DYN
@@ -36,7 +37,7 @@ abi::__forced_unwind::~__forced_unwind() throw() { }
 
 abi::__foreign_exception::~__foreign_exception() throw() { }
 
-const char* 
+const char*
 std::exception::what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_USE_NOEXCEPT
 {
   // NB: Another elegant option would be returning typeid(*this).name()
@@ -45,11 +46,12 @@ std::exception::what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_USE_NOEXCEPT
   return "std::exception";
 }
 
-const char* 
+const char*
 std::bad_exception::what() const _GLIBCXX_TXN_SAFE_DYN _GLIBCXX_USE_NOEXCEPT
 {
   return "std::bad_exception";
 }
+#endif
 
 // Transactional clones for the destructors and what().
 // what() is effectively transaction_pure, but we do not want to annotate it

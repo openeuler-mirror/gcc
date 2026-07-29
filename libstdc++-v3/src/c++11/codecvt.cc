@@ -744,6 +744,7 @@ namespace
   }
 }
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
 // Define members of codecvt<char16_t, char, mbstate_t> specialization.
 // Converts from UTF-8 to UTF-16.
 
@@ -891,6 +892,7 @@ codecvt<char32_t, char, mbstate_t>::do_max_length() const throw()
   // up to 4 UTF-8 code units.
   return 4;
 }
+#endif
 
 #if defined(_GLIBCXX_USE_CHAR8_T)
 // Define members of codecvt<char16_t, char8_t, mbstate_t> specialization.
@@ -1042,6 +1044,7 @@ codecvt<char32_t, char8_t, mbstate_t>::do_max_length() const throw()
 }
 #endif // _GLIBCXX_USE_CHAR8_T
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
 // Define members of codecvt_utf8<char16_t> base class implementation.
 // Converts from UTF-8 to UCS-2.
 
@@ -1791,11 +1794,14 @@ __codecvt_utf8_utf16_base<wchar_t>::do_max_length() const throw()
   return max;
 }
 #endif
+#endif
 
 inline template class __codecvt_abstract_base<char16_t, char, mbstate_t>;
 inline template class __codecvt_abstract_base<char32_t, char, mbstate_t>;
+#ifndef _GLIBCXX_NONSHARED_CXX11_80
 template class codecvt_byname<char16_t, char, mbstate_t>;
 template class codecvt_byname<char32_t, char, mbstate_t>;
+#endif
 
 #if defined(_GLIBCXX_USE_CHAR8_T)
 inline template class __codecvt_abstract_base<char16_t, char8_t, mbstate_t>;

@@ -1245,14 +1245,14 @@ See RS/6000 and PowerPC Options.
 -mfdiv  -mno-fdiv
 -mdiv  -mno-div
 -misa-spec=@var{ISA-spec-string}
--march=@var{ISA-string}
+-march=@var{ISA-string|Profiles|Profiles_ISA-string}
 -mtune=@var{processor-string}
 -mpreferred-stack-boundary=@var{num}
 -msmall-data-limit=@var{N-bytes}
 -msave-restore  -mno-save-restore
 -mshorten-memrefs  -mno-shorten-memrefs
 -mstrict-align  -mno-strict-align
--mcmodel=medlow  -mcmodel=medany
+-mcmodel=medlow  -mcmodel=medany -mcmodel=large
 -mexplicit-relocs  -mno-explicit-relocs
 -mrelax  -mno-relax
 -mriscv-attribute  -mno-riscv-attribute
@@ -21422,7 +21422,7 @@ performance of the code.  Permissible values for this option are:
 @samp{octeontx2f95mm},
 @samp{a64fx}, @samp{fujitsu-monaka},
 @samp{thunderx}, @samp{thunderxt88},
-@samp{thunderxt88p1}, @samp{thunderxt81}, @samp{tsv110},
+@samp{thunderxt88p1}, @samp{thunderxt81}, @samp{tsv110}, @samp{hip12},
 @samp{thunderxt83}, @samp{thunderx2t99}, @samp{thunderx3t110}, @samp{zeus},
 @samp{cortex-a57.cortex-a53}, @samp{cortex-a72.cortex-a53},
 @samp{cortex-a73.cortex-a35}, @samp{cortex-a73.cortex-a53},
@@ -30493,11 +30493,16 @@ The default is @option{-misa-spec=20191213} unless GCC has been configured
 with @option{--with-isa-spec=} specifying a different default version.
 
 @opindex march
-@item -march=@var{ISA-string}
-Generate code for given RISC-V ISA (e.g.@: @samp{rv64im}).  ISA strings must be
-lower-case.  Examples include @samp{rv64i}, @samp{rv32g}, @samp{rv32e}, and
-@samp{rv32imaf}. Additionally, a special value @option{help}
-(@option{-march=help}) is accepted to list all supported extensions.
+@item -march=@var{ISA-string|Profiles|Profile_ISA-string}
+Generate code for given RISC-V ISA or Profiles or a combination of them
+(e.g.@: @samp{rv64im} @samp{rvi20u64} @samp{rvi20u64_zbb}).  ISA strings and
+Profiles must be lower-case.  Examples include @samp{rv64i}, @samp{rv32g},
+@samp{rv32e}, @samp{rv32imaf}, @samp{rva22u64} and @samp{rva23u64}.
+To combine Profiles and optional RISC-V ISA extention, the profile should start
+at the beginning of the option, then use underline connect ISA-string (e.g.@:
+@samp{rvi20u64_zca_zcb} @samp{rva23u64_zacas}).  Additionally, a special value
+@option{help} (@option{-march=help}) is accepted to list all supported
+extensions.
 
 The syntax of the ISA string is defined as follows:
 
@@ -30898,6 +30903,34 @@ to @samp{zvks} and @samp{zvkg}.
 @tab 1.0
 @tab Table jump instruction extension.
 
+@item sha
+@tab 1.0
+@tab The augmented hypervisor extension
+
+@item shcounterenw
+@tab 1.0
+@tab Support writeable enables for any supported counter
+
+@item shgatpa
+@tab 1.0
+@tab SvNNx4 mode supported for all modes supported by satp
+
+@item shtvala
+@tab 1.0
+@tab The htval register provides all needed values
+
+@item shvstvala
+@tab 1.0
+@tab The vstval register provides all needed values
+
+@item shvstvecd
+@tab 1.0
+@tab The vstvec register supports Direct mode
+
+@item shvsatpa
+@tab 1.0
+@tab The vsatp register supports all modes supported by satp
+
 @item smaia
 @tab 1.0
 @tab Advanced interrupt architecture extension.
@@ -30914,9 +30947,17 @@ to @samp{zvks} and @samp{zvkg}.
 @tab 1.0
 @tab Advanced interrupt architecture extension for supervisor-mode.
 
+@item ssccptr
+@tab 1.0
+@tab Main memory supports page table reads
+
 @item sscofpmf
 @tab 1.0
 @tab Count overflow & filtering extension.
+
+@item sscounterenw
+@tab 1.0
+@tab Support writeable enables for any supported counter
 
 @item ssstateen
 @tab 1.0
@@ -30925,6 +30966,26 @@ to @samp{zvks} and @samp{zvkg}.
 @item sstc
 @tab 1.0
 @tab Supervisor-mode timer interrupts extension.
+
+@item sstvala
+@tab 1.0
+@tab Stval provides all needed values
+
+@item sstvecd
+@tab 1.0
+@tab Stvec supports Direct mode
+
+@item ssu64xl
+@tab 1.0
+@tab UXLEN=64 must be supported
+
+@item svade
+@tab 1.0
+@tab Cause exception when hardware updating of A/D bits is disabled
+
+@item svadu
+@tab 1.0
+@tab Hardware Updating of A/D Bits extension.
 
 @item svinval
 @tab 1.0
@@ -30937,6 +30998,10 @@ to @samp{zvks} and @samp{zvkg}.
 @item svpbmt
 @tab 1.0
 @tab Page-based memory types extension.
+
+@item svbare
+@tab 1.0
+@tab Satp mode bare is supported
 
 @item xcvmac
 @tab 1.0
@@ -31123,6 +31188,22 @@ Do not or do generate unaligned memory accesses.  The default is set depending
 on whether the processor we are optimizing for supports fast unaligned access
 or not.
 
+@opindex mscalar-strict-align
+@opindex mno-scalar-strict-align
+@item -mscalar-strict-align
+@itemx -mno-scalar-strict-align
+Do not or do generate unaligned memory accesses.  The default is set depending
+on whether the processor we are optimizing for supports fast unaligned access
+or not.  This is an alias for @option{-mstrict-align}.
+
+@opindex mvector-strict-align
+@opindex mno-vector-strict-align
+@item -mvector-strict-align
+@itemx -mno-vector-strict-align
+Do not or do generate unaligned vector memory accesses.  The default is set
+to off unless the processor we are optimizing for explicitly supports
+element-misaligned vector memory access.
+
 @opindex mcmodel=medlow
 @item -mcmodel=medlow
 Generate code for the medium-low code model. The program and its statically
@@ -31139,6 +31220,11 @@ statically or dynamically linked.
 The code generated by the medium-any code model is position-independent, but is
 not guaranteed to function correctly when linked into position-independent
 executables or libraries.
+
+@opindex -mcmodel=large
+@item -mcmodel=large
+Generate code for a large code model, which has no restrictions on size or
+placement of symbols.
 
 @item -mexplicit-relocs
 @itemx -mno-exlicit-relocs
@@ -34514,37 +34600,36 @@ VPCLMULQDQ, AVX512BITALG, RDPID and AVX512VPOPCNTDQ instruction set support.
 Intel Alder Lake/Raptor Lake/Meteor Lake/Gracemont CPU with 64-bit extensions,
 MOVBE, MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW,
 PCLMUL, RDRND, XSAVE, XSAVEC, XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX,
-GFNI-SSE, CLWB, MOVDIRI, MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI,
-BMI2, F16C, FMA, LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL,
-WIDEKL and AVX-VNNI instruction set support.
+GFNI-SSE, CLWB, MOVDIRI, MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C,
+FMA, LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL and
+AVX-VNNI instruction set support.
 
 @item arrowlake
 Intel Arrow Lake CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
 SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
 XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB, MOVDIRI,
-MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT,
-PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI,
-UINTR, AVXIFMA, AVXVNNIINT8, AVXNECONVERT and CMPCCXADD instruction set
-support.
+MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT, PCONFIG, PKU,
+VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI, UINTR, AVXIFMA,
+AVXVNNIINT8, AVXNECONVERT and CMPCCXADD instruction set support.
 
 @item arrowlake-s
 @itemx lunarlake
 Intel Arrow Lake S/Lunar Lake CPU with 64-bit extensions, MOVBE, MMX, SSE,
 SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND,
 XSAVE, XSAVEC, XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB,
-MOVDIRI, MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA,
-LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI,
-UINTR, AVXIFMA, AVXVNNIINT8, AVXNECONVERT, CMPCCXADD, AVXVNNIINT16, SHA512,
-SM3 and SM4 instruction set support.
+MOVDIRI, MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT,
+PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI, UINTR,
+AVXIFMA, AVXVNNIINT8, AVXNECONVERT, CMPCCXADD, AVXVNNIINT16, SHA512, SM3 and
+SM4 instruction set support.
 
 @item pantherlake
 Intel Panther Lake CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,
 SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE, XSAVEC,
 XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB, MOVDIRI,
-MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT,
-PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI,
-UINTR, AVXIFMA, AVXVNNIINT8, AVXNECONVERT, CMPCCXADD, AVXVNNIINT16, SHA512,
-SM3, SM4 and PREFETCHI instruction set support.
+MOVDIR64B, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA, LZCNT, PCONFIG, PKU,
+VAES, VPCLMULQDQ, SERIALIZE, HRESET, AVX-VNNI, UINTR, AVXIFMA, AVXVNNIINT8,
+AVXNECONVERT, CMPCCXADD, AVXVNNIINT16, SHA512, SM3 and SM4 instruction set
+support.
 
 @item sapphirerapids
 @itemx emeraldrapids
@@ -34633,9 +34718,9 @@ Intel Clearwater Forest CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2,
 SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PREFETCHW, PCLMUL, RDRND, XSAVE,
 XSAVEC, XSAVES, XSAVEOPT, FSGSBASE, PTWRITE, RDPID, SGX, GFNI-SSE, CLWB,
 MOVDIRI, MOVDIR64B, CLDEMOTE, WAITPKG, ADCX, AVX, AVX2, BMI, BMI2, F16C, FMA,
-LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, KL, WIDEKL, AVX-VNNI,
-ENQCMD, UINTR, AVXIFMA, AVXVNNIINT8, AVXNECONVERT, CMPCCXADD, AVXVNNIINT16,
-SHA512, SM3, SM4, USER_MSR and PREFETCHI instruction set support.
+LZCNT, PCONFIG, PKU, VAES, VPCLMULQDQ, SERIALIZE, HRESET, AVX-VNNI, ENQCMD,
+UINTR, AVXIFMA, AVXVNNIINT8, AVXNECONVERT, CMPCCXADD, AVXVNNIINT16, SHA512,
+SM3, SM4, USER_MSR and PREFETCHI instruction set support.
 
 @item knl
 Intel Knights Landing CPU with 64-bit extensions, MOVBE, MMX, SSE, SSE2, SSE3,

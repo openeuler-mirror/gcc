@@ -20,6 +20,9 @@ along with GCC; see the file COPYING3.  If not see
 <http://www.gnu.org/licenses/>.  */
 
 #include "config.h"
+#include <cstdio>
+#define INCLUDE_SET
+#define INCLUDE_STRING
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
@@ -36,6 +39,47 @@ along with GCC; see the file COPYING3.  If not see
 #include "asan.h"
 #include "opts.h"
 
+/* Parse string that specify forced inlining, separated by commas.  */
+static std::set<std::string> multi_version_libs;
+static void
+parse_multi_version_lib_string (const char* s)
+{
+  std::string target_string (s);
+  std::string delim = ",";
+  size_t start = 0;
+  size_t end = target_string.find (delim);
+  if (target_string.substr (start, end - start) == "")
+    return;
+
+  while (end != std::string::npos)
+    {
+      multi_version_libs.insert (target_string.substr (start, end - start));
+      start = end + delim.size ();
+      end = target_string.find (delim, start);
+    }
+  multi_version_libs.insert (target_string.substr (start, end - start));
+}
+
+static bool
+target_lib_p (std::string name)
+{
+  if (multi_version_libs.empty () && multi_version_lib_string)
+    parse_multi_version_lib_string (multi_version_lib_string);
+  if (multi_version_lib_string)
+    {
+      while (!name.empty () && name.back () == '/')
+	name.erase (name.length () - 1);
+      if (name.empty ())
+	return false;
+      size_t last_slash_pos = name.find_last_of ('/');
+      if (last_slash_pos != std::string::npos
+	  && last_slash_pos != name.length () - 1)
+	name = name.substr (last_slash_pos + 1);
+      if (multi_version_libs.find (name) != multi_version_libs.end ())
+	return true;
+    }
+  return false;
+}
 
 /* Read a STRING_CST from the string table in DATA_IN using input
    block IB.  */

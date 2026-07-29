@@ -58,7 +58,8 @@ enum riscv_microarchitecture_type {
   sifive_p400,
   sifive_p600,
   xiangshan,
-  generic_ooo
+  generic_ooo,
+  xt_c930
 };
 extern enum riscv_microarchitecture_type riscv_microarchitecture;
 
@@ -146,9 +147,6 @@ enum rvv_vector_bits_enum {
   ((opts->x_riscv_zvl_flags == 0)                                              \
      ? 0                                                                       \
      : 32 << (__builtin_popcount (opts->x_riscv_zvl_flags) - 1))
-
-/* TODO: Enable RVV movmisalign by default for now.  */
-#define TARGET_VECTOR_MISALIGN_SUPPORTED 1
 
 /* The maximmum LMUL according to user configuration.  */
 #define TARGET_MAX_LMUL                                                        \

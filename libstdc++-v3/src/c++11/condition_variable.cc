@@ -31,9 +31,11 @@ namespace std _GLIBCXX_VISIBILITY(default)
 {
 _GLIBCXX_BEGIN_NAMESPACE_VERSION
 
+#ifndef _GLIBCXX_NONSHARED_CXX11
   condition_variable::condition_variable() noexcept = default;
 
   condition_variable::~condition_variable() noexcept = default;
+#endif
 
   void
   condition_variable::wait(unique_lock<mutex>& __lock)
@@ -41,6 +43,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
     _M_cond.wait(*__lock.mutex());
   }
 
+#ifndef _GLIBCXX_NONSHARED_CXX11
   void
   condition_variable::notify_one() noexcept
   {
@@ -52,6 +55,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
   {
     _M_cond.notify_all();
   }
+#endif
 
   extern void
   __at_thread_exit(__at_thread_exit_elt*);

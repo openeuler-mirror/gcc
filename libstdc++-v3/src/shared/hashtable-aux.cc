@@ -22,6 +22,9 @@
 // see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 // <http://www.gnu.org/licenses/>.
 
+#ifndef HASHTABLE_AUX_CC
+#define HASHTABLE_AUX_CC 1
+
 namespace __detail
 {
   // The sentinel value is kept only for abi backward compatibility.
@@ -90,3 +93,5 @@ namespace __detail
 #endif
   };
 } // namespace __detail
+
+#endif

@@ -80,6 +80,8 @@ private:
   const char *parse_single_multiletter_ext (const char *, const char *,
 					    const char *, bool);
 
+  std::string parse_profiles (const char*);
+
   void handle_implied_ext (const char *);
   bool check_implied_ext ();
   void handle_combine_ext ();
@@ -120,5 +122,8 @@ public:
 extern const riscv_subset_list *riscv_cmdline_subset_list (void);
 extern void
 riscv_set_arch_by_subset_list (riscv_subset_list *, struct gcc_options *);
+extern bool
+riscv_ext_is_subset (struct cl_target_option *, struct cl_target_option *);
+extern int riscv_x_target_flags_isa_mask (void);
 
 #endif /* ! GCC_RISCV_SUBSET_H */

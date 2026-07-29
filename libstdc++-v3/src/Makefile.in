@@ -147,7 +147,7 @@ am__uninstall_files_from_dir = { \
          $(am__cd) "$$dir" && rm -f $$files; }; \
   }
 am__installdirs = "$(DESTDIR)$(toolexeclibdir)"
-LTLIBRARIES = $(toolexeclib_LTLIBRARIES)
+LTLIBRARIES = $(noinst_LTLIBRARIES) $(toolexeclib_LTLIBRARIES)
 am__DEPENDENCIES_1 =
 @GLIBCXX_LDBL_COMPAT_TRUE@am__objects_1 = compatibility-ldbl.lo
 am__objects_2 = compatibility.lo compatibility-debug_list.lo \
@@ -167,6 +167,16 @@ am__objects_6 = $(am__objects_3) $(am__objects_5)
 libstdc___la_OBJECTS = $(am_libstdc___la_OBJECTS)
 @VTV_CYGMIN_FALSE@am_libstdc___la_rpath = -rpath $(toolexeclibdir)
 @VTV_CYGMIN_TRUE@am_libstdc___la_rpath = -rpath $(toolexeclibdir)
+am_libstdc___nonshared110_la_OBJECTS =
+libstdc___nonshared110_la_OBJECTS =  \
+	$(am_libstdc___nonshared110_la_OBJECTS)
+AM_V_lt = $(am__v_lt_@AM_V@)
+am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
+am__v_lt_0 = --silent
+am__v_lt_1 = 
+am_libstdc___nonshared80_la_OBJECTS =
+libstdc___nonshared80_la_OBJECTS =  \
+	$(am_libstdc___nonshared80_la_OBJECTS)
 libvtv_la_LIBADD =
 @VTV_CYGMIN_TRUE@am_libvtv_la_OBJECTS = vtv_stubs.lo
 libvtv_la_OBJECTS = $(am_libvtv_la_OBJECTS)
@@ -188,10 +198,6 @@ depcomp =
 am__depfiles_maybe =
 CXXCOMPILE = $(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) \
 	$(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS)
-AM_V_lt = $(am__v_lt_@AM_V@)
-am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
-am__v_lt_0 = --silent
-am__v_lt_1 = 
 AM_V_CXX = $(am__v_CXX_@AM_V@)
 am__v_CXX_ = $(am__v_CXX_@AM_DEFAULT_V@)
 am__v_CXX_0 = @echo "  CXX     " $@;
@@ -201,7 +207,26 @@ AM_V_CXXLD = $(am__v_CXXLD_@AM_V@)
 am__v_CXXLD_ = $(am__v_CXXLD_@AM_DEFAULT_V@)
 am__v_CXXLD_0 = @echo "  CXXLD   " $@;
 am__v_CXXLD_1 = 
-SOURCES = $(libstdc___la_SOURCES) $(libvtv_la_SOURCES)
+COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
+	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
+LTCOMPILE = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) \
+	$(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) \
+	$(AM_CFLAGS) $(CFLAGS)
+AM_V_CC = $(am__v_CC_@AM_V@)
+am__v_CC_ = $(am__v_CC_@AM_DEFAULT_V@)
+am__v_CC_0 = @echo "  CC      " $@;
+am__v_CC_1 = 
+CCLD = $(CC)
+LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(AM_LDFLAGS) $(LDFLAGS) -o $@
+AM_V_CCLD = $(am__v_CCLD_@AM_V@)
+am__v_CCLD_ = $(am__v_CCLD_@AM_DEFAULT_V@)
+am__v_CCLD_0 = @echo "  CCLD    " $@;
+am__v_CCLD_1 = 
+SOURCES = $(libstdc___la_SOURCES) $(libstdc___nonshared110_la_SOURCES) \
+	$(libstdc___nonshared80_la_SOURCES) $(libvtv_la_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive cscopelist-recursive \
 	ctags-recursive dvi-recursive html-recursive info-recursive \
 	install-data-recursive install-dvi-recursive \
@@ -242,7 +267,8 @@ am__define_uniq_tagged_files = \
 ETAGS = etags
 CTAGS = ctags
 DIST_SUBDIRS = c++98 c++11 c++17 c++20 c++23 c++26 filesystem \
-	libbacktrace experimental
+	libbacktrace experimental nonshared98 nonshared11 nonshared17 \
+	nonshared20 nonshared23 nonshared26
 ABI_TWEAKS_SRCDIR = @ABI_TWEAKS_SRCDIR@
 ACLOCAL = @ACLOCAL@
 ALLOCATOR_H = @ALLOCATOR_H@
@@ -266,6 +292,8 @@ BACKTRACE_USES_MALLOC = @BACKTRACE_USES_MALLOC@
 BASIC_FILE_CC = @BASIC_FILE_CC@
 BASIC_FILE_H = @BASIC_FILE_H@
 CC = @CC@
+CCAS = @CCAS@
+CCASFLAGS = @CCASFLAGS@
 CCODECVT_CC = @CCODECVT_CC@
 CCOLLATE_CC = @CCOLLATE_CC@
 CCTYPE_CC = @CCTYPE_CC@
@@ -492,12 +520,16 @@ AM_CPPFLAGS = $(GLIBCXX_INCLUDES) $(CPPFLAGS)
 @GLIBCXX_HOSTED_FALSE@experimental_dir = 
 @GLIBCXX_HOSTED_TRUE@experimental_dir = experimental
 SUBDIRS = c++98 c++11 c++17 c++20 c++23 c++26 \
-	$(filesystem_dir) $(backtrace_dir) $(experimental_dir)
+	$(filesystem_dir) $(backtrace_dir) $(experimental_dir) \
+	nonshared98 nonshared11 nonshared17 nonshared20 nonshared23 nonshared26
 
 @VTV_CYGMIN_FALSE@toolexeclib_LTLIBRARIES = libstdc++.la
 
 # Cross compiler support.
 @VTV_CYGMIN_TRUE@toolexeclib_LTLIBRARIES = libvtv.la libstdc++.la
+noinst_LTLIBRARIES = libstdc++_nonshared80.la \
+		     libstdc++_nonshared110.la
+
 @VTV_CYGMIN_TRUE@libvtv_la_SOURCES = vtv_stubs.cc
 @VTV_CYGMIN_TRUE@libvtv_la_LDFLAGS = $(lt_host_flags)
 @VTV_CYGMIN_TRUE@libvtv_la_AM_CXXFLAGS = \
@@ -531,6 +563,32 @@ SUBDIRS = c++98 c++11 c++17 c++20 c++23 c++26 \
 @ENABLE_SYMVERS_GNU_NAMESPACE_TRUE@cxx0x_compat_sources = 
 parallel_compat_sources = \
 	compatibility-parallel_list.cc  compatibility-parallel_list-2.cc
+
+libstdc___nonshared80_la_SOURCES = 
+libstdc___nonshared80_la_LIBADD = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience80.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience80.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience80.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience80.la
+
+libstdc___nonshared80_la_DEPENDENCIES = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience80.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience80.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience80.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience80.la
+
+libstdc___nonshared110_la_SOURCES = 
+libstdc___nonshared110_la_LIBADD = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience110.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience110.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience110.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience110.la
+
+libstdc___nonshared110_la_DEPENDENCIES = \
+	$(top_builddir)/src/nonshared98/libnonshared98convenience110.la \
+	$(top_builddir)/src/nonshared11/libnonshared11convenience110.la \
+	$(top_builddir)/src/nonshared17/libnonshared17convenience110.la \
+	$(top_builddir)/src/nonshared20/libnonshared20convenience110.la
 
 cxx98_sources = \
 	compatibility.cc \
@@ -725,6 +783,17 @@ $(ACLOCAL_M4): @MAINTAINER_MODE_TRUE@ $(am__aclocal_m4_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(am__aclocal_m4_deps):
 
+clean-noinstLTLIBRARIES:
+	-test -z "$(noinst_LTLIBRARIES)" || rm -f $(noinst_LTLIBRARIES)
+	@list='$(noinst_LTLIBRARIES)'; \
+	locs=`for p in $$list; do echo $$p; done | \
+	      sed 's|^[^/]*$$|.|; s|/[^/]*$$||; s|$$|/so_locations|' | \
+	      sort -u`; \
+	test -z "$$locs" || { \
+	  echo rm -f $${locs}; \
+	  rm -f $${locs}; \
+	}
+
 install-toolexeclibLTLIBRARIES: $(toolexeclib_LTLIBRARIES)
 	@$(NORMAL_INSTALL)
 	@list='$(toolexeclib_LTLIBRARIES)'; test -n "$(toolexeclibdir)" || list=; \
@@ -762,6 +831,12 @@ clean-toolexeclibLTLIBRARIES:
 
 libstdc++.la: $(libstdc___la_OBJECTS) $(libstdc___la_DEPENDENCIES) $(EXTRA_libstdc___la_DEPENDENCIES) 
 	$(AM_V_GEN)$(libstdc___la_LINK) $(am_libstdc___la_rpath) $(libstdc___la_OBJECTS) $(libstdc___la_LIBADD) $(LIBS)
+
+libstdc++_nonshared110.la: $(libstdc___nonshared110_la_OBJECTS) $(libstdc___nonshared110_la_DEPENDENCIES) $(EXTRA_libstdc___nonshared110_la_DEPENDENCIES) 
+	$(AM_V_CCLD)$(LINK)  $(libstdc___nonshared110_la_OBJECTS) $(libstdc___nonshared110_la_LIBADD) $(LIBS)
+
+libstdc++_nonshared80.la: $(libstdc___nonshared80_la_OBJECTS) $(libstdc___nonshared80_la_DEPENDENCIES) $(EXTRA_libstdc___nonshared80_la_DEPENDENCIES) 
+	$(AM_V_CCLD)$(LINK)  $(libstdc___nonshared80_la_OBJECTS) $(libstdc___nonshared80_la_LIBADD) $(LIBS)
 
 libvtv.la: $(libvtv_la_OBJECTS) $(libvtv_la_DEPENDENCIES) $(EXTRA_libvtv_la_DEPENDENCIES) 
 	$(AM_V_GEN)$(libvtv_la_LINK) $(am_libvtv_la_rpath) $(libvtv_la_OBJECTS) $(libvtv_la_LIBADD) $(LIBS)
@@ -927,7 +1002,8 @@ maintainer-clean-generic:
 clean: clean-recursive
 
 clean-am: clean-generic clean-libtool clean-local \
-	clean-toolexeclibLTLIBRARIES mostlyclean-am
+	clean-noinstLTLIBRARIES clean-toolexeclibLTLIBRARIES \
+	mostlyclean-am
 
 distclean: distclean-recursive
 	-rm -f Makefile
@@ -997,14 +1073,14 @@ uninstall-am: uninstall-toolexeclibLTLIBRARIES
 
 .PHONY: $(am__recursive_targets) CTAGS GTAGS TAGS all all-am all-local \
 	check check-am clean clean-generic clean-libtool clean-local \
-	clean-toolexeclibLTLIBRARIES cscopelist-am ctags ctags-am \
-	distclean distclean-compile distclean-generic \
-	distclean-libtool distclean-tags dvi dvi-am html html-am info \
-	info-am install install-am install-data install-data-am \
-	install-data-local install-dvi install-dvi-am install-exec \
-	install-exec-am install-html install-html-am install-info \
-	install-info-am install-man install-pdf install-pdf-am \
-	install-ps install-ps-am install-strip \
+	clean-noinstLTLIBRARIES clean-toolexeclibLTLIBRARIES \
+	cscopelist-am ctags ctags-am distclean distclean-compile \
+	distclean-generic distclean-libtool distclean-tags dvi dvi-am \
+	html html-am info info-am install install-am install-data \
+	install-data-am install-data-local install-dvi install-dvi-am \
+	install-exec install-exec-am install-html install-html-am \
+	install-info install-info-am install-man install-pdf \
+	install-pdf-am install-ps install-ps-am install-strip \
 	install-toolexeclibLTLIBRARIES installcheck installcheck-am \
 	installdirs installdirs-am maintainer-clean \
 	maintainer-clean-generic mostlyclean mostlyclean-compile \

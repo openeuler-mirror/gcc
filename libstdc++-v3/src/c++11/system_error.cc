@@ -607,7 +607,9 @@ _GLIBCXX_BEGIN_INLINE_ABI_NAMESPACE(_V2)
 
 _GLIBCXX_END_INLINE_ABI_NAMESPACE(_V2)
 
+#ifndef _GLIBCXX_NONSHARED_CXX11
   system_error::~system_error() = default;
+#endif
 
   error_condition
   error_category::default_error_condition(int __i) const noexcept
@@ -622,9 +624,11 @@ _GLIBCXX_END_INLINE_ABI_NAMESPACE(_V2)
   error_category::equivalent(const error_code& __code, int __i) const noexcept
   { return *this == __code.category() && __code.value() == __i; }
 
+#ifndef _GLIBCXX_NONSHARED_CXX11
   error_condition
   error_code::default_error_condition() const noexcept
   { return category().default_error_condition(value()); }
+#endif
 
 #if _GLIBCXX_USE_CXX11_ABI
   // Return error_category::message() as a COW string

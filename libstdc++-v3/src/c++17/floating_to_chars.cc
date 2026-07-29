@@ -1767,6 +1767,7 @@ template<typename T>
     __builtin_unreachable();
   }
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_110
 // Define the overloads for float.
 to_chars_result
 to_chars(char* first, char* last, float value) noexcept
@@ -1830,6 +1831,7 @@ to_chars(char* first, char* last, long double value, chars_format fmt,
   else
     return __floating_to_chars_precision(first, last, value, fmt, precision);
 }
+#endif
 
 #ifdef FLOAT128_TO_CHARS
 #ifdef _GLIBCXX_LONG_DOUBLE_ALT128_COMPAT
@@ -1907,6 +1909,7 @@ __to_chars_bfloat16_t(char* first, char* last, float value,
 				      floating_type_bfloat16_t{ value }, fmt);
 }
 
+#ifndef _GLIBCXX_NONSHARED_CXX11_110
 #ifdef _GLIBCXX_LONG_DOUBLE_COMPAT
 // Map the -mlong-double-64 long double overloads to the double overloads.
 extern "C" to_chars_result
@@ -1922,6 +1925,7 @@ extern "C" to_chars_result
 _ZSt8to_charsPcS_eSt12chars_formati(char* first, char* last, double value,
 				    chars_format fmt, int precision) noexcept
   __attribute__((alias ("_ZSt8to_charsPcS_dSt12chars_formati")));
+#endif
 #endif
 
 _GLIBCXX_END_NAMESPACE_VERSION

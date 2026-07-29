@@ -395,6 +395,8 @@ static const struct aarch64_flag_desc aarch64_tuning_flags[] =
 #include "tuning_models/thunderxt88.h"
 #include "tuning_models/thunderx.h"
 #include "tuning_models/tsv110.h"
+#include "tuning_models/hip09.h"
+#include "tuning_models/hip12.h"
 #include "tuning_models/xgene1.h"
 #include "tuning_models/emag.h"
 #include "tuning_models/qdf24xx.h"
@@ -18361,6 +18363,14 @@ aarch64_override_options_internal (struct gcc_options *opts)
   SET_OPTION_IF_UNSET (opts, &global_options_set,
 		       param_sched_autopref_queue_depth, queue_depth);
 
+  /* If the core wants only AdvancedSIMD autovectorization, do this through
+     aarch64_autovec_preference.  If the user set it explicitly, they should
+     know what they want.  */
+  if (aarch64_tune_params.extra_tuning_flags
+      & AARCH64_EXTRA_TUNE_PREFER_ADVSIMD_AUTOVEC)
+    SET_OPTION_IF_UNSET (opts, &global_options_set,
+			 aarch64_autovec_preference, 1);
+
   /* Set up parameters to be used in prefetching algorithm.  Do not
      override the defaults unless we are tuning for a core we have
      researched values for.  */
@@ -26628,6 +26638,89 @@ aarch64_expand_cpymem_mops (rtx *operands, bool is_memmove)
   return true;
 }
 
+/* Expand a cpymem using inline SVE loop.  OPERANDS are taken
+   from the cpymem pattern.  Return true iff we succeeded.  */
+
+static bool
+aarch64_expand_cpymem_sve (rtx *operands)
+{
+  rtx dst = operands[0];
+  rtx src = operands[1];
+  rtx len = operands[2];
+
+  rtx fallback_label = gen_label_rtx ();
+  rtx end_label = gen_label_rtx ();
+
+  machine_mode pred_mode = VNx16BImode;
+  machine_mode data_mode = VNx16QImode;
+
+  if (!REG_P (len))
+    len = force_reg (DImode, len);
+
+  if (aarch64_sve_memcall_runtime_check)
+  {
+    /* Create runtime check based on runtime memcall length */
+    emit_cmp_and_jump_insns (len,
+        GEN_INT ((unsigned HOST_WIDE_INT)aarch64_sve_memcall_size_threshold),
+                             GTU, NULL_RTX, DImode, 0, fallback_label);
+  }
+
+  rtx dst_addr_base = copy_to_mode_reg (Pmode, XEXP (dst, 0));
+  rtx src_addr_base = copy_to_mode_reg (Pmode, XEXP (src, 0));
+  /* Get SVE loop index size as 16 x vscale */
+  poly_int64 poly_size = GET_MODE_SIZE (data_mode);
+
+  rtx index = gen_reg_rtx (DImode);
+  emit_move_insn (index, const0_rtx);
+  rtx pred = gen_reg_rtx (pred_mode);
+
+  /* Init whilelo as bound check */
+  emit_insn (gen_while_ultdivnx16bi (pred, index, len));
+  rtx cc_reg = gen_rtx_REG (CC_NZCmode, CC_REGNUM);
+
+  rtx loop_start = gen_label_rtx ();
+  emit_label (loop_start);
+
+  /* LD1b z0 mem[src + index] */
+  rtx src_addr = gen_rtx_PLUS (Pmode, src_addr_base, index);
+  rtx src_val = gen_reg_rtx (data_mode);
+  rtx src_indexed_mem = gen_rtx_MEM (data_mode, src_addr);
+  set_mem_align (src_indexed_mem, MEM_ALIGN (src));
+  emit_insn (gen_maskloadvnx16qivnx16bi (src_val, src_indexed_mem, pred));
+  /* ST1b z0 mem[src + index] */
+  rtx dst_addr = gen_rtx_PLUS (Pmode, dst_addr_base, index);
+  rtx dst_indexed_mem = gen_rtx_MEM (data_mode, dst_addr);
+  set_mem_align (dst_indexed_mem, MEM_ALIGN (dst));
+  emit_insn (gen_maskstorevnx16qivnx16bi (dst_indexed_mem, src_val, pred));
+
+  /* Update index with poly_size & jump back */
+  emit_insn (gen_adddi3 (index, index, gen_int_mode (poly_size, DImode)));
+  emit_insn (gen_while_ultdivnx16bi (pred, index, len));
+
+  rtx is_any = gen_rtx_NE (VOIDmode, cc_reg, const0_rtx);
+  rtx jump_back = emit_jump_insn (gen_rtx_SET (pc_rtx,
+                      gen_rtx_IF_THEN_ELSE (VOIDmode, is_any,
+                          gen_rtx_LABEL_REF (Pmode, loop_start),
+                          pc_rtx)));
+  JUMP_LABEL (jump_back) = loop_start;
+  emit_jump_insn (gen_rtx_SET (pc_rtx, gen_rtx_LABEL_REF (Pmode, end_label)));
+
+  if (aarch64_sve_memcall_runtime_check)
+  {
+    /* create standard memcpy as fallback */
+    emit_label (fallback_label);
+    rtx dst_p = force_reg (Pmode, XEXP (dst, 0));
+    rtx src_p = force_reg (Pmode, XEXP (src, 0));
+    emit_library_call (gen_rtx_SYMBOL_REF (Pmode, "memcpy"), LCT_NORMAL,
+                       VOIDmode, dst_p, Pmode, src_p, Pmode,
+                       len, DImode);
+  }
+
+  emit_label (end_label);
+
+  return true;
+}
+
 /* Expand cpymem/movmem, as if from a __builtin_memcpy/memmove.
    OPERANDS are taken from the cpymem/movmem pattern.  IS_MEMMOVE is true
    if this is a memmove rather than memcpy.  Return true if we succeed,
@@ -26641,6 +26734,17 @@ aarch64_expand_cpymem (rtx *operands, bool is_memmove)
   unsigned align = UINTVAL (operands[3]);
   rtx base;
   machine_mode mode = BLKmode, next_mode;
+
+  /* Try SVE inline with variable-sized memcpy or const-size over threshold */
+  /* Default threshold is 256 */
+  if ((!CONST_INT_P (operands[2]) ||
+       INTVAL (operands[2]) <=
+           (unsigned HOST_WIDE_INT) aarch64_sve_memcall_size_threshold) &&
+      aarch64_sve_memcall_inlining &&
+      !(STRICT_ALIGNMENT && align < 16) &&
+      TARGET_SVE &&
+      !is_memmove)
+    return aarch64_expand_cpymem_sve (operands);
 
   /* Variable-sized or strict-align copies may use the MOPS expansion.  */
   if (!CONST_INT_P (operands[2]) || (STRICT_ALIGNMENT && align < 16))
@@ -26794,6 +26898,89 @@ aarch64_expand_setmem_mops (rtx *operands)
   return true;
 }
 
+/* Expand a setmem using inline SVE loop.  OPERANDS are the same
+   as for the setmem pattern.  Return true iff we succeed.  */
+
+static bool
+aarch64_expand_setmem_sve (rtx *operands)
+{
+  rtx dst = operands[0];
+  rtx len = operands[1];
+  rtx val = operands[2];
+
+  rtx fallback_label = gen_label_rtx ();
+  rtx end_label = gen_label_rtx ();
+
+  machine_mode pred_mode = VNx16BImode;
+  machine_mode data_mode = VNx16QImode;
+
+  if (!REG_P (len))
+    len = force_reg (DImode, len);
+
+  if (aarch64_sve_memcall_runtime_check)
+  {
+    /* Create runtime check based on runtime memcall length */
+    emit_cmp_and_jump_insns (len,
+        GEN_INT ((unsigned HOST_WIDE_INT)aarch64_sve_memcall_size_threshold),
+                             GTU, NULL_RTX, DImode, 0, fallback_label);
+  }
+
+  rtx dst_addr_base = copy_to_mode_reg (Pmode, XEXP (dst, 0));
+  /* Get SVE loop index size as 16 x vscale */
+  poly_int64 poly_size = GET_MODE_SIZE (data_mode);
+
+  /* Broadcast val to vector reg */
+  rtx v_val = gen_reg_rtx (data_mode);
+  if (val == const0_rtx || (CONST_INT_P (val) && INTVAL (val) == 0))
+      emit_move_insn (v_val, CONST0_RTX (data_mode));
+  else
+      v_val = expand_vector_broadcast(data_mode, force_reg (QImode, val));
+
+  rtx index = gen_reg_rtx (DImode);
+  emit_move_insn (index, const0_rtx);
+  rtx pred = gen_reg_rtx (pred_mode);
+
+  /* Init whilelo as bound check */
+  emit_insn (gen_while_ultdivnx16bi (pred, index, len));
+  rtx cc_reg = gen_rtx_REG (CC_NZCmode, CC_REGNUM);
+
+  rtx loop_start = gen_label_rtx ();
+  emit_label (loop_start);
+
+  /* ST1b z0 mem[dst + index] */
+  rtx dst_addr = gen_rtx_PLUS (Pmode, dst_addr_base, index);
+  rtx dst_indexed_mem = gen_rtx_MEM (data_mode, dst_addr);
+  set_mem_align (dst_indexed_mem, MEM_ALIGN (dst));
+  emit_insn (gen_maskstorevnx16qivnx16bi (dst_indexed_mem, v_val, pred));
+
+  /* Update index with poly_size & jump back */
+  emit_insn (gen_adddi3 (index, index, gen_int_mode (poly_size, DImode)));
+  emit_insn (gen_while_ultdivnx16bi (pred, index, len));
+
+  rtx is_any = gen_rtx_NE (VOIDmode, cc_reg, const0_rtx);
+  rtx jump_back = emit_jump_insn (gen_rtx_SET (pc_rtx,
+                      gen_rtx_IF_THEN_ELSE (VOIDmode, is_any,
+                          gen_rtx_LABEL_REF (Pmode, loop_start),
+                          pc_rtx)));
+  JUMP_LABEL (jump_back) = loop_start;
+  emit_jump_insn (gen_rtx_SET (pc_rtx, gen_rtx_LABEL_REF (Pmode, end_label)));
+
+  if (aarch64_sve_memcall_runtime_check)
+  {
+    /* create standard memcpy as fallback */
+    emit_label (fallback_label);
+    rtx dst_p = force_reg (Pmode, XEXP (dst, 0));
+    rtx val_qi = force_reg (QImode, val);
+    emit_library_call (gen_rtx_SYMBOL_REF (Pmode, "memset"), LCT_NORMAL,
+                      VOIDmode, dst_p, Pmode, val_qi, QImode,
+                      len, DImode);
+  }
+
+  emit_label (end_label);
+
+  return true;
+}
+
 /* Expand setmem, as if from a __builtin_memset.  Return true if
    we succeed, otherwise return false.  */
 
@@ -26807,6 +26994,14 @@ aarch64_expand_setmem (rtx *operands)
   unsigned align = UINTVAL (operands[3]);
   rtx base;
   machine_mode cur_mode = BLKmode, next_mode;
+
+  if ((!CONST_INT_P (operands[1]) ||
+       INTVAL (operands[1]) <=
+           (unsigned HOST_WIDE_INT) aarch64_sve_memcall_size_threshold) &&
+      aarch64_sve_memcall_inlining &&
+      !(STRICT_ALIGNMENT && align < 16) &&
+      TARGET_SVE)
+    return aarch64_expand_setmem_sve (operands);
 
   /* Variable-sized or strict-align memset may use the MOPS expansion.  */
   if (!CONST_INT_P (operands[1]) || !TARGET_SIMD
@@ -27419,6 +27614,25 @@ aarch_macro_fusion_pair_p (rtx_insn *prev, rtx_insn *curr)
                               XEXP (SET_SRC (prev_set), 0)))
               return true;
         }
+    }
+  /* Fuse CMP and CSEL/CSET.  */
+  if (prev_set && curr_set
+      && GET_CODE (SET_SRC (prev_set)) == COMPARE
+      && SCALAR_INT_MODE_P (GET_MODE (XEXP (SET_SRC (prev_set), 0)))
+      && reg_referenced_p (SET_DEST (prev_set), PATTERN (curr)))
+    {
+      enum attr_type prev_type = get_attr_type (prev);
+      if ((prev_type == TYPE_ALUS_SREG || prev_type == TYPE_ALUS_IMM)
+	  && ((aarch64_fusion_enabled_p (AARCH64_FUSE_CMP_CSEL)
+	       && GET_CODE (SET_SRC (curr_set)) == IF_THEN_ELSE
+	       && aarch64_reg_or_zero (XEXP (SET_SRC (curr_set), 1), VOIDmode)
+	       && aarch64_reg_or_zero (XEXP (SET_SRC (curr_set), 2), VOIDmode)
+	       && SCALAR_INT_MODE_P (GET_MODE (XEXP (SET_SRC (curr_set), 1))))
+	      || (aarch64_fusion_enabled_p (AARCH64_FUSE_CMP_CSET)
+		  && GET_RTX_CLASS (GET_CODE (SET_SRC (curr_set)))
+		     == RTX_COMPARE
+		  && REG_P (SET_DEST (curr_set)))))
+	return true;
     }
 
   /* Fuse compare (CMP/CMN/TST/BICS) and conditional branch.  */

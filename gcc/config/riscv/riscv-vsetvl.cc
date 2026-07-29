@@ -1728,8 +1728,11 @@ private:
   }
   inline void use_max_sew (vsetvl_info &prev, const vsetvl_info &next)
   {
-    int max_sew = MAX (prev.get_sew (), next.get_sew ());
-    prev.set_sew (max_sew);
+    bool prev_sew_larger = prev.get_sew () >= next.get_sew ();
+    const vsetvl_info from = prev_sew_larger ? prev : next;
+    prev.set_sew (from.get_sew ());
+    prev.set_vlmul (from.get_vlmul ());
+    prev.set_ratio (from.get_ratio ());
     use_min_of_max_sew (prev, next);
   }
   inline void use_next_sew_lmul (vsetvl_info &prev, const vsetvl_info &next)
@@ -1754,7 +1757,8 @@ private:
   inline void use_max_sew_and_lmul_with_next_ratio (vsetvl_info &prev,
 						    const vsetvl_info &next)
   {
-    prev.set_vlmul (calculate_vlmul (prev.get_sew (), next.get_ratio ()));
+    int max_sew = MAX (prev.get_sew (), next.get_sew ());
+    prev.set_vlmul (calculate_vlmul (max_sew, next.get_ratio ()));
     use_max_sew (prev, next);
     prev.set_ratio (next.get_ratio ());
   }
@@ -2816,6 +2820,9 @@ pre_vsetvl::fuse_local_vsetvl_info ()
 		      curr_info.dump (dump_file, "        ");
 		    }
 		  m_dem.merge (prev_info, curr_info);
+		  if (!curr_info.vl_used_by_non_rvv_insn_p ()
+		      && vsetvl_insn_p (curr_info.get_insn ()->rtl ()))
+		    m_delete_list.safe_push (curr_info);
 		  if (curr_info.get_read_vl_insn ())
 		    prev_info.set_read_vl_insn (curr_info.get_read_vl_insn ());
 		  if (dump_file && (dump_flags & TDF_DETAILS))

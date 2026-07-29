@@ -386,6 +386,14 @@
   (and (match_code "const_int")
        (match_test "SINGLE_BIT_MASK_OPERAND (UINTVAL (op))")))
 
+;; Register, small constant or single bit constant for use in
+;; bseti/binvi.
+(define_predicate "arith_or_zbs_operand"
+  (ior (match_operand 0 "const_arith_operand")
+       (match_operand 0 "register_operand")
+       (and (match_test "TARGET_ZBS")
+	    (match_operand 0 "single_bit_mask_operand"))))
+
 (define_predicate "not_single_bit_mask_operand"
   (and (match_code "const_int")
        (match_test "SINGLE_BIT_MASK_OPERAND (~UINTVAL (op))")))
@@ -660,3 +668,9 @@
   return (riscv_symbolic_constant_p (op, &type)
          && type == SYMBOL_PCREL);
 })
+
+;; Shadow stack operands only allow x1, x5 registers
+(define_predicate "x1x5_operand"
+  (and (match_operand 0 "register_operand")
+       (match_test "REGNO (op) == RETURN_ADDR_REGNUM
+		    || REGNO (op) == T0_REGNUM")))
