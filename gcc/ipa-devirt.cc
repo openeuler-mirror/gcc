@@ -4479,6 +4479,19 @@ type_alias_set_has_unsafe_uid (unsigned uid, type_alias_map *map)
 }
 
 static bool
+has_loose_function_type_aliases_p (tree ftype)
+{
+  if (!ftype || !loose_fta_map)
+    return false;
+
+  if (loose_fta_map->count (TYPE_UID (ftype)))
+    return true;
+
+  tree ctype = TYPE_CANONICAL (ftype);
+  return ctype && loose_fta_map->count (TYPE_UID (ctype));
+}
+
+static bool
 unsafe_function_type_uid_p (unsigned uid)
 {
   return unsafe_types->count (uid)
@@ -4486,11 +4499,17 @@ unsafe_function_type_uid_p (unsigned uid)
 	 || type_alias_set_has_unsafe_uid (uid, loose_fta_map);
 }
 
+/* Return whether FTYPE is unsafe.  PRECISE_UID is the type uid used by the
+   original precise analysis when no loose aliases apply to FTYPE.  */
+
 static bool
-unsafe_function_type_p (tree ftype)
+unsafe_function_type_p (tree ftype, unsigned precise_uid)
 {
   if (!ftype)
     return false;
+
+  if (!has_loose_function_type_aliases_p (ftype))
+    return unsafe_types->count (precise_uid);
 
   if (unsafe_function_type_uid_p (TYPE_UID (ftype)))
     return true;
@@ -5920,7 +5939,7 @@ dump_function_signature_info (struct cgraph_node *n, tree ftype, bool varargs)
     fprintf (dump_file, "is method, ");
   if (!n->address_taken)
     fprintf (dump_file, "is not address taken, ");
-  if (unsafe_function_type_p (ftype))
+  if (unsafe_function_type_p (ftype, TYPE_UID (ftype)))
     fprintf (dump_file, "is unsafe, ");
   fprintf (dump_file, "\n");
 }
@@ -6075,26 +6094,31 @@ save_analysis_results ()
 	  tree ftype = TREE_TYPE (call_fn_ty);
 	  tree ctype = TYPE_CANONICAL (ftype);
 	  unsigned ctype_uid = ctype ? TYPE_UID (ctype) : 0;
-	  if (!ctype_uid || unsafe_function_type_p (ftype)
+	  if (!ctype_uid || unsafe_function_type_p (ftype, ctype_uid)
 	      || !fs_map->count (ctype_uid))
 	    continue;
 	  /* TODO: cleanup noninterposable aliases.  */
+	  decl_set *decls = (*fs_map)[ctype_uid];
 	  decl_set conservative_decls;
-	  collect_conservative_signature_decls (TYPE_UID (ftype),
-						&conservative_decls);
-	  if (TYPE_UID (ftype) != ctype_uid)
-	    collect_conservative_signature_decls (ctype_uid,
-						  &conservative_decls);
-	  if (conservative_decls.empty ())
+	  if (has_loose_function_type_aliases_p (ftype))
+	    {
+	      collect_conservative_signature_decls (TYPE_UID (ftype),
+						    &conservative_decls);
+	      if (TYPE_UID (ftype) != ctype_uid)
+		collect_conservative_signature_decls (ctype_uid,
+						      &conservative_decls);
+	      decls = &conservative_decls;
+	    }
+	  if (decls->empty ())
 	    continue;
 	  if (dump_file)
 	    {
 	      fprintf (dump_file, "For call ");
 	      print_gimple_stmt (dump_file, stmt, 0);
 	    }
-	  vec_alloc (e->indirect_info->targets, conservative_decls.size ());
-	  for (decl_set::const_iterator it = conservative_decls.begin ();
-	       it != conservative_decls.end (); it++)
+	  vec_alloc (e->indirect_info->targets, decls->size ());
+	  for (decl_set::const_iterator it = decls->begin ();
+	       it != decls->end (); it++)
 	    {
 	      struct cgraph_node *target = cgraph_node::get (*it);
 	      /* TODO: maybe discard some targets.  */
@@ -6240,7 +6264,7 @@ erase_from_unreachable (unsigned type_uid, type_set &unreachable)
 }
 
 static void
-dump_found_fdecls (decl_set *decls, unsigned ctype_uid)
+dump_found_fdecls (decl_set *decls, unsigned ctype_uid, bool unsafe)
 {
   fprintf (dump_file, "Signature analysis FOUND decls (%d):", ctype_uid);
   for (decl_set::const_iterator it = decls->begin (); it != decls->end (); it++)
@@ -6248,7 +6272,7 @@ dump_found_fdecls (decl_set *decls, unsigned ctype_uid)
       print_generic_expr (dump_file, *it);
       fprintf (dump_file, "(%d), ", DECL_UID (*it));
     }
-  if (unsafe_function_type_uid_p (ctype_uid))
+  if (unsafe)
     fprintf (dump_file, "type is UNSAFE");
   fprintf (dump_file, "\n");
 }
@@ -6318,7 +6342,7 @@ find_functions_can_be_removed (type_set &unreachable)
       tree ftype = TREE_TYPE (n->decl);
       tree ctype = TYPE_CANONICAL (ftype);
       if (!ctype || !unreachable.count (TYPE_UID (ctype))
-	  || unsafe_function_type_p (ftype)
+	  || unsafe_function_type_p (ftype, TYPE_UID (ftype))
 	  || TREE_CODE (ftype) == METHOD_TYPE || n->callers != NULL
 	  || !n->definition || n->alias || n->thunk || n->clones)
 	continue;
@@ -6442,33 +6466,39 @@ optimize_indirect_calls ()
 		  if (dump_flags && (dump_flags & TDF_STATS))
 		    erase_from_unreachable (ctype_uid, unreachable_ftypes);
 		  decl_set *decls = (*fs_map)[ctype_uid];
+		  bool unsafe = unsafe_function_type_p (ftype, ctype_uid);
 		  if (dump_file)
-		    dump_found_fdecls (decls, ctype_uid);
+		    dump_found_fdecls (decls, ctype_uid, unsafe);
 		  decl_set conservative_decls;
-		  collect_conservative_signature_decls (TYPE_UID (ftype),
-							&conservative_decls);
-		  if (TYPE_UID (ftype) != ctype_uid)
-		    collect_conservative_signature_decls (ctype_uid,
-							  &conservative_decls);
-		  if (dump_file && (dump_flags & TDF_DETAILS))
-		    fprintf (dump_file, "ICP-CONSERVATIVE ctype_uid=%u "
-			     "exact_targets=%u conservative_targets=%u "
-			     "unsafe=%s\n",
-			     ctype_uid, (unsigned) decls->size (),
-			     (unsigned) conservative_decls.size (),
-			     unsafe_function_type_p (ftype) ? "yes" : "no");
-		  dump_conservative_fdecls (&conservative_decls, ctype_uid);
-		  /* TODO: optimize for multple targets.  */
-		  if (!unsafe_function_type_p (ftype)
-		      && conservative_decls.size () == 1)
+		  decl_set *candidate_decls = decls;
+		  if (has_loose_function_type_aliases_p (ftype))
 		    {
-		      decl = *(conservative_decls.begin ());
+		      collect_conservative_signature_decls (TYPE_UID (ftype),
+							    &conservative_decls);
+		      if (TYPE_UID (ftype) != ctype_uid)
+			collect_conservative_signature_decls (ctype_uid,
+							      &conservative_decls);
+		      candidate_decls = &conservative_decls;
+		      if (dump_file && (dump_flags & TDF_DETAILS))
+			fprintf (dump_file, "ICP-CONSERVATIVE ctype_uid=%u "
+				 "exact_targets=%u conservative_targets=%u "
+				 "unsafe=%s\n",
+				 ctype_uid, (unsigned) decls->size (),
+				 (unsigned) conservative_decls.size (),
+				 unsafe ? "yes" : "no");
+		      dump_conservative_fdecls (&conservative_decls,
+					       ctype_uid);
+		    }
+		  /* TODO: optimize for multple targets.  */
+		  if (!unsafe && candidate_decls->size () == 1)
+		    {
+		      decl = *(candidate_decls->begin ());
 		      likely_target = cgraph_node::get (decl);
 		    }
-		  if (!unsafe_function_type_p (ftype)
-		      && !conservative_decls.empty ()
+		  if (!unsafe
+		      && !candidate_decls->empty ()
 		      && (dump_flags & TDF_STATS))
-		    count_found_targets (stats, conservative_decls.size ());
+		    count_found_targets (stats, candidate_decls->size ());
 		}
 	    }
 	  if (!decl || !likely_target)
