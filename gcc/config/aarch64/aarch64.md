@@ -1818,7 +1818,7 @@
         (match_operand:QI  2 "nonmemory_operand")) ;; Value
    (use (match_operand:DI  1 "general_operand")) ;; Length
    (match_operand          3 "immediate_operand")] ;; Align
- "TARGET_SIMD || TARGET_MOPS"
+   ""
  {
   if (aarch64_expand_setmem (operands))
     DONE;
