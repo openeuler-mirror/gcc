@@ -552,7 +552,7 @@ Objective-C and Objective-C++ Dialects}.
 -fassociative-math  -fauto-profile  -fauto-profile[=@var{path}]
 -fauto-inc-dec  -fbranch-probabilities
 -fcaller-saves
--fcombine-stack-adjustments  -fconserve-stack
+-fcombine-stack-adjustments  -fcomponent-type-flow  -fconserve-stack
 -ffold-mem-offsets
 -fcompare-elim  -fcprop-registers  -fcrossjumping
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules
@@ -13056,6 +13056,25 @@ defaults to off.  On AVR and MSP430, this option is completely disabled.
 
 Passes that use the dataflow information
 are enabled independently at different optimization levels.
+
+@opindex fcomponent-type-flow
+@item -fcomponent-type-flow
+Use C++ type-flow information to optimize repeated run-time type checks.
+For zero-offset pointer @code{dynamic_cast} expressions, GCC emits a small
+per-call-site, thread-local positive cache.  A cache miss, a failed cast, and
+hierarchies requiring pointer adjustment continue to use the complete ABI
+run-time check.
+
+During speculative devirtualization, this option also permits GCC to select a
+target shared by a uniquely dominant number of live virtual tables when there
+is more than one otherwise likely target.  GCC emits a target-address guard
+and retains the original indirect call as the fallback, so a less-common
+dynamic type preserves the original behavior.
+
+The option is disabled by default at all optimization levels.  Use
+@option{-fcomponent-type-flow} to enable it explicitly.  Without the option,
+or with @option{-fno-component-type-flow}, GCC retains the original
+@code{dynamic_cast} and speculative-devirtualization behavior.
 
 @opindex fdevirtualize
 @item -fdevirtualize

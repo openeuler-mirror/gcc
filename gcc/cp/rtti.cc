@@ -28,6 +28,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "stringpool.h"
 #include "intl.h"
 #include "stor-layout.h"
+#include "gimple-expr.h"
+#include "varasm.h"
 #include "c-family/c-pragma.h"
 #include "gcc-rich-location.h"
 
@@ -796,6 +798,61 @@ build_dynamic_cast_1 (location_t loc, tree type, tree expr,
 	    }
 	  result = build_cxx_call (dcast_fn, 4, elems, complain);
 	  SET_EXPR_LOCATION (result, loc);
+
+	  /* For a zero-offset downcast, a successful result has the same
+	     address as the source subobject.  Remember a successful dynamic
+	     vptr at each cast site so repeated casts of that dynamic type do
+	     not need to enter the RTTI runtime.  The cache is positive-only:
+	     misses and all other hierarchy shapes retain the full dynamic_cast
+	     semantics.  */
+	  if (flag_component_type_flow && tc == POINTER_TYPE
+	      && optimize >= 2 && integer_zerop (boff))
+	    {
+	      tree caches[2];
+	      for (unsigned int i = 0; i < 2; ++i)
+		{
+		  caches[i] = build_decl (loc, VAR_DECL,
+					  create_tmp_var_name ("__dcast_cache"),
+					  ptr_type_node);
+		  TREE_PUBLIC (caches[i]) = false;
+		  TREE_STATIC (caches[i]) = true;
+		  DECL_ARTIFICIAL (caches[i]) = true;
+		  DECL_IGNORED_P (caches[i]) = true;
+		  TREE_USED (caches[i]) = true;
+		  CP_DECL_THREAD_LOCAL_P (caches[i]) = true;
+		  set_decl_tls_model (caches[i],
+				      decl_default_tls_model (caches[i]));
+		  pushdecl_top_level_and_finish (caches[i], NULL_TREE);
+		}
+
+	      tree vptr_addr = build1 (NOP_EXPR,
+				       build_pointer_type (ptr_type_node),
+				       expr1);
+	      tree vptr = cp_build_indirect_ref (loc, vptr_addr, RO_NULL,
+					 complain);
+	      vptr = save_expr (vptr);
+	      tree hit = cp_build_binary_op (loc, EQ_EXPR, caches[0], vptr,
+					     complain);
+	      for (unsigned int i = 1; i < 2; ++i)
+		hit = build2 (TRUTH_ORIF_EXPR, boolean_type_node, hit,
+			      cp_build_binary_op (loc, EQ_EXPR, caches[i], vptr,
+						  complain));
+
+	      result = save_expr (result);
+	      tree nonnull = cp_truthvalue_conversion (result, complain);
+	      tree update = cp_build_modify_expr (loc, caches[1], NOP_EXPR,
+					  caches[0], complain);
+	      tree insert = cp_build_modify_expr (loc, caches[0], NOP_EXPR,
+					  vptr, complain);
+	      update = build2 (COMPOUND_EXPR, TREE_TYPE (insert), update,
+			       insert);
+	      tree update_result = build2 (COMPOUND_EXPR, TREE_TYPE (result),
+					   update, result);
+	      tree miss = build3 (COND_EXPR, TREE_TYPE (result), nonnull,
+				  update_result, result);
+	      tree fast = build1 (NOP_EXPR, TREE_TYPE (result), expr1);
+	      result = build3 (COND_EXPR, TREE_TYPE (result), hit, fast, miss);
+	    }
 
 	  if (tc == REFERENCE_TYPE)
 	    {

@@ -1235,6 +1235,10 @@ fcombine-stack-adjustments
 Common Var(flag_combine_stack_adjustments) Optimization
 Looks for opportunities to reduce stack adjustments and stack references.
 
+fcomponent-type-flow
+Common Var(flag_component_type_flow) Optimization
+Use type-flow information to optimize repeated C++ run-time type checks.
+
 fcommon
 Common Var(flag_no_common,0) Init(1)
 Put uninitialized globals in the common section.

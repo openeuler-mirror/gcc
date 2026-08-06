@@ -3611,6 +3611,69 @@ decl_warning_cmp (const void *p1, const void *p2)
   return t2->count - t1->count;
 }
 
+/* Count live vtables that directly refer to N.  This is a simple whole-unit
+   popularity estimate for virtual methods.  Do not follow aliases: identical
+   code folding may merge unrelated virtual methods, whose vtables are not
+   useful predictors for this call target.  */
+
+static unsigned int
+vtable_reference_count (cgraph_node *n)
+{
+  unsigned int count = 0;
+  ipa_ref *ref;
+  int i;
+
+  for (i = 0; n->iterate_referring (i, ref); i++)
+    if (ref->use == IPA_REF_ADDR
+	&& VAR_P (ref->referring->decl)
+	&& DECL_VIRTUAL_P (ref->referring->decl))
+      count++;
+
+  return count;
+}
+
+/* Pick the only likely target in TARGETS, as before, or a uniquely dominant
+   target referenced by at least twice as many live vtables as the runner-up.
+   The latter is only a profitability prediction: speculative
+   devirtualization retains the original indirect call as its fallback.  */
+
+static cgraph_node *
+select_likely_target (vec<cgraph_node *> targets, bool *multiple,
+		      unsigned int *best_count, unsigned int *second_count)
+{
+  cgraph_node *best = NULL;
+  unsigned int best_refs = 0;
+  unsigned int second_refs = 0;
+  unsigned int candidates = 0;
+
+  for (unsigned int i = 0; i < targets.length (); i++)
+    if (likely_target_p (targets[i]))
+      {
+	candidates++;
+	unsigned int refs = vtable_reference_count (targets[i]);
+	if (!best || refs > best_refs)
+	  {
+	    second_refs = best_refs;
+	    best_refs = refs;
+	    best = targets[i];
+	  }
+	else if (refs > second_refs)
+	  second_refs = refs;
+      }
+
+  *multiple = candidates > 1;
+  *best_count = best_refs;
+  *second_count = second_refs;
+  if (candidates == 1)
+    return best;
+  if (flag_component_type_flow
+      && candidates > 1
+      && best_refs >= 2
+      && best_refs >= 2 * second_refs)
+    return best;
+  return NULL;
+}
+
 
 /* Try to speculatively devirtualize call to OTR_TYPE with OTR_TOKEN with
    context CTX.  */
@@ -3622,16 +3685,11 @@ try_speculative_devirtualization (tree otr_type, HOST_WIDE_INT otr_token,
   vec <cgraph_node *>targets
      = possible_polymorphic_call_targets
 	  (otr_type, otr_token, ctx, NULL, NULL, true);
-  unsigned int i;
-  struct cgraph_node *likely_target = NULL;
-
-  for (i = 0; i < targets.length (); i++)
-    if (likely_target_p (targets[i]))
-      {
-	if (likely_target)
-	  return NULL;
-	likely_target = targets[i];
-      }
+  bool multiple;
+  unsigned int best_count;
+  unsigned int second_count;
+  cgraph_node *likely_target
+    = select_likely_target (targets, &multiple, &best_count, &second_count);
   if (!likely_target
       ||!likely_target->definition
       || DECL_EXTERNAL (likely_target->decl))
@@ -3765,24 +3823,26 @@ ipa_devirt (void)
 		nmultiple++;
 		continue;
 	      }
-	    for (i = 0; i < targets.length (); i++)
-	      if (likely_target_p (targets[i]))
-		{
-		  if (likely_target)
-		    {
-		      likely_target = NULL;
-		      if (dump_file)
-			fprintf (dump_file, "More than one likely target\n\n");
-		      nmultiple++;
-		      break;
-		    }
-		  likely_target = targets[i];
-		}
+	    bool multiple;
+	    unsigned int best_count;
+	    unsigned int second_count;
+	    likely_target = select_likely_target (targets, &multiple,
+					    &best_count, &second_count);
 	    if (!likely_target)
 	      {
+		if (multiple)
+		  {
+		    if (dump_file)
+		      fprintf (dump_file, "More than one likely target\n\n");
+		    nmultiple++;
+		  }
 		bad_call_targets.add (cache_token);
 	        continue;
 	      }
+	    if (multiple && dump_file)
+	      fprintf (dump_file,
+		       "Selecting dominant target (%u versus %u live vtables)\n",
+		       best_count, second_count);
 	    /* This is reached only when dumping; check if we agree or disagree
  	       with the speculation.  */
 	    if (e->speculative)
