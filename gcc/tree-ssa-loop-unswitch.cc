@@ -937,49 +937,50 @@ tree_unswitch_single_loop (class loop *loop, dump_user_location_t loc,
   basic_block predicate_bb = NULL;
   unsigned true_size = 0, false_size = 0;
 
+  auto check_predicate = [&](unswitch_predicate *pred, basic_block bb) -> bool
+    {
+      if (bitmap_bit_p (handled, pred->num))
+	return false;
+
+      evaluate_loop_insns_for_predicate (loop, predicate_path,
+					 pred, ignored_edge_flag,
+					 &true_size, &false_size);
+
+      /* We'll get LOOP replaced with a simplified version according
+	 to PRED estimated to TRUE_SIZE and a copy simplified according to
+	 the inverted PRED estimated to FALSE_SIZE.  */
+      if (true_size + false_size < budget + loop_size)
+	{
+	  predicate = pred;
+	  predicate_bb = bb;
+
+	  /* There are cases where true_size and false_size add up to less
+	     than the original loop_size.  We do not want to grow the
+	     remaining budget because of that.  */
+	  if (true_size + false_size > loop_size)
+	    budget -= (true_size + false_size - loop_size);
+
+	  return true;
+	}
+      else if (dump_enabled_p ())
+	dump_printf_loc (MSG_NOTE, loc,
+			 "not unswitching condition, cost too big "
+			 "(%u insns copied to %u and %u)\n", loop_size,
+			 true_size, false_size);
+
+      return false;
+    };
+
   auto check_predicates = [&](basic_block bb) -> bool
     {
       for (auto pred : get_predicates_for_bb (bb))
-	{
-	  if (bitmap_bit_p (handled, pred->num))
-	    continue;
-
-	  evaluate_loop_insns_for_predicate (loop, predicate_path,
-					     pred, ignored_edge_flag,
-					     &true_size, &false_size);
-
-	  /* We'll get LOOP replaced with a simplified version according
-	     to PRED estimated to TRUE_SIZE and a copy simplified
-	     according to the inverted PRED estimated to FALSE_SIZE.  */
-	  if (true_size + false_size < budget + loop_size)
-	    {
-	      predicate = pred;
-	      predicate_bb = bb;
-
-	      /* There are cases where true_size and false_size add up to
-		 less than the original loop_size.  We do not want to
-		 grow the remaining budget because of that.  */
-	      if (true_size + false_size > loop_size)
-		budget -= (true_size + false_size - loop_size);
-
-	      /* FIXME: right now we select first candidate, but we can
-		 choose the cheapest or hottest one.  */
-	      return true;
-	    }
-	  else if (dump_enabled_p ())
-	    dump_printf_loc (MSG_NOTE, loc,
-			     "not unswitching condition, cost too big "
-			     "(%u insns copied to %u and %u)\n", loop_size,
-			     true_size, false_size);
-	}
+	if (check_predicate (pred, bb))
+	  return true;
       return false;
     };
 
   if (hottest)
-    {
-      predicate = hottest;
-      predicate_bb = hottest_bb;
-    }
+    check_predicate (hottest, hottest_bb);
   else
     /* Check predicates of reachable blocks.  */
     evaluate_bbs (loop, NULL, ignored_edge_flag, check_predicates);
