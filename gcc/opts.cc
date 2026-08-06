@@ -2123,7 +2123,15 @@ enable_cfgo_optimizations (struct gcc_options *opts,
 			   int value)
 {
   SET_OPTION_IF_UNSET (opts, opts_set, flag_modulo_sched, value);
-  SET_OPTION_IF_UNSET (opts, opts_set, flag_selective_scheduling, value);
+  /* Do not enable -fselective-scheduling here.  It is documented as
+     experimental upstream, and together with profile instrumentation it was
+     measured to generate wrong code on aarch64: a whole statement is silently
+     eliminated, with no crash and no diagnostic.  Neither option alone is
+     enough - instrumentation without it, and it without instrumentation, both
+     behave correctly - so enabling it from this function is what turns a
+     profile collection run into a miscompile.  Both -fcfgo-profile-generate
+     and -fcfgo-profile-use reach here.  Users who still want the option can
+     pass -fselective-scheduling explicitly; SET_OPTION_IF_UNSET honours it.  */
   SET_OPTION_IF_UNSET (opts, opts_set, flag_rename_registers, value);
   SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_partial_training, value);
 
