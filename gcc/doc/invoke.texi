@@ -19286,6 +19286,34 @@ these properties.  Unless overridden by @option{-mtune},
 @option{-mcpu=neoverse-512tvb} tunes code in the same way as for
 @option{-mtune=neoverse-512tvb}.
 
+@item -maarch64-sve-memcall-inlining
+@itemx -mno-aarch64-sve-memcall-inlining
+@opindex maarch64-sve-memcall-inlining
+@opindex mno-aarch64-sve-memcall-inlining
+Enable or disable the use of SVE loops to inline calls to @code{memcpy} and
+@code{memset}.  This optimization is disabled by default and is only available
+when the target supports SVE.
+
+@item --param=aarch64-sve-memcall-size-threshold=@var{n}
+@opindex param=aarch64-sve-memcall-size-threshold
+Set the maximum size in bytes for which @code{memcpy} and @code{memset} can be
+expanded using an SVE loop.  The default is 4096.  A constant-sized operation
+whose size is equal to the threshold is eligible for SVE expansion; one whose
+size is greater than the threshold uses the normal expansion instead.
+
+@item -maarch64-sve-memcall-runtime-check
+@itemx -mno-aarch64-sve-memcall-runtime-check
+@opindex maarch64-sve-memcall-runtime-check
+@opindex mno-aarch64-sve-memcall-runtime-check
+Enable or disable a run-time size check for variable-sized @code{memcpy} and
+@code{memset} operations that are expanded using an SVE loop.  This option is
+enabled by default.  When it is enabled, operations whose run-time size is
+greater than the value of
+@option{--param=aarch64-sve-memcall-size-threshold} fall back to the
+corresponding library call.  When it is disabled, variable-sized operations
+use the SVE loop without a library-call fallback.  This option has an effect
+only when @option{-maarch64-sve-memcall-inlining} is enabled.
+
 @item -moverride=@var{string}
 @opindex moverride
 Override tuning decisions made by the back-end in response to a
