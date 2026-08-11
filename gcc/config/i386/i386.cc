@@ -23034,7 +23034,7 @@ ix86_autovectorize_vector_modes (vector_modes *modes, bool all)
   if (TARGET_SSE2)
     modes->safe_push (V4QImode);
 
-  return 0;
+  return ix86_vect_compare_costs ? VECT_COMPARE_COSTS : 0;
 }
 
 /* Implemenation of targetm.vectorize.get_mask_mode.  */
@@ -23289,6 +23289,23 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 	    stmt_cost = ix86_cost->add;
 	  break;
 	default:
+	  if (truth_value_p (subcode))
+	    {
+	      if (SSE_FLOAT_MODE_SSEMATH_OR_HF_P (mode))
+		/* CMPccS? instructions are cheap, so use sse_op.  While they
+		   produce a mask which may need to be turned to 0/1 by and,
+		   expect that this will be optimized away in a common case.  */
+		stmt_cost = ix86_cost->sse_op;
+	      else if (X87_FLOAT_MODE_P (mode))
+		/* fcmp + setcc.  */
+		stmt_cost = ix86_cost->fadd + ix86_cost->add;
+	      else if (VECTOR_MODE_P (mode))
+		stmt_cost = ix86_vec_cost (mode, ix86_cost->sse_op);
+	      else
+		/* setcc.  */
+		stmt_cost = ix86_cost->add;
+	      break;
+	    }
 	  break;
 	}
     }
