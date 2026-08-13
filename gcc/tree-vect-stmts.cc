@@ -1142,7 +1142,9 @@ vect_model_load_cost (vec_info *vinfo,
       vect_transform_slp_perm_load (vinfo, slp_node, vNULL, NULL,
 				    vf, true, &n_perms, &n_loads);
       inside_cost += record_stmt_cost (cost_vec, n_perms, vec_perm,
-				       first_stmt_info, 0, vect_body);
+				       first_stmt_info, slp_node,
+				       STMT_VINFO_VECTYPE (first_stmt_info),
+				       0, vect_body);
 
       /* And adjust the number of loads performed.  This handles
 	 redundancies as well as loads that are later dead.  */
@@ -13577,4 +13579,3 @@ vect_gen_len (tree len, tree start_index, tree end_index, tree len_limit)
 
   return stmts;
 }
-
