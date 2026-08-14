@@ -3161,3 +3161,4 @@ ix86_generate_version_dispatcher_body (void *node_p)
   pop_cfun ();
   return resolver_decl;
 }
+
