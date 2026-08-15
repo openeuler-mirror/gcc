@@ -622,6 +622,7 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-builtin-call-dce  -ftree-ccp  -ftree-ch
 -ftree-coalesce-vars  -ftree-copy-prop  -ftree-dce  -ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
+-ftree-bitset-store-coalescing
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
 -ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
@@ -13873,6 +13874,16 @@ for (int i = 0; i < N; i++)
 @end smallexample
 This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
+
+@opindex ftree-bitset-store-coalescing
+@item -ftree-bitset-store-coalescing
+Recognize canonical two-level packed-bit update loops and create a guarded
+fast path that combines adjacent bit updates into masked word stores.  The
+original loop nest is retained as a fallback when packed arrays have the same
+base, when the writable array has the same base as the row-index array, or
+when the packed-bit range is outside the profitability bound.  The transformed
+idiom requires distinct packed storage objects, as in the source-level
+row-major form.  This option is disabled by default.
 
 @opindex floop-unroll-and-jam
 @item -floop-unroll-and-jam
