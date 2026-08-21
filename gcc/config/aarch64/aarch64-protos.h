@@ -1004,6 +1004,7 @@ gimple *aarch64_general_gimple_fold_builtin (unsigned int, gcall *,
 					     gimple_stmt_iterator *);
 rtx aarch64_general_expand_builtin (unsigned int, tree, rtx, int);
 tree aarch64_general_builtin_decl (unsigned, bool);
+unsigned  get_crc_builtin_code(unsigned , bool);
 tree aarch64_general_builtin_rsqrt (unsigned int);
 void handle_arm_acle_h (void);
 void handle_arm_neon_h (void);
