@@ -3480,6 +3480,19 @@ ftree-loop-vectorize
 Common Var(flag_tree_loop_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable loop vectorization on trees.
 
+; openEuler gcc-12 carried -falias-analysis-expand-ssa, gating an extra
+; non-loop alias disambiguation in tree-data-ref (the PR106019 scenario).
+; GCC 14 solves that scenario natively and unconditionally - the
+; upstream regression test bb-slp-pr106019.c passes on this tree - and
+; the gcc-14 migration had only carried this option record without the
+; logic it gated, so the switch never did anything here.  The record is
+; kept so the diagnosis is clear instead of 'unrecognized option': the
+; positive form is rejected in common_handle_option with an explanation;
+; the negative form is accepted silently (off is the de-facto state).
+falias-analysis-expand-ssa
+Common Var(flag_alias_analysis_expand_ssa) Init(0)
+Rejected on GCC 14: the non-loop alias disambiguation this enabled is built in.
+
 ftree-slp-vectorize
 Common Var(flag_tree_slp_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable basic block vectorization (SLP) on trees.
