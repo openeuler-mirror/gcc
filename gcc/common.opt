@@ -4072,6 +4072,10 @@ fipa-ra
 Common Var(flag_ipa_ra) Optimization
 Use caller save register across calls if possible.
 
+fifcvt-allow-complicated-cmps
+Common Var(flag_ifcvt_allow_complicated_cmps) Optimization
+Allow RTL if-conversion pass to deal with complicated cmps (can increase compilation time).
+
 ffind-with-sve
 Common Var(flag_find_with_sve) Init(0) Optimization
 Enable replace std::find with sve
