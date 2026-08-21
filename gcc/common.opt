@@ -1146,6 +1146,11 @@ fasynchronous-unwind-tables
 Common Var(flag_asynchronous_unwind_tables) Optimization
 Generate unwind tables that are exact at each instruction boundary.
 
+farray-widen-compare
+Common Var(flag_array_widen_compare) Optimization
+Rewrite qualifying byte-compare loops to compare eight bytes at a time.
+Unsafe unless both arrays are readable up to the loop bound.
+
 fauto-inc-dec
 Common Var(flag_auto_inc_dec) Init(1) Optimization
 Generate auto-inc/dec instructions.

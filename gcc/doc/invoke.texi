@@ -550,6 +550,7 @@ Objective-C and Objective-C++ Dialects}.
 -falign-loops[=@var{n}[:@var{m}:[@var{n2}[:@var{m2}]]]]
 -fmin-function-alignment=[@var{n}]
 -fno-allocation-dce -fallow-store-data-races
+-farray-widen-compare
 -fassociative-math  -fauto-profile  -fauto-profile[=@var{path}]
 -fauto-inc-dec  -fbranch-probabilities
 -fbuiltin-will-return
@@ -13009,6 +13010,23 @@ This transformation unifies equivalent code and saves code size.  The
 resulting code may or may not perform better than without cross-jumping.
 
 Enabled at levels @option{-O2}, @option{-O3}, @option{-Os}.
+
+@opindex farray-widen-compare
+@item -farray-widen-compare
+Rewrite loops that compare two arrays byte by byte until the first
+mismatch - the match-finder loops of LZMA-style compressors, typically -
+to compare eight bytes at a time, locating the mismatching byte with a
+count-trailing-zeros instruction.  Off by default; takes effect at
+@option{-O3} and above, on little-endian LP64 targets only.
+
+@strong{Warning:} this option is unsafe.  The rewritten loop may read up
+to eight bytes beyond the first mismatching byte (never beyond the loop
+bound).  The original loop stops reading at the first mismatch, so a
+conforming program that places the mismatching byte at the very end of
+readable memory - the loop bound lying beyond it - is correct as
+written, yet faults when compiled with this option.  Enable it only
+when both arrays are fully readable up to the loop bound, as is the
+case for compressor match buffers with padding.
 
 @opindex fauto-inc-dec
 @item -fauto-inc-dec

@@ -408,6 +408,9 @@ UrlSuffix(gcc/Instrumentation-Options.html#index-fsanitize-undefined-trap-on-err
 fasynchronous-unwind-tables
 UrlSuffix(gcc/Code-Gen-Options.html#index-fasynchronous-unwind-tables)
 
+farray-widen-compare
+UrlSuffix(gcc/Optimize-Options.html#index-farray-widen-compare)
+
 fauto-inc-dec
 UrlSuffix(gcc/Optimize-Options.html#index-fauto-inc-dec)
 
