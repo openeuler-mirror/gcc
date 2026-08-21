@@ -5,6 +5,7 @@
 
 # Load support procs.
 load_lib gcc-dg.exp
+load_lib scanwpaipa.exp
 
 # If a testcase doesn't have special options, use these.
 global DEFAULT_CFLAGS
