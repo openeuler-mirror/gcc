@@ -3602,6 +3602,17 @@ common_handle_option (struct gcc_options *opts,
 				&opts->x_str_align_functions);
       break;
     
+    case OPT_fchrec_mul_fold_strict_overflow:
+      /* The folding this used to gate is built into GCC 14 (see the
+	 common.opt comment); reject the positive form with the
+	 explanation, accept the negative form silently.  */
+      if (value)
+	error_at (loc,
+		  "%<-fchrec-mul-fold-strict-overflow%> is not needed on"
+		  " GCC 14: the strict-overflow CHREC multiplication"
+		  " folding it enabled is built in and always active");
+      break;
+
     case OPT_falias_analysis_expand_ssa:
       /* The disambiguation this used to gate is built into GCC 14
 	 (see the common.opt comment); reject the positive form with

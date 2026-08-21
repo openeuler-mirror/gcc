@@ -1240,6 +1240,20 @@ fchecking=
 Common Joined RejectNegative UInteger Var(flag_checking)
 Perform internal consistency checkings.
 
+; openEuler gcc-12 carried -fchrec-mul-fold-strict-overflow, gating a
+; backport of the PR114074 fix (strict-overflow handling when folding
+; multiplications of scalar-evolution CHRECs).  GCC 14 contains that
+; fix natively and unconditionally - the upstream tests pr68317.c and
+; torture/pr114074.c pass on this tree, and chrec_fold_multiply already
+; performs unconditionally the operand canonicalization the gcc-14 port
+; of the patch had kept behind this switch.  The record is kept so the
+; diagnosis is clear instead of 'unrecognized option': the positive form
+; is rejected in common_handle_option with an explanation; the negative
+; form is accepted silently (off is the de-facto state).
+fchrec-mul-fold-strict-overflow
+Common Var(flag_chrec_mul_fold_strict_overflow) Init(0)
+Rejected on GCC 14: the strict-overflow CHREC folding this enabled is built in.
+
 fcanon-prefix-map
 Common Var(common_deferred_options) Defer
 For -f*-prefix-map= options compare canonicalized pathnames rather than just strings.
