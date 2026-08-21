@@ -49,6 +49,9 @@
 #include "except.h"
 #include "ipa-utils.h"
 
+/* Check whether in C language or LTO with only C language.  */
+extern bool lang_c_p (void);
+
 namespace {
 
 /* Data used when collecting DECLs and TYPEs for language data removal.  */
@@ -102,6 +105,14 @@ fld_worklist_push (tree t, class free_lang_data_d *fld)
 static tree
 fld_simplified_type_name (tree type)
 {
+  /* Simplify type will cause that struct A and struct A within
+     struct B are different type pointers, so skip it in structure
+     optimizations.  */
+  if (optimize >= 3 && flag_ipa_struct_reorg && !seen_error ()
+      && flag_lto_partition == LTO_PARTITION_ONE && lang_c_p ()
+      && (in_lto_p || flag_whole_program))
+    return TYPE_NAME (type);
+
   if (!TYPE_NAME (type) || TREE_CODE (TYPE_NAME (type)) != TYPE_DECL)
     return TYPE_NAME (type);
   /* Drop TYPE_DECLs in TYPE_NAME in favor of the identifier in the
@@ -339,6 +350,12 @@ static tree
 fld_simplified_type (tree t, class free_lang_data_d *fld)
 {
   if (!t)
+    return t;
+  /* Simplify type will cause that struct A and struct A within
+     struct B are different type pointers, so skip it in structure
+     optimizations.  */
+  if (flag_ipa_struct_reorg && lang_c_p ()
+      && flag_lto_partition == LTO_PARTITION_ONE)
     return t;
   if (POINTER_TYPE_P (t))
     return fld_incomplete_type_of (t, fld);

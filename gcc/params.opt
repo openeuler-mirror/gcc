@@ -873,6 +873,18 @@ Enum(parloops_schedule_type) String(runtime) Value(PARLOOPS_SCHEDULE_RUNTIME)
 Common Joined UInteger Var(param_partial_inlining_entry_probability) Init(70) Optimization IntegerRange(0, 100) Param
 Maximum probability of the entry BB of split region (in percent relative to entry BB of the function) to make partial inlining happen.
 
+-param=struct-reorg-cold-struct-ratio=
+Common Joined UInteger Var(param_struct_reorg_cold_struct_ratio) Init(10) IntegerRange(0, 100) Param Optimization
+The threshold ratio between current and hottest structure counts.
+
+-param=compressed-pointer-size=
+Common Joined UInteger Var(param_pointer_compression_size) Init(32) IntegerRange(8, 32) Param Optimization
+Set pointer compression size.
+
+-param=semi-relayout-level=
+Common Joined UInteger Var(semi_relayout_level) Init(13) IntegerRange(11, 15) Param Optimization
+Set capacity of each bucket to semi-relayout to (1 << semi-relayout-level) / 8 .
+
 -param=predictable-branch-outcome=
 Common Joined UInteger Var(param_predictable_branch_outcome) Init(2) IntegerRange(0, 50) Param Optimization
 Maximal estimated outcome of branch considered predictable.

@@ -15675,6 +15675,15 @@ In each case, the @var{value} is an integer.  The following choices
 of @var{name} are recognized for all targets:
 
 @table @gcctabopt
+@item struct-reorg-cold-struct-ratio
+The threshold ratio (as a percentage) between a structure frequency
+and the frequency of the hottest structure in the program.  This parameter
+is used by struct-reorg optimization enabled by @option{-fipa-struct-reorg}.
+We say that if the ratio of a structure frequency, calculated by profiling,
+to the hottest structure frequency in the program is less than this
+parameter, then structure reorganization is not applied to this structure.
+The default is 10.
+
 @item predictable-branch-outcome
 When branch is predicted to be taken with probability lower than this threshold
 (in percent), then it is considered well predictable.

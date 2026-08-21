@@ -1,0 +1,82 @@
+#   Copyright (C) 1997-2023 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with GCC; see the file COPYING3.  If not see
+# <http://www.gnu.org/licenses/>.
+
+load_lib gcc-dg.exp
+load_lib torture-options.exp
+
+# Initialize `dg'.
+dg-init
+torture-init
+
+set STRUCT_REORG_TORTURE_OPTIONS [list \
+	{ -O3 } \
+	{ -Ofast } ]
+
+set-torture-options $STRUCT_REORG_TORTURE_OPTIONS {{}}
+
+# -fipa-struct-reorg
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/wo_*.c]] \
+ 	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/w_*.c]] \
+	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/struct_reorg*.cpp]] \
+	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sr_*.c]] \
+	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/csr_*.c]] \
+	"" "-fipa-struct-reorg -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-reorder-fields
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/rf_*.c]] \
+	"" "-fipa-reorder-fields -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-struct-reorg=2
+gcc-dg-runtest $srcdir/$subdir/rf_rewrite_problem_with_split.c \
+	"" "-fipa-struct-reorg=2 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-struct-reorg=3
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/dfe*.c]] \
+	"" "-fipa-struct-reorg=3 -fdump-ipa-all -flto-partition=one -fwhole-program"
+gcc-dg-runtest $srcdir/$subdir/struct_reorg-7.c \
+	"" "-fipa-struct-reorg=3 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-struct-reorg=4
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/pc*.c]] \
+	"" "-fipa-struct-reorg=4 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-struct-reorg=5
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/pc*.c]] \
+	"" "-fipa-struct-reorg=5 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-struct-reorg=6
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/semi_relayout*.c]] \
+	"" "-fipa-struct-reorg=6 -fdump-ipa-all -flto-partition=one -fwhole-program"
+
+# -fipa-struct-sfc
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-sfc -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
+# -fipa-struct-sfc -fipa-struct-sfc-bitfield
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc-bitfield_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-sfc -fipa-struct-sfc-bitfield -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
+# -fipa-struct-sfc -fipa-struct-sfc-shadow
+gcc-dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/sfc-shadow_*.c]] \
+	"" "-fipa-reorder-fields -fipa-struct-sfc -fipa-struct-sfc-shadow -fdump-ipa-struct_reorg-details -flto-partition=one -fwhole-program"
+
+# All done.
+torture-finish
+dg-finish
