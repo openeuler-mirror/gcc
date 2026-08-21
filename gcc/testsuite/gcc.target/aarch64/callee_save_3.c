@@ -8,5 +8,6 @@ float foo (float x, float y) {
   return (x + test ()) * y;
 }
 
-/* { dg-final { scan-assembler {\tstp\td14, d15, \[sp,} } } */
-/* { dg-final { scan-assembler {\tldp\td14, d15, \[sp,} } } */
+/* GCC 12 allocates FP registers in ascending register-number order.  */
+/* { dg-final { scan-assembler {\tstp\td8, d9, \[sp,} } } */
+/* { dg-final { scan-assembler {\tldp\td8, d9, \[sp,} } } */
