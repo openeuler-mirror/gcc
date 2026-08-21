@@ -643,6 +643,7 @@ Objective-C and Objective-C++ Dialects}.
 @xref{Instrumentation Options,,Program Instrumentation Options}.
 @gccoptlist{-p  -pg  -fprofile-arcs  --coverage  -ftest-coverage
 -fcondition-coverage
+-fkernel-pgo
 -fprofile-abs-path
 -fprofile-dir=@var{path}  -fprofile-generate  -fprofile-generate=@var{path}
 -fprofile-info-section  -fprofile-info-section=@var{name}
@@ -17427,6 +17428,31 @@ process ID.
 value of environment variable @var{VAR}
 
 @end table
+
+@opindex fkernel-pgo
+@item -fkernel-pgo
+Under profile instrumentation that includes value profiling
+(@option{-fprofile-generate}, or @option{-fprofile-arcs} with
+@option{-fprofile-values}), do not give the indirect-call profiling
+variable a TLS model.  Off by default.  Under link-time optimization
+the option takes effect where the instrumentation runs: give it when
+compiling; given only at link time it does nothing.
+
+The variable (@code{__gcov_indirect_call}) passes context from an
+indirect call site to the profiling stub in the called function, and
+is normally thread-local so that concurrent threads do not clobber
+each other's entry.  A kernel has no ELF TLS runtime - its loader does
+not process TLS relocations - and supplies its own non-TLS definition
+of the variable from its profiling runtime; this option is what makes
+an instrumented kernel build link.  The variable is then shared, so
+racing indirect calls can lose or misattribute some value-profile
+samples.  That costs profile quality, never correctness.
+
+This option is for freestanding builds that ship their own profiling
+runtime.  Do not use it for ordinary programs: libgcov defines the
+variable thread-locally wherever the target supports TLS, and linking
+an object compiled with this option against it fails with a TLS
+mismatch error.
 
 @opindex fprofile-generate
 @item -fprofile-generate

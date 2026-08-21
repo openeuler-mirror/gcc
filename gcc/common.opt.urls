@@ -908,6 +908,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-fkeep-static-functions)
 fkeep-static-consts
 UrlSuffix(gcc/Optimize-Options.html#index-fkeep-static-consts)
 
+fkernel-pgo
+UrlSuffix(gcc/Instrumentation-Options.html#index-fkernel-pgo)
+
 fleading-underscore
 UrlSuffix(gcc/Code-Gen-Options.html#index-fleading-underscore)
 

@@ -1208,7 +1208,13 @@ init_ic_make_global_vars (void)
   DECL_ARTIFICIAL (ic_tuple_var) = 1;
   DECL_INITIAL (ic_tuple_var) = NULL;
   DECL_EXTERNAL (ic_tuple_var) = 1;
-  if (targetm.have_tls)
+  /* Not under -fkernel-pgo: a kernel has no ELF TLS runtime - its
+     loader does not process TLS relocations - and provides its own
+     non-TLS definition of __gcov_indirect_call.  The shared variable
+     can then be clobbered between racing indirect calls, which loses
+     or misattributes some value-profile samples; that costs profile
+     quality, never correctness.  */
+  if (targetm.have_tls && !flag_kernel_pgo)
     set_decl_tls_model (ic_tuple_var, decl_default_tls_model (ic_tuple_var));
 }
 

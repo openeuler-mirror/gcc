@@ -2235,6 +2235,15 @@ fkeep-static-consts
 Common Var(flag_keep_static_consts) Init(1)
 Emit static const variables even if they are not used.
 
+; Plain Common, not Optimization: the only consumer creates the one
+; indirect-call profiling variable per translation unit, so a
+; per-function value could not be honored anyway - and whether that
+; variable is TLS is a whole-build property that has to match the
+; profiling runtime's definition of it.
+fkernel-pgo
+Common Var(flag_kernel_pgo)
+Disable TLS setting of instrumentation variables to support PGO kernel compilation in -fprofile-generate, as kernel does not support TLS.
+
 fleading-underscore
 Common Var(flag_leading_underscore) Init(-1)
 Give external symbols a leading underscore.
