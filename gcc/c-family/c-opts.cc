@@ -108,6 +108,9 @@ static size_t include_cursor;
 /* Whether any standard preincluded header has been preincluded.  */
 static bool done_preinclude;
 
+/* Whether the -fsimdmath declarations have been offered to cpp yet.  */
+static bool done_simdmath;
+
 static void handle_OPT_d (const char *);
 static void set_std_cxx98 (int);
 static void set_std_cxx11 (int);
@@ -827,6 +830,13 @@ c_common_post_options (const char **pfilename)
 
   if (cpp_opts->deps.style == DEPS_NONE)
     check_deps_environment_vars ();
+
+  /* Not for assembler input: nothing there can be vectorized, so the
+     report would be noise on every .S file a project-wide -fsimdmath
+     reaches - which is the same reason the pre-include skips them.  */
+  if (cpp_get_options (parse_in)->lang != CLK_ASM)
+    maybe_warn_simdmath_ineffective (&global_options, &global_options_set,
+				   UNKNOWN_LOCATION);
 
   handle_deferred_opts ();
 
@@ -1694,6 +1704,52 @@ push_command_line_include (void)
 	  if (preinc && cpp_push_default_include (parse_in, preinc))
 	    return;
 	}
+    }
+
+  if (!done_simdmath)
+    {
+      done_simdmath = true;
+      /* Declare the _ZGV* vector entry points -fsimdmath vectorizes math
+	 calls into.  This goes in as a default include, like the target's
+	 own pre-include and unlike -include, for two reasons.  It must not
+	 be fatal where the header is absent: -fsimdmath is meant to sit in
+	 a project's CFLAGS, so it reaches --disable-libgomp builds and
+	 -nostdinc translation units too, and gfortran has always skipped a
+	 missing simdmath_f.h silently.  And it must search the bracket
+	 chain: simdmath.h is a name that exists in the wild, and a copy in
+	 the source directory would otherwise shadow the compiler's.
+	 Not for assembler input - the declarations are C, and the
+	 assembler would read them as instructions.
+
+	 std_inc, like the target's own pre-include above: IT_DEFAULT
+	 suppresses the diagnostic for a header that is not found, but not
+	 the one for having nowhere to look.  -nostdinc empties the bracket
+	 chain outright, and on an installed compiler - where nothing else
+	 puts a directory there - that turned into
+
+	   cc1: error: no include path in which to search for simdmath.h
+
+	 which is the very failure this was written to avoid.  It does not
+	 reproduce in a build tree, whose driver passes the two staging
+	 directories as -isystem, and -nostdinc does not remove those.
+
+	 Not under -fmodules-ts either.  What goes in here is eleven
+	 declarations, not the handful of #defines that lets the target's
+	 own pre-include past the rule that a module-declaration be the
+	 first declaration in the file - so every module interface unit
+	 would fail to compile, and the global module fragment spelling
+	 would not rescue it.  A project that puts -fsimdmath in its
+	 CXXFLAGS would find its modular sources unbuildable with no way to
+	 opt out short of dropping the option.  Vectorizing those units
+	 needs the user's own omp declare simd; invoke.texi says so.  */
+      if (flag_simdmath
+	  && flag_hosted
+	  && std_inc
+	  && !flag_modules
+	  && !cpp_opts->preprocessed
+	  && cpp_get_options (parse_in)->lang != CLK_ASM
+	  && cpp_push_default_include (parse_in, "simdmath.h"))
+	return;
     }
 
   pch_cpp_save_state ();

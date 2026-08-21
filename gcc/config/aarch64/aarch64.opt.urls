@@ -67,6 +67,12 @@ UrlSuffix(gcc/AArch64-Options.html#index-mlow-precision-sqrt)
 mlow-precision-div
 UrlSuffix(gcc/AArch64-Options.html#index-mlow-precision-div)
 
+mdaz-ftz
+UrlSuffix(gcc/AArch64-Options.html#index-mdaz-ftz)
+
+msimdmath-vec64
+UrlSuffix(gcc/AArch64-Options.html#index-msimdmath-vec64)
+
 mearly-ra=
 UrlSuffix(gcc/AArch64-Options.html#index-mearly-ra)
 

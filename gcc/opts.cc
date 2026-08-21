@@ -330,12 +330,16 @@ static const char undocumented_msg[] = N_("This option lacks documentation.");
 static const char use_diagnosed_msg[] = N_("Uses of this option are diagnosed.");
 
 typedef char *char_p; /* For DEF_VEC_P.  */
+static void set_simdmath_flags (struct gcc_options *opts,
+				struct gcc_options *opts_set, int set);
 
 static void set_debug_level (uint32_t dinfo, int extended,
 			     const char *arg, struct gcc_options *opts,
 			     struct gcc_options *opts_set,
 			     location_t loc);
 static void set_fast_math_flags (struct gcc_options *opts, int set);
+static void set_fp_model_flags (struct gcc_options *opts,
+				struct gcc_options *opts_set, int set);
 static void decode_d_option (const char *arg, struct gcc_options *opts,
 			     location_t loc, diagnostic_context *dc);
 static void set_unsafe_math_optimizations_flags (struct gcc_options *opts,
@@ -2685,6 +2689,129 @@ check_force_inline_targets_string (const char *arg, location_t loc)
     }
 }
 
+/* -fsimdmath substitutes a vector variant for a scalar math call, which is
+   allowed only where the two are interchangeable.  Two things rule that
+   out: errno, which a vector variant cannot set per lane, and
+   rounding-math, whose mode it does not follow.  Both are legitimate
+   requests, so the option is left doing part of its job or none of it -
+   and used to do so in silence.  Report it.
+
+   Called from each front end's post_options rather than from
+   finish_options: this is a statement about the command line, and
+   finish_options runs again for every optimize attribute and every
+   #pragma GCC optimize in the file.  Doing it there made a transient
+   pragma region latch the report, warned twice over an LTO link, and
+   fired on assembler input, which cannot vectorize anything.  */
+
+/* The Fortran counterpart, and it says the opposite thing.  gfortran
+   reaches the vector variants through !GCC$ builtin (...) attributes simd
+   in simdmath_f.h, which puts the attribute on the builtin declaration
+   itself; neither -fmath-errno nor -frounding-math gates that, so the
+   calls are emitted whatever the floating-point model asks for - measured
+   on every model, including strict.  Telling a Fortran user that nothing
+   was vectorized would be false in the direction that reassures, so tell
+   them what actually happens instead.  Whether the models ought to reach
+   that path is a separate question about shipped behaviour.  */
+
+void
+maybe_warn_simdmath_unconstrained (struct gcc_options *opts,
+				   struct gcc_options *opts_set,
+				   location_t loc)
+{
+  if (!opts->x_flag_simdmath || !opts_set->x_flag_simdmath)
+    return;
+
+  const char *model = NULL;
+  switch ((enum fp_model) opts->x_flag_fp_model)
+    {
+    case FP_MODEL_PRECISE: model = "-ffp-model=precise"; break;
+    case FP_MODEL_EXCEPT:  model = "-ffp-model=except"; break;
+    case FP_MODEL_STRICT:  model = "-ffp-model=strict"; break;
+    default: break;
+    }
+
+  if (opts->x_flag_rounding_math)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> vectorizes math calls here regardless "
+		      "of %qs", model ? model : "-frounding-math"))
+	{
+	  inform (loc, "the %<!GCC$ builtin%> declarations it pre-includes "
+		       "attach the vector attribute directly, which "
+		       "%<-frounding-math%> does not gate");
+	  inform (loc, "a vector variant does not follow the rounding mode, "
+		       "so results may differ from the scalar calls");
+	}
+    }
+  /* Deliberately no errno branch here.  gfc_init_options fixes
+     flag_errno_math off and marks it front-end set, Fortran intrinsics do
+     not set errno, and no measurement showed an explicit -fmath-errno
+     changing anything gfortran generates - so -fsimdmath is not taking
+     away something the user was getting.  Only the rounding mode is a
+     demonstrable divergence from what a model asks for.  */
+}
+
+void
+maybe_warn_simdmath_ineffective (struct gcc_options *opts,
+				 struct gcc_options *opts_set, location_t loc)
+{
+  if (!opts->x_flag_simdmath || !opts_set->x_flag_simdmath)
+    return;
+
+  const char *model = NULL;
+  switch ((enum fp_model) opts->x_flag_fp_model)
+    {
+    case FP_MODEL_PRECISE: model = "-ffp-model=precise"; break;
+    case FP_MODEL_EXCEPT:  model = "-ffp-model=except"; break;
+    case FP_MODEL_STRICT:  model = "-ffp-model=strict"; break;
+    default: break;
+    }
+
+  /* The notes only go out if the warning did: -w inhibits warnings and
+     not notes, so an unconditional inform leaves them orphaned.  */
+  /* -fopenmp honours omp declare simd on its own, so -fno-openmp-simd
+     only makes the directives dormant when it is the sole switch that
+     would have acted on them.  Reporting otherwise was wrong twice over:
+     the vector calls are emitted, and under -Werror the false report
+     failed the build.  */
+  if (!opts->x_flag_openmp_simd && !opts->x_flag_openmp)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> has no effect while "
+		      "%<-fno-openmp-simd%> is in effect"))
+	inform (loc, "the declarations it pre-includes are %<omp declare simd%> "
+		     "directives, which that option leaves dormant");
+    }
+  else if (opts->x_flag_rounding_math)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> has no effect while "
+		      "%<-frounding-math%> is in effect"))
+	{
+	  if (model)
+	    inform (loc, "%qs turns on %<-frounding-math%>", model);
+	  inform (loc, "a vector variant does not follow the rounding mode, "
+		       "so no math call is vectorized");
+	}
+    }
+  else if (opts->x_flag_errno_math)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> has no effect on the math functions "
+		      "that set %<errno%> while %<-fmath-errno%> is in "
+		      "effect"))
+	{
+	  if (model)
+	    inform (loc, "%qs keeps %<errno%>", model);
+	  inform (loc,
+		  "%qs, %qs, %qs, %qs, %qs, %qs and %qs are not vectorized; "
+		  "%qs, %qs, %qs and %qs still are",
+		  "exp", "expf", "log", "logf", "pow", "powf", "exp2f",
+		  "sin", "sinf", "cos", "cosf");
+	}
+    }
+}
+
 /* Handle target- and language-independent options.  Return zero to
    generate an "unknown option" message.  Only options that need
    extra handling need to be listed here; if you simply want
@@ -3026,12 +3153,35 @@ common_handle_option (struct gcc_options *opts,
       dc->m_source_printing.min_margin_width = value;
       break;
 
+    case OPT_fsimdmath:
+      set_simdmath_flags (opts, opts_set, value);
+      break;
+
     case OPT_fdump_:
       /* Deferred.  */
       break;
 
     case OPT_ffast_math:
       set_fast_math_flags (opts, value);
+      break;
+
+    case OPT_ffp_model_:
+      set_fp_model_flags (opts, opts_set, value);
+      break;
+
+      /* The removed spellings are diagnosed once, in driver_handle_option.
+	 The error does not belong here as well - these are Common Driver,
+	 and handle_option runs every handler whose mask matches, so both
+	 would fire in the same driver process and the user would see it
+	 twice.  But a case is still needed: the default arm below asserts
+	 that anything reaching it has a flag variable, and an anchor kept
+	 only to be diagnosed by name deliberately has none, so leaving them
+	 out turned `cc1 -fftz' into
+	   internal compiler error: in common_handle_option
+	 rather than a clean rejection.  The driver normally errors before
+	 cc1 is reached, which is why this stayed hidden.  */
+    case OPT_fp_model_:
+    case OPT_fftz:
       break;
 
     case OPT_funsafe_math_optimizations:
@@ -3414,6 +3564,37 @@ common_handle_option (struct gcc_options *opts,
   return true;
 }
 
+/* The following routines are used to set -fno-math-errno and -fopenmp-simd
+   to enable vector mathlib.  -fno-simdmath only clears the feature flag
+   itself; the implied flags are ordinary order-sensitive side effects and
+   are deliberately not restored (decided 2026-08: no extra semantics on
+   the negative form).  */
+static void
+set_simdmath_flags (struct gcc_options *opts, struct gcc_options *opts_set,
+		    int set)
+{
+  if (set)
+    {
+      /* Vectorizing a math call means giving up errno for it, but not
+	 behind the user's back: every floating-point model except
+	 `fast' promises errno, and an explicit -fmath-errno says so
+	 outright.  Either way -fsimdmath leaves it alone, and the
+	 functions that do not set errno - sin and cos - still
+	 vectorize.  */
+      if (opts->x_flag_fp_model == FP_MODEL_NORMAL
+	  || opts->x_flag_fp_model == FP_MODEL_FAST)
+	SET_OPTION_IF_UNSET (opts, opts_set, flag_errno_math, 0);
+      /* Likewise for the other half of the coupling.  This one has the
+	 wider reach of the two: -fopenmp-simd also activates any `omp
+	 simd' directives already in the source, so a user who wrote
+	 -fno-openmp-simd to keep them dormant must not have them turned
+	 back on by an option they gave for an unrelated reason.  A plain
+	 assignment here honoured -fsimdmath -fno-openmp-simd and ignored
+	 -fno-openmp-simd -fsimdmath, which is no rule at all.  */
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_openmp_simd, 1);
+    }
+}
+
 /* Used to set the level of strict aliasing warnings in OPTS,
    when no level is specified (i.e., when -Wstrict-aliasing, and not
    -Wstrict-aliasing=level was given).
@@ -3455,6 +3636,139 @@ set_fast_math_flags (struct gcc_options *opts, int set)
 	opts->x_flag_rounding_math = 0;
       if (!opts->frontend_set_flag_cx_limited_range)
 	opts->x_flag_cx_limited_range = 1;
+    }
+}
+
+/* Undo the two parts of -ffast-math that set_fast_math_flags cannot.
+   Both are set under `if (set)' there, so passing 0 leaves them
+   standing: -ffast-math -ffp-model=strict kept complex division
+   unranged, and __GCC_IEC_559_COMPLEX stayed 0, in a model that promises
+   value-safe arithmetic.  Only the models call this - -fno-fast-math is
+   left exactly as upstream has it, since changing that would alter
+   every target's behaviour for an option this work does not own.
+
+   The two halves arbitrate differently, deliberately.  Complex range
+   reduction is part of what the model decides, so the model wins over an
+   -fcx-limited-range given before it; fp-model-28.c pins that.  Excess
+   precision is not: -fexcess-precision=16 asks for a rounding step after
+   every _Float16 operation, which is a value-safety request in its own
+   right, and taking it away in the name of value safety is backwards.
+   That half was written with frontend_set_flag_excess_precision, which
+   no front end ever sets and which is not what a command-line option
+   sets either, so the test was always true and the option was discarded
+   outright - measured on AArch64 as fcvt going from six to four and
+   __FLT_EVAL_METHOD__ from 16 to 0.  SET_OPTION_IF_UNSET draws the line
+   in the right place: set_fast_math_flags assigns to opts->x_ directly
+   and never touches opts_set, so a genuine residue is still undone,
+   while anything the user asked for by name survives.  */
+static void
+undo_residual_fast_math_flags (struct gcc_options *opts,
+			       struct gcc_options *opts_set)
+{
+  if (!opts->frontend_set_flag_cx_limited_range)
+    opts->x_flag_cx_limited_range = 0;
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_excess_precision,
+		       EXCESS_PRECISION_DEFAULT);
+}
+
+/* Optimizations that move floating-point computations across control
+   flow can make an exception happen on a path that would not have
+   executed it.  The models that preserve exception semantics turn them
+   off; an explicit request on the command line still wins.
+
+   The last of the three does not reach the transformation, and the
+   documentation says so.  pass_predcom's gate runs the pass whenever
+   loop vectorization is on and the option was not given explicitly -
+   and SET_OPTION_IF_UNSET, by design, leaves opts_set alone, so that
+   escape hatch stays open.  Measured at -O2 and -O3: the pcom dump is
+   produced either way and its contents do not change.  Marking the
+   option as explicitly set would close it, at the price of turning a
+   documented-inert flag into a real optimization loss for every user of
+   the model, on a pass that reuses loads across iterations rather than
+   moving computations across control flow.  Left as it is, deliberately;
+   an explicit -fno-predictive-commoning is the way to reach it.  */
+static void
+set_fp_spurious_exception_flags (struct gcc_options *opts,
+				 struct gcc_options *opts_set)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_expensive_optimizations, 0);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_code_hoisting, 0);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_predictive_commoning, 0);
+}
+
+/* Handle -ffp-model= options.  */
+static void
+set_fp_model_flags (struct gcc_options *opts, struct gcc_options *opts_set,
+		    int set)
+{
+  enum fp_model model = (enum fp_model) set;
+  switch (model)
+    {
+      case FP_MODEL_FAST:
+	/* Equivalent to open ffast-math.  */
+	set_fast_math_flags (opts, 1);
+	break;
+
+      case FP_MODEL_PRECISE:
+	/* Equivalent to close ffast-math.  */
+	set_fast_math_flags (opts, 0);
+	undo_residual_fast_math_flags (opts, opts_set);
+	/* Turn on -frounding-math -fsignaling-nans.  */
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_EXCEPT:
+	/* The driver cancels -ffast-math outright for this model (see
+	   handle_fp_model_driver), so the spellings that make up
+	   -ffast-math have to be undone here for the same reason: a
+	   project whose CFLAGS already carry -funsafe-math-optimizations
+	   or -ffinite-math-only, and that appends a model to get IEEE
+	   behaviour, must actually get it.  -ffinite-math-only is the
+	   sharpest case - it says NaN and Inf do not occur, which is the
+	   very premise `except' exists to deny.  */
+	set_fast_math_flags (opts, 0);
+	undo_residual_fast_math_flags (opts, opts_set);
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	set_fp_spurious_exception_flags (opts, opts_set);
+	/* Also turn on ffpe-trap in fortran.  */
+	break;
+
+      case FP_MODEL_STRICT:
+	/* Turn on both precise and except.  Without the cancellation
+	   `strict' was the weakest of the three models rather than the
+	   strongest: -ffinite-math-only survived it while `precise'
+	   cleared it, so -ffp-model=strict folded __builtin_isnan to 0.  */
+	set_fast_math_flags (opts, 0);
+	undo_residual_fast_math_flags (opts, opts_set);
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	set_fp_spurious_exception_flags (opts, opts_set);
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_NORMAL:
+	/* Do nothing.  */
+	break;
+
+      default:
+	gcc_unreachable ();
     }
 }
 

@@ -440,6 +440,7 @@ static const char *convert_filename (const char *, int, int);
 static void try_generate_repro (const char **argv);
 static const char *getenv_spec_function (int, const char **);
 static const char *if_exists_spec_function (int, const char **);
+static const char *simdmath_link_spec_function (int, const char **);
 static const char *if_exists_else_spec_function (int, const char **);
 static const char *if_exists_then_else_spec_function (int, const char **);
 static const char *sanitize_spec_function (int, const char **);
@@ -1773,6 +1774,7 @@ static const struct spec_function static_spec_functions[] =
 {
   { "getenv",                   getenv_spec_function },
   { "if-exists",		if_exists_spec_function },
+  { "simdmath-link",		simdmath_link_spec_function },
   { "if-exists-else",		if_exists_else_spec_function },
   { "if-exists-then-else",	if_exists_then_else_spec_function },
   { "sanitize",			sanitize_spec_function },
@@ -4668,6 +4670,35 @@ driver_handle_option (struct gcc_options *opts,
 
     case OPT_gcodeview:
       add_infile ("--pdb=", "*");
+      break;
+
+    /* Removed options, diagnosed here and only here.  The driver is the
+       right place because an invocation that compiles nothing never
+       reaches cc1 - a build system reusing CFLAGS in LDFLAGS, or
+       assembling a .s, would otherwise be told nothing at all.
+       common_handle_option carries matching cases that only `break':
+       the options are Common Driver, handle_option runs every handler
+       whose mask matches, so an error in both fired twice in this one
+       process - but silent cases are still needed there, because its
+       default arm asserts a flag variable and these anchors
+       deliberately have none (reachable via -specs appending them to
+       the cc1 command line).  */
+    case OPT_fp_model_:
+      /* Echo what was written, as the -fftz cases below do; naming the
+	 option without its value made the message read as if a bare
+	 -fp-model= had been given.  */
+      error ("%qs is no longer supported; use %<-ffp-model=%> instead",
+	     decoded->orig_option_with_args_text);
+      break;
+
+    case OPT_fftz:
+      /* Both spellings were real, so both get pointed at their
+	 replacement rather than one of them being unrecognized.  */
+      if (value)
+	error ("%<-fftz%> is no longer supported; use %<-mdaz-ftz%> instead");
+      else
+	error ("%<-fno-ftz%> is no longer supported; use %<-mno-daz-ftz%> "
+	       "instead");
       break;
 
     default:
@@ -8267,8 +8298,11 @@ driver::main (int argc, char **argv)
 
   set_progname (argv[0]);
   expand_at_files (&argc, &argv);
-  decode_argv (argc, const_cast <const char **> (argv));
+  /* Initialize diagnostics before decoding: option pruning may emit
+     warnings (e.g. -ffp-model= priority arbitration), and nothing in
+     global_initializations depends on the decoded options.  */
   global_initializations ();
+  decode_argv (argc, const_cast <const char **> (argv));
   build_multilib_strings ();
   set_up_specs ();
   putenv_COLLECT_AS_OPTIONS (assembler_options);
@@ -10477,6 +10511,47 @@ if_exists_spec_function (int argc, const char **argv)
     return argv[0];
 
   return NULL;
+}
+
+/* simdmath-link built-in spec function.
+
+   Expands to the -fsimdmath vector math library link policy selected
+   by the OPENEULER_GCC_SIMDMATH_LINK environment variable:
+
+     as-needed (default)  require libmathlib; a missing library is a
+			  hard linker error
+     none		  never add libmathlib; the user links a provider
+			  explicitly, or accepts the unresolved references
+
+   The value is a strict whitelist and environment strings are never
+   spliced into the link line; anything unrecognized is a fatal
+   error.  */
+
+static const char *
+simdmath_link_spec_function (int argc, const char **argv ATTRIBUTE_UNUSED)
+{
+  if (argc != 0)
+    fatal_error (input_location,
+		 "spec function %<simdmath-link%> takes no arguments");
+
+  const char *policy = env.get ("OPENEULER_GCC_SIMDMATH_LINK");
+  /* Only libmathlib.  The packaged build of it records just libc and
+     leaves its own references to cos, sin, powl and the rest of libm
+     undefined, so a C link needs -lm as well - but supplying it here
+     would satisfy the program's own libm references too, and removing
+     -fsimdmath later would then break a link that had been working.
+     That is an underlinked library, not something the driver should
+     paper over; invoke.texi documents the requirement instead.  */
+  if (policy == NULL || policy[0] == '\0'
+      || strcmp (policy, "as-needed") == 0)
+    return "%{static|static-pie:-lmathlib;"
+	   ":--push-state --as-needed -lmathlib --pop-state}";
+  if (strcmp (policy, "none") == 0)
+    return "";
+  fatal_error (input_location,
+	       "invalid value %qs in environment variable "
+	       "%<OPENEULER_GCC_SIMDMATH_LINK%>; expected %<as-needed%> or "
+	       "%<none%>", policy);
 }
 
 /* if-exists-else built-in spec function.

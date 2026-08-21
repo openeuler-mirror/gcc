@@ -237,6 +237,16 @@ Enable the division approximation.  Enabling this reduces
 precision of division results to about 16 bits for
 single precision and to 32 bits for double precision.
 
+mdaz-ftz
+Target
+Set the flush-to-zero flag in the floating-point control register at startup.
+
+msimdmath-vec64
+Target Var(flag_simdmath_vec64) Optimization
+With -fsimdmath, also enumerate 64-bit vector simd clones (e.g. V2SF) for
+math builtin declarations.  No current vector math library provides these
+variants, so enabling this option may cause unresolved symbols at link time.
+
 Enum
 Name(early_ra_scope) Type(enum aarch64_early_ra_scope)
 

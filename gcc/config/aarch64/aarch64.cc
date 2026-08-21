@@ -28957,6 +28957,43 @@ lane_size (cgraph_simd_clone_arg_type clone_arg_type, tree type)
 }
 
 
+/* True if DECL is one of the math functions whose vector variants
+   -fsimdmath declares and libmathlib provides.  The list is the contents
+   of libgomp/simdmath.h.in; keep the two in step.  */
+
+/* Maintenance note: this list must stay in lockstep with the eleven
+   functions libgomp/simdmath.h.in and simdmath_f.h.in declare - it is
+   what keeps their 64-bit clones from being enumerated.  Nothing
+   checks the correspondence mechanically: a function added to the
+   headers but not here escapes the suppression, and the failure shows
+   up only as an undefined _ZGVnN2* reference at link time.
+
+   Under -flto this predicate's caller runs at link time on
+   declarations with no per-function optimization state, so the
+   flag_simdmath it is guarded by comes from the link command line;
+   compiling with -fsimdmath but linking without it loses the
+   suppression (measured; invoke.texi documents the requirement).  */
+
+static bool
+aarch64_simdmath_covered_p (tree decl)
+{
+  if (!fndecl_built_in_p (decl, BUILT_IN_NORMAL))
+    return false;
+
+  switch (DECL_FUNCTION_CODE (decl))
+    {
+    case BUILT_IN_COS:   case BUILT_IN_COSF:
+    case BUILT_IN_SIN:   case BUILT_IN_SINF:
+    case BUILT_IN_EXP:   case BUILT_IN_EXPF:
+    case BUILT_IN_LOG:   case BUILT_IN_LOGF:
+    case BUILT_IN_POW:   case BUILT_IN_POWF:
+    case BUILT_IN_EXP2F:
+      return true;
+    default:
+      return false;
+    }
+}
+
 /* Implement TARGET_SIMD_CLONE_COMPUTE_VECSIZE_AND_SIMDLEN.  */
 
 static int
@@ -29054,7 +29091,45 @@ aarch64_simd_clone_compute_vecsize_and_simdlen (struct cgraph_node *node,
   if (known_eq (clonei->simdlen, 0U))
     {
       simdlen = exact_div (poly_uint64 (64), nds_elt_bits);
-      if (maybe_ne (simdlen, 1U))
+      /* Under -fsimdmath, the math functions get their vector
+	 implementations from the vector math library, which only provides
+	 128-bit variants.  Do not enumerate 64-bit clones for them unless
+	 -msimdmath-vec64 states the library has such variants.
+
+	 Confined by name to the eleven functions that library covers.
+	 The gate first read `any declaration this translation unit does
+	 not define', which took in every omp declare simd declaration in
+	 the program; narrowing it to built-ins was not enough either,
+	 since every libm name is one.
+
+	 By name is where it stops, deliberately.  A program that supplies
+	 its own vector sinf and declares it with omp declare simd does
+	 lose the 64-bit clone here, renamed with asm or not, and
+	 invoke.texi says so: -fsimdmath means the vector math comes from
+	 the packaged library, so a build supplying its own should not be
+	 enabling it.  Distinguishing the two would mean asking where the
+	 declaration came from - DECL_IS_UNDECLARED_BUILTIN separates them
+	 cleanly - which was considered and not done, because the
+	 behaviour it would buy is one the option does not promise.
+
+	 Fortran reaches this through !GCC$ builtin (x) attributes simd,
+	 which marks the built-in decl, so the check sees it.  The
+	 declarations -fsimdmath itself contributes in C and C++ never
+	 reach this branch, since each pins its own simdlen; what reaches
+	 it there is the program's own.
+
+	 DECL_EXTERNAL, not the negated cgraph definition flag, for
+	 `this unit does not provide it' - and not because the two part
+	 ways: measured both ways across every construction the suite
+	 pins (a plain declaration, a unit defining one of the eleven
+	 under omp declare simd, a gnu89 extern inline body among them),
+	 they answer alike at this hook.  DECL_EXTERNAL is kept because
+	 it asks the declaration itself, with no dependence on how much
+	 of the cgraph has been finalized by the time this hook runs.  */
+      if (maybe_ne (simdlen, 1U)
+	  && !(flag_simdmath && !flag_simdmath_vec64
+	       && DECL_EXTERNAL (node->decl)
+	       && aarch64_simdmath_covered_p (node->decl)))
 	simdlens.safe_push (simdlen);
       simdlens.safe_push (simdlen * 2);
     }

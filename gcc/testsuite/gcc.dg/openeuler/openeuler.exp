@@ -1,0 +1,284 @@
+# GCC testsuite driver for openEuler-specific C feature tests.
+#
+# Run only this suite with:
+#   make check-gcc RUNTESTFLAGS="openeuler.exp"
+
+# Load support procs.
+load_lib gcc-dg.exp
+
+# If a testcase doesn't have special options, use these.
+global DEFAULT_CFLAGS
+if ![info exists DEFAULT_CFLAGS] then {
+    set DEFAULT_CFLAGS " -ansi -pedantic-errors"
+}
+
+global TEST_ALWAYS_FLAGS
+set simdmath_saved_flags ""
+set simdmath_had_flags [info exists TEST_ALWAYS_FLAGS]
+if { $simdmath_had_flags } {
+    set simdmath_saved_flags $TEST_ALWAYS_FLAGS
+}
+
+set all_tests [lsort [glob -nocomplain $srcdir/$subdir/*.\[cSi\]]]
+
+# Partition the suite.  nohdr-simdmath-1.c asserts what -fsimdmath does
+# with nothing on the include path, which is only reproducible before the
+# -isystem below is added, so it runs first.
+#
+# nohdr-simdmath-2.c used to run here too and was vacuous for it: with no
+# header reachable, -ffreestanding changes nothing, so deleting the
+# flag_hosted guard left it passing.  Measured, by deleting that guard -
+# the test went red only once it was moved down here, where the header is
+# reachable and the guard is the only thing keeping it out.  The comment
+# this replaces claimed the ordering was insurance for those guards; it
+# was the opposite.
+#
+# simdmath-shadow-* needs a decoy in the working directory and nothing else
+# does, so it runs on its own with the decoy in place.
+set nohdr_tests {}
+set shadow_tests {}
+set main_tests {}
+foreach test $all_tests {
+    switch -glob -- [file tail $test] {
+	nohdr-simdmath-1.c { lappend nohdr_tests $test }
+	simdmath-shadow-*  { lappend shadow_tests $test }
+	default		   { lappend main_tests $test }
+    }
+}
+
+# Clear the board's implicit -lm for this suite, the way lib/lto.exp does
+# for its own.  DejaGnu appends -lm to every executable link unless the
+# board says otherwise, which makes a link test unable to see a missing
+# libm - and that is exactly the defect simdmath-link-c-1.c exists to
+# catch.  Nothing else here needs it: the run tests use plain arithmetic,
+# and the driver supplies libm itself where the feature needs it.
+global board_info
+set simdmath_board [target_info name]
+set simdmath_had_mathlib [board_info $simdmath_board exists mathlib]
+if { $simdmath_had_mathlib } {
+    set simdmath_saved_mathlib [board_info $simdmath_board mathlib]
+}
+set board_info($simdmath_board,mathlib) " "
+
+# Initialize `dg'.  Inside catch with the group that follows it: the
+# board's mathlib is already cleared at this point and the restore is at
+# the end of the file, so an error escaping from either would leave every
+# later executable link in this runtest process without libm.  dg-init was
+# outside every catch until an injected error showed it - two ERRORs, zero
+# FAILs, and both the cleared mathlib and the -isystem below leaking into
+# the rest of the runtest process.
+set run_rc [catch {
+    dg-init
+    dg-runtest $nohdr_tests "" $DEFAULT_CFLAGS
+} run_result]
+
+# The C and C++ half of -fsimdmath pre-includes simdmath.h, which ships
+# with the compiler and so is not on the search path of one run out of a
+# build tree.  Ask the compiler under test rather than looking for a file:
+# vectorizing a pow loop needs the declaration the pre-include carries, and
+# glibc's libmvec has no pow on this target, so _ZGVnN2vv_pow in the output
+# can only have come from that header.  (A probe that merely looked for a
+# diagnostic did not work: int pow; warns about redeclaring a built-in
+# whether or not the header arrived.)
+# An installed compiler finds its own copy and needs nothing added; the
+# glob-and-inject this replaces answered for the build tree whatever
+# compiler was being tested, which sent every test that requires this
+# effective target to UNSUPPORTED as soon as the suite was pointed at an
+# installed compiler - and that includes the whole C++ side of the
+# feature.
+proc simdmath_header_reaches_compiler { } {
+    # An explicit #include, and deliberately without -fsimdmath.  The
+    # question this has to answer is "does this compiler ship the header",
+    # which is not the same as "does -fsimdmath pre-include it" - and a
+    # probe that asks the second is answered by the very mechanism the
+    # tests exist to check.  Measured: with the C/C++ pre-include deleted
+    # outright, the earlier probe answered "no header", every test that
+    # would have caught it turned into UNSUPPORTED, the suite reported
+    # zero failures and the whole C++ side dropped to zero tests.  The
+    # Fortran suite escaped that only because its probe has always asked
+    # whether include 'simdmath_f.h' compiles.
+    #
+    # Board options precede the ones added here and none of them can make
+    # a header unreadable.  Verified against both answers: yes under nine
+    # board flags with the header reachable, no with nothing on the
+    # include path.  -nostdinc and -ffreestanding answer yes, not no -
+    # -nostdinc does not remove an explicit -isystem, and a build tree
+    # always has one - so under those two boards the header is found
+    # while the pre-include is correctly suppressed by the flag_hosted
+    # and std_inc guards.  The two canaries carry dg-skip-if for them.
+    return [check_no_compiler_messages_nocache simdmath_probe assembly {
+	#include <simdmath.h>
+	int simdmath_probe_dummy;
+    } ""]
+}
+
+if { $run_rc == 0 } {
+    set run_rc [catch { simdmath_header_reaches_compiler } run_result]
+}
+set simdmath_header_found [expr {$run_rc == 0 ? $run_result : 0}]
+global GCC_UNDER_TEST
+if { $run_rc == 0 && !$simdmath_header_found
+     && [string first "/" [lindex $GCC_UNDER_TEST 0]] >= 0 } {
+    # Only when the compiler under test is this build tree's own driver.
+    # Judged by location, not by flags: the fallback header is globbed
+    # from beside the driver binary itself, and only a build tree keeps a
+    # <target>/libgomp build directory next to the directory its driver
+    # runs from.  An installed compiler has nothing there, so pointing
+    # the suite at one that ships without the header - the only
+    # configuration that can show a packaging loss - gets no fallback.
+    # The judgement this replaces, "is there a -B anywhere in the driver
+    # string", masked that defect two independent ways: an installed
+    # compiler invoked with a -B of its own, and one merely living under
+    # a pathname containing -B, both took the fallback and passed every
+    # test.  A driver named with no directory at all comes from PATH and
+    # is never the build tree's, hence the guard above.
+
+    # TEST_ALWAYS_FLAGS rather than the default flags: a test that carries
+    # its own dg-options replaces those, and this path has to survive.
+    #
+    # -isystem, not -I: an installed compiler keeps this header in
+    # libsubincludedir, which is a system directory, and the diagnostics
+    # that apply to a system header are the ones the shipped compiler
+    # applies.  With -I, sweeping any suite with -fsimdmath produced
+    # dozens of failures from -Wtraditional and C90 warnings inside the
+    # compiler's own header.
+    set simdmath_driver_dir \
+	[file dirname [file normalize [lindex $GCC_UNDER_TEST 0]]]
+    foreach cand [glob -nocomplain \
+		      "$simdmath_driver_dir/../*/libgomp/simdmath.h"] {
+	set TEST_ALWAYS_FLAGS "$simdmath_saved_flags -isystem [file dirname $cand]"
+	# Inside catch for the same reason the test groups below are: this
+	# probe runs the compiler, and TEST_ALWAYS_FLAGS has already been
+	# mutated, so an error escaping here would leave the -isystem in
+	# front of every later .exp file in this runtest process.
+	set run_rc [catch { simdmath_header_reaches_compiler } run_result]
+	if { $run_rc == 0 } {
+	    set simdmath_header_found $run_result
+	}
+	break
+    }
+}
+# A header that should have shipped and did not is a failure, not a
+# reason to skip.  Every test that needs the declarations is gated on
+# simdmath_header, so when the answer is no the whole feature goes to
+# UNSUPPORTED and the suite reports success - measured: renaming the two
+# installed headers, with the compiler untouched, left all three suites
+# at zero failures and took the C++ side from 13 PASS to 1.  That is the
+# shape the packaged compiler is in today, since the RPM does not install
+# simdmath.h at all.
+#
+# Ask the compiler under test, not the directory the harness happens to
+# sit in.  omp.h ships from the same nodist_libsubinclude_HEADERS rule in
+# libgomp/Makefile.am as simdmath.h does, so a compiler that reaches one
+# and not the other has lost it in packaging, while a build configured
+# --disable-libgomp has neither and owes nothing.  The glob this replaces
+# looked for any directory named libgomp near $objdir, source trees
+# included, so its answer depended on where runtest was started - and in
+# the one configuration this exists for, a clean directory driving an
+# installed compiler, it answered "no defect".
+proc simdmath_header_absence_is_a_defect { } {
+    return [check_no_compiler_messages_nocache simdmath_omp_probe assembly {
+	#include <omp.h>
+	int simdmath_omp_probe_dummy;
+    } ""]
+}
+
+# Report the missing header once, before the tests that need it all
+# turn into UNSUPPORTED.
+# Only when nothing went wrong above: a Tcl error leaves
+# simdmath_header_found at 0, and reporting a missing header on top of
+# the ERROR would name the wrong cause.
+if { $run_rc == 0 && !$simdmath_header_found
+     && [simdmath_header_absence_is_a_defect] } {
+    fail "simdmath.h is not reachable from the compiler under test"
+}
+
+# The link tests need the packaged libmathlib.  Without it they should be
+# unsupported, not failures: the library is a separate package and its
+# absence says nothing about this compiler.  The probe asks whether the
+# library is there, so it supplies -lm itself - libmathlib does not link
+# standalone, which is the very thing the tests it gates check for.
+proc check_effective_target_libmathlib { } {
+    return [check_no_compiler_messages_nocache libmathlib_probe executable {
+	int main (void) { return 0; }
+    } "-lmathlib -lm"]
+}
+
+# Whether this compiler, with the flags in force, actually emits the
+# vector call - a different question from whether the declarations
+# arrived, and the one a test that scans for a _ZGV symbol is really
+# asking.  A board that turns vectorization off (-fno-tree-vectorize, a
+# -march without SIMD) leaves the declarations in place and emits no
+# call, so the two must not share one effective target.  pow is used
+# because glibc's libmvec has none on this target, so the symbol can only
+# have come from the pre-include.
+proc check_effective_target_simdmath_vectorizes { } {
+    return [check_no_messages_and_pattern_nocache simdmath_vec_probe \
+		"_ZGVnN2vv_pow" assembly {
+	    #include <math.h>
+	    double a[1024], b[1024];
+	    void f (void)
+	    {
+	      int i;
+	      for (i = 0; i < 1024; i++)
+	        a[i] = pow (a[i], b[i]);
+	    }
+	} "-O3 -fsimdmath -ffat-lto-objects -Wno-simdmath"]
+}
+
+# Tests that rely on the pre-included header can only run where it exists;
+# a build without libgomp, or a language-subset build, simply has none.
+proc check_effective_target_simdmath_header { } {
+    global simdmath_header_found
+    return $simdmath_header_found
+}
+
+# Both groups run inside catch: TEST_ALWAYS_FLAGS is global and is re-read
+# for every compile in this runtest process, so a Tcl error escaping from
+# here would leave the -isystem above in front of every later .exp file.
+if { $run_rc == 0 } {
+    set run_rc [catch { dg-runtest $main_tests "" $DEFAULT_CFLAGS } run_result]
+}
+
+# A simdmath.h in the working directory must lose to the compiler's.  The
+# working directory is where the compiler runs, so the decoy goes here;
+# it is removed again immediately, and the removal is not conditional on
+# the tests passing.
+if { $run_rc == 0 && $shadow_tests != {} } {
+    # The decoy is written inside the catch as well.  It was outside, and
+    # an error from open or puts - a read-only working directory is
+    # enough - would have skipped both the restore below and the delete.
+    set run_rc [catch {
+	set decoy [open "simdmath.h" w]
+	puts $decoy "#error simdmath.h was taken from the working directory"
+	close $decoy
+	dg-runtest $shadow_tests "" $DEFAULT_CFLAGS
+    } run_result]
+    file delete "simdmath.h"
+}
+
+# Leave the flags as they were for whatever suite runs next.  Restore, do
+# not unset: an incoming empty string is a value like any other, and
+# unsetting it would make a later `info exists' answer differently than it
+# did before this file ran.
+if { $simdmath_had_flags } {
+    set TEST_ALWAYS_FLAGS $simdmath_saved_flags
+} else {
+    unset -nocomplain TEST_ALWAYS_FLAGS
+}
+
+# All done.
+dg-finish
+
+# Put the board's mathlib setting back for whatever suite runs next.
+if { $simdmath_had_mathlib } {
+    set board_info($simdmath_board,mathlib) $simdmath_saved_mathlib
+} else {
+    unset -nocomplain board_info($simdmath_board,mathlib)
+}
+
+# Re-raise a failure from either group only here, so that the decoy is gone,
+# the flags are restored and dg-finish has run first.
+if { $run_rc } {
+    error $run_result
+}

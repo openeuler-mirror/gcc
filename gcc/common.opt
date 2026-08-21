@@ -737,6 +737,10 @@ Warn when one local variable shadows another local variable or parameter of comp
 Wshadow-compatible-local
 Common Warning Undocumented Alias(Wshadow=compatible-local)
 
+Wsimdmath
+Common Var(warn_simdmath) Init(1) Warning
+Warn when -fsimdmath cannot vectorize because of the floating-point settings in effect.
+
 Wstack-protector
 Common Var(warn_stack_protect) Warning
 Warn when not issuing stack smashing protection for some reason.
@@ -1714,6 +1718,37 @@ ffp-int-builtin-inexact
 Common Var(flag_fp_int_builtin_inexact) Init(1) Optimization
 Allow built-in functions ceil, floor, round, trunc to raise \"inexact\" exceptions.
 
+ffp-model=
+Common Joined RejectNegative Enum(fp_model) Var(flag_fp_model) Init(FP_MODEL_NORMAL) Optimization
+-ffp-model=[normal|fast|precise|except|strict] Perform floating-point precision control.
+
+; Renamed to -mdaz-ftz, which is what upstream already calls the identical
+; option on x86 and which is a Target option, as this one should always
+; have been - it only ever did anything on AArch64.  Kept as a diagnosing
+; anchor so a stale command line is told the new spelling rather than
+; getting "unrecognized command-line option"; both spellings are real, so
+; neither is RejectNegative.  Diagnosed in driver_handle_option.
+fftz
+Common Driver Undocumented
+
+Enum
+Name(fp_model) Type(enum fp_model) UnknownError(unknown floating point precision model %qs)
+
+EnumValue
+Enum(fp_model) String(normal) Value(FP_MODEL_NORMAL)
+
+EnumValue
+Enum(fp_model) String(fast) Value(FP_MODEL_FAST)
+
+EnumValue
+Enum(fp_model) String(precise) Value(FP_MODEL_PRECISE)
+
+EnumValue
+Enum(fp_model) String(except) Value(FP_MODEL_EXCEPT)
+
+EnumValue
+Enum(fp_model) String(strict) Value(FP_MODEL_STRICT)
+
 ; Nonzero means don't put addresses of constant functions in registers.
 ; Used for compiling the Unix kernel, where strange substitutions are
 ; done on the assembly output.
@@ -2405,6 +2440,18 @@ foptimize-sibling-calls
 Common Var(flag_optimize_sibling_calls) Optimization
 Optimize sibling and tail recursive calls.
 
+; Removed spelling of -ffp-model=, kept only as an anchor so that a stale
+; command line gets a diagnostic naming the replacement instead of a bare
+; "unrecognized command-line option".  Diagnosed in driver_handle_option,
+; and only there - see the note beside that case.  The help text is
+; dropped so that the internal note is not what --help=common prints;
+; the option is still listed there, as "This option lacks documentation",
+; because --help=<class> does not exclude Undocumented options - plain
+; --help does.  Eighteen upstream options, -ffast-math among them, are
+; listed the same way.
+fp-model=
+Common Driver Joined RejectNegative Undocumented
+
 fpartial-inlining
 Common Var(flag_partial_inlining) Optimization
 Perform partial inlining.
@@ -2858,6 +2905,10 @@ Disable optimizations observable by IEEE signaling NaNs.
 fsigned-zeros
 Common Var(flag_signed_zeros) Init(1) Optimization SetByCombined
 Disable floating point optimizations that ignore the IEEE signedness of zero.
+
+fsimdmath
+Common Var(flag_simdmath) Init(0) Optimization
+Declare vector variants of the math functions the vector math library provides.
 
 fsingle-precision-constant
 Common Var(flag_single_precision_constant) Optimization

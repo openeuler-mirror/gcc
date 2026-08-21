@@ -394,6 +394,7 @@ Objective-C and Objective-C++ Dialects}.
 -Wno-pragmas  -Wno-prio-ctor-dtor  -Wredundant-decls
 -Wrestrict  -Wno-return-local-addr  -Wreturn-type
 -Wno-scalar-storage-order  -Wsequence-point
+-Wno-simdmath
 -Wshadow  -Wshadow=global  -Wshadow=local  -Wshadow=compatible-local
 -Wno-shadow-ivar
 -Wno-shift-count-negative  -Wno-shift-count-overflow  -Wshift-negative-value
@@ -562,6 +563,7 @@ Objective-C and Objective-C++ Dialects}.
 -fdevirtualize-at-ltrans  -fdse
 -fearly-inlining  -fipa-sra  -fexpensive-optimizations  -ffat-lto-objects
 -ffast-math  -ffinite-math-only  -ffloat-store  -fexcess-precision=@var{style}
+-ffp-model=@var{model}  -fsimdmath  -fno-simdmath
 -ffinite-loops
 -fforward-propagate  -ffp-contract=@var{style}  -ffunction-sections
 -fgcse  -fgcse-after-reload  -fgcse-las  -fgcse-lm  -fgraphite-identity
@@ -798,6 +800,8 @@ Objective-C and Objective-C++ Dialects}.
 -mtls-size=@var{size}
 -mfix-cortex-a53-835769  -mfix-cortex-a53-843419
 -mlow-precision-recip-sqrt  -mlow-precision-sqrt  -mlow-precision-div
+-mdaz-ftz  -mno-daz-ftz
+-msimdmath-vec64  -mno-simdmath-vec64
 -mpc-relative-literal-loads
 -msign-return-address=@var{scope}
 -mbranch-protection=@var{none}|@var{standard}|@var{pac-ret}[+@var{leaf}
@@ -8984,6 +8988,22 @@ allowed in GCC@.  It is not supported by ISO C90.  @xref{Mixed Labels and Declar
 
 This warning is upgraded to an error by @option{-pedantic-errors}.
 
+@opindex Wsimdmath
+@opindex Wno-simdmath
+@item -Wno-simdmath
+Do not report how @option{-fsimdmath} interacts with the floating-point
+settings in effect.  The report is on by default.  In C and C++ it says
+that vectorization cannot happen, naming the setting responsible and,
+where the option is only partly disabled, which functions are affected.
+In Fortran it says the opposite where that is the truth: the vector
+calls are emitted whatever the model asks for, because the declarations
+go through @code{!GCC$ builtin} rather than through the gates the C
+front end honors.  One option covers both, so switching it off switches
+off the Fortran report as well.  It is made once per translation unit,
+before parsing, so @code{#pragma GCC diagnostic} cannot reach it -
+@option{-Wno-simdmath} or @option{-Wno-error=simdmath} on the command
+line is the way to quiet it.
+
 @opindex Wshadow
 @opindex Wno-shadow
 @item -Wshadow
@@ -14987,6 +15007,177 @@ This option is not turned on by any @option{-O} option besides
 that depend on an exact implementation of IEEE or ISO rules/specifications
 for math functions. It may, however, yield faster code for programs
 that do not require the guarantees of these specifications.
+
+@opindex ffp-model
+@item -ffp-model=@var{model}
+Select a floating-point semantics model.  @var{model} is one of:
+
+@table @samp
+@item normal
+The default: no change to the usual floating-point behavior.
+@item fast
+Equivalent to @option{-ffast-math}.
+@item precise
+Disables @option{-ffast-math} and asks for reproducible results:
+@option{-frounding-math} and @option{-fsignaling-nans} are turned on and
+floating-point contraction is turned off.
+@item except
+Preserves floating-point exception semantics: @option{-ftrapping-math},
+@option{-fsignaling-nans} and @code{errno} setting are turned on, and
+optimizations that can raise an exception on a path that would not have
+executed it - @option{-fexpensive-optimizations}, @option{-fcode-hoisting}
+and @option{-fpredictive-commoning} - are turned off unless requested
+explicitly.  Turning off @option{-fpredictive-commoning} this way does
+not stop predictive commoning: that pass runs whenever loop
+vectorization is enabled and the option was not named on the command
+line, so reaching it takes an explicit
+@option{-fno-predictive-commoning}.  In Fortran it also asks for
+@option{-ffpe-trap=invalid,zero,overflow} and @option{-ffpe-summary=all};
+these are defaults, so a program that gives its own @option{-ffpe-trap=}
+or @option{-ffpe-summary=} keeps that choice, including the choice to
+trap nothing.
+@item strict
+Both @samp{precise} and @samp{except}.
+@end table
+
+@option{-ffp-model=precise}, @option{-ffp-model=except} and
+@option{-ffp-model=strict} take priority over fast-math settings on the
+same command line, wherever those appear: an @option{-Ofast} is degraded
+to @option{-O3} and an @option{-ffast-math} is dropped, each with a
+warning.  A @option{-fno-fast-math} is left alone, since it asks for the
+same thing the model does.  To go back to fast math, name the model:
+@option{-ffp-model=fast}.  When several @option{-ffp-model=} options are
+given, the last one wins and the others are reported.
+
+The individual options that make up @option{-ffast-math}, such as
+@option{-funsafe-math-optimizations} and @option{-ffinite-math-only}, are
+undone by these three models as well, so that appending a model to a set
+of flags that already asks for fast math gets the behavior the model
+names.  Unlike @option{-ffast-math} itself these are not removed from the
+command line but overridden where they are handled, so ordering applies
+in the usual way: a component named after the model wins, and one named
+before it does not.
+
+On AArch64 GNU/Linux the three models additionally suppress
+@file{crtfastmath.o}, whatever brought it in and wherever that appeared,
+unless flush-to-zero was asked for by name; see @option{-mdaz-ftz}.  This
+reaches the program only if the model appears on the command line that
+links it, since that is where the startup file is chosen.  On every other
+target the models govern code generation alone: a program built with
+@option{-funsafe-math-optimizations} and @option{-ffp-model=strict}
+elsewhere still runs with denormals flushed.
+
+@opindex fsimdmath
+@item -fsimdmath
+Declare vector variants of the math functions supported by the vector
+math library, so that loops calling them can be vectorized into calls
+to those variants.  The declarations are pre-included from
+@file{simdmath.h} for C and C++ and from @file{simdmath_f.h} for
+Fortran; both are installed with the compiler and list the functions
+the library covers.  They are looked up as system headers and are
+optional: where neither is installed, or where the search path excludes
+them as @option{-nostdinc} does, the option compiles without them
+instead of failing, and the declarations can be supplied by hand.
+Enabling this option also turns on @option{-fopenmp-simd} where that was
+not decided already, which is required for such calls to be vectorized;
+note that it also activates any @code{omp simd} directives already
+present in the source.  It turns on
+@option{-fno-math-errno} as well, but only where @code{errno} was not
+asked for: an explicit @option{-fmath-errno}, and every floating-point
+model other than @option{normal} and @option{fast}, keep it, and the
+functions that do not set @code{errno} still vectorize.  An explicit @option{-fmath-errno} and
+the value-safe models are honored whichever side of @option{-fsimdmath}
+they appear on.  @option{-fno-fast-math} is not in that set: it asks for
+@code{errno} only as one part of a bundle, so the usual last-one-wins
+rule applies and @option{-fno-fast-math -fsimdmath} vectorizes while
+@option{-fsimdmath -fno-fast-math} does not.
+@option{-fno-simdmath} disables the option itself.  On the command line
+this is all there is to it: the driver collapses an option and its
+negation to whichever came last, so @option{-fsimdmath -fno-simdmath}
+never turns the two flags on in the first place.  They do stay in effect,
+and must be negated separately, where the option is switched off for one
+function rather than for the command line, as with
+@code{__attribute__ ((optimize ("no-simdmath")))}.
+
+How much of the option survives depends on the floating-point settings in
+force, and the compiler says so rather than leaving it to be discovered:
+
+@table @asis
+@item @option{-ffp-model=normal} or @option{fast}
+All eleven functions are vectorized.
+@item @option{-ffp-model=except}, or an explicit @option{-fmath-errno}
+@code{errno} is kept, and a vector variant cannot set it per lane, so
+@code{exp}, @code{expf}, @code{log}, @code{logf}, @code{pow},
+@code{powf} and @code{exp2f} are not vectorized.  @code{sin},
+@code{sinf}, @code{cos} and @code{cosf} do not set @code{errno} and are
+unaffected.  This is the case worth watching: the compiler still emits
+some vector calls, so the option looks like it worked.
+@item @option{-ffp-model=precise} or @option{strict}
+Nothing is vectorized.  Both turn on @option{-frounding-math}, and a
+vector variant does not follow the rounding mode.
+@end table
+
+That table is for C and C++.  Fortran reaches the vector variants by a
+different route - the @code{!GCC$ builtin} declarations in
+@file{simdmath_f.h} attach the attribute to the builtin itself - which
+neither @option{-fmath-errno} nor @option{-frounding-math} gates, so
+there the calls are emitted whatever the model asks for and may not
+follow the rounding mode.  The compiler reports that where it applies.
+The @code{errno} half of a model has no effect in Fortran at all, which
+has no @code{errno} to set, so nothing is reported for it there.
+
+The option can cost compilation time in C and C++.  A precompiled header
+is only usable when nothing has been parsed before it, and these
+declarations are parsed first, so a translation unit that would otherwise
+have loaded one reads its headers from source instead.  Nothing is
+diagnosed and the generated code is the same, but a project that relies
+on precompiled headers builds noticeably slower with this option than
+without it.  Fortran is not affected.
+
+In C++ the declarations carry the same exception specification glibc
+gives these functions, so that they do not clash with the ones
+@file{math.h} declares later in the same translation unit.
+
+Wherever C++ modules are enabled - @option{-fmodules-ts} or
+@option{-fmodule-header} - the declarations are not pre-included at all,
+in any translation unit of that compilation.  A module-declaration has to
+be the first declaration in its file, and these are declarations rather
+than the preprocessor definitions a target pre-include is limited to, so
+a module interface unit would otherwise fail to compile.  Math calls in
+such a compilation are vectorized by declaring the functions with
+@code{omp declare simd} in the usual way; the rest of the option,
+including linking @code{libmathlib}, is unaffected.
+
+On AArch64 the implementations come from @code{libmathlib} (the
+packaged Arm optimized-routines).  The driver links it automatically
+when the option is also given on the command line that links the
+program, under the policy named by the @env{OPENEULER_GCC_SIMDMATH_LINK}
+environment variable:
+
+@table @samp
+@item as-needed
+The default.  Link @code{libmathlib} as needed; a missing library is a
+link error.
+@item none
+Never link @code{libmathlib}: the program supplies its own provider, or
+accepts that the vector math symbols stay unresolved.  This is what the
+compiler did before the option existed, and it is what a build should use
+where the library is not installed.
+@end table
+
+@code{libmathlib} is built without @option{-lm} and leaves its own
+references to the scalar math functions undefined, so a C link needs
+@option{-lm} as well; without it the link fails with undefined references
+to @code{cos}, @code{powl} and similar.  The driver does not supply one
+and does not warn about it either.  Supplying it would put @option{-lm}
+after the program's own objects and satisfy their references too, so
+removing @option{-fsimdmath} later would break a link that had been
+working; warning about it would mean warning on every C link, including
+the many that do not need it, since whether the library is reached is not
+known until the link runs.  C++ and Fortran are unaffected, having
+@code{libm} on the line already.
+
+Any other value is rejected with an error.
 
 @opindex fno-math-errno
 @opindex fmath-errno
@@ -21325,6 +21516,53 @@ precision of square root results to about 16 bits for
 single precision and to 32 bits for double precision.
 If enabled, it implies @option{-mlow-precision-recip-sqrt}.
 
+@opindex mdaz-ftz
+@opindex mno-daz-ftz
+@item -mdaz-ftz
+@itemx -mno-daz-ftz
+Enable or disable flush-to-zero handling of denormal numbers at program
+startup.  This controls whether @file{crtfastmath.o} is linked, which
+sets the flush-to-zero bit in the floating-point control register; the
+AArch64 bit covers what x86 splits between its FTZ and DAZ flags, and the
+option is spelled the same way there.  Its point is to make flush-to-zero
+available on its own, since it is otherwise reachable only as part of the
+aggressive floating-point optimizations implied by @option{-Ofast},
+@option{-ffast-math}, @option{-funsafe-math-optimizations} and
+@option{-ffp-model=fast}, all of which link that file too.
+
+The two spellings are one option, so between them the last on the command
+line wins, as for any flag and its negation.  Once that is settled, the
+startup file is linked according to the first rule below that applies,
+whatever order the remaining options were given in:
+
+@table @asis
+@item @option{-mno-daz-ftz}
+Never linked.  Nothing else overrides it.
+@item @option{-shared}
+Never linked; a shared object does not set the control register for the
+process that loads it.
+@item @option{-mdaz-ftz}
+Linked.  An explicit request for flush-to-zero is honored even under
+@option{-ffp-model=precise}, @option{except} or @option{strict}: those
+models govern the transformations the compiler may perform, and asking
+for both is asking for IEEE code generation with denormals flushed.
+@item @option{-ffp-model=precise}, @option{except} or @option{strict}
+Not linked.  This is what keeps flush-to-zero from arriving implicitly,
+for instance through a @option{-funsafe-math-optimizations} that a
+project's @env{CFLAGS} carried in.
+@item @option{-Ofast}, @option{-ffast-math}, @option{-funsafe-math-optimizations}, @option{-ffp-model=fast}
+Linked.
+@end table
+
+Because it works by linking a startup file, it takes effect only when it
+appears on the command line that links the program, and what it sets is
+process-wide: one object built with it makes every part of that program
+run with denormals flushed, whatever the other objects were compiled
+with.  For that reason it is ignored for @option{-shared} here, which is
+a deliberate difference from the x86 option of the same name: a shared
+object should not decide the control register for a process that merely
+loads it.
+
 @opindex mlow-precision-div
 @opindex mno-low-precision-div
 @item -mlow-precision-div
@@ -21334,6 +21572,50 @@ This option only has an effect if @option{-ffast-math} or
 @option{-funsafe-math-optimizations} is used as well.  Enabling this reduces
 precision of division results to about 16 bits for
 single precision and to 32 bits for double precision.
+
+@opindex msimdmath-vec64
+@opindex mno-simdmath-vec64
+@item -msimdmath-vec64
+@itemx -mno-simdmath-vec64
+Under @option{-fsimdmath}, also consider 64-bit vector variants (for
+example @code{V2SF}) when vectorizing calls to the math functions
+declared by that option.  Disabled by default: no vector math library
+currently implements those variants, so enabling this option can leave
+unresolved symbols at link time.
+
+The 64-bit variants are withheld by name, from the eleven functions
+@file{simdmath.h} and @file{simdmath_f.h} declare, and only where the
+translation unit does not define them.  A function under any other name
+keeps its full clone set, and so does one this translation unit defines.
+
+The suppression is by name, so it also applies to a declaration the
+program wrote itself, when that declaration uses one of those eleven
+names.  A program that supplies its own vector implementation of, say,
+@code{sinf} and declares it with @code{omp declare simd} loses the
+@code{_ZGVnN2v_sinf} call path while @option{-fsimdmath} is in force,
+even if the symbol is renamed with @code{asm}.  This is a consequence of
+what the option means: @option{-fsimdmath} says the vector math comes
+from the packaged library, and that library has no 64-bit variants, so a
+build supplying its own should not enable it.  Where both are wanted,
+@option{-msimdmath-vec64} restores the 64-bit variants for every one of
+the eleven, which also means the compiler may then emit calls the
+packaged library cannot satisfy.
+
+In C and C++ the declarations @option{-fsimdmath} itself contributes name
+their own @code{simdlen} and are unaffected by this option either way;
+Fortran, which reaches the variants through @code{!GCC$ builtin}, is
+where it changes what the option does.
+
+Under link-time optimization the suppression follows the @emph{link}
+command line.  The vector clones are enumerated at link time, on
+library declarations that carry no per-function optimization state, so
+a @option{-fsimdmath} given only when compiling does not withhold the
+64-bit variants there, and the vectorizer may select a variant no
+library provides - the link then fails with an undefined @code{_ZGV}
+reference.  A Fortran program built with @option{-fsimdmath -flto}
+must therefore carry @option{-fsimdmath} on the link command line as
+well.  @option{-msimdmath-vec64} likewise takes effect at link time
+under LTO.
 
 @item -mtrack-speculation
 @itemx -mno-track-speculation

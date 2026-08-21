@@ -190,6 +190,9 @@ UrlSuffix(gcc/Warning-Options.html#index-Wshadow_003dlocal)
 Wshadow=compatible-local
 UrlSuffix(gcc/Warning-Options.html#index-Wshadow_003dcompatible-local)
 
+Wsimdmath
+UrlSuffix(gcc/Warning-Options.html#index-Wno-simdmath)
+
 Wstack-protector
 UrlSuffix(gcc/Warning-Options.html#index-Wno-stack-protector)
 
@@ -678,6 +681,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-ffp-contract)
 
 ffp-int-builtin-inexact
 UrlSuffix(gcc/Optimize-Options.html#index-ffp-int-builtin-inexact)
+
+ffp-model=
+UrlSuffix(gcc/Optimize-Options.html#index-ffp-model)
 
 ffunction-cse
 UrlSuffix(gcc/Optimize-Options.html#index-ffunction-cse)
@@ -1269,6 +1275,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-fsignaling-nans)
 
 fsigned-zeros
 UrlSuffix(gcc/Optimize-Options.html#index-fno-signed-zeros)
+
+fsimdmath
+UrlSuffix(gcc/Optimize-Options.html#index-fsimdmath)
 
 fsingle-precision-constant
 UrlSuffix(gcc/Optimize-Options.html#index-fsingle-precision-constant)

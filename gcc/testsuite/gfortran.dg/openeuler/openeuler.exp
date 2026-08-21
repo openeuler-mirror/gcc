@@ -1,0 +1,150 @@
+# GCC testsuite driver for openEuler-specific Fortran feature tests.
+#
+# Run only this suite with:
+#   make check-gfortran RUNTESTFLAGS="openeuler.exp"
+
+# Load support procs.
+load_lib gfortran-dg.exp
+
+# If a testcase doesn't have special options, use these.
+global DEFAULT_FFLAGS
+if ![info exists DEFAULT_FFLAGS] then {
+    set DEFAULT_FFLAGS " -pedantic-errors"
+}
+
+# simdmath_f.h ships with the compiler, so one run out of a build tree has
+# no installed copy to find.  Ask the compiler under test rather than
+# looking for a file: gfortran resolves an INCLUDE statement through the
+# same directory list the pre-include uses, so a probe that includes the
+# header by name answers exactly the question.  Looking for the build
+# tree's copy instead answered for a compiler that might not be the one
+# being tested.
+#
+# Where a path does have to be added it is -I, not -isystem: gfortran
+# finds this header through its include-dir list, not a bracket chain.
+# ALWAYS_GFORTRANFLAGS rather than the default flags: a test that carries
+# its own dg-options replaces those, and gfortran_init has already folded
+# TEST_ALWAYS_FLAGS in by the time this file runs.
+proc simdmath_header_reaches_compiler { } {
+    return [check_no_compiler_messages_nocache simdmath_probe_f assembly {
+! Fortran
+	program main
+	  include 'simdmath_f.h'
+	end program
+    } "-Wno-simdmath"]
+}
+
+global ALWAYS_GFORTRANFLAGS
+set simdmath_saved_flags $ALWAYS_GFORTRANFLAGS
+set simdmath_header_found [simdmath_header_reaches_compiler]
+global GFORTRAN_UNDER_TEST
+if { !$simdmath_header_found
+     && [string first "/" [lindex $GFORTRAN_UNDER_TEST 0]] >= 0 } {
+    # Only when the compiler under test is this build tree's own driver.
+    # Judged by location, not by flags: the fallback header is globbed
+    # from beside the driver binary itself, and only a build tree keeps a
+    # <target>/libgomp build directory next to the directory its driver
+    # runs from.  An installed compiler has nothing there, so pointing
+    # the suite at one that ships without the header - the only
+    # configuration that can show a packaging loss - gets no fallback.
+    # The judgement this replaces, "is there a -B anywhere in the driver
+    # string", masked that defect two independent ways: an installed
+    # compiler invoked with a -B of its own, and one merely living under
+    # a pathname containing -B, both took the fallback and passed every
+    # test.  A driver named with no directory at all comes from PATH and
+    # is never the build tree's, hence the guard above.
+    set simdmath_driver_dir \
+	[file dirname [file normalize [lindex $GFORTRAN_UNDER_TEST 0]]]
+    foreach cand [glob -nocomplain \
+		      "$simdmath_driver_dir/../*/libgomp/simdmath_f.h"] {
+	lappend ALWAYS_GFORTRANFLAGS "additional_flags=-I[file dirname $cand]"
+	set simdmath_header_found [simdmath_header_reaches_compiler]
+	break
+    }
+}
+
+# The link tests need the packaged libmathlib.  Without it they should be
+# unsupported, not failures: the library is a separate package and its
+# absence says nothing about this compiler.  The probe asks whether the
+# library is there, so it supplies -lm itself - libmathlib does not link
+# standalone, which is the very thing the tests it gates check for.
+proc check_effective_target_libmathlib { } {
+    return [check_no_compiler_messages_nocache libmathlib_probe executable {
+! Fortran
+	program main
+	end program
+    } "-lmathlib -lm"]
+}
+
+# Whether this compiler, with the flags in force, actually emits the
+# vector call - a different question from whether the header was found,
+# and the one a test that scans for a _ZGV symbol is really asking.
+# -ffat-lto-objects mirrors what the dg layer adds under an -flto
+# board; without it the probe reads LTO IR and finds nothing.
+proc check_effective_target_simdmath_vectorizes { } {
+    return [check_no_messages_and_pattern_nocache simdmath_vec_probe_f \
+		"_ZGVnN2vv_pow" assembly {
+! Fortran
+	program main
+	  real(8) :: a(1024), b(1024)
+	  integer :: i
+	  do i = 1, 1024
+	    a(i) = a(i) ** b(i)
+	  end do
+	  if (a(1) < 0) stop 1
+	end program
+    } "-O3 -fsimdmath -ffat-lto-objects -Wno-simdmath"]
+}
+
+# Tests that rely on the pre-included header can only run where it exists;
+# a build without libgomp, or a language-subset build, simply has none.
+proc check_effective_target_simdmath_header { } {
+    global simdmath_header_found
+    return $simdmath_header_found
+}
+
+# Initialize `dg'.
+dg-init
+# A header that should have shipped and did not is a failure, not a
+# reason to skip.  Every test that needs the declarations is gated on
+# simdmath_header, so when the answer is no the whole feature goes to
+# UNSUPPORTED and the suite reports success - measured: renaming the two
+# installed headers, with the compiler untouched, left all three suites
+# at zero failures and took the C++ side from 13 PASS to 1.  That is the
+# shape the packaged compiler is in today, since the RPM does not install
+# simdmath_f.h at all.
+#
+# Ask the compiler under test, not the directory the harness happens to
+# sit in.  omp_lib.h ships from the same nodist_finclude_HEADERS rule in
+# libgomp/Makefile.am as simdmath_f.h does, so a compiler that reaches one
+# and not the other has lost it in packaging, while a build configured
+# --disable-libgomp has neither and owes nothing.  The glob this replaces
+# looked for any directory named libgomp near $objdir, source trees
+# included, so its answer depended on where runtest was started - and in
+# the one configuration this exists for, a clean directory driving an
+# installed compiler, it answered "no defect".
+proc simdmath_header_absence_is_a_defect { } {
+    return [check_no_compiler_messages_nocache simdmath_omp_probe_f95 assembly {
+! Fortran
+	program main
+	  include 'omp_lib.h'
+	end program
+    } ""]
+}
+
+# Report the missing header once, before the tests that need it all
+# turn into UNSUPPORTED.
+if { !$simdmath_header_found && [simdmath_header_absence_is_a_defect] } {
+    fail "simdmath_f.h is not reachable from the compiler under test"
+}
+
+# Main loop.
+gfortran-dg-runtest [lsort \
+       [glob -nocomplain $srcdir/$subdir/*.\[fF\]{,90,95,03,08} ] ] \
+       "" $DEFAULT_FFLAGS
+
+# Leave the flags as they were for whatever suite runs next.
+set ALWAYS_GFORTRANFLAGS $simdmath_saved_flags
+
+# All done.
+dg-finish
