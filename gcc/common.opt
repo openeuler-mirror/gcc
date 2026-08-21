@@ -4068,4 +4068,12 @@ fipa-ra
 Common Var(flag_ipa_ra) Optimization
 Use caller save register across calls if possible.
 
+ffind-with-sve
+Common Var(flag_find_with_sve) Init(0) Optimization
+Enable replace std::find with sve
+
+fsve-expand-std-find-threshold
+Common Var(sve_expand_std_find_threshold) Init(8) Optimization
+Minimal length of the array to search
+
 ; This comment is to ensure we retain the blank line above.

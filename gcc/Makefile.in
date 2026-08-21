@@ -1498,6 +1498,7 @@ OBJS = \
 	gimple-range-phi.o \
 	gimple-range-trace.o \
 	gimple-ssa-backprop.o \
+	gimple-ssa-expand-sve.o \
 	gimple-ssa-isolate-paths.o \
 	gimple-ssa-nonnull-compare.o \
 	gimple-ssa-sccopy.o \
