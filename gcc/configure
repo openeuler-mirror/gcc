@@ -15413,6 +15413,12 @@ esac
 
 
 cat >>confdefs.h <<_ACEOF
+#define BOLTPLUGINSONAME "${host_bolt_plugin_soname}"
+_ACEOF
+
+
+
+cat >>confdefs.h <<_ACEOF
 #define LTOPLUGINSONAME "${host_lto_plugin_soname}"
 _ACEOF
 
