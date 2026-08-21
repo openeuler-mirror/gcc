@@ -3182,6 +3182,7 @@ common_handle_option (struct gcc_options *opts,
 	 cc1 is reached, which is why this stayed hidden.  */
     case OPT_fp_model_:
     case OPT_fftz:
+    case OPT_fmerge_mull:
       break;
 
     case OPT_funsafe_math_optimizations:

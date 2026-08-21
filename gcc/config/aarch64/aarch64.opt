@@ -335,6 +335,10 @@ Use an immediate to offset from the stack protector guard register, sp_el0.
 This option is for use with fstack-protector-strong and not for use in
 user-land code.
 
+mmul-widen128
+Target Var(flag_aarch64_mul_widen128) Optimization Init(0)
+Enable recognition of 64-bit to 128-bit widening multiplication idioms.
+
 TargetVariable
 long aarch64_stack_protector_guard_offset = 0
 

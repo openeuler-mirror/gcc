@@ -4683,6 +4683,15 @@ driver_handle_option (struct gcc_options *opts,
        default arm asserts a flag variable and these anchors
        deliberately have none (reachable via -specs appending them to
        the cc1 command line).  */
+    case OPT_fmerge_mull:
+      /* Common Driver, so this is reached on every target, while
+	 -mmul-widen128 exists only on AArch64.  Naming it unqualified
+	 sent an x86 user from one error to another: take the suggestion
+	 and the option is unrecognized.  */
+      error ("%<-fmerge-mull%> is no longer supported; the transformation "
+	     "it enabled is part of %<-mmul-widen128%> on AArch64");
+      break;
+
     case OPT_fp_model_:
       /* Echo what was written, as the -fftz cases below do; naming the
 	 option without its value made the message read as if a bare

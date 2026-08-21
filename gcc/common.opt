@@ -2330,6 +2330,17 @@ fmerge-debug-strings
 Common Var(flag_merge_debug_strings) Init(1)
 Attempt to merge identical debug strings across compilation units.
 
+; Removed option: the transformation it enabled is part of
+; -mmul-widen128.  Kept as a diagnosing anchor, help text omitted; see
+; the note on fp-model= above.  RejectNegative matters here: without it
+; the -fno- spelling decodes to this same option and hits the anchor, so
+; a build carrying -fno-merge-mull - the likeliest spelling to survive,
+; since the feature was default-off and known broken - failed with an
+; error naming an option nobody wrote.  -fno-merge-mull is now what it
+; should be for a removed option: unrecognized.
+fmerge-mull
+Common Driver RejectNegative Undocumented
+
 fmessage-length=
 Common RejectNegative Joined UInteger
 -fmessage-length=<number>	Limit diagnostics to <number> characters per line.  0 suppresses line-wrapping.

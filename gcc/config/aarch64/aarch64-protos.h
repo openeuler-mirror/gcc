@@ -1083,6 +1083,11 @@ rtl_opt_pass *make_pass_insert_bti (gcc::context *ctxt);
 rtl_opt_pass *make_pass_cc_fusion (gcc::context *ctxt);
 rtl_opt_pass *make_pass_switch_pstate_sm (gcc::context *ctxt);
 rtl_opt_pass *make_pass_ldp_fusion (gcc::context *);
+/* Forward-declared rather than pulled in: this header is included from
+   places that have not seen tree-pass.h, and every other pass factory
+   here returns rtl_opt_pass, which tm.h has already declared.  */
+class gimple_opt_pass;
+gimple_opt_pass *make_pass_aarch64_mul_widen128 (gcc::context *ctxt);
 
 poly_uint64 aarch64_regmode_natural_size (machine_mode);
 

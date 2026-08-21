@@ -801,7 +801,7 @@ Objective-C and Objective-C++ Dialects}.
 -mfix-cortex-a53-835769  -mfix-cortex-a53-843419
 -mlow-precision-recip-sqrt  -mlow-precision-sqrt  -mlow-precision-div
 -mdaz-ftz  -mno-daz-ftz
--msimdmath-vec64  -mno-simdmath-vec64
+-mmul-widen128  -mno-mul-widen128  -msimdmath-vec64  -mno-simdmath-vec64
 -mpc-relative-literal-loads
 -msign-return-address=@var{scope}
 -mbranch-protection=@var{none}|@var{standard}|@var{pac-ret}[+@var{leaf}
@@ -21572,6 +21572,45 @@ This option only has an effect if @option{-ffast-math} or
 @option{-funsafe-math-optimizations} is used as well.  Enabling this reduces
 precision of division results to about 16 bits for
 single precision and to 32 bits for double precision.
+
+@opindex mmul-widen128
+@opindex mno-mul-widen128
+@item -mmul-widen128
+@itemx -mno-mul-widen128
+Recognize a hand-written 64x64 to 128-bit multiply---four 32-bit quadrant
+products recombined with shifts and carries---and let the hardware do it
+instead.  Both the bit-splice and the wrapping addition formulations of
+the low half are recognized, in either case only for unsigned 64-bit
+operands.  Code that keeps both halves, or only the high one, becomes a
+widening multiply; code that keeps only the low half becomes a plain
+64-bit multiply, since no widening is needed for it.  Disabled by
+default.
+
+The carries must be spelled as expressions---@code{hi += (uint64_t) (lo
+< a);} and the like.  A carry written as an @code{if} statement is not
+recognized, and neither is a schoolbook whose high half is stored only
+on one path or inside a loop.  In each such case the code is compiled as
+written---at most the low half is folded to a plain 64-bit
+multiply---never wrongly.
+
+Under link-time optimization this option takes effect only if it is given
+when compiling; passing it only at link time has no effect, since each
+function is optimized according to the options its own translation unit
+was compiled with.
+
+The recognition also depends on the shape reaching the pass intact, so a
+few option combinations leave the multiply alone even though the option
+is in force.  Instrumentation that splits a basic block is one:
+@option{-fprofile-arcs}, @option{-fprofile-generate} and
+@option{-fcondition-coverage} all leave parts of the idiom split across
+blocks, and they do so for both formulations - including the bit
+splice, whose source has no conditional in it, since the compiler
+introduces and normally collapses branches of its own.  This
+matters because the first step of a profile-guided build is a
+@option{-fprofile-generate} compile; @option{-fprofile-use} is
+unaffected.  @option{-Og} is a different case: the pass this one runs
+after is not in that pipeline, so it never runs at all.  In each case
+the effect is a missed optimization, never a wrong result.
 
 @opindex msimdmath-vec64
 @opindex mno-simdmath-vec64

@@ -97,3 +97,6 @@ UrlSuffix(gcc/AArch64-Options.html#index-mstack-protector-guard-reg)
 mstack-protector-guard-offset=
 UrlSuffix(gcc/AArch64-Options.html#index-mstack-protector-guard-offset)
 
+mmul-widen128
+UrlSuffix(gcc/AArch64-Options.html#index-mmul-widen128)
+
