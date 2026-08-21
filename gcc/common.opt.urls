@@ -426,6 +426,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-fbranch-count-reg)
 fbranch-probabilities
 UrlSuffix(gcc/Optimize-Options.html#index-fbranch-probabilities)
 
+fbuiltin-will-return
+UrlSuffix(gcc/Optimize-Options.html#index-fbuiltin-will-return)
+
 fcallgraph-info
 UrlSuffix(gcc/Developer-Options.html#index-fcallgraph-info)
 

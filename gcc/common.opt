@@ -1188,6 +1188,10 @@ fbtr-bb-exclusive
 Common Ignore
 Does nothing.  Preserved for backward compatibility.
 
+fbuiltin-will-return
+Common Var(flag_builtin_will_return) Optimization
+Treat built-ins that cannot loop, throw or exit - today only __builtin_prefetch - as calls that always return.
+
 fcallgraph-info
 Common RejectNegative Var(flag_callgraph_info) Init(NO_CALLGRAPH_INFO);
 Output callgraph information on a per-file basis.

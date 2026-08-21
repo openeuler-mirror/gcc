@@ -3032,6 +3032,49 @@ nonbarrier_call_p (gimple *call)
   return false;
 }
 
+/* True if CALL is a built-in that always returns: it cannot loop
+   forever, throw, or terminate the program.  GCC's ECF_* vocabulary
+   has no such bit (the concept matches LLVM's `willreturn'
+   attribute), so this is an explicit whitelist, gated by
+   -fbuiltin-will-return.  Extend the switch only with built-ins for
+   which all three properties hold unconditionally.  */
+
+static inline bool
+will_return_builtin_p (gimple *call)
+{
+  if (!flag_builtin_will_return)
+    return false;
+
+  if (!gimple_call_builtin_p (call, BUILT_IN_NORMAL))
+    return false;
+
+  switch (DECL_FUNCTION_CODE (gimple_call_fndecl (call)))
+    {
+    case BUILT_IN_PREFETCH:
+      return true;
+    default:
+      return false;
+    }
+}
+
+/* True if CALL is guaranteed to return exactly once.  With
+   -fbuiltin-will-return off this must compute precisely the condition
+   its callers open-coded before it existed - const-or-pure, not
+   looping, cannot throw externally - so that the default behaviour
+   stays byte-for-byte upstream's.  */
+
+bool
+will_return_call_p (gimple *call, function *fun)
+{
+  int flags = gimple_call_flags (call);
+  if (!(flags & (ECF_CONST|ECF_PURE))
+      || (flags & ECF_LOOPING_CONST_OR_PURE)
+      || stmt_can_throw_external (fun, call))
+    return will_return_builtin_p (call);
+
+  return true;
+}
+
 /* Callback for walk_stmt_load_store_ops.
  
    Return TRUE if OP will dereference the tree stored in DATA, FALSE

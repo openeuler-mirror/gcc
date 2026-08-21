@@ -552,6 +552,7 @@ Objective-C and Objective-C++ Dialects}.
 -fno-allocation-dce -fallow-store-data-races
 -fassociative-math  -fauto-profile  -fauto-profile[=@var{path}]
 -fauto-inc-dec  -fbranch-probabilities
+-fbuiltin-will-return
 -fcaller-saves
 -fcombine-stack-adjustments  -fconserve-stack
 -ffold-mem-offsets
@@ -13015,6 +13016,21 @@ Combine increments or decrements of addresses with memory accesses.
 This pass is always skipped on architectures that do not have
 instructions to support this.  Enabled by default at @option{-O1} and
 higher on architectures that support this.
+
+@opindex fbuiltin-will-return
+@item -fbuiltin-will-return
+Treat built-in calls that cannot loop, throw or exit the program -
+currently only @code{__builtin_prefetch} - as calls that always
+return.  Off by default.
+
+GCC normally assumes any call that is not @code{const} or @code{pure}
+might not return, and refuses to hoist a possibly-trapping expression
+- a memory load, typically - across it.  A prefetch only drops a hint
+to the hardware, but its attributes cannot say so, so code dense with
+prefetches (for example, produced by an automatic prefetch insertion
+pass) loses redundancy elimination around every one of them.  This
+option lifts that pessimization for the whitelisted built-ins.  It
+never changes what the program computes.
 
 @opindex fdce
 @item -fdce
