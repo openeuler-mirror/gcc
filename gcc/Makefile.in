@@ -1540,6 +1540,9 @@ OBJS = \
 	init-regs.o \
 	internal-fn.o \
 	ipa-struct-reorg/ipa-struct-reorg.o \
+	ipa-alignment-propagation.o \
+	ipa-localize-array.o \
+	ipa-array-dse.o \
 	ipa-cp.o \
 	ipa-sra.o \
 	ipa-devirt.o \

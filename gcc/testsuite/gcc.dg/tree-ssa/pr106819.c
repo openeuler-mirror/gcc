@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp-details" }
+// { dg-options "-O2 -fdump-tree-evrp1-details" }
 
 static int isNaN(double x)
 {
@@ -21,4 +21,4 @@ int main()
     return 0;
 }
 
-// { dg-final {scan-tree-dump-not "Folds to: 0.0" "evrp" } }
+// { dg-final {scan-tree-dump-not "Folds to: 0.0" "evrp1" } }

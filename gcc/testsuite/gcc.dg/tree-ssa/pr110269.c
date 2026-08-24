@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-ccp2 -fdump-tree-optimized -fno-ipa-vrp" } */
+/* { dg-options "-O2 -fdump-tree-ccp3 -fdump-tree-optimized -fno-ipa-vrp" } */
 
 void foo(void);
 static int a = 1, c;
@@ -30,5 +30,5 @@ int main() {
     ;
 }
 
-/* { dg-final { scan-tree-dump-times "Folding predicate" 2 "ccp2" } } */
+/* { dg-final { scan-tree-dump-times "Folding predicate" 2 "ccp3" } } */
 /* { dg-final { scan-tree-dump-not "foo" "optimized" } } */

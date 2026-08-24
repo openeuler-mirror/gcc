@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp -fno-thread-jumps" }
+// { dg-options "-O2 -fdump-tree-evrp1 -fno-thread-jumps" }
 
 void use (double);
 void link_error ();
@@ -31,4 +31,4 @@ foo (double x)
     }
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" { target { { *-*-linux* } && { glibc } } } } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" { target { { *-*-linux* } && { glibc } } } } }

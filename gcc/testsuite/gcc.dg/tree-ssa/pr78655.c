@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-tree-ccp -fno-tree-forwprop -fno-tree-fre -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fno-tree-ccp -fno-tree-forwprop -fno-tree-fre -fdump-tree-evrp1" } */
 
 struct A{int a,b;};
 inline int*f1(struct A*p){return&p->a;}   /* offset of 0.  */
@@ -33,5 +33,5 @@ main()
   
 }
 
-/* { dg-final { scan-tree-dump-not "bad" "evrp"} } */
+/* { dg-final { scan-tree-dump-not "bad" "evrp1"} } */
 

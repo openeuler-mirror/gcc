@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-tree-fre -fdisable-tree-evrp -fdump-tree-vrp1-details -fdelete-null-pointer-checks -fno-thread-jumps" } */
+/* { dg-options "-O2 -fno-tree-fre -fdisable-tree-evrp1 -fdump-tree-vrp1-details -fdelete-null-pointer-checks -fno-thread-jumps" } */
 
 int
 foo (int i, int *p)

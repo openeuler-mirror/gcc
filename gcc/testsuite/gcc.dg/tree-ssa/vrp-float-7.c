@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fno-tree-forwprop -fno-tree-ccp -fno-tree-fre -fdump-tree-evrp" }
+// { dg-options "-O2 -fno-tree-forwprop -fno-tree-ccp -fno-tree-fre -fdump-tree-evrp1" }
 
 extern void link_error ();
 
@@ -11,4 +11,4 @@ foo ()
     link_error ();
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" } }

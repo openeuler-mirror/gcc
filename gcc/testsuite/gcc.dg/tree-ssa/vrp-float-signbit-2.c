@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp" }
+// { dg-options "-O2 -fdump-tree-evrp1" }
 
 // Test that the only thing we know about the signbit about negative number is
 // that it's not 0.
@@ -20,5 +20,5 @@ void func(float x)
     }
 }
 
-// { dg-final { scan-tree-dump-not "num = \[-0-9\];" "evrp" } }
-// { dg-final { scan-tree-dump-not "link_error" "evrp" } }
+// { dg-final { scan-tree-dump-not "num = \[-0-9\];" "evrp1" } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" } }

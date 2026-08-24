@@ -2170,9 +2170,9 @@ enable_cfgo_optimizations (struct gcc_options *opts,
      pass -fselective-scheduling explicitly; SET_OPTION_IF_UNSET honours it.  */
   SET_OPTION_IF_UNSET (opts, opts_set, flag_rename_registers, value);
   SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_partial_training, value);
-  /* flag_ipa_alignment_propagation: feature not yet migrated to gcc-14. */
-  /* flag_ipa_localize_array: feature not yet migrated to gcc-14. */
-  /* flag_ipa_array_dse: feature not yet migrated to gcc-14. */
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_alignment_propagation, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_localize_array, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_array_dse, value);
   SET_OPTION_IF_UNSET (opts, opts_set, flag_gnu89_inline, value);
   /* flag_convert_minmax: -fconvert-minmax was not carried to gcc-14.  It
      was measured to have no effect here (upstream already produces the

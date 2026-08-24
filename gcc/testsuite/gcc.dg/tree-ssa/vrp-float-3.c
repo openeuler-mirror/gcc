@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdisable-tree-ethread -fdump-tree-evrp" }
+// { dg-options "-O2 -fdisable-tree-ethread -fdump-tree-evrp1" }
 
 void link_error ();
 
@@ -15,4 +15,4 @@ foo (double x, double y)
     }
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" } }

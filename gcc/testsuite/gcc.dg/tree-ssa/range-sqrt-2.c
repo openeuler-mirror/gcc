@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp -fno-thread-jumps" }
+// { dg-options "-O2 -fdump-tree-evrp1 -fno-thread-jumps" }
 
 #include <math.h>
 
@@ -41,4 +41,4 @@ stool (double x)
     }
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" { target { { *-*-linux* } && { glibc } } } } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" { target { { *-*-linux* } && { glibc } } } } }

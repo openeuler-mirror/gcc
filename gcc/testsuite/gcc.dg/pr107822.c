@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 int b;
 void foo();
@@ -17,4 +17,4 @@ int main() {
     foo();
 }
 
-/* { dg-final { scan-tree-dump-not "foo" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "foo" "evrp1" } } */

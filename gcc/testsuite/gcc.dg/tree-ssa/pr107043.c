@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp" }
+// { dg-options "-O2 -fdump-tree-evrp1" }
 
 int g0(int n)
 {
@@ -19,4 +19,4 @@ int g1(int n)
   return (n >> 15) & 0x1;
 }
 
-// { dg-final { scan-tree-dump-times "return 1;" 2 "evrp" } }
+// { dg-final { scan-tree-dump-times "return 1;" 2 "evrp1" } }

@@ -28,11 +28,12 @@ INSERT_PASS_BEFORE (pass_shorten_branches, 1, pass_insert_bti);
 INSERT_PASS_AFTER (pass_if_after_combine, 1, pass_cc_fusion);
 INSERT_PASS_BEFORE (pass_early_remat, 1, pass_ldp_fusion);
 INSERT_PASS_BEFORE (pass_peephole2, 1, pass_ldp_fusion);
-/* Instance 3 is the forwprop that runs before the first pass_sink_code.
+/* Instance 5 is the forwprop that runs before the first pass_sink_code.
    The matchers want the schoolbook's parts in one basic block, and
    sinking moves a conditionally stored high half into the block that
    consumes it; anchoring after instance 4 puts this pass downstream of
    that and loses the shapes mul-widen128-sink-cond-1.c stands for.
-   openEuler's gcc-12 anchors at the same place, spelled 5 because its
-   tree carries two more forwprop instances.  */
-INSERT_PASS_AFTER (pass_forwprop, 3, pass_aarch64_mul_widen128);
+   The two extra instances are the ones pass_ipa_alignment_propagation and
+   pass_ipa_localize_array carry in their sub-pass lists; openEuler's
+   gcc-12 spells this same anchor 5 for that reason.  */
+INSERT_PASS_AFTER (pass_forwprop, 5, pass_aarch64_mul_widen128);
