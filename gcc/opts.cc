@@ -2151,6 +2151,73 @@ enable_fdo_optimizations (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, flag_tree_loop_distribution, value);
 }
 
+/* Enable cfgo-related flags.  */
+
+static void
+enable_cfgo_optimizations (struct gcc_options *opts,
+			   struct gcc_options *opts_set,
+			   int value)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_modulo_sched, value);
+  /* Do not enable -fselective-scheduling here.  It is documented as
+     experimental upstream, and together with profile instrumentation it was
+     measured to generate wrong code on aarch64: a whole statement is silently
+     eliminated, with no crash and no diagnostic.  Neither option alone is
+     enough - instrumentation without it, and it without instrumentation, both
+     behave correctly - so enabling it from this function is what turns a
+     profile collection run into a miscompile.  Both -fcfgo-profile-generate
+     and -fcfgo-profile-use reach here.  Users who still want the option can
+     pass -fselective-scheduling explicitly; SET_OPTION_IF_UNSET honours it.  */
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_rename_registers, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_partial_training, value);
+  /* flag_ipa_alignment_propagation: feature not yet migrated to gcc-14. */
+  /* flag_ipa_localize_array: feature not yet migrated to gcc-14. */
+  /* flag_ipa_array_dse: feature not yet migrated to gcc-14. */
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_gnu89_inline, value);
+  /* flag_convert_minmax: -fconvert-minmax was not carried to gcc-14.  It
+     was measured to have no effect here (upstream already produces the
+     same code), so the maxmin group was left out and the flag does not
+     exist in this tree.  */
+  /* flag_tree_slp_transpose_vectorize: feature withdrawn from gcc-14.  */
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_prefetch, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_ic, value);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_find_with_sve, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_finite_loops, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_omit_frame_pointer, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_sized_deallocation, 0);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_loop_elim, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_if_conversion_gimple, value);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_auto, 331);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_inline_unit_growth, 60);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_recursive_depth_auto,
+		       7);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_recursive, 3227);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_recursive_auto,
+		       2571);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_early_inlining_insns, 256);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_early_inliner_max_iterations, 1);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_single, 2742);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_function_insns, 9055);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_function_growth, 701);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_unit_insns, 94216);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_eval_threshold, 864);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_loop_hint_bonus, 440);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_max_recursive_depth, 29);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_min_recursive_probability,
+		       4);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_recursive_freq_factor, 18);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_recursion_penalty, 64);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_single_call_penalty, 43);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_unit_growth, 96);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_large_unit_insns, 47631);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_value_list_size, 12);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_profile_count_base, 54);
+}
+
 /* -f{,no-}sanitize{,-recover}= suboptions.  */
 const struct sanitizer_opts_s sanitizer_opts[] =
 {
@@ -3315,6 +3382,33 @@ common_handle_option (struct gcc_options *opts,
       /* Deferred.  */
       break;
 
+    case OPT_fcfgo_profile_use_:
+      opts->x_profile_data_prefix = xstrdup (arg);
+      opts->x_flag_profile_use = true;
+      /* Only the form with "=" implies the option is on; it carries
+	 RejectNegative, so no -fno- variant reaches here.  The bare form
+	 must use the value the driver passed, which is 0 for
+	 -fno-cfgo-profile-use.  Setting it in the shared case below would
+	 make the negative form turn the whole set on.  */
+      value = true;
+      /* No break here - do -fcfgo-profile-use processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_profile_use:
+      enable_cfgo_optimizations (opts, opts_set, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_use, value);
+      /* Enable the plain -fprofile-use optimizations too.  Falling through
+	 to OPT_fprofile_use_ instead would run xstrdup on a null argument
+	 for the form without "=".  */
+      enable_fdo_optimizations (opts, opts_set, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_reorder_functions,
+			   value);
+      /* Indirect call profiling should do all useful transformations
+	 speculative devirtualization does.  */
+      if (opts->x_flag_value_profile_transformations)
+	SET_OPTION_IF_UNSET (opts, opts_set, flag_devirtualize_speculatively,
+			     false);
+      break;
+
     case OPT_fprofile_use_:
       opts->x_profile_data_prefix = xstrdup (arg);
       opts->x_flag_profile_use = true;
@@ -3330,6 +3424,15 @@ common_handle_option (struct gcc_options *opts,
       if (opts->x_flag_value_profile_transformations)
 	SET_OPTION_IF_UNSET (opts, opts_set, flag_devirtualize_speculatively,
 			     false);
+      break;
+
+    case OPT_fcfgo_csprofile_use_:
+      opts->x_csprofile_data_prefix = xstrdup (arg);
+      value = true;
+      /* No break here - do -fcfgo-csprofile-use processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_csprofile_use:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_use, value);
       break;
 
     case OPT_fauto_profile_:
@@ -3359,8 +3462,36 @@ common_handle_option (struct gcc_options *opts,
 	}
       break;
 
+    case OPT_foeaware_policy_:
+      opts->x_oeaware_optimize_policy = value;
+      /* No break here - do -foeaware processing.  */
+      /* FALLTHRU.  */
+    case OPT_foeaware_policy:
+      opts->x_flag_oeaware = value;
+      break;
+
     case OPT_fipa_reorder_fields:
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_struct_reorg, value);
+      break;
+
+    case OPT_fcfgo_profile_generate_:
+      opts->x_profile_data_prefix = xstrdup (arg);
+      /* See the note on OPT_fcfgo_profile_use_ above: the value belongs
+	 here, not in the shared case, or -fno-cfgo-profile-generate would
+	 instrument the whole translation unit.  */
+      value = true;
+      /* No break here - do -fcfgo-profile-generate processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_profile_generate:
+      enable_cfgo_optimizations (opts, opts_set, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_generate, value);
+      /* Enable the plain -fprofile-generate options too.  Falling through
+	 to OPT_fprofile_generate_ instead would run xstrdup on a null
+	 argument for the form without "=".  */
+      SET_OPTION_IF_UNSET (opts, opts_set, profile_arc_flag, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_values, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_inline_functions, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_bit_cp, value);
       break;
 
     case OPT_fprofile_generate_:
@@ -3373,6 +3504,15 @@ common_handle_option (struct gcc_options *opts,
       SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_values, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_inline_functions, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_bit_cp, value);
+      break;
+
+    case OPT_fcfgo_csprofile_generate_:
+      opts->x_csprofile_data_prefix = xstrdup (arg);
+      value = true;
+      /* No break here - do -fcfgo-csprofile-generate processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_csprofile_generate:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_generate, value);
       break;
 
     case OPT_fprofile_info_section:

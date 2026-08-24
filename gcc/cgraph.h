@@ -1097,10 +1097,16 @@ struct GTY((tag ("SYMTAB_FUNCTION"))) cgraph_node : public symtab_node
      present.  */
   bool get_untransformed_body ();
 
-  /* Prepare function body.  When doing LTO, read cgraph_node's body from disk 
+  /* Prepare function body.  When doing LTO, read cgraph_node's body from disk
      if it is not already present.  When some IPA transformations are scheduled,
      apply them.  */
   bool get_body ();
+
+  /* Prepare function body.  When doing LTO, read cgraph_node's body from disk
+     if it is not already present.  When some IPA transformations are scheduled,
+     apply them.
+     Flag is used to control only skipping or enabling cspgo.  */
+  bool ipa_transform_for_cspgo (bool);
 
   void materialize_clone (void);
 

@@ -2649,6 +2649,10 @@ Common Joined RejectNegative Var(profile_data_prefix)
 Set the top-level directory for storing the profile data.
 The default is 'pwd'.
 
+fcfgo-csprofile-dir=
+Common Joined RejectNegative Var(csprofile_data_prefix)
+Set the top-level directory for storing the cs profile data.
+
 fprofile-note=
 Common Joined RejectNegative Var(profile_note_location)
 Select the name for storing the profile note file.
@@ -2713,6 +2717,22 @@ fprofile-generate=
 Common Joined RejectNegative
 Enable common options for generating profile info for profile feedback directed optimizations, and set -fprofile-dir=.
 
+fcfgo-profile-generate
+Common Var(flag_cfgo_profile_generate)
+Enable common options for generating cfgo profile info for profile feedback directed optimizations.
+
+fcfgo-profile-generate=
+Common Joined RejectNegative
+Enable common options for generating cfgo profile info for profile feedback directed optimizations, and set -fprofile-dir=.
+
+fcfgo-csprofile-generate
+Common Var(flag_csprofile_generate)
+Enable common options for generating context sensitive profile info for profile feedback directed optimizations.
+
+fcfgo-csprofile-generate=
+Common Joined RejectNegative
+Enable common options for generating context sensitive profile info for profile feedback directed optimizations, and set -fcfgo-csprofile-dir=.
+
 fprofile-info-section
 Common RejectNegative
 Register the profile information in the .gcov_info section instead of using a constructor/destructor.
@@ -2732,6 +2752,22 @@ Enable common options for performing profile feedback directed optimizations.
 fprofile-use=
 Common Joined RejectNegative
 Enable common options for performing profile feedback directed optimizations, and set -fprofile-dir=.
+
+fcfgo-profile-use
+Common Var(flag_cfgo_profile_use)
+Enable common options for performing profile feedback directed optimizations.
+
+fcfgo-profile-use=
+Common Joined RejectNegative
+Enable common options for performing profile feedback directed optimizations, and set -fprofile-dir=.
+
+fcfgo-csprofile-use
+Common Var(flag_csprofile_use)
+Enable common options for performing context sensitive profile feedback directed optimizations.
+
+fcfgo-csprofile-use=
+Common Joined RejectNegative
+Enable common options for performing context sensitive profile feedback directed optimizations, and set -fcfgo-csprofile-dir=.
 
 fprofile-values
 Common Var(flag_profile_values)
@@ -3316,6 +3352,14 @@ Enable Full Redundancy Elimination (FRE) on trees.
 foptimize-strlen
 Common Var(flag_optimize_strlen) Optimization
 Enable string length optimizations on trees.
+
+foeaware-policy
+Common Var(flag_oeaware) Init(0) Optimization
+Perform oeAware-gcc co-optimization.
+
+foeaware-policy=
+Common RejectNegative Joined UInteger Var(oeaware_optimize_policy) Init(1) IntegerRange(1, 7)
+Select the optimization policy.
 
 fisolate-erroneous-paths-dereference
 Common Var(flag_isolate_erroneous_paths_dereference) Optimization
