@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O1 -fdump-tree-optimized -fdump-tree-original -fdump-tree-forwprop1 -fdump-tree-forwprop2" } */
+/* { dg-options "-O1 -fdump-tree-optimized -fdump-tree-original -fdump-tree-forwprop1 -fdump-tree-forwprop4" } */
 #define bool _Bool
 int maxbool(bool ab, bool bb)
 {

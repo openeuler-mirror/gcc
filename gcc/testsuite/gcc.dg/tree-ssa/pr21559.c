@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp-details" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-details" } */
 
 static int blocksize = 4096;
 
@@ -33,4 +33,4 @@ void foo (void)
 
 
 /* First, we should simplify the bits < 0 test within the loop.  */
-/* { dg-final { scan-tree-dump-times "Simplified relational" 1 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "Simplified relational" 1 "evrp1" } } */

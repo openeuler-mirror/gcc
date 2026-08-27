@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fgimple -fdump-tree-evrp" }
+// { dg-options "-O2 -fgimple -fdump-tree-evrp1" }
 
 void link_error();
 
@@ -51,4 +51,4 @@ foo2 (float x, float y)
   return;
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" } }

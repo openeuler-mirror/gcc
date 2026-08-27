@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp-slim -fdelete-null-pointer-checks" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-slim -fdelete-null-pointer-checks" } */
 /* { dg-skip-if "" { keeps_null_pointer_checks } } */
 
 void f(void *d, const void *s, __SIZE_TYPE__ n)
@@ -41,4 +41,4 @@ void f(void *d, const void *s, __SIZE_TYPE__ n)
     __builtin_abort ();
 }
 
-/* { dg-final { scan-tree-dump-not "__builtin_abort" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "__builtin_abort" "evrp1" } } */

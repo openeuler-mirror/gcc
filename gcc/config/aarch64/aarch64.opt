@@ -237,6 +237,16 @@ Enable the division approximation.  Enabling this reduces
 precision of division results to about 16 bits for
 single precision and to 32 bits for double precision.
 
+mdaz-ftz
+Target
+Set the flush-to-zero flag in the floating-point control register at startup.
+
+msimdmath-vec64
+Target Var(flag_simdmath_vec64) Optimization
+With -fsimdmath, also enumerate 64-bit vector simd clones (e.g. V2SF) for
+math builtin declarations.  No current vector math library provides these
+variants, so enabling this option may cause unresolved symbols at link time.
+
 Enum
 Name(early_ra_scope) Type(enum aarch64_early_ra_scope)
 
@@ -324,6 +334,10 @@ Target Joined RejectNegative String Var(aarch64_stack_protector_guard_offset_str
 Use an immediate to offset from the stack protector guard register, sp_el0.
 This option is for use with fstack-protector-strong and not for use in
 user-land code.
+
+mmul-widen128
+Target Var(flag_aarch64_mul_widen128) Optimization Init(0)
+Enable recognition of 64-bit to 128-bit widening multiplication idioms.
 
 TargetVariable
 long aarch64_stack_protector_guard_offset = 0

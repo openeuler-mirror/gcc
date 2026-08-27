@@ -1,4 +1,4 @@
-/* { dg-options "-Os -fgimple -fdump-tree-pre-details -fdisable-tree-evrp -fno-tree-dse" } */
+/* { dg-options "-Os -fgimple -fdump-tree-pre-details -fdisable-tree-evrp1 -fno-tree-dse" } */
 
 #if __SIZEOF_INT__ == 2
 #define unsigned __UINT32_TYPE__

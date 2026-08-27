@@ -23,7 +23,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "gcov-io.h"
 
 extern void coverage_init (const char *);
-extern void coverage_finish (void);
+extern void coverage_finish (bool);
 extern void coverage_remove_note_file (void);
 
 /* Start outputting coverage information for the current
@@ -53,7 +53,8 @@ extern tree tree_coverage_counter_addr (unsigned /*counter*/, unsigned/*num*/);
 extern gcov_type *get_coverage_counts (unsigned /*counter*/,
 				       unsigned /*cfg_checksum*/,
 				       unsigned /*lineno_checksum*/,
-				       unsigned /*n_counts*/);
+				       unsigned /*n_counts*/,
+				       bool /*is_cspgo*/);
 
 extern tree get_gcov_type (void);
 extern bool coverage_node_map_initialized_p (void);

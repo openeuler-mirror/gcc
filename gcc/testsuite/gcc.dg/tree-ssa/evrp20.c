@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 void call (void);
 
@@ -16,4 +16,4 @@ void foo (int base)
       }
 }
 
-/* { dg-final { scan-tree-dump-not "call" "evrp"} } */
+/* { dg-final { scan-tree-dump-not "call" "evrp1"} } */

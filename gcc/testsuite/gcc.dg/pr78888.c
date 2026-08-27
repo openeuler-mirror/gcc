@@ -1,6 +1,6 @@
 /* PR tree-optimization/78888 */
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 void kill (void);
 void keep (void);
@@ -25,5 +25,5 @@ void g (int x)
   if (__builtin_tolower ((unsigned char)x) == 'z')
     keep ();
 }
-/* { dg-final { scan-tree-dump-not "kill" "evrp" } }  */
-/* { dg-final { scan-tree-dump-times "keep" 4 "evrp"} } */
+/* { dg-final { scan-tree-dump-not "kill" "evrp1" } }  */
+/* { dg-final { scan-tree-dump-times "keep" 4 "evrp1"} } */

@@ -1413,6 +1413,7 @@ OBJS = \
 	cgraphunit.o \
 	cgraphclones.o \
 	combine.o \
+	crypto-accel.o \
 	combine-stack-adj.o \
 	compare-elim.o \
 	context.o \
@@ -1475,6 +1476,7 @@ OBJS = \
 	gimple-builder.o \
 	gimple-expr.o \
 	gimple-if-to-switch.o \
+	gimple-if-split.o \
 	gimple-iterator.o \
 	gimple-fold.o \
 	gimple-harden-conditionals.o \
@@ -1497,6 +1499,7 @@ OBJS = \
 	gimple-range-phi.o \
 	gimple-range-trace.o \
 	gimple-ssa-backprop.o \
+	gimple-ssa-expand-sve.o \
 	gimple-ssa-isolate-paths.o \
 	gimple-ssa-nonnull-compare.o \
 	gimple-ssa-sccopy.o \
@@ -1536,6 +1539,10 @@ OBJS = \
 	incpath.o \
 	init-regs.o \
 	internal-fn.o \
+	ipa-struct-reorg/ipa-struct-reorg.o \
+	ipa-alignment-propagation.o \
+	ipa-localize-array.o \
+	ipa-array-dse.o \
 	ipa-cp.o \
 	ipa-sra.o \
 	ipa-devirt.o \
@@ -1551,6 +1558,7 @@ OBJS = \
 	ipa-modref.o \
 	ipa-modref-tree.o \
 	ipa-predicate.o \
+	ipa-prefetch.o \
 	ipa-profile.o \
 	ipa-prop.o \
 	ipa-param-manipulation.o \
@@ -1741,11 +1749,13 @@ OBJS = \
 	tree-ssa-ifcombine.o \
 	tree-ssa-live.o \
 	tree-ssa-loop-ch.o \
+	tree-ssa-loop-crc.o \
 	tree-ssa-loop-im.o \
 	tree-ssa-loop-ivcanon.o \
 	tree-ssa-loop-ivopts.o \
 	tree-ssa-loop-manip.o \
 	tree-ssa-loop-niter.o \
+	tree-ssa-loop-array-widen-compare.o \
 	tree-ssa-loop-prefetch.o \
 	tree-ssa-loop-split.o \
 	tree-ssa-loop-unswitch.o \

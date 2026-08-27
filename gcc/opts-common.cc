@@ -28,7 +28,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "spellcheck.h"
 #include "opts-jobserver.h"
 
-static void prune_options (struct cl_decoded_option **, unsigned int *);
+static void prune_options (struct cl_decoded_option **, unsigned int *,
+			   unsigned int);
 
 /* An option that is undocumented, that takes a joined argument, and
    that doesn't fit any of the classes of uses (language/common,
@@ -1118,7 +1119,7 @@ decode_cmdline_options_to_array (unsigned int argc, const char **argv,
 
   *decoded_options = opt_array;
   *decoded_options_count = num_decoded_options;
-  prune_options (decoded_options, decoded_options_count);
+  prune_options (decoded_options, decoded_options_count, lang_mask);
 }
 
 /* Return true if NEXT_OPT_IDX cancels OPT_IDX.  Return false if the
@@ -1139,12 +1140,141 @@ cancel_option (int opt_idx, int next_opt_idx, int orig_next_opt_idx)
   return false;
 }
 
+/* Check whether opt_idx exists in decoded_options array between index
+   start and end.  If found, return its index in decoded_options,
+   else return end.  */
+static unsigned int
+find_opt_idx (const struct cl_decoded_option *decoded_options,
+	       unsigned int decoded_options_count,
+	       unsigned int start, unsigned int end, unsigned int opt_idx)
+{
+  gcc_assert (end <= decoded_options_count);
+  gcc_assert (opt_idx < cl_options_count);
+  unsigned int k;
+  for (k = start; k < end; k++)
+    {
+      if (decoded_options[k].opt_index == opt_idx)
+	{
+	  return k;
+	}
+    }
+  return k;
+}
+
+/* remove the opt_index element from decoded_options array.  */
+static unsigned int
+remove_option (struct cl_decoded_option *decoded_options,
+	       unsigned int decoded_options_count,
+	       unsigned int opt_index)
+{
+  gcc_assert (opt_index < decoded_options_count);
+  unsigned int i;
+  for (i = opt_index; i < decoded_options_count - 1; i++)
+    {
+      decoded_options[i] = decoded_options[i + 1];
+    }
+  return decoded_options_count - 1;
+}
+
+/* Handle the priority between -ffp-model=, Ofast, and
+   ffast-math.  */
+static unsigned int
+handle_fp_model_driver (struct cl_decoded_option *decoded_options,
+			unsigned int decoded_options_count,
+			unsigned int fp_model_index,
+			unsigned int lang_mask)
+{
+  struct cl_decoded_option fp_model_opt = decoded_options[fp_model_index];
+  enum fp_model model = (enum fp_model) fp_model_opt.value;
+  /* All three of precise, except and strict are defeated by fast-math:
+     it implies -fno-trapping-math and -fno-signaling-nans, which is
+     exactly what except asks to preserve.  */
+  if (model == FP_MODEL_PRECISE || model == FP_MODEL_STRICT
+      || model == FP_MODEL_EXCEPT)
+    {
+      /* If found Ofast, override Ofast with O3.  Every occurrence is
+	 degraded, but the user is told once: repeating -Ofast is one
+	 request, and the message names the model, not the position.  */
+      unsigned int Ofast_index;
+      bool degraded_Ofast = false;
+      Ofast_index = find_opt_idx (decoded_options, decoded_options_count,
+				  0, decoded_options_count, OPT_Ofast);
+      while (Ofast_index != decoded_options_count)
+	{
+	  const char *tmp_argv = "-O3";
+	  decode_cmdline_option (&tmp_argv, lang_mask,
+				 &decoded_options[Ofast_index]);
+	  degraded_Ofast = true;
+	  Ofast_index = find_opt_idx (decoded_options, decoded_options_count,
+				      0, decoded_options_count, OPT_Ofast);
+	}
+      if (degraded_Ofast)
+	warning (0, "%<-Ofast%> is degraded to %<-O3%> due to %qs",
+		 fp_model_opt.orig_option_with_args_text);
+      /* Cancel every -ffast-math, wherever it sits: -Ofast just above is
+	 degraded from either side, and the two spellings of the same
+	 request have to be treated alike.  Only the positive form - the
+	 negative one asks for the same thing the model does, and dropping
+	 it would leave the flags it would have cleared in place.  */
+      /* No de-duplication needed here, unlike -Ofast just above: -ffast-math
+	 has a negative form, so prune_options has already collapsed any
+	 repetition of it to a single option before this runs.  */
+      unsigned int i = 0;
+      while ((i = find_opt_idx (decoded_options, decoded_options_count, i,
+				decoded_options_count, OPT_ffast_math))
+	     != decoded_options_count)
+	{
+	  if (!decoded_options[i].value)
+	    {
+	      ++i;
+	      continue;
+	    }
+	  bool before = i < fp_model_index;
+	  decoded_options_count
+	    = remove_option (decoded_options, decoded_options_count, i);
+	  if (i < fp_model_index)
+	    fp_model_index--;
+	  warning (0,
+		   before
+		   ? G_("%<-ffast-math%> before %qs is canceled")
+		   : G_("%<-ffast-math%> after %qs is canceled"),
+		   fp_model_opt.orig_option_with_args_text);
+	}
+
+      /* -mdaz-ftz is deliberately not touched here.  It asks for flush-to-zero
+	 and nothing else, and the feature exists precisely so that it can
+	 be asked for without the aggressive floating-point optimizations it
+	 is otherwise bundled with - which is this combination.  The link
+	 spec gives it precedence over the model; Intel's -fp-model treats
+	 an explicit -ftz the same way.  Only -mno-daz-ftz overrides it.  */
+    }
+  if (model == FP_MODEL_FAST)
+    {
+      /* If found -fno-fast-math after -ffp-model=fast, cancel this one.  */
+      unsigned int fno_fast_math_index;
+      fno_fast_math_index
+	= find_opt_idx (decoded_options, decoded_options_count, fp_model_index,
+			decoded_options_count, OPT_ffast_math);
+      if (fno_fast_math_index != decoded_options_count
+	  && decoded_options[fno_fast_math_index].value == 0)
+	{
+	  decoded_options_count
+	    = remove_option (decoded_options, decoded_options_count,
+			     fp_model_index);
+	  warning (0,
+		   "%<-ffp-model=fast%> before %<-fno-fast-math%> is canceled");
+	}
+    }
+  return decoded_options_count;
+}
+
 /* Filter out options canceled by the ones after them, and related
    rearrangement.  */
 
 static void
 prune_options (struct cl_decoded_option **decoded_options,
-	       unsigned int *decoded_options_count)
+	       unsigned int *decoded_options_count,
+	       unsigned int lang_mask)
 {
   unsigned int old_decoded_options_count = *decoded_options_count;
   struct cl_decoded_option *old_decoded_options = *decoded_options;
@@ -1158,7 +1288,39 @@ prune_options (struct cl_decoded_option **decoded_options,
   unsigned int fdiagnostics_color_idx = 0;
   unsigned int fdiagnostics_urls_idx = 0;
 
+  /* Everything this function warns about - a model overridden by a later
+     one, a fast-math option cancelled by a model - is reported while the
+     command line is still being decoded, so the diagnostic context is
+     still in whatever state the defaults left it.  Find the styling
+     options first and apply them, so those warnings read the way the
+     command line asked.  -fdiagnostics-plain-output has already been
+     expanded into them by the time we get here.  */
+  for (i = 1; i < old_decoded_options_count; i++)
+    {
+      /* Not one that failed to decode: an unrecognized argument leaves a
+	 default value of 1 behind, and applying that turned
+	 `-fdiagnostics-color=bogus' into color-on-a-pipe - the error
+	 reporting the bad argument itself came out styled, where without
+	 this loop it never was.  The bad argument gets its own error
+	 later either way.  */
+      if (old_decoded_options[i].errors)
+	continue;
+      switch (old_decoded_options[i].opt_index)
+	{
+	case OPT_fdiagnostics_color_:
+	  diagnostic_color_init (global_dc, old_decoded_options[i].value);
+	  break;
+	case OPT_fdiagnostics_urls_:
+	  diagnostic_urls_init (global_dc, old_decoded_options[i].value);
+	  break;
+	default:
+	  break;
+	}
+    }
+
   /* Remove arguments which are negated by others after them.  */
+
+  unsigned int fp_model_index = old_decoded_options_count;
   new_decoded_options_count = 0;
   for (i = 0; i < old_decoded_options_count; i++)
     {
@@ -1197,6 +1359,34 @@ prune_options (struct cl_decoded_option **decoded_options,
 	  fdiagnostics_urls_idx = i;
 	  continue;
 
+	case OPT_ffp_model_:
+	  /* Only the last -ffp-model= option will take effect.  */
+	  unsigned int next_fp_model_idx;
+	  next_fp_model_idx = find_opt_idx (old_decoded_options,
+					    old_decoded_options_count,
+					    i + 1,
+					    old_decoded_options_count,
+					    OPT_ffp_model_);
+	  if (next_fp_model_idx != old_decoded_options_count)
+	    {
+	      /* Found more than one -ffp-model=, cancel this one.  */
+	      if (old_decoded_options[i].value
+		  != old_decoded_options[next_fp_model_idx].value)
+		{
+		  warning (0, "%qs is overridden by %qs",
+			   old_decoded_options[i].
+			   orig_option_with_args_text,
+			   old_decoded_options[next_fp_model_idx].
+			   orig_option_with_args_text);
+		}
+	      break;
+	    }
+	  else
+	    {
+	      /* Found the last -ffp-model= option.  */
+	      fp_model_index = new_decoded_options_count;
+	    }
+	  /* FALLTHRU.  */
 	default:
 	  gcc_assert (opt_idx < cl_options_count);
 	  option = &cl_options[opt_idx];
@@ -1235,6 +1425,14 @@ keep:
 	    }
 	  break;
 	}
+    }
+  if (fp_model_index < new_decoded_options_count)
+    {
+      new_decoded_options_count
+	= handle_fp_model_driver (new_decoded_options,
+				  new_decoded_options_count,
+				  fp_model_index,
+				  lang_mask);
     }
 
   /* For those not yet handled, put (only) the last at a front position after

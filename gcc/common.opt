@@ -737,6 +737,10 @@ Warn when one local variable shadows another local variable or parameter of comp
 Wshadow-compatible-local
 Common Warning Undocumented Alias(Wshadow=compatible-local)
 
+Wsimdmath
+Common Var(warn_simdmath) Init(1) Warning
+Warn when -fsimdmath cannot vectorize because of the floating-point settings in effect.
+
 Wstack-protector
 Common Var(warn_stack_protect) Warning
 Warn when not issuing stack smashing protection for some reason.
@@ -1142,6 +1146,23 @@ fasynchronous-unwind-tables
 Common Var(flag_asynchronous_unwind_tables) Optimization
 Generate unwind tables that are exact at each instruction boundary.
 
+farray-widen-compare
+Common Var(flag_array_widen_compare) Optimization
+Rewrite qualifying byte-compare loops to compare eight bytes at a time.
+Unsafe unless both arrays are readable up to the loop bound.
+
+fcrypto-accel-aes
+Common Var(flag_crypto_accel_aes) Init(0) Optimization
+Perform crypto acceleration AES pattern matching.
+
+floop-crc
+Common Var(flag_loop_crc) Optimization
+Do the loop crc conversion.
+
+floop-sve-mode-opt
+Common Var(flag_loop_sve_mode_opt) Optimization
+Optimization of adding sve mode for some loop
+
 fauto-inc-dec
 Common Var(flag_auto_inc_dec) Init(1) Optimization
 Generate auto-inc/dec instructions.
@@ -1184,6 +1205,10 @@ fbtr-bb-exclusive
 Common Ignore
 Does nothing.  Preserved for backward compatibility.
 
+fbuiltin-will-return
+Common Var(flag_builtin_will_return) Optimization
+Treat built-ins that cannot loop, throw or exit - today only __builtin_prefetch - as calls that always return.
+
 fcallgraph-info
 Common RejectNegative Var(flag_callgraph_info) Init(NO_CALLGRAPH_INFO);
 Output callgraph information on a per-file basis.
@@ -1223,6 +1248,20 @@ fchecking=
 Common Joined RejectNegative UInteger Var(flag_checking)
 Perform internal consistency checkings.
 
+; openEuler gcc-12 carried -fchrec-mul-fold-strict-overflow, gating a
+; backport of the PR114074 fix (strict-overflow handling when folding
+; multiplications of scalar-evolution CHRECs).  GCC 14 contains that
+; fix natively and unconditionally - the upstream tests pr68317.c and
+; torture/pr114074.c pass on this tree, and chrec_fold_multiply already
+; performs unconditionally the operand canonicalization the gcc-14 port
+; of the patch had kept behind this switch.  The record is kept so the
+; diagnosis is clear instead of 'unrecognized option': the positive form
+; is rejected in common_handle_option with an explanation; the negative
+; form is accepted silently (off is the de-facto state).
+fchrec-mul-fold-strict-overflow
+Common Var(flag_chrec_mul_fold_strict_overflow) Init(0)
+Rejected on GCC 14: the strict-overflow CHREC folding this enabled is built in.
+
 fcanon-prefix-map
 Common Var(common_deferred_options) Defer
 For -f*-prefix-map= options compare canonicalized pathnames rather than just strings.
@@ -1254,6 +1293,10 @@ Run only the second compilation of -fcompare-debug.
 fcompare-elim
 Common Var(flag_compare_elim_after_reload) Optimization
 Perform comparison elimination after register allocation has finished.
+
+floop-elim
+Common Var(flag_loop_elim) Init(0) Optimization
+Perform redundant loop elimination.
 
 fconserve-stack
 Common Var(flag_conserve_stack) Optimization
@@ -1340,6 +1383,18 @@ Perform speculative devirtualization.
 fdevirtualize
 Common Var(flag_devirtualize) Optimization
 Try to convert virtual calls to direct ones.
+
+fipa-ic
+Common Var(flag_ipa_ic) Optimization Init(0)
+Perform interprocedural analysis of indirect calls.
+
+ficp
+Common Var(flag_icp) Optimization Init(0)
+Try to promote indirect calls to direct ones.
+
+ficp-speculatively
+Common Var(flag_icp_speculatively) Optimization
+Promote indirect calls speculatively.
 
 fdiagnostics-show-location=
 Common Joined RejectNegative Enum(diagnostic_prefixing_rule)
@@ -1714,6 +1769,37 @@ ffp-int-builtin-inexact
 Common Var(flag_fp_int_builtin_inexact) Init(1) Optimization
 Allow built-in functions ceil, floor, round, trunc to raise \"inexact\" exceptions.
 
+ffp-model=
+Common Joined RejectNegative Enum(fp_model) Var(flag_fp_model) Init(FP_MODEL_NORMAL) Optimization
+-ffp-model=[normal|fast|precise|except|strict] Perform floating-point precision control.
+
+; Renamed to -mdaz-ftz, which is what upstream already calls the identical
+; option on x86 and which is a Target option, as this one should always
+; have been - it only ever did anything on AArch64.  Kept as a diagnosing
+; anchor so a stale command line is told the new spelling rather than
+; getting "unrecognized command-line option"; both spellings are real, so
+; neither is RejectNegative.  Diagnosed in driver_handle_option.
+fftz
+Common Driver Undocumented
+
+Enum
+Name(fp_model) Type(enum fp_model) UnknownError(unknown floating point precision model %qs)
+
+EnumValue
+Enum(fp_model) String(normal) Value(FP_MODEL_NORMAL)
+
+EnumValue
+Enum(fp_model) String(fast) Value(FP_MODEL_FAST)
+
+EnumValue
+Enum(fp_model) String(precise) Value(FP_MODEL_PRECISE)
+
+EnumValue
+Enum(fp_model) String(except) Value(FP_MODEL_EXCEPT)
+
+EnumValue
+Enum(fp_model) String(strict) Value(FP_MODEL_STRICT)
+
 ; Nonzero means don't put addresses of constant functions in registers.
 ; Used for compiling the Unix kernel, where strange substitutions are
 ; done on the assembly output.
@@ -1897,6 +1983,10 @@ fif-conversion2
 Common Var(flag_if_conversion2) Optimization
 Perform conversion of conditional jumps to conditional execution.
 
+fif-conversion-gimple
+Common Var(flag_if_conversion_gimple) Optimization
+Perform conversion of conditional jumps to branchless equivalents during gimple transformations.
+
 fstack-reuse=
 Common Joined RejectNegative Enum(stack_reuse_level) Var(flag_stack_reuse) Init(SR_ALL) Optimization
 -fstack-reuse=[all|named_vars|none]	Set stack reuse level for local variables.
@@ -2053,6 +2143,10 @@ finstrument-functions-exclude-file-list=
 Common RejectNegative Joined
 -finstrument-functions-exclude-file-list=filename,...	Do not instrument functions listed in files.
 
+fif-split
+Common Var(flag_if_split) Init(0) Optimization
+Perform splitting if complex conditions on separate ones with clonning their bodies (gimple version).
+
 fipa-cp
 Common Var(flag_ipa_cp) Optimization
 Perform interprocedural constant propagation.
@@ -2113,9 +2207,54 @@ fipa-matrix-reorg
 Common Ignore
 Does nothing. Preserved for backward compatibility.
 
+fipa-alignment-propagation
+Common Var(flag_ipa_alignment_propagation) Init(0) Optimization
+Propagate alignment of local variable's address
+
+fipa-localize-array
+Common Var(flag_ipa_localize_array) Init(0) Optimization
+Transform global calloced array to be specific function local.
+
+fipa-array-dse
+Common Var(flag_ipa_array_dse) Init(0) Optimization
+Array dead and redundant store elimination.
+
+fipa-reorder-fields
+Common Var(flag_ipa_reorder_fields) Init(0) Optimization
+Perform structure fields reorder optimizations.
+
 fipa-struct-reorg
-Common Ignore
-Does nothing. Preserved for backward compatibility.
+Common Var(flag_ipa_struct_reorg) Init(0) Optimization
+Perform structure layout optimizations.
+
+fipa-struct-reorg=
+Common RejectNegative Joined UInteger Var(struct_layout_optimize_level) Init(0) IntegerRange(0, 6)
+-fipa-struct-reorg=[0,1,2,3,4,5,6] adding none, struct-reorg, reorder-fields,
+dfe, safe-pointer-compression, unsafe-pointer-compression, semi-relayout optimizations.
+
+fipa-struct-sfc
+Common Var(flag_ipa_struct_sfc) Init(0) Optimization
+Perform static structure field compression.
+
+fipa-struct-sfc-bitfield
+Common Var(flag_ipa_struct_sfc_bitfield) Init(0) Optimization
+Enable compressing to bitfield in static struct field compression.
+
+fipa-struct-sfc-shadow
+Common Var(flag_ipa_struct_sfc_shadow) Init(0) Optimization
+Enable field shadowing optimization in static struct field compression.
+
+fipa-struct-dfc
+Common Var(flag_ipa_struct_dfc) Init(0) Optimization
+Perform dynamic structure field compression.
+
+fipa-struct-dfc-bitfield
+Common Var(flag_ipa_struct_dfc_bitfield) Init(0) Optimization
+Enable compressing to bitfield in dynamic struct field compression.
+
+fipa-struct-dfc-shadow
+Common Var(flag_ipa_struct_dfc_shadow) Init(0) Optimization
+Enable field shadowing optimization in dynamic struct field compression.
 
 fipa-vrp
 Common Var(flag_ipa_vrp) Optimization
@@ -2199,6 +2338,15 @@ Generate code for static functions even if they are never called.
 fkeep-static-consts
 Common Var(flag_keep_static_consts) Init(1)
 Emit static const variables even if they are not used.
+
+; Plain Common, not Optimization: the only consumer creates the one
+; indirect-call profiling variable per translation unit, so a
+; per-function value could not be honored anyway - and whether that
+; variable is TLS is a whole-build property that has to match the
+; profiling runtime's definition of it.
+fkernel-pgo
+Common Var(flag_kernel_pgo)
+Disable TLS setting of instrumentation variables to support PGO kernel compilation in -fprofile-generate, as kernel does not support TLS.
 
 fleading-underscore
 Common Var(flag_leading_underscore) Init(-1)
@@ -2294,6 +2442,17 @@ Attempt to merge identical constants across compilation units.
 fmerge-debug-strings
 Common Var(flag_merge_debug_strings) Init(1)
 Attempt to merge identical debug strings across compilation units.
+
+; Removed option: the transformation it enabled is part of
+; -mmul-widen128.  Kept as a diagnosing anchor, help text omitted; see
+; the note on fp-model= above.  RejectNegative matters here: without it
+; the -fno- spelling decodes to this same option and hits the anchor, so
+; a build carrying -fno-merge-mull - the likeliest spelling to survive,
+; since the feature was default-off and known broken - failed with an
+; error naming an option nobody wrote.  -fno-merge-mull is now what it
+; should be for a removed option: unrecognized.
+fmerge-mull
+Common Driver RejectNegative Undocumented
 
 fmessage-length=
 Common RejectNegative Joined UInteger
@@ -2405,6 +2564,18 @@ foptimize-sibling-calls
 Common Var(flag_optimize_sibling_calls) Optimization
 Optimize sibling and tail recursive calls.
 
+; Removed spelling of -ffp-model=, kept only as an anchor so that a stale
+; command line gets a diagnostic naming the replacement instead of a bare
+; "unrecognized command-line option".  Diagnosed in driver_handle_option,
+; and only there - see the note beside that case.  The help text is
+; dropped so that the internal note is not what --help=common prints;
+; the option is still listed there, as "This option lacks documentation",
+; because --help=<class> does not exclude Undocumented options - plain
+; --help does.  Eighteen upstream options, -ffast-math among them, are
+; listed the same way.
+fp-model=
+Common Driver Joined RejectNegative Undocumented
+
 fpartial-inlining
 Common Var(flag_partial_inlining) Optimization
 Perform partial inlining.
@@ -2477,6 +2648,10 @@ fprefetch-loop-arrays
 Common Var(flag_prefetch_loop_arrays) Init(-1) Optimization
 Generate prefetch instructions, if available, for arrays in loops.
 
+fipa-prefetch
+Common Var(flag_ipa_prefetch) Init(0) Optimization
+Generate prefetch instructions, if available, using IPA info.
+
 fprofile
 Common Var(profile_flag)
 Enable basic program profiling code.
@@ -2497,6 +2672,10 @@ fprofile-dir=
 Common Joined RejectNegative Var(profile_data_prefix)
 Set the top-level directory for storing the profile data.
 The default is 'pwd'.
+
+fcfgo-csprofile-dir=
+Common Joined RejectNegative Var(csprofile_data_prefix)
+Set the top-level directory for storing the cs profile data.
 
 fprofile-note=
 Common Joined RejectNegative Var(profile_note_location)
@@ -2562,6 +2741,22 @@ fprofile-generate=
 Common Joined RejectNegative
 Enable common options for generating profile info for profile feedback directed optimizations, and set -fprofile-dir=.
 
+fcfgo-profile-generate
+Common Var(flag_cfgo_profile_generate)
+Enable common options for generating cfgo profile info for profile feedback directed optimizations.
+
+fcfgo-profile-generate=
+Common Joined RejectNegative
+Enable common options for generating cfgo profile info for profile feedback directed optimizations, and set -fprofile-dir=.
+
+fcfgo-csprofile-generate
+Common Var(flag_csprofile_generate)
+Enable common options for generating context sensitive profile info for profile feedback directed optimizations.
+
+fcfgo-csprofile-generate=
+Common Joined RejectNegative
+Enable common options for generating context sensitive profile info for profile feedback directed optimizations, and set -fcfgo-csprofile-dir=.
+
 fprofile-info-section
 Common RejectNegative
 Register the profile information in the .gcov_info section instead of using a constructor/destructor.
@@ -2581,6 +2776,22 @@ Enable common options for performing profile feedback directed optimizations.
 fprofile-use=
 Common Joined RejectNegative
 Enable common options for performing profile feedback directed optimizations, and set -fprofile-dir=.
+
+fcfgo-profile-use
+Common Var(flag_cfgo_profile_use)
+Enable common options for performing profile feedback directed optimizations.
+
+fcfgo-profile-use=
+Common Joined RejectNegative
+Enable common options for performing profile feedback directed optimizations, and set -fprofile-dir=.
+
+fcfgo-csprofile-use
+Common Var(flag_csprofile_use)
+Enable common options for performing context sensitive profile feedback directed optimizations.
+
+fcfgo-csprofile-use=
+Common Joined RejectNegative
+Enable common options for performing context sensitive profile feedback directed optimizations, and set -fcfgo-csprofile-dir=.
 
 fprofile-values
 Common Var(flag_profile_values)
@@ -2692,6 +2903,30 @@ Reorder basic blocks and partition into hot and cold sections.
 freorder-functions
 Common Var(flag_reorder_functions) Optimization
 Reorder functions to improve code placement.
+
+fauto-bolt
+Common Var(flag_auto_bolt)
+Generate profile from AutoFDO or PGO and do BOLT optimization after linkage.
+
+fauto-bolt=
+Common Joined RejectNegative
+Specify the feedback data directory required by BOLT-plugin.  The default is the current directory.
+
+fbolt-use
+Common Var(flag_bolt_use)
+Do BOLT optimization after linkage with BOLT profile read from this option.  The default is data.fdata.
+
+fbolt-use=
+Common Joined RejectNegative Var
+Do BOLT optimization after linkage with BOLT profile read from this option.
+
+fbolt-target=
+Common Joined RejectNegative Var
+Specify the BOLT optimization target binary.
+
+fbolt-option=
+Common Joined RejectNegative Var
+Specify BOLT optimization options separated by commas.
 
 frerun-cse-after-loop
 Common Var(flag_rerun_cse_after_loop) Optimization
@@ -2858,6 +3093,10 @@ Disable optimizations observable by IEEE signaling NaNs.
 fsigned-zeros
 Common Var(flag_signed_zeros) Init(1) Optimization SetByCombined
 Disable floating point optimizations that ignore the IEEE signedness of zero.
+
+fsimdmath
+Common Var(flag_simdmath) Init(0) Optimization
+Declare vector variants of the math functions the vector math library provides.
 
 fsingle-precision-constant
 Common Var(flag_single_precision_constant) Optimization
@@ -3138,6 +3377,14 @@ foptimize-strlen
 Common Var(flag_optimize_strlen) Optimization
 Enable string length optimizations on trees.
 
+foeaware-policy
+Common Var(flag_oeaware) Init(0) Optimization
+Perform oeAware-gcc co-optimization.
+
+foeaware-policy=
+Common RejectNegative Joined UInteger Var(oeaware_optimize_policy) Init(1) IntegerRange(1, 7)
+Select the optimization policy.
+
 fisolate-erroneous-paths-dereference
 Common Var(flag_isolate_erroneous_paths_dereference) Optimization
 Detect paths that trigger erroneous or undefined behavior due to
@@ -3272,6 +3519,11 @@ freciprocal-math
 Common Var(flag_reciprocal_math) SetByCombined Optimization
 Same as -fassociative-math for expressions which include division.
 
+fuaddsub-overflow-match-all
+Common Var(flag_uaddsub_overflow_match_all) Optimization
+Match unsigned add/sub overflow even if the target does not support
+the corresponding instruction.
+
 ; Nonzero means that unsafe floating-point math optimizations are allowed
 ; for the sake of speed.  IEEE compliance is not guaranteed, and operations
 ; are allowed to assume that their arguments and results are "normal"
@@ -3355,9 +3607,26 @@ ftree-loop-vectorize
 Common Var(flag_tree_loop_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable loop vectorization on trees.
 
+; openEuler gcc-12 carried -falias-analysis-expand-ssa, gating an extra
+; non-loop alias disambiguation in tree-data-ref (the PR106019 scenario).
+; GCC 14 solves that scenario natively and unconditionally - the
+; upstream regression test bb-slp-pr106019.c passes on this tree - and
+; the gcc-14 migration had only carried this option record without the
+; logic it gated, so the switch never did anything here.  The record is
+; kept so the diagnosis is clear instead of 'unrecognized option': the
+; positive form is rejected in common_handle_option with an explanation;
+; the negative form is accepted silently (off is the de-facto state).
+falias-analysis-expand-ssa
+Common Var(flag_alias_analysis_expand_ssa) Init(0)
+Rejected on GCC 14: the non-loop alias disambiguation this enabled is built in.
+
 ftree-slp-vectorize
 Common Var(flag_tree_slp_vectorize) Optimization EnabledBy(ftree-vectorize)
 Enable basic block vectorization (SLP) on trees.
+
+ftree-slp-late
+Common Var(flag_slp_late) Init(0) Optimization
+Enable additional SLP vectorization pass after reassociation.
 
 fvect-cost-model=
 Common Joined RejectNegative Enum(vect_cost_model) Var(flag_vect_cost_model) Init(VECT_COST_MODEL_DEFAULT) Optimization
@@ -3878,5 +4147,17 @@ Driver Joined Separate
 fipa-ra
 Common Var(flag_ipa_ra) Optimization
 Use caller save register across calls if possible.
+
+fifcvt-allow-complicated-cmps
+Common Var(flag_ifcvt_allow_complicated_cmps) Optimization
+Allow RTL if-conversion pass to deal with complicated cmps (can increase compilation time).
+
+ffind-with-sve
+Common Var(flag_find_with_sve) Init(0) Optimization
+Enable replace std::find with sve
+
+fsve-expand-std-find-threshold
+Common Var(sve_expand_std_find_threshold) Init(8) Optimization
+Minimal length of the array to search
 
 ; This comment is to ensure we retain the blank line above.

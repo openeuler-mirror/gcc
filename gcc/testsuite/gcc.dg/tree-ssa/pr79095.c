@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-ipa-icf -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fno-ipa-icf -fdump-tree-evrp1" } */
 
 extern void arf (unsigned x, unsigned y);
 extern void baz (unsigned x, unsigned y);
@@ -429,8 +429,8 @@ f4nro (unsigned a, unsigned b)
 }
 
 /* All calls to baz should still reference a & b as arguments. */
-/* { dg-final { scan-tree-dump-times "baz \\(a_\[0-9\]+\\(D\\), b_\[0-9\]+\\)" 32 "evrp"} } */
+/* { dg-final { scan-tree-dump-times "baz \\(a_\[0-9\]+\\(D\\), b_\[0-9\]+\\)" 32 "evrp1"} } */
 
 
 /* All calls to arf should have constant arguments.  */
-/* { dg-final { scan-tree-dump-times "arf \\(\[0-9\]+, \[0-9\]+\\)" 32 "evrp"} } */
+/* { dg-final { scan-tree-dump-times "arf \\(\[0-9\]+, \[0-9\]+\\)" 32 "evrp1"} } */

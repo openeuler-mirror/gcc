@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 /* Simple tests to make sure transitives are working. */
 void keep();
@@ -140,5 +140,5 @@ f9 (int x, int y, int z)
       }
 }
 
-/* { dg-final { scan-tree-dump-not "kill" "evrp" } }  */
-/* { dg-final { scan-tree-dump-times "keep" 13 "evrp"} } */
+/* { dg-final { scan-tree-dump-not "kill" "evrp1" } }  */
+/* { dg-final { scan-tree-dump-times "keep" 13 "evrp1"} } */

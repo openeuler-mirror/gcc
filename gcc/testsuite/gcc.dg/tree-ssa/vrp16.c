@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-tree-fre -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fno-tree-fre -fdump-tree-evrp1" } */
 
 
 extern void abort (void) __attribute__ ((__noreturn__));
@@ -19,5 +19,5 @@ nonlocal_mentioned_p (rtx x)
 	abort ();
 }
 
-/* { dg-final { scan-tree-dump-times "if" 0 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "if" 0 "evrp1" } } */
 

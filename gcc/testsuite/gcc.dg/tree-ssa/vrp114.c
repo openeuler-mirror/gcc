@@ -1,5 +1,5 @@
 /* { dg-do link { target int32plus } } */
-/* { dg-options "-O2 -fdump-tree-fre1 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-fre1 -fdump-tree-evrp1" } */
 
 extern void link_error ();
 void foo (int a)
@@ -21,4 +21,4 @@ int main()
 }
 
 /* { dg-final { scan-tree-dump-times "link_error" 1 "fre1" } } */
-/* { dg-final { scan-tree-dump-times "link_error" 0 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "link_error" 0 "evrp1" } } */

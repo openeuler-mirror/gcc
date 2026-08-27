@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp -fno-tree-forwprop" }*/
+/* { dg-options "-O2 -fdump-tree-evrp1 -fno-tree-forwprop" }*/
 
 typedef __INT32_TYPE__ int32_t;
 
@@ -27,4 +27,4 @@ int32_t xor(int32_t x, int32_t y)
   return t;
 }
 
-/* { dg-final { scan-tree-dump-times "\\\[-128, 127\\\]" 9 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "\\\[-128, 127\\\]" 9 "evrp1" } } */

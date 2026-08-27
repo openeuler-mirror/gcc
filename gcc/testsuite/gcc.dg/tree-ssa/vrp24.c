@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-tree-forwprop -fdump-tree-evrp-details -fdump-tree-optimized -fno-tree-ccp --param logical-op-non-short-circuit=1" } */
+/* { dg-options "-O2 -fno-tree-forwprop -fdump-tree-evrp1-details -fdump-tree-optimized -fno-tree-ccp --param logical-op-non-short-circuit=1" } */
 
 
 struct rtx_def;
@@ -88,6 +88,6 @@ L7:
    n_sets can only have the values [0, 1] as it's the result of a
    boolean operation.  */
 
-/* { dg-final { scan-tree-dump-times "Simplified relational" 2 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "Simplified relational" 2 "evrp1" } } */
 /* { dg-final { scan-tree-dump-times "if " 3 "optimized" } } */
 

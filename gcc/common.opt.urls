@@ -190,6 +190,9 @@ UrlSuffix(gcc/Warning-Options.html#index-Wshadow_003dlocal)
 Wshadow=compatible-local
 UrlSuffix(gcc/Warning-Options.html#index-Wshadow_003dcompatible-local)
 
+Wsimdmath
+UrlSuffix(gcc/Warning-Options.html#index-Wno-simdmath)
+
 Wstack-protector
 UrlSuffix(gcc/Warning-Options.html#index-Wno-stack-protector)
 
@@ -405,6 +408,9 @@ UrlSuffix(gcc/Instrumentation-Options.html#index-fsanitize-undefined-trap-on-err
 fasynchronous-unwind-tables
 UrlSuffix(gcc/Code-Gen-Options.html#index-fasynchronous-unwind-tables)
 
+farray-widen-compare
+UrlSuffix(gcc/Optimize-Options.html#index-farray-widen-compare)
+
 fauto-inc-dec
 UrlSuffix(gcc/Optimize-Options.html#index-fauto-inc-dec)
 
@@ -422,6 +428,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-fbranch-count-reg)
 
 fbranch-probabilities
 UrlSuffix(gcc/Optimize-Options.html#index-fbranch-probabilities)
+
+fbuiltin-will-return
+UrlSuffix(gcc/Optimize-Options.html#index-fbuiltin-will-return)
 
 fcallgraph-info
 UrlSuffix(gcc/Developer-Options.html#index-fcallgraph-info)
@@ -679,6 +688,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-ffp-contract)
 ffp-int-builtin-inexact
 UrlSuffix(gcc/Optimize-Options.html#index-ffp-int-builtin-inexact)
 
+ffp-model=
+UrlSuffix(gcc/Optimize-Options.html#index-ffp-model)
+
 ffunction-cse
 UrlSuffix(gcc/Optimize-Options.html#index-ffunction-cse)
 
@@ -901,6 +913,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-fkeep-static-functions)
 
 fkeep-static-consts
 UrlSuffix(gcc/Optimize-Options.html#index-fkeep-static-consts)
+
+fkernel-pgo
+UrlSuffix(gcc/Instrumentation-Options.html#index-fkernel-pgo)
 
 fleading-underscore
 UrlSuffix(gcc/Code-Gen-Options.html#index-fleading-underscore)
@@ -1269,6 +1284,9 @@ UrlSuffix(gcc/Optimize-Options.html#index-fsignaling-nans)
 
 fsigned-zeros
 UrlSuffix(gcc/Optimize-Options.html#index-fno-signed-zeros)
+
+fsimdmath
+UrlSuffix(gcc/Optimize-Options.html#index-fsimdmath)
 
 fsingle-precision-constant
 UrlSuffix(gcc/Optimize-Options.html#index-fsingle-precision-constant)

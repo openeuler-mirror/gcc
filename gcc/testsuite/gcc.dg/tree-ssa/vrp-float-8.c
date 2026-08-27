@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fno-thread-jumps -fdump-tree-evrp" }
+// { dg-options "-O2 -fno-thread-jumps -fdump-tree-evrp1" }
 
 extern void link_error ();
 
@@ -22,5 +22,5 @@ float test (float x)
       }
 }
 
-// { dg-final { scan-tree-dump-times "fast_sqrt" 2 "evrp" } }
-// { dg-final { scan-tree-dump-not "link_error" "evrp" } }
+// { dg-final { scan-tree-dump-times "fast_sqrt" 2 "evrp1" } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" } }

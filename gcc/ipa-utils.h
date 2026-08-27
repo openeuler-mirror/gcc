@@ -21,6 +21,9 @@ along with GCC; see the file COPYING3.  If not see
 #ifndef GCC_IPA_UTILS_H
 #define GCC_IPA_UTILS_H
 
+#include "cgraph.h"
+#include "function.h"
+
 struct ipa_dfs_info {
   int dfn_number;
   int low_link;
@@ -31,6 +34,18 @@ struct ipa_dfs_info {
   bool on_stack;
   struct cgraph_node* next_cycle;
   void *aux;
+};
+
+/* Use RAII to help save cfun.  */
+class cfun_saver
+{
+public:
+  cfun_saver (cgraph_node *node);
+  cfun_saver (cgraph_node *node, unsigned loop_flags);
+  ~cfun_saver ();
+
+private:
+  bool need_finalize_loop_optimizer = false;
 };
 
 
@@ -46,6 +61,7 @@ tree get_base_var (tree);
 void ipa_merge_profiles (struct cgraph_node *dst,
 			 struct cgraph_node *src, bool preserve_body = false);
 bool recursive_call_p (tree, tree);
+bool leaf_recursive_node_p (cgraph_node *node);
 bool stmt_may_terminate_function_p (function *fun, gimple *stmt, bool assume_return_or_eh);
 bitmap find_always_executed_bbs (function *fun, bool assume_return_or_eh);
 

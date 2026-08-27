@@ -3307,6 +3307,14 @@ process_edge_to_unknown_caller (cgraph_edge *cs)
   gcc_checking_assert (from_ifs);
   isra_call_summary *csum = call_sums->get (cs);
 
+  /* TODO: implement better support for call edges inserted after summary
+     collection but before sra wpa invocation.  */
+  if (!csum)
+    {
+      csum = call_sums->get_create (cs);
+      csum->m_return_ignored = true;
+    }
+
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "Processing an edge to an unknown caller from %s:\n",
 	     cs->caller->dump_name ());
@@ -3568,6 +3576,13 @@ propagate_used_across_scc_edge (cgraph_edge *cs, vec<cgraph_node *> *stack)
     return;
 
   isra_call_summary *csum = call_sums->get (cs);
+  /* TODO: implement better support for call edges inserted after summary
+     collection but before sra wpa invocation.  */
+  if (!csum)
+    {
+      csum = call_sums->get_create (cs);
+      csum->m_return_ignored = true;
+    }
   gcc_checking_assert (csum);
   unsigned args_count = csum->m_arg_flow.length ();
   enum availability availability;
@@ -3800,7 +3815,15 @@ param_splitting_across_edge (cgraph_edge *cs)
     = ipcp_get_transformation_summary (cs->caller);
 
   isra_call_summary *csum = call_sums->get (cs);
-  gcc_checking_assert (csum);
+  /* Call edges inserted after summary collection but before sra wpa
+     invocation (e.g. by IPA-prefetch) have no summary; create an empty one,
+     matching the shim in process_edge_to_unknown_caller.  gcc-14's IPA-SRA
+     reaches this edge-processing path for such edges where gcc-12 did not.  */
+  if (!csum)
+    {
+      csum = call_sums->get_create (cs);
+      csum->m_return_ignored = true;
+    }
   unsigned args_count = csum->m_arg_flow.length ();
   isra_func_summary *to_ifs = func_sums->get (callee);
   unsigned param_count

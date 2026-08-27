@@ -1208,7 +1208,13 @@ init_ic_make_global_vars (void)
   DECL_ARTIFICIAL (ic_tuple_var) = 1;
   DECL_INITIAL (ic_tuple_var) = NULL;
   DECL_EXTERNAL (ic_tuple_var) = 1;
-  if (targetm.have_tls)
+  /* Not under -fkernel-pgo: a kernel has no ELF TLS runtime - its
+     loader does not process TLS relocations - and provides its own
+     non-TLS definition of __gcov_indirect_call.  The shared variable
+     can then be clobbered between racing indirect calls, which loses
+     or misattributes some value-profile samples; that costs profile
+     quality, never correctness.  */
+  if (targetm.have_tls && !flag_kernel_pgo)
     set_decl_tls_model (ic_tuple_var, decl_default_tls_model (ic_tuple_var));
 }
 
@@ -1873,7 +1879,7 @@ tree_profiling (void)
      cgraphunit.cc:ipa_passes().  */
   gcc_assert (symtab->state == IPA_SSA);
 
-  init_node_map (true);
+  init_node_map (true, false);
   parse_profile_file_filtering ();
 
   FOR_EACH_DEFINED_FUNCTION (node)
@@ -1914,7 +1920,7 @@ tree_profiling (void)
 	     time.  */
 	  else
 	    {
-	      read_thunk_profile (node);
+	      read_thunk_profile (node, false);
 	      continue;
 	    }
 	}
@@ -1929,7 +1935,7 @@ tree_profiling (void)
 	  && (execute_fixup_cfg () & TODO_cleanup_cfg))
 	cleanup_tree_cfg ();
 
-      branch_prob (thunk);
+      branch_prob (thunk, false);
 
       if (! flag_branch_probabilities
 	  && flag_profile_values)
@@ -2034,6 +2040,170 @@ tree_profiling (void)
   return 0;
 }
 
+/* Profile all functions in the callgraph with cs profile.  */
+
+static unsigned int
+csprofile_transform (struct cgraph_node *node)
+{
+  basic_block bb;
+  bool thunk = false;
+
+  parse_profile_file_filtering ();
+
+  if (dump_file)
+    {
+      fprintf (dump_file, "[cspgo] trying cspgo on function:\n");
+      dump_function_header (dump_file, cfun->decl, dump_flags);
+    }
+
+  if (!DECL_STRUCT_FUNCTION (current_function_decl))
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] %s without function decl, skip.\n",
+		 node->dump_name ());
+      return 0;
+    }
+
+  if (!gimple_has_body_p (node->decl) && !node->thunk)
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] %s without gimple body, skip.\n",
+		 node->dump_name ());
+      return 0;
+    }
+
+  /* Don't profile functions produced for builtin stuff.  */
+  if (DECL_SOURCE_LOCATION (node->decl) == BUILTINS_LOCATION)
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] %s with BUILTINS_LOCATION, skip.\n",
+		 node->dump_name ());
+      return 0;
+    }
+
+  const char *file = LOCATION_FILE (DECL_SOURCE_LOCATION (node->decl));
+  if (!file || !include_source_file_for_profile (file))
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] %s is sub func or in filter-files, "
+			    "skip.\n", node->dump_name ());
+      return 0;
+    }
+
+  if (lookup_attribute ("no_profile_instrument_function",
+			DECL_ATTRIBUTES (node->decl)))
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] %s is no_profile_instrument_function,"
+		 " skip.\n", node->dump_name ());
+      return 0;
+    }
+
+  /* Do not instrument extern inline functions.  */
+  if (DECL_EXTERNAL (node->decl))
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] %s is DECL_EXTERNAL, skip.\n",
+			     node->dump_name ());
+      return 0;
+    }
+
+  if (!coverage_node_map_initialized_p ())
+    init_node_map (true, true);
+
+  /* Node without profile id should skip.  */
+  if (!node->profile_id)
+    {
+      if (dump_file)
+	fprintf (dump_file, "[cspgo] %s does not has profile_id, skip.\n",
+			     node->dump_name ());
+      return 0;
+    }
+
+  if (flag_csprofile_generate)
+    {
+      profile_arc_flag = 1;
+      flag_branch_probabilities = 0;
+    }
+
+  /* Process thunk function.  */
+  if (node->thunk)
+    {
+      /* We cannot expand variadic thunks to Gimple.  */
+      if (stdarg_p (TREE_TYPE (node->decl)))
+	{
+	  if (dump_file)
+	    fprintf (dump_file, "[cspgo] %s is DECL_EXTERNAL, skip.\n",
+			     node->dump_name ());
+	  return 0;
+	}
+      thunk = true;
+      /* When generate profile, expand thunk to gimple so it can be
+	 instrumented same way as other functions.  */
+      if (profile_arc_flag)
+	expand_thunk (node, false, true);
+      /* Read cgraph profile but keep function as thunk at profile-use
+	 time.  */
+      else
+	{
+	  read_thunk_profile (node, true);
+	  return 0;
+	}
+    }
+
+  /* Local pure-const may imply need to fixup the cfg.  */
+  if (gimple_has_body_p (node->decl)
+	&& (execute_fixup_cfg () & TODO_cleanup_cfg))
+    cleanup_tree_cfg ();
+
+  branch_prob (thunk, true);
+
+  if (! flag_branch_probabilities
+	&& flag_profile_values)
+    gimple_gen_ic_func_profiler ();
+
+  if (flag_branch_probabilities
+      && !thunk
+      && flag_profile_values
+      && flag_value_profile_transformations
+      && profile_status_for_fn (cfun) == PROFILE_READ)
+    gimple_value_profile_transformations ();
+
+  /* The above could hose dominator info.  Currently there is
+     none coming in, this is a safety valve.  It should be
+     easy to adjust it, if and when there is some.  */
+  free_dominance_info (CDI_DOMINATORS);
+  free_dominance_info (CDI_POST_DOMINATORS);
+
+  release_profile_file_filtering ();
+
+  if (flag_csprofile_generate)
+    {
+      profile_arc_flag = 0;
+      flag_branch_probabilities = 1;
+    }
+
+  /* Update call statements and rebuild the cgraph.  */
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      gimple_stmt_iterator gsi;
+      for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
+	{
+	  gimple *stmt = gsi_stmt (gsi);
+	  if (is_gimple_call (stmt))
+	    update_stmt (stmt);
+	}
+    }
+
+  /* re-merge split blocks.  */
+  cleanup_tree_cfg ();
+  update_ssa (TODO_update_ssa);
+
+  cgraph_edge::rebuild_edges ();
+
+  return 0;
+}
+
 namespace {
 
 const pass_data pass_data_ipa_tree_profile =
@@ -2079,6 +2249,95 @@ simple_ipa_opt_pass *
 make_pass_ipa_tree_profile (gcc::context *ctxt)
 {
   return new pass_ipa_tree_profile (ctxt);
+}
+
+namespace {
+
+const pass_data pass_data_ipa_csprofile =
+{
+  IPA_PASS, /* type */
+  "csprofile", /* name */
+  OPTGROUP_NONE, /* optinfo_flags */
+  TV_IPA_CSPROFILE, /* tv_id */
+  0, /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  0, /* todo_flags_finish */
+};
+
+class pass_ipa_csprofile : public ipa_opt_pass_d
+{
+public:
+  pass_ipa_csprofile (gcc::context *ctxt)
+    : ipa_opt_pass_d (pass_data_ipa_csprofile, ctxt,
+		      NULL, /* generate_summary */
+		      NULL, /* write_summary */
+		      NULL, /* read_summary */
+		      NULL, /* write_optimization_summary */
+		      NULL, /* read_optimization_summary */
+		      NULL, /* stmt_fixup */
+		      0, /* function_transform_todo_flags_start */
+		      csprofile_transform, /* function_transform */
+		      NULL) /* variable_transform */
+  {}
+
+  /* opt_pass methods: */
+  virtual bool gate (function *)
+    {
+      if (flag_csprofile_generate || flag_csprofile_use)
+	{
+	  int ret = true;
+	  if (!profile_data_prefix)
+	    {
+	      error ("pgo profile path must set when using cspgo.");
+	      ret = false;
+	    }
+
+	  if (!csprofile_data_prefix)
+	    {
+	      error ("cspgo profile path must set when using cspgo.");
+	      ret = false;
+	    }
+
+	  if (!(flag_cfgo_profile_use || flag_profile_use))
+	    {
+	      error ("cspgo must used with cfgo-pgo or pgo.");
+	      ret = false;
+	    }
+
+	  /* pgo and cspgo path must different.  */
+	  char* cfgo_pgo_path = lrealpath (profile_data_prefix);
+	  char* cfgo_cspgo_path = lrealpath (csprofile_data_prefix);
+	  bool files_differ = filename_cmp (cfgo_pgo_path, cfgo_cspgo_path);
+	  if (!files_differ)
+	    {
+	      error ("pgo and cspgo path must different between %s and %s",
+		     cfgo_pgo_path, cfgo_cspgo_path);
+	      ret = false;
+	    }
+	  free (cfgo_pgo_path);
+	  free (cfgo_cspgo_path);
+
+	  return ret;
+	}
+      return false;
+    }
+  /* The main process of cspgo is in csprofile_transform, execute does not need
+     to do anything.  */
+  virtual unsigned int execute (function *)
+    {
+      return 0;
+    }
+
+}; // class pass_ipa_csprofile
+
+} // anon namespace
+
+ipa_opt_pass_d *
+make_pass_ipa_csprofile (gcc::context *ctxt)
+{
+  return new pass_ipa_csprofile (ctxt);
 }
 
 #include "gt-tree-profile.h"

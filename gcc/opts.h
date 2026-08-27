@@ -452,6 +452,12 @@ extern bool target_handle_option (struct gcc_options *opts,
 				  const struct cl_option_handlers *handlers,
 				  diagnostic_context *dc,
 				  void (*target_option_override_hook) (void));
+extern void maybe_warn_simdmath_unconstrained (struct gcc_options *,
+					       struct gcc_options *,
+					       location_t);
+extern void maybe_warn_simdmath_ineffective (struct gcc_options *,
+					     struct gcc_options *,
+					     location_t);
 extern void finish_options (struct gcc_options *opts,
 			    struct gcc_options *opts_set,
 			    location_t loc);

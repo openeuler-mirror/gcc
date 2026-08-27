@@ -1,0 +1,65 @@
+/* Vector math declarations pre-included by -fsimdmath.  */
+
+/* The guard is load-bearing beyond the usual reason: it is the only
+   thing a test can look at to assert that the pre-include actually
+   happened.  Every other symptom - a vector call in the assembly, a
+   redeclaration diagnostic - depends on something else as well, so a
+   test built on one of those goes quiet instead of red when the
+   pre-include breaks.  */
+#ifndef __SIMDMATH_H__
+#define __SIMDMATH_H__
+
+#ifdef __cplusplus
+/* These declarations are seen before any system header, so the exception
+   specification glibc gives the same functions has to be matched here or
+   every later declaration of them is a conflict.  __THROW is not
+   available yet - sys/cdefs.h has not been read - so spell it out.  */
+# if __cplusplus >= 201103L
+#  define __SIMDMATH_THROW noexcept (true)
+# else
+#  define __SIMDMATH_THROW throw ()
+# endif
+extern "C" {
+#else
+# define __SIMDMATH_THROW
+#endif
+
+#pragma omp declare simd simdlen(2) notinbranch
+double cos (double x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(4) notinbranch
+float cosf (float x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(2) notinbranch
+double sin (double x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(4) notinbranch
+float sinf (float x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(2) notinbranch
+double exp (double x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(4) notinbranch
+float expf (float x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(2) notinbranch
+double log (double x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(4) notinbranch
+float logf (float x) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(2) notinbranch
+double pow (double x, double y) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(4) notinbranch
+float powf (float x, float y) __SIMDMATH_THROW;
+
+#pragma omp declare simd simdlen(4) notinbranch
+float exp2f (float x) __SIMDMATH_THROW;
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
+#undef __SIMDMATH_THROW
+#endif /* __SIMDMATH_H__ */

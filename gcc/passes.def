@@ -71,6 +71,7 @@ along with GCC; see the file COPYING3.  If not see
   PUSH_INSERT_PASSES_WITHIN (pass_local_optimization_passes)
       NEXT_PASS (pass_fixup_cfg);
       NEXT_PASS (pass_rebuild_cgraph_edges);
+      NEXT_PASS (pass_find_with_sve);
       NEXT_PASS (pass_local_fn_summary);
       NEXT_PASS (pass_early_inline);
       NEXT_PASS (pass_warn_recursion);
@@ -97,10 +98,13 @@ along with GCC; see the file COPYING3.  If not see
           NEXT_PASS (pass_dse);
 	  NEXT_PASS (pass_cd_dce, false /* update_address_taken_p */);
 	  NEXT_PASS (pass_phiopt, true /* early_p */);
+	  NEXT_PASS (pass_array_widen_compare);
+	  NEXT_PASS (pass_loop_crc);
 	  NEXT_PASS (pass_tail_recursion);
 	  NEXT_PASS (pass_if_to_switch);
 	  NEXT_PASS (pass_convert_switch);
 	  NEXT_PASS (pass_cleanup_eh);
+	  NEXT_PASS (pass_if_split);
 	  NEXT_PASS (pass_sccopy);
 	  NEXT_PASS (pass_profile);
 	  NEXT_PASS (pass_local_pure_const);
@@ -160,11 +164,14 @@ along with GCC; see the file COPYING3.  If not see
   NEXT_PASS (pass_ipa_profile);
   NEXT_PASS (pass_ipa_icf);
   NEXT_PASS (pass_ipa_devirt);
+  NEXT_PASS (pass_ipa_icp);
+  NEXT_PASS (pass_ipa_prefetch);
   NEXT_PASS (pass_ipa_cp);
   NEXT_PASS (pass_ipa_sra);
   NEXT_PASS (pass_ipa_cdtor_merge);
   NEXT_PASS (pass_ipa_fn_summary);
   NEXT_PASS (pass_ipa_inline);
+  NEXT_PASS (pass_ipa_csprofile);
   NEXT_PASS (pass_ipa_pure_const);
   NEXT_PASS (pass_ipa_modref);
   NEXT_PASS (pass_ipa_free_fn_summary, false /* small_p */);
@@ -181,7 +188,23 @@ along with GCC; see the file COPYING3.  If not see
      passes are executed after partitioning and thus see just parts of the
      compiled unit.  */
   INSERT_PASSES_AFTER (all_late_ipa_passes)
+  NEXT_PASS (pass_ipa_alignment_propagation);
+  PUSH_INSERT_PASSES_WITHIN (pass_ipa_alignment_propagation)
+      NEXT_PASS (pass_ccp, true /* nonzero_p */);
+      NEXT_PASS (pass_early_vrp);
+      NEXT_PASS (pass_cd_dce, false /* update_address_taken_p */);
+      NEXT_PASS (pass_forwprop);
+      NEXT_PASS (pass_rebuild_cgraph_edges);
+  POP_INSERT_PASSES ()
+  NEXT_PASS (pass_ipa_localize_array);
+  PUSH_INSERT_PASSES_WITHIN (pass_ipa_localize_array)
+      NEXT_PASS (pass_forwprop);
+      NEXT_PASS (pass_rebuild_cgraph_edges);
+  POP_INSERT_PASSES ()
+  NEXT_PASS (pass_ipa_array_dse);
   NEXT_PASS (pass_ipa_pta);
+  /* FIXME: this should be a normal IP pass.  */
+  NEXT_PASS (pass_ipa_struct_reorg);
   NEXT_PASS (pass_omp_simd_clone);
   TERMINATE_PASS_LIST (all_late_ipa_passes)
 
@@ -342,6 +365,10 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_cse_sincos);
       NEXT_PASS (pass_cse_reciprocals);
       NEXT_PASS (pass_reassoc, false /* early_p */);
+      NEXT_PASS (pass_slp_vectorize_late);
+      PUSH_INSERT_PASSES_WITHIN (pass_slp_vectorize_late)
+	  NEXT_PASS (pass_slp_vectorize);
+      POP_INSERT_PASSES ()
       NEXT_PASS (pass_strength_reduction);
       NEXT_PASS (pass_split_paths);
       NEXT_PASS (pass_tracer);
@@ -490,6 +517,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_rtl_fwprop_addr);
       NEXT_PASS (pass_inc_dec);
       NEXT_PASS (pass_initialize_regs);
+      NEXT_PASS (pass_crypto_accel);
       NEXT_PASS (pass_ud_rtl_dce);
       NEXT_PASS (pass_combine);
       NEXT_PASS (pass_if_after_combine);

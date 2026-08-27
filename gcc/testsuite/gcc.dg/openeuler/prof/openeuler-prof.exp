@@ -1,0 +1,86 @@
+# GCC testsuite driver for openEuler features that need a full
+# profile cycle (compile with -fprofile-generate, run, recompile with
+# -fprofile-use plus the feature under test).
+#
+# Run only this suite with:
+#   make check-gcc RUNTESTFLAGS="openeuler-prof.exp"
+
+load_lib target-supports.exp
+
+# Some targets don't support tree profiling.
+if { ![check_profiling_available "-fprofile-generate"] } {
+    return
+}
+
+# The procedures in profopt.exp need these parameters.
+set tool gcc
+set prof_ext "gcda"
+
+if $tracelevel then {
+    strace $tracelevel
+}
+
+# Load support procs.
+load_lib profopt.exp
+
+# Save and override the default list defined in profopt.exp.
+set oeprof_save_profopt_options $PROFOPT_OPTIONS
+set PROFOPT_OPTIONS [list {}]
+
+# The feedback step carries the feature under test; -fauto-bolt on the
+# generate step would be rejected (it requires feedback data).  The
+# companion flags are spelled out so cc1 does not emit its
+# option-adjustment notes, which profopt would count as a failed
+# compile.
+set profile_option "-fprofile-generate"
+set feedback_option "-fprofile-use -fauto-bolt -ffunction-sections -fipa-ra -fno-align-jumps -fno-align-labels -fno-align-loops"
+set profile_wrapper ""
+
+# The bolt plugin unconditionally chats on the linker's message
+# channel (BOLT-PLUGIN-INFO).  Prune those lines before the compile
+# check; everything else still fails the step as usual.
+if { [info procs oeprof_saved_check_compile] == "" } {
+    rename gcc_check_compile oeprof_saved_check_compile
+    proc gcc_check_compile { testcase option objname gcc_output } {
+	regsub -all -line {^[^\n]*BOLT-PLUGIN-INFO:[^\n]*\n?} $gcc_output "" gcc_output
+	return [oeprof_saved_check_compile $testcase $option $objname $gcc_output]
+    }
+}
+
+# The bolt plugin shells out to llvm-bolt at link time and reports an
+# ld error when it is missing, which would fail the feedback step in
+# environments without it.  Interpose a hermetic stub that just copies
+# its input to the requested output; the compile-side dump, the
+# plugin's section parsing and its .fdata generation - the parts under
+# test - all run for real.
+set oeprof_stubdir "[pwd]/bolt-stub"
+file mkdir $oeprof_stubdir
+set oeprof_stub [open "$oeprof_stubdir/llvm-bolt" w]
+puts $oeprof_stub "#!/bin/sh"
+puts $oeprof_stub {in=""; out=""; prev=""}
+puts $oeprof_stub {for a in "$@"; do}
+puts $oeprof_stub {  if [ "$prev" = "-o" ]; then out="$a"; fi}
+puts $oeprof_stub {  case "$a" in -*) ;; *) if [ -z "$in" ]; then in="$a"; fi ;; esac}
+puts $oeprof_stub {  prev="$a"}
+puts $oeprof_stub {done}
+puts $oeprof_stub {if [ -n "$in" ] && [ -n "$out" ]; then cp "$in" "$out"; fi}
+close $oeprof_stub
+file attributes "$oeprof_stubdir/llvm-bolt" -permissions 00755
+set oeprof_saved_path $env(PATH)
+setenv PATH "$oeprof_stubdir:$env(PATH)"
+
+foreach src [lsort [glob -nocomplain $srcdir/$subdir/*.c]] {
+    # If we're only testing specific files and this isn't one of them, skip it.
+    if ![runtest_file_p $runtests $src] then {
+        continue
+    }
+
+    profopt-execute $src
+}
+
+setenv PATH $oeprof_saved_path
+if { [info procs oeprof_saved_check_compile] != "" } {
+    rename gcc_check_compile ""
+    rename oeprof_saved_check_compile gcc_check_compile
+}
+set PROFOPT_OPTIONS $oeprof_save_profopt_options

@@ -12062,6 +12062,15 @@ If @var{code} is out of range the function should return
 @code{error_mark_node}.
 @end deftypefn
 
+@deftypefn {Target Hook} unsigned TARGET_GET_CRC_BUILTIN_CODE (unsigned @var{code}, bool @var{initialize_p})
+Define this hook to get crc32 builtin code.  It should be a function that
+returns the crc32 builtin function code @var{code}.
+If there is no such builtin and it cannot be initialized at this time
+if @var{initialize_p} is true the function should return @code{NULL_TREE}.
+If @var{code} is out of range the function should return
+@code{error_mark_node}.
+@end deftypefn
+
 @deftypefn {Target Hook} rtx TARGET_EXPAND_BUILTIN (tree @var{exp}, rtx @var{target}, rtx @var{subtarget}, machine_mode @var{mode}, int @var{ignore})
 
 Expand a call to a machine specific built-in function that was set up by
@@ -12306,6 +12315,35 @@ Define this macro for systems like AIX, where the linker discards
 object files that are not referenced from @code{main} and uses export
 lists.
 @end defmac
+
+@deftypefn {Target Hook} machine_mode TARGET_GET_V16QI_MODE ()
+This function get the 16 byte elements vector mode if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_REV32V16QI (rtx @var{dest}, rtx @var{src})
+This function generate the byte reverse instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESEV16QI (rtx @var{dest}, rtx @var{src1}, rtx @var{src2})
+This function generate the AES encryption instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESDV16QI (rtx @var{dest}, rtx @var{src1}, rtx @var{src2})
+This function generate the AES decryption instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESMCV16QI (rtx @var{dest}, rtx @var{src})
+This function generate the AES mix columns instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
+
+@deftypefn {Target Hook} rtx TARGET_GEN_AESIMCV16QI (rtx @var{dest}, rtx @var{src})
+This function generate the AES inversed mix columns instruction
+ of 16 byte elements vector if target supports this.
+@end deftypefn
 
 @deftypefn {Target Hook} bool TARGET_CANNOT_MODIFY_JUMPS_P (void)
 This target hook returns @code{true} past the point in which new jump

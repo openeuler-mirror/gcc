@@ -1,6 +1,6 @@
 // { dg-do compile }
 // { dg-require-effective-target c++20 }
-// { dg-options "-O2 -fdump-tree-evrp -fdump-tree-vrp1" }
+// { dg-options "-O2 -fdump-tree-evrp1 -fdump-tree-vrp1" }
 
 namespace std
 {
@@ -25,5 +25,5 @@ bar (double x)
   return std::isfinite (x);
 }
 
-/* { dg-final { scan-tree-dump "return 1;" "evrp" } } */
+/* { dg-final { scan-tree-dump "return 1;" "evrp1" } } */
 /* { dg-final { scan-tree-dump-times "return 1;" 2 "vrp1" } } */
