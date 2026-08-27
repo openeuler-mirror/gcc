@@ -705,20 +705,32 @@ class pass_ch : public ch_base
 {
 public:
   pass_ch (gcc::context *ctxt)
-    : ch_base (pass_data_ch, ctxt)
+    : ch_base (pass_data_ch, ctxt), bitset_prepare_p (false)
   {}
 
   /* opt_pass methods: */
-  bool gate (function *) final override { return flag_tree_ch != 0; }
+  bool gate (function *) final override
+  {
+    return flag_tree_ch != 0
+	   && (!bitset_prepare_p || flag_tree_bitset_store_coalescing);
+  }
 
   /* Initialize and finalize loop structures, copying headers inbetween.  */
   unsigned int execute (function *) final override;
 
   opt_pass * clone () final override { return new pass_ch (m_ctxt); }
+  void set_pass_param (unsigned int n, bool param) final override
+  {
+    gcc_assert (n == 0);
+    bitset_prepare_p = param;
+  }
 
 protected:
   /* ch_base method: */
   bool process_loop_p (class loop *loop) final override;
+
+private:
+  bool bitset_prepare_p;
 }; // class pass_ch
 
 const pass_data pass_data_ch_vect =
@@ -1221,9 +1233,16 @@ pass_ch_vect::execute (function *fun)
 /* Apply header copying according to a very simple test of do-while shape.  */
 
 bool
-pass_ch::process_loop_p (class loop *)
+pass_ch::process_loop_p (class loop *loop)
 {
-  return true;
+  if (!bitset_prepare_p)
+    return true;
+
+  class loop *inner = loop->inner;
+  return loop_depth (loop) == 1
+	 && inner && !inner->next
+	 && loop->num_nodes == 8
+	 && inner->num_nodes == 5;
 }
 
 /* Apply header-copying to loops where we might enable vectorization.  */

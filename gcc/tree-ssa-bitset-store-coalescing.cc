@@ -66,6 +66,11 @@ const pass_data bitset_store_coalescing_pass_data = {
   PROP_cfg | PROP_ssa, 0, 0, 0, 0
 };
 
+const pass_data bitset_store_coalescing_prepare_pass_data = {
+  GIMPLE_PASS, "bitset_coalesce_prep", OPTGROUP_NONE, TV_NONE,
+  PROP_cfg | PROP_ssa, 0, 0, 0, 0
+};
+
 struct canonical_iv
 {
   gphi *phi;
@@ -95,6 +100,26 @@ static bool
 same_tree_p (tree a, tree b)
 {
   return a && b && operand_equal_p (a, b, 0);
+}
+
+static bool
+same_assignment_rhs_p (tree a, tree b)
+{
+  if (same_tree_p (a, b))
+    return true;
+  if (!a || !b || TREE_CODE (a) != SSA_NAME || TREE_CODE (b) != SSA_NAME
+      || !types_compatible_p (TREE_TYPE (a), TREE_TYPE (b)))
+    return false;
+  gassign *a_def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (a));
+  gassign *b_def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (b));
+  if (!a_def || !b_def
+      || gimple_assign_rhs_code (a_def) != gimple_assign_rhs_code (b_def)
+      || gimple_num_ops (a_def) != gimple_num_ops (b_def))
+    return false;
+  for (unsigned int i = 1; i < gimple_num_ops (a_def); ++i)
+    if (!same_tree_p (gimple_op (a_def, i), gimple_op (b_def, i)))
+      return false;
+  return true;
 }
 
 static bool
@@ -224,9 +249,10 @@ find_canonical_iv (class loop *loop, canonical_iv *out)
       bool exit_on_false = (exit->flags & EDGE_FALSE_VALUE) != 0;
       tree bound = NULL_TREE;
       if (exit_on_false && (code == LT_EXPR || code == NE_EXPR)
-	  && same_tree_p (lhs, next))
+	  && (same_tree_p (lhs, value) || same_tree_p (lhs, next)))
 	bound = rhs;
-      else if (exit_on_false && code == GT_EXPR && same_tree_p (rhs, next))
+      else if (exit_on_false && code == GT_EXPR
+	       && (same_tree_p (rhs, value) || same_tree_p (rhs, next)))
 	bound = lhs;
       if (!bound || value_depends_on_p (bound, value))
 	continue;
@@ -381,10 +407,11 @@ find_candidate (class loop *inner, candidate *out)
     return false;
   /* Keep the opt-in matcher cheap in very large LTO units.  The canonical
      update diamond has five inner-loop blocks; with its rotation setup and
-     outer latch, the enclosing loop has nine.  Later tests remain fully
-     structural, but there is no reason to run recursive SSA dependency
-     walks for a different CFG.  */
-  if (inner->num_nodes != 5 || outer->num_nodes != 9)
+     outer latch, the enclosing loop has eight blocks before jump threading
+     and nine afterwards.  Later tests remain fully structural, but there is
+     no reason to run recursive SSA dependency walks for a different CFG.  */
+  if (inner->num_nodes != 5
+      || (outer->num_nodes != 8 && outer->num_nodes != 9))
     return false;
   if (!can_duplicate_loop_p (outer))
     return reject_candidate (inner, "loop duplication safety");
@@ -554,7 +581,7 @@ find_candidate (class loop *inner, candidate *out)
   if (!split_pointer_plus (info_ptr, &cand.info_base, &info_offset)
       || !split_pointer_plus (presence_ptr, &cand.presence_base,
 			      &presence_offset)
-      || !same_tree_p (info_offset, presence_offset)
+      || !same_assignment_rhs_p (info_offset, presence_offset)
       || same_tree_p (cand.info_base, cand.presence_base))
     return reject_candidate (inner, "paired packed-array addresses");
 
@@ -1118,6 +1145,74 @@ transform_candidate (candidate &cand)
   return true;
 }
 
+/* Normalize potential pattern loop nests before regular IPA inlining.  A
+   continue predictor can occupy an otherwise empty block until the late
+   predictor cleanup, after IPA has already introduced scalar exit PHIs.
+   Remove predictor statements only from the narrow candidate shape and
+   request CFG cleanup.  LIM without store motion then exposes the same
+   address and loop-bound form used by the matcher.  */
+class pass_bitset_store_coalescing_prepare : public gimple_opt_pass
+{
+public:
+  explicit pass_bitset_store_coalescing_prepare (gcc::context *ctxt)
+    : gimple_opt_pass (bitset_store_coalescing_prepare_pass_data, ctxt)
+  {}
+
+  opt_pass *clone () final override
+  {
+    return new pass_bitset_store_coalescing_prepare (m_ctxt);
+  }
+
+  bool gate (function *) final override
+  {
+    return flag_tree_bitset_store_coalescing && flag_tree_loop_im
+	   && optimize >= 3;
+  }
+
+  unsigned int execute (function *fun) final override
+  {
+    loop_optimizer_init (LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
+    bool need_lim = false;
+    bool removed_predict = false;
+    for (auto inner : loops_list (fun, LI_FROM_INNERMOST))
+      {
+	class loop *outer = loop_outer (inner);
+	if (!outer || loop_depth (outer) != 1
+	    || outer->inner != inner || inner->next
+	    || (outer->num_nodes != 8 && outer->num_nodes != 9)
+	    || (inner->num_nodes != 5 && inner->num_nodes != 6))
+	  continue;
+
+	if (inner->num_nodes == 5)
+	  {
+	    need_lim = true;
+	    continue;
+	  }
+
+	basic_block *body = get_loop_body (inner);
+	for (unsigned int i = 0; i < inner->num_nodes; ++i)
+	  for (gimple_stmt_iterator gsi = gsi_start_bb (body[i]);
+	       !gsi_end_p (gsi);)
+	    if (gimple_code (gsi_stmt (gsi)) == GIMPLE_PREDICT)
+	      {
+		gsi_remove (&gsi, true);
+		removed_predict = true;
+	      }
+	    else
+	      gsi_next (&gsi);
+	free (body);
+      }
+
+    unsigned int todo = 0;
+    if (need_lim)
+      todo = loop_invariant_motion_in_fun (fun, false);
+    loop_optimizer_finalize ();
+    if (removed_predict)
+      todo |= TODO_cleanup_cfg;
+    return todo;
+  }
+};
+
 class pass_bitset_store_coalescing : public gimple_opt_pass
 {
 public:
@@ -1154,6 +1249,12 @@ public:
 };
 
 } // anonymous namespace
+
+gimple_opt_pass *
+make_pass_bitset_store_coalescing_prepare (gcc::context *ctxt)
+{
+  return new pass_bitset_store_coalescing_prepare (ctxt);
+}
 
 gimple_opt_pass *
 make_pass_bitset_store_coalescing (gcc::context *ctxt)
