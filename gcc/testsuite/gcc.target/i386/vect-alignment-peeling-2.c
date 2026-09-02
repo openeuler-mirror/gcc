@@ -85,6 +85,6 @@ int main()
       __builtin_abort ();
 }
 
-/* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 4 "vect" } } */ 
+/* { dg-final { scan-tree-dump-times "Alignment of access forced using peeling" 7 "vect" } } */
 /* Verify all vector accesses are emitted as aligned.  */
 /* { dg-final { scan-assembler-not "movup" } } */

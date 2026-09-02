@@ -1219,6 +1219,10 @@ Do not use GOT to access external symbols.
 Target Joined UInteger Var(x86_stlf_window_ninsns) Init(64) Param
 Instructions number above which STFL stall penalty can be compensated.
 
+-param=ix86-vect-compare-costs=
+Target Joined UInteger Var(ix86_vect_compare_costs) Init(1) IntegerRange(0, 1) Param Optimization
+Whether x86 vectorizer cost modeling compares costs of different vector sizes.
+
 munroll-only-small-loops
 Target Var(ix86_unroll_only_small_loops) Init(0) Save
 Enable conservative small loop unrolling.

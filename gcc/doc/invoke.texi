@@ -15271,6 +15271,11 @@ The following choices of @var{name} are available on i386 and x86_64 targets:
 @item x86-stlf-window-ninsns
 Instructions number above which STFL stall penalty can be compensated.
 
+@item ix86-vect-compare-costs
+Whether x86 vectorizer cost modeling compares costs of different vector sizes.
+The value may be 0 or 1.  The default is 1; set it to 0 to restore the
+previous behavior.
+
 @end table
 
 @end table
