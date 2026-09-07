@@ -559,6 +559,10 @@ DEF_TUNE (X86_TUNE_AVX256_OPTIMAL, "avx256_optimal", m_CORE_AVX512)
 DEF_TUNE (X86_TUNE_AVX512_SPLIT_REGS, "avx512_split_regs", m_ZNVER4
 	  | m_C86_4G_M7 | m_C86_4G_M8)
 
+/* X86_TUNE_AVX512_AVOID_VEC_PERM: Avoid using 512-bit cross-lane
+   vector permutation instructions in the auto-vectorizer.  */
+DEF_TUNE (X86_TUNE_AVX512_AVOID_VEC_PERM, "avx512_avoid_vec_perm", m_C86_4G_M7)
+
 /* X86_TUNE_AVX256_MOVE_BY_PIECES: Optimize move_by_pieces with 256-bit
    AVX instructions.  */
 DEF_TUNE (X86_TUNE_AVX256_MOVE_BY_PIECES, "avx256_move_by_pieces",

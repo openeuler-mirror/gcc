@@ -27,6 +27,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree.h"
 #include "memmodel.h"
 #include "gimple.h"
+#include "gimple-pretty-print.h"
 #include "cfghooks.h"
 #include "cfgloop.h"
 #include "df.h"
@@ -23168,13 +23169,25 @@ ix86_noce_conversion_profitable_p (rtx_insn *seq, struct noce_if_info *if_info)
 /* x86-specific vector costs.  */
 class ix86_vector_costs : public vector_costs
 {
-  using vector_costs::vector_costs;
+public:
+  ix86_vector_costs (vec_info *, bool);
 
   unsigned int add_stmt_cost (int count, vect_cost_for_stmt kind,
 			      stmt_vec_info stmt_info, slp_tree node,
 			      tree vectype, int misalign,
 			      vect_cost_model_location where) override;
+  void finish_cost (const vector_costs *scalar_costs) override;
+
+private:
+  /* Number of 512-bit vector permutations.  */
+  unsigned m_num_avx512_vec_perm[3];
 };
+
+ix86_vector_costs::ix86_vector_costs (vec_info *vinfo,
+				      bool costing_for_scalar)
+  : vector_costs (vinfo, costing_for_scalar),
+    m_num_avx512_vec_perm ()
+{}
 
 /* Implement targetm.vectorize.create_costs.  */
 
@@ -23182,6 +23195,47 @@ static vector_costs *
 ix86_vectorize_create_costs (vec_info *vinfo, bool costing_for_scalar)
 {
   return new ix86_vector_costs (vinfo, costing_for_scalar);
+}
+
+/* Return true if a vec_perm should be counted as a cross-lane vector
+   permutation for a vector with NUNITS elements.  */
+static bool
+ix86_count_cross_lane_perm_p (vec_info *vinfo, slp_tree node, unsigned nunits)
+{
+  /* TODO: For loop vectorization with no SLP load-permutation
+     information, conservatively treat these perms as cross-lane.
+     Repeated-index cases such as {0, 0, 0, 0} are emitted as
+     separate vec_perm_exprs for each index, so we cannot reliably
+     separate false positives from real cross-lane shuffles yet.  */
+  if (!node
+      || !SLP_TREE_LOAD_PERMUTATION (node).exists ()
+      || !is_a<bb_vec_info> (vinfo))
+    return true;
+
+  unsigned half = nunits / 2;
+  bool allsame = true;
+  unsigned first = SLP_TREE_LOAD_PERMUTATION (node)[0];
+  bool cross_lane_p = false;
+
+  for (unsigned i = 0; i != SLP_TREE_LANES (node); i++)
+    {
+      unsigned tmp = SLP_TREE_LOAD_PERMUTATION (node)[i];
+      /* allsame is just a broadcast.  */
+      if (tmp != first)
+	allsame = false;
+
+      /* The load permutation can cover multiple vectors, so compare
+	 source and destination lanes modulo NUNITS.  */
+      tmp = tmp & (nunits - 1);
+      unsigned index = i & (nunits - 1);
+      if ((index < half && tmp >= half) || (index >= half && tmp < half))
+	cross_lane_p = true;
+
+      if (!allsame && cross_lane_p)
+	return true;
+    }
+
+  return false;
 }
 
 unsigned
@@ -23434,9 +23488,40 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 	retval = (retval * 17) / 10;
     }
 
+  /* BIT_FIELD_REF <vect_**, 64, 0> with count 0 costs 0 in body.  */
+  if (kind == vec_perm && vectype
+      && GET_MODE_SIZE (TYPE_MODE (vectype)) == 64
+      && count != 0)
+    {
+      unsigned nunits = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
+
+      if (ix86_count_cross_lane_perm_p (m_vinfo, node, nunits))
+	{
+	  m_num_avx512_vec_perm[where] += count;
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    {
+	      fprintf (dump_file,
+		       "Detected avx512 cross-lane permutation: ");
+	      if (stmt_info)
+		print_gimple_expr (dump_file, stmt_info->stmt, 0, TDF_SLIM);
+	      fprintf (dump_file, " \n");
+	    }
+	}
+    }
+
   m_costs[where] += retval;
 
   return retval;
+}
+
+void
+ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
+{
+  for (int i = 0; i != 3; i++)
+    if (m_num_avx512_vec_perm[i] && TARGET_AVX512_AVOID_VEC_PERM)
+      m_costs[i] = INT_MAX;
+
+  vector_costs::finish_cost (scalar_costs);
 }
 
 /* Validate target specific memory model bits in VAL. */
