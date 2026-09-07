@@ -21815,7 +21815,8 @@ ix86_avoid_jump_mispredicts (void)
 	  if (dump_file)
 	    fprintf (dump_file, "Padding insn %i by %i bytes!\n",
 		     INSN_UID (insn), padsize);
-          emit_insn_before (gen_pad (GEN_INT (padsize)), insn);
+	  emit_insn_before (gen_max_skip_align (GEN_INT (4),
+					   GEN_INT (padsize)), insn);
 	}
     }
 }
