@@ -24,6 +24,8 @@ GCC for openEuler 使用 GPLv3 协议，请见[License](https://atomgit.com/open
 
 ## 如何提交贡献
 
+提交前的本地检查和 CI 接入方式见 [GCC 补丁检查指南](contrib/README.pre-commit.md)。
+
 我们非常欢迎开发者提交贡献，如果您发现了一个bug或者有一些想法想要交流，欢迎[发邮件到dev列表](https://www.openeuler.org/zh/community/mailing-list/)或者[提交一个issue](https://atomgit.com/openeuler/gcc/issues)。
 
 ## 源码编译指导
