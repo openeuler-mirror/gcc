@@ -937,6 +937,44 @@ svpattern_token (enum aarch64_svpattern pattern)
   gcc_unreachable ();
 }
 
+/* Return true if RHS is an operand suitable for a CB<cc> (immediate)
+   instruction.  OP_CODE determines the type of the comparison.  */
+bool
+aarch64_cb_rhs (rtx_code op_code, rtx rhs)
+{
+  if (!CONST_INT_P (rhs))
+    return REG_P (rhs);
+
+  HOST_WIDE_INT rhs_val = INTVAL (rhs);
+
+  switch (op_code)
+    {
+    case EQ:
+    case NE:
+    case LT:
+    case LTU:
+    case GE:
+    case GEU:
+      /* EQ/NE  range is 0 .. 63.
+	 LT/LTU range is 0 .. 63.
+	 GE/GEU range is 1 .. 64 => GT x - 1, but also supports 0 via XZR.
+	 So the intersection is 0 .. 63. */
+      return IN_RANGE (rhs_val, 0, 63);
+
+    case GT:
+    case GTU:
+    case LE:
+    case LEU:
+      /* GT/GTU range is  0 .. 63
+	 LE/LEU range is -1 .. 62 => LT x + 1.
+	 So the intersection is 0 .. 62. */
+      return IN_RANGE (rhs_val, 0, 62);
+
+    default:
+      return false;
+    }
+}
+
 /* Return the location of a piece that is known to be passed or returned
    in registers.  FIRST_ZR is the first unused vector argument register
    and FIRST_PR is the first unused predicate argument register.  */
@@ -2684,10 +2722,10 @@ aarch64_gen_test_and_branch (rtx_code code, rtx x, int bitnum,
       emit_insn (gen_aarch64_and3nr_compare0 (mode, x, mask));
       rtx cc_reg = gen_rtx_REG (CC_NZVmode, CC_REGNUM);
       rtx x = gen_rtx_fmt_ee (code, CC_NZVmode, cc_reg, const0_rtx);
-      return gen_condjump (x, cc_reg, label);
+      return gen_aarch64_bcond (x, cc_reg, label);
     }
-  return gen_aarch64_tb (code, mode, mode,
-			 x, gen_int_mode (bitnum, mode), label);
+  return gen_aarch64_tbz (code, mode, mode,
+			   x, gen_int_mode (bitnum, mode), label);
 }
 
 /* Consider the operation:
@@ -13902,6 +13940,16 @@ aarch64_if_then_else_costs (rtx op0, rtx op1, rtx op2, int *cost, bool speed)
 	      /* TBZ/TBNZ.  */
 	      if (comparator == const0_rtx)
 		return true;
+	    }
+
+	  if (TARGET_CMPBR)
+	    {
+	      machine_mode cmpmode = GET_MODE (inner);
+	      *cost += rtx_cost (inner, cmpmode, cmpcode, 0, speed);
+	      if ((cmpmode != SImode && cmpmode != DImode)
+		  || !aarch64_cb_rhs (cmpcode, comparator))
+		*cost += rtx_cost (comparator, cmpmode, cmpcode, 1, speed);
+	      return true;
 	    }
 	}
     }

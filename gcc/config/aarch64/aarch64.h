@@ -409,6 +409,9 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* CSSC instructions are enabled through +cssc.  */
 #define TARGET_CSSC AARCH64_HAVE_ISA (CSSC)
 
+/* CB<cc> instructions are enabled through +cmpbr.  */
+#define TARGET_CMPBR AARCH64_HAVE_ISA (CMPBR)
+
 /* F8F32MM instructions, enabled through +f8f32mm.  */
 #define TARGET_F8F32MM (AARCH64_HAVE_ISA (F8F32MM))
 /* F8F16MM instructions, enabled through +f8f16mm.  */

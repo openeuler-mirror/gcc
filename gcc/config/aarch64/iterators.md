@@ -2736,6 +2736,32 @@
 			  (geu "hs")
 			  (gtu "hi")])
 
+(define_code_attr inv_cmp_op [(lt "ge")
+			  (le "gt")
+			  (eq "ne")
+			  (ne "eq")
+			  (ge "lt")
+			  (gt "le")
+			  (ltu "hs")
+			  (leu "hi")
+			  (geu "lo")
+			  (gtu "ls")])
+
+(define_mode_attr cmpbr_suffix [(QI "b") (HI "h")])
+
+(define_code_iterator INT_CMP [lt le eq ne ge gt ltu leu geu gtu])
+
+;; Inverse comparisons must have the same constraint so that
+;; branches can be redirected during late compilation.
+(define_code_attr cmpbr_imm_constraint [
+    (eq "Uc0") (ne "Uc0")
+    (lt "Uc0") (ge "Uc0")
+    (ltu "Uc0") (geu "Uc0")
+
+    (gt "Uc1") (le "Uc1")
+    (gtu "Uc1") (leu "Uc1")
+])
+
 (define_code_attr fix_trunc_optab [(fix "fix_trunc")
 				   (unsigned_fix "fixuns_trunc")])
 

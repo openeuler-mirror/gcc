@@ -1069,3 +1069,13 @@
   (and (match_code "const_int")
        (match_test "IN_RANGE (INTVAL (op),  -4096, 4080)
 		    && !(INTVAL (op) & 0xf)")))
+
+(define_predicate "aarch64_reg_Uc0_operand"
+  (ior (match_operand 0 "register_operand")
+       (and (match_code "const_int")
+	    (match_test "satisfies_constraint_Uc0 (op)"))))
+
+(define_predicate "aarch64_reg_Uc1_operand"
+  (ior (match_operand 0 "register_operand")
+       (and (match_code "const_int")
+	    (match_test "satisfies_constraint_Uc1 (op)"))))
