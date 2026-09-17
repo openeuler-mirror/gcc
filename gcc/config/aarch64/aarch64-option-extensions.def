@@ -250,6 +250,8 @@ AARCH64_OPT_EXTENSION("ssve-fp8dot2", SSVE_FP8DOT2, (SME2, FP8), (), (), "smesf8
 
 AARCH64_OPT_EXTENSION("fprcvt", FPRCVT, (FP), (), (), "fprcvt")
 
+AARCH64_OPT_EXTENSION("lsui", LSUI, (), (), (), "")
+
 AARCH64_OPT_EXTENSION("lut", LUT, (SIMD), (), (), "lut")
 
 AARCH64_OPT_EXTENSION("cpa", CPA, (), (), (), "")
