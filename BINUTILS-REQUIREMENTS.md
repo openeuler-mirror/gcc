@@ -103,7 +103,12 @@ __builtin_aarch64_rsr64 ("vdisr_el3")    →  mrs x0, s3_6_c12_c1_1
 
 受此影响的特性：FEAT_Debugv8p9、FEAT_SPE_FDS、FEAT_RASv2、FEAT_SCTLR2、
 FEAT_SEBEP、FEAT_FGT2、FEAT_STEP2、FEAT_E3DSE —— 它们在 GCC 里只有系统寄存器名，
-现在即可使用。FEAT_SPE_EFT 与 FEAT_FPAR 在上游 GCC 中没有任何表示。
+现在即可使用。FEAT_SPE_EFT 的 `pmsnevfr_el1` 与 FEAT_FPAR 的 `pfar_el1`、
+`pfar_el2`、`mfar_el3` 同样已在表中，一并可用。
+
+**查这张表要按寄存器名查，不要按特性名 grep。** 表里的特性标签与 Arm 手册的
+FEAT_ 名字并不一一对应：`pmsnevfr_el1` 上游归在 `SPE_FnE` 而不是 `SPE_EFT`，
+`mfar_el3` 在本树标的是 `AARCH64_NO_FEATURES`。按特性名检索会漏判成「GCC 没有」。
 
 ## 五、在 binutils 补齐之前
 
