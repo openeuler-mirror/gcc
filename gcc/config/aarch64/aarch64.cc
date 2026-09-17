@@ -15479,6 +15479,12 @@ aarch64_register_move_cost (machine_mode mode,
 				reg_class_contents[FFR_REGS]))
     return 80;
 
+  /* Moves to/from sysregs are expensive, and must go via GPR.  */
+  if (from == MOVEABLE_SYSREGS)
+    return 80 + aarch64_register_move_cost (mode, GENERAL_REGS, to);
+  if (to == MOVEABLE_SYSREGS)
+    return 80 + aarch64_register_move_cost (mode, from, GENERAL_REGS);
+
   /* Moving between GPR and stack cost is the same as GP2GP.  */
   if ((from == GENERAL_REGS && to == STACK_REG)
       || (to == GENERAL_REGS && from == STACK_REG))
@@ -15551,9 +15557,16 @@ aarch64_memory_move_cost (machine_mode mode, reg_class_t rclass_i, bool in)
 	    ? aarch64_tune_params.memmov_cost.load_fp
 	    : aarch64_tune_params.memmov_cost.store_fp);
 
+  /* If the move needs to go through GPRs, add the cost of doing that.  */
+  int base = 0;
+  if (rclass_i == MOVEABLE_SYSREGS)
+    base += (in
+	     ? aarch64_register_move_cost (DImode, GENERAL_REGS, rclass_i)
+	     : aarch64_register_move_cost (DImode, rclass_i, GENERAL_REGS));
+
   return (in
-	  ? aarch64_tune_params.memmov_cost.load_int
-	  : aarch64_tune_params.memmov_cost.store_int);
+	  ? base + aarch64_tune_params.memmov_cost.load_int
+	  : base + aarch64_tune_params.memmov_cost.store_int);
 }
 
 /* Implement TARGET_INSN_COST.  We have the opportunity to do something
