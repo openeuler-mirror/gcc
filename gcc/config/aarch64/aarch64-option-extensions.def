@@ -252,6 +252,8 @@ AARCH64_OPT_EXTENSION("fprcvt", FPRCVT, (FP), (), (), "fprcvt")
 
 AARCH64_OPT_EXTENSION("lut", LUT, (SIMD), (), (), "lut")
 
+AARCH64_OPT_EXTENSION("cpa", CPA, (), (), (), "")
+
 AARCH64_OPT_EXTENSION("f8f32mm", F8F32MM, (SIMD, FP8), (), (), "f8mm8")
 
 AARCH64_OPT_EXTENSION("f8f16mm", F8F16MM, (SIMD, FP8), (), (), "f8mm4")

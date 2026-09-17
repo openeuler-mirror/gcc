@@ -22152,6 +22152,8 @@ extension in streaming mode.
 Enable the Floating Point Absolute Maximum/Minimum extension.
 @item lut
 Enable the Lookup Table extension.
+@item cpa
+Enable the Checked Pointer Arithmetic instructions.
 
 @end table
 
