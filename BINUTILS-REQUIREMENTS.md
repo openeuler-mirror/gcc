@@ -19,6 +19,10 @@
 | FEAT_SVE_F16F32MM | `-march=...+sve-f16f32mm` | `sve-f16f32mm` | `fmmla z0.s, z1.h, z2.h` |
 | FEAT_FAMINMAX | `-march=...+faminmax` | `faminmax` | `famax v0.4s, v1.4s, v2.4s` |
 | FEAT_LUT | `-march=...+lut` | `lut` | `luti2 v0.16b, {v1.16b}, v2[0]` |
+| FEAT_CMPBR | `-march=...+cmpbr` | `cmpbr` | `cbeq w0, w1, .L`、`cbbls w1, w0, .L` |
+| FEAT_SVE2p1 | `-march=...+sve2p1` | `sve2p1` | `extq z0.b, z0.b, z1.b, #8`、`pmov p0.b, z0` |
+| FEAT_CPA | `-march=...+cpa` | `cpa` | 无新指令，仅影响地址计算的语义标注 |
+| FEAT_LSUI | `-march=...+lsui` | `lsui` | `ldtxr`、`sttxr` 等非特权原子 |
 
 streaming 变体 `+ssve-fp8fma`、`+ssve-fp8dot2`、`+ssve-fp8dot4` 与对应的非 streaming
 扩展同批次进入 binutils，不单列。
@@ -32,6 +36,15 @@ streaming 变体 `+ssve-fp8fma`、`+ssve-fp8dot2`、`+ssve-fp8dot4` 与对应的
 | 2.40 | Debian 12 | 拒绝 | 拒绝 | 拒绝 | 拒绝 | 拒绝 | 拒绝 |
 | 2.41 | **openEuler 24.03-LTS** | 拒绝 | 拒绝 | 拒绝 | 拒绝 | 拒绝 | 拒绝 |
 | 2.42 | Ubuntu 24.04 | 拒绝 | 拒绝 | 拒绝 | 拒绝 | 接受 | 接受 |
+
+2026-09-18 补测（构建容器内的 2.40）：
+
+| binutils | `+cmpbr` | `+sve2p1` | `+sve-b16b16` | `+cpa` | `+lsui` |
+| --- | --- | --- | --- | --- | --- |
+| 2.40 | 拒绝 | 拒绝 | 拒绝 | 拒绝 | 拒绝 |
+
+`+sve2p1` 与 `+cmpbr` 在 2.41/2.42 上未测（手上只有构建容器的 2.40），但 2.40 拒绝、
+且这两个扩展名进入 binutils 的时间晚于 fp8 家族，因此 2.41 拒绝是可推断的，未实测。
 
 拒绝形式为 `Error: unknown architectural extension 'xxx'`，随后指令本身也报
 `operand mismatch` 或 `unknown mnemonic`。
@@ -49,7 +62,7 @@ gcc-14 基线里就有，同样在 openEuler 24.03-LTS 的 2.41 上汇编不过�
 
 ```sh
 for e in fprcvt fp8 fp8fma fp8dot2 fp8dot4 f8f32mm f8f16mm sve-f16f32mm \
-         faminmax lut predres2 d128; do
+         faminmax lut predres2 d128 cmpbr sve2p1 cpa lsui; do
   printf '\t.arch armv9-a+%s\n\tnop\n' "$e" > /tmp/e.s
   if as /tmp/e.s -o /tmp/e.o 2>/dev/null; then echo "known:   +$e"
   else echo "UNKNOWN: +$e"; fi
@@ -118,3 +131,6 @@ FEAT_ 名字并不一一对应：`pmsnevfr_el1` 上游归在 `SPE_FnE` 而不是
   也不要在 `-mcpu` 的隐含扩展集合中打开。
 - 本仓库 `aarch64-cores.def` 中没有任何核声明实现这些特性（最新的 hip12 为 V9_2A），
   所以默认路径不会触发。
+- **`-march=armv9.4-a` 现在默认打开 `+sve2p1`**（上游 d46be332818）。这是唯一一处
+  「不显式写扩展名也会启用」的情况：显式用 `-march=armv9.4-a` 或更高的构建，汇编阶段
+  会需要认识 `sve2p1` 的汇编器。`-march=armv9.3-a` 及以下、以及所有 `-mcpu=` 路径不受影响。
