@@ -990,7 +990,7 @@ pure_scalable_type_info::piece::get_rtx (unsigned int first_zr,
   if (num_zr > 0 && num_pr == 0)
     return gen_rtx_REG (mode, first_zr);
 
-  if (num_zr == 0 && num_pr <= 2)
+  if (num_zr == 0 && num_pr > 0)
     return gen_rtx_REG (mode, first_pr);
 
   gcc_unreachable ();
@@ -1679,10 +1679,37 @@ aarch64_classify_vector_mode (machine_mode mode, bool any_target_p = false)
       return (TARGET_FLOAT || any_target_p) ? VEC_ADVSIMD : 0;
 
     case E_VNx32BImode:
+    case E_VNx64BImode:
       return TARGET_SVE ? VEC_SVE_PRED | VEC_STRUCT : 0;
 
     default:
       return 0;
+    }
+}
+
+/* Like aarch64_classify_vector_mode, but also include modes that are used
+   for memory operands but not register operands.  Such modes do not count
+   as real vector modes; they are just an internal construct to make things
+   easier to describe.  */
+static unsigned int
+aarch64_classify_vector_memory_mode (machine_mode mode)
+{
+  switch (mode)
+    {
+    case VNx1SImode:
+    case VNx1DImode:
+      return TARGET_SVE ? VEC_SVE_DATA | VEC_PARTIAL : 0;
+
+    case VNx1TImode:
+      return TARGET_SVE ? VEC_SVE_DATA : 0;
+
+    case VNx2TImode:
+    case VNx3TImode:
+    case VNx4TImode:
+      return TARGET_SVE ? VEC_SVE_DATA | VEC_STRUCT : 0;
+
+    default:
+      return aarch64_classify_vector_mode (mode);
     }
 }
 
@@ -1810,13 +1837,15 @@ aarch64_array_mode (machine_mode mode, unsigned HOST_WIDE_INT nelems)
 {
   if (TARGET_SVE && GET_MODE_CLASS (mode) == MODE_VECTOR_BOOL)
     {
-      /* Use VNx32BI for pairs of predicates, but explicitly reject giving
-	 a mode to other array sizes.  Using integer modes requires a round
-	 trip through memory and generates terrible code.  */
+      /* Use VNx32BI and VNx64BI for tuples of predicates, but explicitly
+	 reject giving a mode to other array sizes.  Using integer modes
+	 requires a round trip through memory and generates terrible code.  */
       if (nelems == 1)
 	return mode;
       if (mode == VNx16BImode && nelems == 2)
 	return VNx32BImode;
+      if (mode == VNx16BImode && nelems == 4)
+	return VNx64BImode;
       return BLKmode;
     }
 
@@ -2049,7 +2078,7 @@ aarch64_hard_regno_nregs (unsigned regno, machine_mode mode)
     case PR_REGS:
     case PR_LO_REGS:
     case PR_HI_REGS:
-      return mode == VNx32BImode ? 2 : 1;
+      return mode == VNx64BImode ? 4 : mode == VNx32BImode ? 2 : 1;
 
     case MOVEABLE_SYSREGS:
     case FFR_REGS:
@@ -2530,7 +2559,9 @@ aarch64_regmode_natural_size (machine_mode mode)
      code for Advanced SIMD.  */
   if (!aarch64_sve_vg.is_constant ())
     {
-      unsigned int vec_flags = aarch64_classify_vector_mode (mode);
+      /* REGMODE_NATURAL_SIZE influences general subreg validity rules,
+	 so we need to handle memory-only modes as well.  */
+      unsigned int vec_flags = aarch64_classify_vector_memory_mode (mode);
       if (vec_flags & VEC_SVE_PRED)
 	return BYTES_PER_SVE_PRED;
       if (vec_flags & VEC_SVE_DATA)
@@ -3216,31 +3247,30 @@ aarch64_emit_binop (rtx dest, optab binoptab, rtx op0, rtx op1)
     emit_move_insn (dest, tmp);
 }
 
-/* Split a move from SRC to DST into two moves of mode SINGLE_MODE.  */
+/* Split a move from SRC to DST into multiple moves of mode SINGLE_MODE.  */
 
 void
-aarch64_split_double_move (rtx dst, rtx src, machine_mode single_mode)
+aarch64_split_move (rtx dst, rtx src, machine_mode single_mode)
 {
   machine_mode mode = GET_MODE (dst);
+  auto npieces = exact_div (GET_MODE_SIZE (mode),
+			    GET_MODE_SIZE (single_mode)).to_constant ();
+  auto_vec<rtx, 4> dst_pieces, src_pieces;
 
-  rtx dst0 = simplify_gen_subreg (single_mode, dst, mode, 0);
-  rtx dst1 = simplify_gen_subreg (single_mode, dst, mode,
-				  GET_MODE_SIZE (single_mode));
-  rtx src0 = simplify_gen_subreg (single_mode, src, mode, 0);
-  rtx src1 = simplify_gen_subreg (single_mode, src, mode,
-				  GET_MODE_SIZE (single_mode));
+  for (unsigned int i = 0; i < npieces; ++i)
+    {
+      auto off = i * GET_MODE_SIZE (single_mode);
+      dst_pieces.safe_push (simplify_gen_subreg (single_mode, dst, mode, off));
+      src_pieces.safe_push (simplify_gen_subreg (single_mode, src, mode, off));
+    }
 
   /* At most one pairing may overlap.  */
-  if (reg_overlap_mentioned_p (dst0, src1))
-    {
-      aarch64_emit_move (dst1, src1);
-      aarch64_emit_move (dst0, src0);
-    }
+  if (reg_overlap_mentioned_p (dst_pieces[0], src))
+    for (unsigned int i = npieces; i-- > 0;)
+      aarch64_emit_move (dst_pieces[i], src_pieces[i]);
   else
-    {
-      aarch64_emit_move (dst0, src0);
-      aarch64_emit_move (dst1, src1);
-    }
+    for (unsigned int i = 0; i < npieces; ++i)
+      aarch64_emit_move (dst_pieces[i], src_pieces[i]);
 }
 
 /* Split a 128-bit move operation into two 64-bit move operations,
@@ -3284,7 +3314,7 @@ aarch64_split_128bit_move (rtx dst, rtx src)
 	}
     }
 
-  aarch64_split_double_move (dst, src, word_mode);
+  aarch64_split_move (dst, src, word_mode);
 }
 
 /* Return true if we should split a move from 128-bit value SRC
@@ -10422,7 +10452,8 @@ aarch64_classify_index (struct aarch64_address_info *info, rtx x,
       && contains_reg_of_mode[GENERAL_REGS][GET_MODE (SUBREG_REG (index))])
     index = SUBREG_REG (index);
 
-  if (aarch64_sve_data_mode_p (mode) || mode == VNx1TImode)
+  auto vec_flags = aarch64_classify_vector_memory_mode (mode);
+  if (vec_flags & VEC_SVE_DATA)
     {
       if (type != ADDRESS_REG_REG
 	  || (1 << shift) != GET_MODE_UNIT_SIZE (mode))
@@ -10495,7 +10526,7 @@ aarch64_classify_address (struct aarch64_address_info *info,
      Partial vectors like VNx8QImode allow the same indexed addressing
      mode and MUL VL addressing mode as full vectors like VNx16QImode;
      in both cases, MUL VL counts multiples of GET_MODE_SIZE.  */
-  unsigned int vec_flags = aarch64_classify_vector_mode (mode);
+  unsigned int vec_flags = aarch64_classify_vector_memory_mode (mode);
   vec_flags &= ~VEC_PARTIAL;
 
   /* On BE, we use load/store pair for all large int mode load/stores.
@@ -10531,8 +10562,7 @@ aarch64_classify_address (struct aarch64_address_info *info,
 			    && ((vec_flags == 0
 				 && known_lt (GET_MODE_SIZE (mode), 16))
 				|| vec_flags == VEC_ADVSIMD
-				|| vec_flags & VEC_SVE_DATA
-				|| mode == VNx1TImode));
+				|| vec_flags & VEC_SVE_DATA));
 
   /* For SVE, only accept [Rn], [Rn, #offset, MUL VL] and [Rn, Rm, LSL #shift].
      The latter is not valid for SVE predicates, and that's rejected through
@@ -10651,7 +10681,7 @@ aarch64_classify_address (struct aarch64_address_info *info,
 	  /* Make "m" use the LD1 offset range for SVE data modes, so
 	     that pre-RTL optimizers like ivopts will work to that
 	     instead of the wider LDR/STR range.  */
-	  if (vec_flags == VEC_SVE_DATA || mode == VNx1TImode)
+	  if (vec_flags == VEC_SVE_DATA)
 	    return (type == ADDR_QUERY_M
 		    ? offset_4bit_signed_scaled_p (mode, offset)
 		    : offset_9bit_signed_scaled_p (mode, offset));
@@ -11962,7 +11992,7 @@ sizetochar (int size)
     case 64: return 'd';
     case 32: return 's';
     case 16: return 'h';
-    case 8 : return 'b';
+    case 8:  return 'b';
     default: gcc_unreachable ();
     }
 }
@@ -12544,7 +12574,7 @@ aarch64_print_address_internal (FILE *f, machine_mode mode, rtx x,
 	    return true;
 	  }
 
-	vec_flags = aarch64_classify_vector_mode (mode);
+	vec_flags = aarch64_classify_vector_memory_mode (mode);
 	if ((vec_flags & VEC_ANY_SVE) && !load_store_pair_p)
 	  {
 	    HOST_WIDE_INT vnum
@@ -13101,7 +13131,7 @@ aarch64_class_max_nregs (reg_class_t regclass, machine_mode mode)
     case PR_REGS:
     case PR_LO_REGS:
     case PR_HI_REGS:
-      return mode == VNx32BImode ? 2 : 1;
+      return mode == VNx64BImode ? 4 : mode == VNx32BImode ? 2 : 1;
 
     case MOVEABLE_SYSREGS:
     case STACK_REG:
@@ -26014,6 +26044,106 @@ aarch64_evpc_dup (struct expand_vec_perm_d *d)
   return true;
 }
 
+/* Recognize things that can be done using the SVE2p1 Hybrid-VLA
+   permutations, which apply Advanced-SIMD-style permutations to each
+   individual 128-bit block.  */
+
+static bool
+aarch64_evpc_hvla (struct expand_vec_perm_d *d)
+{
+  machine_mode vmode = d->vmode;
+  if (!TARGET_SVE2p1
+      || !TARGET_NON_STREAMING
+      || d->vec_flags != VEC_SVE_DATA
+      || GET_MODE_UNIT_BITSIZE (vmode) > 64)
+    return false;
+
+  /* Set SUBELTS to the number of elements in an Advanced SIMD vector
+     and make sure that adding SUBELTS to each block of SUBELTS indices
+     gives the next block of SUBELTS indices.  That is, it must be possible
+     to interpret the index vector as SUBELTS interleaved linear series in
+     which each series has step SUBELTS.  */
+  unsigned int subelts = 128U / GET_MODE_UNIT_BITSIZE (vmode);
+  unsigned int pairs = subelts / 2;
+  for (unsigned int i = 0; i < subelts; ++i)
+    if (!d->perm.series_p (i, subelts, d->perm[i], subelts))
+      return false;
+
+  /* Used once we have verified that we can use UNSPEC to do the operation.  */
+  auto use_binary = [&](int unspec) -> bool
+    {
+      if (!d->testing_p)
+	{
+	  rtvec vec = gen_rtvec (2, d->op0, d->op1);
+	  emit_set_insn (d->target, gen_rtx_UNSPEC (vmode, vec, unspec));
+	}
+      return true;
+    };
+
+  /* Now check whether the first SUBELTS elements match a supported
+     Advanced-SIMD-style operation.  */
+  poly_int64 first = d->perm[0];
+  poly_int64 nelt = d->perm.length ();
+  auto try_zip = [&]() -> bool
+    {
+      if (maybe_ne (first, 0) && maybe_ne (first, pairs))
+	return false;
+      for (unsigned int i = 0; i < pairs; ++i)
+	if (maybe_ne (d->perm[i * 2], first + i)
+	    || maybe_ne (d->perm[i * 2 + 1], first + nelt + i))
+	  return false;
+      return use_binary (maybe_ne (first, 0) ? UNSPEC_ZIPQ2 : UNSPEC_ZIPQ1);
+    };
+  auto try_uzp = [&]() -> bool
+    {
+      if (maybe_ne (first, 0) && maybe_ne (first, 1))
+	return false;
+      for (unsigned int i = 0; i < pairs; ++i)
+	if (maybe_ne (d->perm[i], first + i * 2)
+	    || maybe_ne (d->perm[i + pairs], first + nelt + i * 2))
+	  return false;
+      return use_binary (maybe_ne (first, 0) ? UNSPEC_UZPQ2 : UNSPEC_UZPQ1);
+    };
+  auto try_extq = [&]() -> bool
+    {
+      HOST_WIDE_INT start;
+      if (!first.is_constant (&start) || !IN_RANGE (start, 0, subelts - 1))
+	return false;
+      for (unsigned int i = 0; i < subelts; ++i)
+	{
+	  poly_int64 next = (start + i >= subelts
+			     ? start + i - subelts + nelt
+			     : start + i);
+	  if (maybe_ne (d->perm[i], next))
+	    return false;
+	}
+      if (!d->testing_p)
+	{
+	  rtx op2 = gen_int_mode (start, SImode);
+	  emit_insn (gen_aarch64_sve_extq (vmode, d->target,
+					   d->op0, d->op1, op2));
+	}
+      return true;
+    };
+  auto try_dupq = [&]() -> bool
+    {
+      HOST_WIDE_INT start;
+      if (!first.is_constant (&start) || !IN_RANGE (start, 0, subelts - 1))
+	return false;
+      for (unsigned int i = 0; i < subelts; ++i)
+	if (maybe_ne (d->perm[i], start))
+	  return false;
+      if (!d->testing_p)
+	{
+	  rtx op1 = gen_int_mode (start, SImode);
+	  emit_insn (gen_aarch64_sve_dupq (vmode, d->target, d->op0, op1));
+	}
+      return true;
+    };
+
+  return try_zip () || try_uzp () || try_extq () || try_dupq ();
+}
+
 static bool
 aarch64_evpc_tbl (struct expand_vec_perm_d *d)
 {
@@ -26264,6 +26394,8 @@ aarch64_expand_vec_perm_const_1 (struct expand_vec_perm_d *d)
 	  else if (aarch64_evpc_sel (d))
 	    return true;
 	  else if (aarch64_evpc_ins (d))
+	    return true;
+	  else if (aarch64_evpc_hvla (d))
 	    return true;
 	  else if (aarch64_evpc_reencode (d))
 	    return true;

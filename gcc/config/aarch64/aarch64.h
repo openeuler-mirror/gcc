@@ -337,12 +337,13 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* SVE2 SM4 instructions, enabled through +sve2-sm4.  */
 #define TARGET_SVE2_SM4 (AARCH64_HAVE_ISA (SVE2_SM4) && TARGET_NON_STREAMING)
 
-/* SME instructions, enabled through +sme.  Note that this does not
-   imply anything about the state of PSTATE.SM.  */
-#define TARGET_SME AARCH64_HAVE_ISA (SME)
+/* SVE2p1 instructions, enabled through +sve2p1.  */
+#define TARGET_SVE2p1 AARCH64_HAVE_ISA (SVE2p1)
 
-/* Same with streaming mode enabled.  */
-#define TARGET_STREAMING_SME (TARGET_STREAMING && TARGET_SME)
+/* SME instructions, enabled through +sme.  Note that this does not
+   imply anything about the state of PSTATE.SM; instructions that require
+   SME and streaming mode should use TARGET_STREAMING instead.  */
+#define TARGET_SME AARCH64_HAVE_ISA (SME)
 
 /* The FEAT_SME_I16I64 extension to SME, enabled through +sme-i16i64.  */
 #define TARGET_SME_I16I64 AARCH64_HAVE_ISA (SME_I16I64)
@@ -528,6 +529,16 @@ through +ssve-fp8dot2.  */
 #define TARGET_SSVE_FP8DOT2 ((\
 		(TARGET_SVE2 && TARGET_FP8DOT2) || TARGET_STREAMING) \
 		&& (AARCH64_HAVE_ISA(SSVE_FP8DOT2) || TARGET_NON_STREAMING))
+
+/* Combinatorial tests.  */
+
+/* There's no need to check TARGET_SME for streaming or streaming-compatible
+   functions, since streaming mode itself implies SME.  */
+#define TARGET_SVE2p1_OR_SME (TARGET_SVE2p1 || TARGET_STREAMING)
+
+#define TARGET_SVE2p1_OR_SME2 \
+  ((TARGET_SVE2p1 || TARGET_STREAMING) \
+   && (TARGET_SME2 || TARGET_NON_STREAMING))
 
 /* Standard register usage.  */
 

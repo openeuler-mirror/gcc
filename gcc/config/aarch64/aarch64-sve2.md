@@ -21,12 +21,22 @@
 ;; The file is organised into the following sections (search for the full
 ;; line):
 ;;
+;; == Moves
+;; ---- Predicate to vector moves
+;; ---- Vector to predicate moves
+;;
 ;; == Loads
+;; ---- 128-bit extending loads
+;; ---- 128-bit structure loads
 ;; ---- Multi-register loads predicated by a counter
+;; ---- 128-bit gather loads
 ;; ---- Non-temporal gather loads
 ;;
 ;; == Stores
+;; ---- 128-bit truncating stores
+;; ---- 128-bit structure stores
 ;; ---- Multi-register stores predicated by a counter
+;; ---- 128-bit scatter stores
 ;; ---- Non-temporal scatter stores
 ;;
 ;; == Predicate manipulation
@@ -101,8 +111,13 @@
 ;; ---- [INT,FP] Select based on predicates as counters
 ;; ---- [INT] While tests
 ;;
+;; == Reductions
+;; ---- [INT] Reduction to 128-bit vector
+;; ---- [FP] Reduction to 128-bit vector
+;;
 ;; == Permutation
 ;; ---- [INT,FP] Reversal
+;; ---- [INT,FP] HVLA permutes
 ;; ---- [INT,FP] General permutes
 ;; ---- [INT,FP] Multi-register permutes
 ;; ---- [INT] Optional bit-permute extensions
@@ -121,8 +136,119 @@
 ;; ---- [FP] Matrix multiply-accumulate widening
 
 ;; =========================================================================
+;; == Moves
+;; =========================================================================
+
+;; -------------------------------------------------------------------------
+;; ---- Predicate to vector moves
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - PMOV (to vector) (SVE2p1)
+;; -------------------------------------------------------------------------
+
+(define_insn "@aarch64_pmov_to_<mode>"
+  [(set (match_operand:SVE_FULL_I 0 "register_operand" "=w")
+	(unspec:SVE_FULL_I
+	  [(match_operand:<VPRED> 1 "register_operand" "Upa")]
+	  UNSPEC_PMOV_UNPACK))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "pmov\t%0, %1.<Vetype>"
+)
+
+(define_insn "@aarch64_pmov_lane_to_<mode>"
+  [(set (match_operand:SVE_FULL_I 0 "register_operand" "=w")
+	(unspec:SVE_FULL_I
+	  [(match_operand:SVE_FULL_I 1 "register_operand" "0")
+	   (match_operand:<VPRED> 2 "register_operand" "Upa")
+	   (match_operand:DI 3 "immediate_operand")]
+	  UNSPEC_PMOV_UNPACK_LANE))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "pmov\t%0[%3], %2.<Vetype>"
+)
+
+;; -------------------------------------------------------------------------
+;; ---- Vector to predicate moves
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - PMOV (from vector) (SVE2p1)
+;; -------------------------------------------------------------------------
+
+(define_insn "@aarch64_pmov_from_<mode>"
+  [(set (match_operand:VNx16BI 0 "register_operand" "=Upa")
+	(unspec:VNx16BI
+	  [(match_operand:SVE_FULL_I 1 "register_operand" "w")]
+	  UNSPEC_PMOV_PACK))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "pmov\t%0.<Vetype>, %1"
+)
+
+(define_insn "@aarch64_pmov_lane_from_<mode>"
+  [(set (match_operand:VNx16BI 0 "register_operand" "=Upa")
+	(unspec:VNx16BI
+	  [(match_operand:SVE_FULL_I 1 "register_operand" "w")
+	   (match_operand:DI 2 "immediate_operand")]
+	  UNSPEC_PMOV_PACK_LANE))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "pmov\t%0.<Vetype>, %1[%2]"
+)
+
+;; =========================================================================
 ;; == Loads
 ;; =========================================================================
+
+;; -------------------------------------------------------------------------
+;; ---- 128-bit extending loads
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - LD1W (to .Q) (SVE2p1)
+;; - LD1D (to .Q) (SVE2p1)
+;; -------------------------------------------------------------------------
+
+;; There isn't really a natural way of representing these instructions
+;; with the modes that we normally use:
+;;
+;; (1) It doesn't really make sense to use VNx1TI (or similar) for the
+;;     result, since there's nothing that can be done with such a mode
+;;     other than to cast it to another mode.  It also isn't how the
+;;     ACLE represents it (for similar reasons).
+;;
+;; (2) Only the lowest bit of each 16 in the predicate is significant,
+;;     but it doesn't really make sense to use VNx1BI to represent it,
+;;     since there is no "PTRUE Pn.Q, ..." instruction.
+;;
+;; (3) We do however need to use VNx1DI and VNx1SI to represent the
+;;     source memories, since none of the normal register modes would
+;;     give the right extent and alignment information (with the alignment
+;;     mattering only for -mstrict-align).
+(define_insn "@aarch64_sve_ld1_extendq<mode>"
+  [(set (match_operand:SVE_FULL_SD 0 "register_operand" "=w")
+	(unspec:SVE_FULL_SD
+	  [(match_operand:<VPRED> 2 "register_operand" "Upl")
+	   (match_operand:<LD1_EXTENDQ_MEM> 1 "memory_operand" "m")]
+	  UNSPEC_LD1_EXTENDQ))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "ld1<Vesize>\t{%0.q}, %2/z, %1"
+)
+
+;; -------------------------------------------------------------------------
+;; ---- 128-bit structure loads
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - LD2Q (SVE2p1)
+;; - LD3Q (SVE2p1)
+;; - LD4Q (SVE2p1)
+;; -------------------------------------------------------------------------
+
+;; Predicated LD[234]Q.
+(define_insn "@aarch64_sve_ldnq<mode>"
+  [(set (match_operand:SVE_STRUCT 0 "register_operand" "=w")
+	(unspec:SVE_STRUCT
+	  [(match_operand:<VPRED> 2 "register_operand" "Upl")
+	   (match_operand:<VNxTI> 1 "memory_operand" "m")]
+	  UNSPEC_LDNQ))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "ld<vector_count>q\t{%S0.q - %<Vendreg>0.q}, %2/z, %1"
+)
 
 ;; -------------------------------------------------------------------------
 ;; ---- Multi-register loads predicated by a counter
@@ -145,7 +271,7 @@
 	  [(match_operand:VNx16BI 2 "register_operand" "Uph")
 	   (match_operand:SVE_FULLx24 1 "memory_operand" "m")]
 	  LD1_COUNT))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "<optab><Vesize>\t%0, %K2/z, %1"
   [(set_attr "stride_type" "ld1_consecutive")]
 )
@@ -198,6 +324,33 @@
    && aarch64_strided_registers_p (operands, 4, 4)"
   "<optab><Vesize>\t{%0.<Vetype>, %1.<Vetype>, %2.<Vetype>, %3.<Vetype>}, %K5/z, %4"
   [(set_attr "stride_type" "ld1_strided")]
+)
+
+;; -------------------------------------------------------------------------
+;; ---- 128-bit gather loads
+;; -------------------------------------------------------------------------
+;; Includes gather forms of:
+;; - LD1Q (SVE2p1)
+;; -------------------------------------------------------------------------
+
+;; Model this as operating on the largest valid element size, which is DI.
+;; This avoids having to define move patterns & more for VNx1TI, which would
+;; be difficult without a non-gather form of LD1Q.
+(define_insn "aarch64_gather_ld1q"
+  [(set (match_operand:VNx2DI 0 "register_operand")
+	(unspec:VNx2DI
+	  [(match_operand:VNx2BI 1 "register_operand")
+	   (match_operand:DI 2 "aarch64_reg_or_zero")
+	   (match_operand:VNx2DI 3 "register_operand")
+	   (mem:BLK (scratch))]
+	  UNSPEC_LD1_GATHER))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  {@ [cons: =0, 1, 2, 3]
+     [&w, Upl, Z, w] ld1q\t{%0.q}, %1/z, [%3.d]
+     [?w, Upl, Z, 0] ^
+     [&w, Upl, r, w] ld1q\t{%0.q}, %1/z, [%3.d, %2]
+     [?w, Upl, r, 0] ^
+  }
 )
 
 ;; -------------------------------------------------------------------------
@@ -261,6 +414,48 @@
 ;; =========================================================================
 
 ;; -------------------------------------------------------------------------
+;; ---- 128-bit truncating stores
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - ST1W (from .Q) (SVE2p1)
+;; - ST1D (from .Q) (SVE2p1)
+;; -------------------------------------------------------------------------
+
+;; See the comment above the corresponding loads for a discussion about the
+;; choice of modes.
+(define_insn "@aarch64_sve_st1_truncq<mode>"
+  [(set (match_operand:<LD1_EXTENDQ_MEM> 0 "memory_operand" "+m")
+	(unspec:<LD1_EXTENDQ_MEM>
+	  [(match_operand:<VPRED> 2 "register_operand" "Upl")
+	   (match_operand:SVE_FULL_SD 1 "register_operand" "w")
+	   (match_dup 0)]
+	  UNSPEC_ST1_TRUNCQ))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "st1<Vesize>\t{%1.q}, %2, %0"
+)
+
+;; -------------------------------------------------------------------------
+;; ---- 128-bit structure stores
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - ST2Q (SVE2p1)
+;; - ST3Q (SVE2p1)
+;; - ST4Q (SVE2p1)
+;; -------------------------------------------------------------------------
+
+;; Predicated ST[234].
+(define_insn "@aarch64_sve_stnq<mode>"
+  [(set (match_operand:<VNxTI> 0 "memory_operand" "+m")
+	(unspec:<VNxTI>
+	  [(match_operand:<VPRED> 2 "register_operand" "Upl")
+	   (match_operand:SVE_STRUCT 1 "register_operand" "w")
+	   (match_dup 0)]
+	  UNSPEC_STNQ))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "st<vector_count>q\t{%S1.q - %<Vendreg>1.q}, %2, %0"
+)
+
+;; -------------------------------------------------------------------------
 ;; ---- Multi-register stores predicated by a counter
 ;; -------------------------------------------------------------------------
 ;; Includes:
@@ -281,7 +476,7 @@
 	   (match_operand:SVE_FULLx24 1 "aligned_register_operand" "Uw<vector_count>")
 	   (match_dup 0)]
 	  ST1_COUNT))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "<optab><Vesize>\t%1, %K2, %0"
   [(set_attr "stride_type" "st1_consecutive")]
 )
@@ -314,6 +509,28 @@
    && aarch64_strided_registers_p (operands + 2, 4, 4)"
   "<optab><Vesize>\t{%2.<Vetype>, %3.<Vetype>, %4.<Vetype>, %5.<Vetype>}, %K1, %0"
   [(set_attr "stride_type" "st1_strided")]
+)
+
+;; -------------------------------------------------------------------------
+;; ---- 128-bit scatter stores
+;; -------------------------------------------------------------------------
+;; Includes scatter form of:
+;; - ST1Q (SVE2p1)
+;; -------------------------------------------------------------------------
+
+(define_insn "aarch64_scatter_st1q"
+  [(set (mem:BLK (scratch))
+	(unspec:BLK
+	  [(match_operand:VNx2BI 0 "register_operand")
+	   (match_operand:DI 1 "aarch64_reg_or_zero")
+	   (match_operand:VNx2DI 2 "register_operand")
+	   (match_operand:VNx2DI 3 "register_operand")]
+	  UNSPEC_ST1Q_SCATTER))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  {@ [ cons: 0 , 1 , 2 , 3  ]
+     [ Upl     , Z , w , w  ] st1q\t{%3.q}, %0, [%2.d]
+     [ Upl     , r , w , w  ] st1q\t{%3.q}, %0, [%2.d, %1]
+  }
 )
 
 ;; -------------------------------------------------------------------------
@@ -375,7 +592,7 @@
 (define_insn "@aarch64_sve_ptrue_c<BHSD_BITS>"
   [(set (match_operand:VNx16BI 0 "register_operand" "=Uph")
 	(unspec:VNx16BI [(const_int BHSD_BITS)] UNSPEC_PTRUE_C))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "ptrue\t%K0.<bits_etype>"
 )
 
@@ -393,7 +610,7 @@
 	   (match_operand:DI 2 "const_int_operand")
 	   (const_int BHSD_BITS)]
 	  UNSPEC_PEXT))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "pext\t%0.<bits_etype>, %K1[%2]"
 )
 
@@ -404,7 +621,7 @@
 	   (match_operand:DI 2 "const_int_operand")
 	   (const_int BHSD_BITS)]
 	  UNSPEC_PEXTx2))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "pext\t{%S0.<bits_etype>, %T0.<bits_etype>}, %K1[%2]"
 )
 
@@ -423,7 +640,7 @@
 	   (match_operand:SI 3 "register_operand" "Ucj")
 	   (const_int BHSD_BITS)]
 	  UNSPEC_PSEL))]
-  "TARGET_STREAMING"
+  "TARGET_SVE2p1_OR_SME"
   "psel\t%0, %1, %2.<bits_etype>[%w3, 0]"
 )
 
@@ -437,7 +654,7 @@
 	     (match_operand:SI 4 "const_int_operand"))
 	   (const_int BHSD_BITS)]
 	  UNSPEC_PSEL))]
-  "TARGET_STREAMING
+  "TARGET_SVE2p1_OR_SME
    && UINTVAL (operands[4]) < 128 / <BHSD_BITS>"
   "psel\t%0, %1, %2.<bits_etype>[%w3, %4]"
 )
@@ -456,7 +673,7 @@
 	   (match_operand:DI 2 "const_int_operand")
 	   (const_int BHSD_BITS)]
 	  UNSPEC_CNTP_C))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "cntp\t%x0, %K1.<bits_etype>, vlx%2"
 )
 
@@ -565,7 +782,7 @@
 	    (match_operand:SVE_FULL_I 1 "register_operand")
 	    (match_operand:SVE_FULL_I 2 "register_operand"))
 	  (match_operand:SVE_FULL_I 3 "register_operand")))]
-  "TARGET_STREAMING_SME"
+  "TARGET_SVE2p1_OR_SME"
   {@ [cons: =0,  1, 2, 3; attrs: movprfx]
      [       w, %0, w, w; *             ] <su>clamp\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>
      [     ?&w,  w, w, w; yes           ] movprfx\t%0, %1\;<su>clamp\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>
@@ -585,7 +802,7 @@
 	       UNSPEC_PRED_X)
 	     (match_operand:SVE_FULL_I 3 "register_operand"))]
 	  UNSPEC_PRED_X))]
-  "TARGET_STREAMING_SME"
+  "TARGET_SVE2p1_OR_SME"
   {@ [cons: =0,  1, 2, 3; attrs: movprfx]
      [       w, %0, w, w; *             ] #
      [     ?&w,  w, w, w; yes           ] #
@@ -1122,7 +1339,7 @@
 	     UNSPEC_FMAXNM)
 	   (match_operand:SVE_FULL_F 3 "register_operand")]
 	  UNSPEC_FMINNM))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   {@ [cons: =0,  1, 2, 3; attrs: movprfx]
      [       w, %0, w, w; *             ] fclamp\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>
      [     ?&w,  w, w, w; yes           ] movprfx\t%0, %1\;fclamp\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>
@@ -1142,7 +1359,7 @@
 	     UNSPEC_COND_FMAXNM)
 	   (match_operand:SVE_FULL_F 3 "register_operand")]
 	  UNSPEC_COND_FMINNM))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   {@ [cons: =0,  1, 2, 3; attrs: movprfx]
      [       w, %0, w, w; *             ] #
      [     ?&w,  w, w, w; yes           ] #
@@ -2154,7 +2371,7 @@
 	     (match_operand:VNx8HI 2 "register_operand")]
 	    DOTPROD)
 	  (match_operand:VNx4SI 3 "register_operand")))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   {@ [ cons: =0 , 1 , 2 , 3 ; attrs: movprfx ]
      [ w        , w , w , 0 ; *              ] <sur>dot\t%0.s, %1.h, %2.h
      [ ?&w      , w , w , w ; yes            ] movprfx\t%0, %3\;<sur>dot\t%0.s, %1.h, %2.h
@@ -2252,7 +2469,7 @@
 	     (match_operand:VNx8HF 2 "register_operand")]
 	    UNSPEC_FDOT)
 	  (match_operand:VNx4SF 3 "register_operand")))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   {@ [ cons: =0 , 1 , 2 , 3 ; attrs: movprfx ]
      [ w        , w , w , 0 ; *              ] fdot\t%0.s, %1.h, %2.h
      [ ?&w      , w , w , w ; yes            ] movprfx\t%0, %3\;fdot\t%0.s, %1.h, %2.h
@@ -2270,7 +2487,7 @@
 	       UNSPEC_SVE_LANE_SELECT)]
 	    UNSPEC_FDOT)
 	  (match_operand:VNx4SF 4 "register_operand")))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   {@ [ cons: =0 , 1 , 2 , 4 ; attrs: movprfx ]
      [ w        , w , y , 0 ; *              ] fdot\t%0.s, %1.h, %2.h[%3]
      [ ?&w      , w , y , w ; yes            ] movprfx\t%0, %4\;fdot\t%0.s, %1.h, %2.h[%3]
@@ -2317,10 +2534,10 @@
 ;; ---- [INT] Multi-vector narrowing unary arithmetic
 ;; -------------------------------------------------------------------------
 ;; Includes:
-;; - SQCVT
-;; - SQCVTN
-;; - UQCVT
-;; - UQCVTN
+;; - SQCVT (SME2)
+;; - SQCVTN (SME2)
+;; - UQCVT (SME2)
+;; - UQCVTN (SME2)
 ;; -------------------------------------------------------------------------
 
 (define_insn "@aarch64_sve_<optab><VNx16QI_ONLY:mode><VNx16SI_ONLY:mode>"
@@ -2328,7 +2545,7 @@
 	(unspec:VNx16QI_ONLY
 	  [(match_operand:VNx16SI_ONLY 1 "aligned_register_operand" "Uw<vector_count>")]
 	  SVE_QCVTxN))]
-  "TARGET_SME2 && TARGET_STREAMING"
+  "TARGET_STREAMING_SME2"
   "<optab>\t%0.b, %1"
 )
 
@@ -2337,7 +2554,7 @@
 	(unspec:VNx8HI_ONLY
 	  [(match_operand:VNx8SI_ONLY 1 "aligned_register_operand" "Uw<vector_count>")]
 	  SVE_QCVTxN))]
-  "TARGET_SME2 && TARGET_STREAMING"
+  ""
   "<optab>\t%0.h, %1"
 )
 
@@ -2346,7 +2563,7 @@
 	(unspec:VNx8HI_ONLY
 	  [(match_operand:VNx8DI_ONLY 1 "aligned_register_operand" "Uw<vector_count>")]
 	  SVE_QCVTxN))]
-  "TARGET_SME2 && TARGET_STREAMING"
+  "TARGET_STREAMING_SME2"
   "<optab>\t%0.h, %1"
 )
 
@@ -2451,6 +2668,14 @@
 ;; -------------------------------------------------------------------------
 ;; ---- [INT] Multi-vector narrowing right shifts
 ;; -------------------------------------------------------------------------
+;; Includes:
+;; - SQRSHR (SME2)
+;; - SQRSHRN (SVE2p1, SME2)
+;; - SQRSHRU (SME2)
+;; - SQRSHRUN (SVE2p1, SME2)
+;; - UQRSHR (SME2)
+;; - UQRSHRN (SVE2p1, SME2)
+;; -------------------------------------------------------------------------
 
 (define_insn "@aarch64_sve_<sve_int_op><mode>"
   [(set (match_operand:<VNARROW> 0 "register_operand" "=w")
@@ -2458,7 +2683,7 @@
 	  [(match_operand:SVE_FULL_SIx2_SDIx4 1 "register_operand" "Uw<vector_count>")
 	   (match_operand:DI 2 "const_int_operand")]
 	  SVE2_INT_SHIFT_IMM_NARROWxN))]
-  "TARGET_STREAMING_SME2"
+  "(<MODE>mode == VNx8SImode || TARGET_STREAMING_SME2)"
   "<sve_int_op>\t%0.<Ventype>, %1, #%2"
 )
 
@@ -2754,14 +2979,14 @@
 ;; ---- [FP<-FP] Widening conversions
 ;; -------------------------------------------------------------------------
 ;; Includes:
-;; - BF1CVT
-;; - BF1CVTLT
-;; - BF2CVT
-;; - BF2CVTLT
-;; - F1CVT
-;; - F1CVTLT
-;; - F2CVT
-;; - F2CVTLT
+;; - BF1CVT (FP8)
+;; - BF1CVTLT (FP8)
+;; - BF2CVT (FP8)
+;; - BF2CVTLT (FP8)
+;; - F1CVT (FP8)
+;; - F1CVTLT (FP8)
+;; - F2CVT (FP8)
+;; - F2CVTLT (FP8)
 ;; - FCVTLT
 ;; -------------------------------------------------------------------------
 
@@ -2957,12 +3182,12 @@
 ;; ---- [FP<-FP] Multi-vector narrowing conversions
 ;; -------------------------------------------------------------------------
 ;; Includes the multi-register forms of:
-;; - BFCVT
-;; - BFCVTN
-;; - FCVT
-;; - FCVTN
-;; - FCVTNB
-;; - FCVTNT
+;; - BFCVT (SME2)
+;; - BFCVTN (SME2)
+;; - FCVT (SME2)
+;; - FCVTN (SME2)
+;; - FCVTNB (FP8)
+;; - FCVTNT (FP8)
 ;; -------------------------------------------------------------------------
 
 (define_insn "truncvnx8sf<mode>2"
@@ -3016,6 +3241,10 @@
 ;; -------------------------------------------------------------------------
 ;; ---- [FP<-INT] Multi-vector conversions
 ;; -------------------------------------------------------------------------
+;; Includes the multi-register forms of:
+;; - SCVTF (SME2)
+;; - UCVTF (SME2)
+;; -------------------------------------------------------------------------
 
 (define_insn "<optab><v_int_equiv><mode>2"
   [(set (match_operand:SVE_SFx24 0 "aligned_register_operand" "=Uw<vector_count>")
@@ -3027,6 +3256,10 @@
 
 ;; -------------------------------------------------------------------------
 ;; ---- [INT<-FP] Multi-vector conversions
+;; -------------------------------------------------------------------------
+;; Includes the multi-register forms of:
+;; - FCVTZS (SME2)
+;; - FCVTZU (SME2)
 ;; -------------------------------------------------------------------------
 
 (define_insn "<optab><mode><v_int_equiv>2"
@@ -3274,7 +3507,7 @@
 	   (const_int BHSD_BITS)]
 	  SVE_WHILE_ORDER))
    (clobber (reg:CC_NZC CC_REGNUM))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "while<cmp_op>\t{%S0.<bits_etype>, %T0.<bits_etype>}, %x1, %x2"
 )
 
@@ -3288,8 +3521,57 @@
 	   (match_operand:DI 3 "const_int_operand")]
 	  SVE_WHILE_ORDER))
    (clobber (reg:CC_NZC CC_REGNUM))]
-  "TARGET_STREAMING_SME2"
+  "TARGET_SVE2p1_OR_SME2"
   "while<cmp_op>\t%K0.<bits_etype>, %x1, %x2, vlx%3"
+)
+
+;; =========================================================================
+;; == Reductions
+;; =========================================================================
+
+;; -------------------------------------------------------------------------
+;; ---- [INT] Reduction to 128-bit vector
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - ADDQV (SVE2p1)
+;; - ANDQV (SVE2p1)
+;; - EORQV (SVE2p1)
+;; - ORQV (SVE2p1)
+;; - SMAXQV (SVE2p1)
+;; - SMINQV (SVE2p1)
+;; - UMAXQV (SVE2p1)
+;; - UMINQV (SVE2p1)
+;; -------------------------------------------------------------------------
+
+(define_insn "@aarch64_pred_reduc_<optab>_<mode>"
+  [(set (match_operand:<V128> 0 "register_operand" "=w")
+	(unspec:<V128>
+	  [(match_operand:<VPRED> 1 "register_operand" "Upl")
+	   (match_operand:SVE_FULL_I 2 "register_operand" "w")]
+	  SVE_INT_REDUCTION_128))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "<optab>\t%0.<Vtype>, %1, %2.<Vetype>"
+)
+
+;; -------------------------------------------------------------------------
+;; ---- [FP] Reduction to 128-bit vector
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - FADDQV (SVE2p1)
+;; - FMAXNMQV (SVE2p1)
+;; - FMAXQV (SVE2p1)
+;; - FMINNMQV (SVE2p1)
+;; - FMINQV (SVE2p1)
+;; -------------------------------------------------------------------------
+
+(define_insn "@aarch64_pred_reduc_<optab>_<mode>"
+  [(set (match_operand:<V128> 0 "register_operand" "=w")
+	(unspec:<V128>
+	  [(match_operand:<VPRED> 1 "register_operand" "Upl")
+	   (match_operand:SVE_FULL_F 2 "register_operand" "w")]
+	  SVE_FP_REDUCTION_128))]
+  "TARGET_SVE2p1 && TARGET_NON_STREAMING"
+  "<optab>\t%0.<Vtype>, %1, %2.<Vetype>"
 )
 
 ;; =========================================================================
@@ -3311,7 +3593,7 @@
 	     [(match_operand:SVE_FULL 2 "register_operand")]
 	     UNSPEC_REVD_ONLY)]
 	  UNSPEC_PRED_X))]
-  "TARGET_STREAMING_SME"
+  "TARGET_SVE2p1_OR_SME"
   {@ [ cons: =0 , 1   , 2 ; attrs: movprfx ]
      [ w        , Upl , 0 ; *              ] revd\t%0.q, %1/m, %2.q
      [ ?&w      , Upl , w ; yes            ] movprfx\t%0, %2\;revd\t%0.q, %1/m, %2.q
@@ -3327,11 +3609,50 @@
 	     UNSPEC_REVD_ONLY)
 	   (match_operand:SVE_FULL 3 "register_operand")]
 	  UNSPEC_SEL))]
-  "TARGET_STREAMING_SME"
+  "TARGET_SVE2p1_OR_SME"
   {@ [ cons: =0 , 1   , 2 , 3  ; attrs: movprfx ]
      [ w        , Upl , w , 0  ; *              ] revd\t%0.q, %1/m, %2.q
      [ ?&w      , Upl , w , w  ; yes            ] movprfx\t%0, %3\;revd\t%0.q, %1/m, %2.q
   }
+)
+
+;; -------------------------------------------------------------------------
+;; ---- [INT,FP] HVLA permutes
+;; -------------------------------------------------------------------------
+;; Includes:
+;; - DUPQ (SVE2p1)
+;; - EXTQ (SVE2p1)
+;; -------------------------------------------------------------------------
+
+(define_insn "@aarch64_sve_dupq<mode>"
+  [(set (match_operand:SVE_FULL 0 "register_operand" "=w")
+	(unspec:SVE_FULL
+	  [(match_operand:SVE_FULL 1 "register_operand" "w")
+	   (match_operand:SI 2 "const_int_operand")]
+	  UNSPEC_DUPQ))]
+  "TARGET_SVE2p1
+   && TARGET_NON_STREAMING
+   && IN_RANGE (INTVAL (operands[2]) * (<elem_bits> / 8), 0, 15)"
+  "dupq\t%0.<Vetype>, %1.<Vetype>[%2]"
+)
+
+(define_insn "@aarch64_sve_extq<mode>"
+  [(set (match_operand:SVE_FULL 0 "register_operand" "=w, ?&w")
+	(unspec:SVE_FULL
+	  [(match_operand:SVE_FULL 1 "register_operand" "0, w")
+	   (match_operand:SVE_FULL 2 "register_operand" "w, w")
+	   (match_operand:SI 3 "const_int_operand")]
+	  UNSPEC_EXTQ))]
+  "TARGET_SVE2p1
+   && TARGET_NON_STREAMING
+   && IN_RANGE (INTVAL (operands[3]) * (<elem_bits> / 8), 0, 15)"
+  {
+    operands[3] = GEN_INT (INTVAL (operands[3]) * (<elem_bits> / 8));
+    return (which_alternative == 0
+	    ? "extq\\t%0.b, %0.b, %2.b, #%3"
+	    : "movprfx\t%0, %1\;extq\\t%0.b, %0.b, %2.b, #%3");
+  }
+  [(set_attr "movprfx" "*,yes")]
 )
 
 ;; -------------------------------------------------------------------------
@@ -3340,6 +3661,7 @@
 ;; Includes:
 ;; - TBL (vector pair form)
 ;; - TBX
+;; - TBXQ (SVE2p1)
 ;; -------------------------------------------------------------------------
 
 ;; TBL on a pair of data vectors.
@@ -3353,16 +3675,16 @@
   "tbl\t%0.<Vetype>, %1, %2.<Vetype>"
 )
 
-;; TBX.  These instructions do not take MOVPRFX.
-(define_insn "@aarch64_sve2_tbx<mode>"
+;; TBX(Q).  These instructions do not take MOVPRFX.
+(define_insn "@aarch64_sve_<perm_insn><mode>"
   [(set (match_operand:SVE_FULL 0 "register_operand" "=w")
 	(unspec:SVE_FULL
 	  [(match_operand:SVE_FULL 1 "register_operand" "0")
 	   (match_operand:SVE_FULL 2 "register_operand" "w")
 	   (match_operand:<V_INT_EQUIV> 3 "register_operand" "w")]
-	  UNSPEC_TBX))]
+	  SVE_TBX))]
   "TARGET_SVE2"
-  "tbx\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>"
+  "<perm_insn>\t%0.<Vetype>, %2.<Vetype>, %3.<Vetype>"
 )
 
 ;; -------------------------------------------------------------------------

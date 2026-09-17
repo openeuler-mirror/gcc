@@ -21772,7 +21772,7 @@ and the features that they enable by default:
 @item @samp{armv9.1-a} @tab Armv9.1-A @tab @samp{armv9-a}, @samp{+bf16}, @samp{+i8mm}
 @item @samp{armv9.2-a} @tab Armv9.2-A @tab @samp{armv9.1-a}, @samp{+ls64}
 @item @samp{armv9.3-a} @tab Armv9.3-A @tab @samp{armv9.2-a}, @samp{+mops}
-@item @samp{armv9.4-a} @tab Armv9.4-A @tab @samp{armv9.3-a}
+@item @samp{armv9.4-a} @tab Armv9.4-A @tab @samp{armv9.3-a}, @samp{+sve2p1}
 @item @samp{armv9.5-a} @tab Armv9.4-A @tab @samp{armv9.4-a}, @samp{+faminmax}, @samp{+lut}
 @item @samp{armv8-r} @tab Armv8-R @tab @samp{armv8-r}
 @end multitable
@@ -22071,6 +22071,8 @@ Enable SVE2 sm4 instructions.  This also enables SVE2 instructions.
 Enable SVE2 aes instructions.  This also enables SVE2 instructions.
 @item sve2-sha3
 Enable SVE2 sha3 instructions.  This also enables SVE2 instructions.
+@item sve2p1
+Enable SVE2.1 instructions.  This also enables SVE2 instructions.
 @item tme
 Enable the Transactional Memory Extension.
 @item i8mm
