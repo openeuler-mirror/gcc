@@ -463,6 +463,8 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
     enabled through +gcs.  */
 #define TARGET_GCS AARCH64_HAVE_ISA (GCS)
 
+#define TARGET_FPRCVT (AARCH64_HAVE_ISA (FPRCVT))
+
 
 /* Standard register usage.  */
 
