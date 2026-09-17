@@ -22119,6 +22119,8 @@ Enable support for 128-bit system register read/write instructions.
 This also enables the LSE128 extension.
 @item gcs
 Enable support for Armv9.4-a Guarded Control Stack extension.
+@item tlbid
+Enable the TLBI Domains Extension.
 @item fprcvt
 Enable the floating-point and integer conversion instructions that take
 their operand in, or produce their result in, a SIMD and floating-point
