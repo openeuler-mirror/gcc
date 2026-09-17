@@ -59,6 +59,12 @@ namespace aarch64_sve
     extern const function_base *const svcdot_lane;
     extern const function_base *const svclamp;
     extern const function_base *const svcntp;
+    extern const function_base *const svcvt1;
+    extern const function_base *const svcvt2;
+    extern const function_base *const svcvtlt1;
+    extern const function_base *const svcvtlt2;
+    extern const function_base *const svcvtnb;
+    extern const function_base *const svcvtnt;
     extern const function_base *const svcvtlt;
     extern const function_base *const svcvtn;
     extern const function_base *const svcvtx;
@@ -84,6 +90,14 @@ namespace aarch64_sve
     extern const function_base *const svmaxnmp;
     extern const function_base *const svmlalb;
     extern const function_base *const svmlalb_lane;
+    extern const function_base *const svmlallbb_lane;
+    extern const function_base *const svmlallbb;
+    extern const function_base *const svmlallbt_lane;
+    extern const function_base *const svmlallbt;
+    extern const function_base *const svmlalltb_lane;
+    extern const function_base *const svmlalltb;
+    extern const function_base *const svmlalltt_lane;
+    extern const function_base *const svmlalltt;
     extern const function_base *const svmlalt;
     extern const function_base *const svmlalt_lane;
     extern const function_base *const svmlslb;

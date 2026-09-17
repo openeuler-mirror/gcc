@@ -107,10 +107,14 @@
     (P14_REGNUM		82)
     (P15_REGNUM		83)
     (LAST_SAVED_REGNUM	83)
-    (FFR_REGNUM		84)
+
+    ;; Floating Point Mode Register, used in FP8 insns.
+    (FPM_REGNUM		84)
+
+    (FFR_REGNUM		85)
     ;; "FFR token": a fake register used for representing the scheduling
     ;; restrictions on FFR-related operations.
-    (FFRT_REGNUM	85)
+    (FFRT_REGNUM	86)
 
     ;; ----------------------------------------------------------------
     ;; Fake registers
@@ -122,17 +126,17 @@
     ;; ABI-related lowering is needed.  These placeholders read and
     ;; write this register.  Instructions that depend on the lowering
     ;; read the register.
-    (LOWERING_REGNUM 86)
+    (LOWERING_REGNUM 87)
 
     ;; Represents the contents of the current function's TPIDR2 block,
     ;; in abstract form.
-    (TPIDR2_BLOCK_REGNUM 87)
+    (TPIDR2_BLOCK_REGNUM 88)
 
     ;; Holds the value that the current function wants PSTATE.ZA to be.
     ;; The actual value can sometimes vary, because it does not track
     ;; changes to PSTATE.ZA that happen during a lazy save and restore.
     ;; Those effects are instead tracked by ZA_SAVED_REGNUM.
-    (SME_STATE_REGNUM 88)
+    (SME_STATE_REGNUM 89)
 
     ;; Instructions write to this register if they set TPIDR2_EL0 to a
     ;; well-defined value.  Instructions read from the register if they
@@ -140,14 +144,14 @@
     ;;
     ;; The register does not model the architected TPIDR2_ELO, just the
     ;; current function's management of it.
-    (TPIDR2_SETUP_REGNUM 89)
+    (TPIDR2_SETUP_REGNUM 90)
 
     ;; Represents the property "has an incoming lazy save been committed?".
-    (ZA_FREE_REGNUM 90)
+    (ZA_FREE_REGNUM 91)
 
     ;; Represents the property "are the current function's ZA contents
     ;; stored in the lazy save buffer, rather than in ZA itself?".
-    (ZA_SAVED_REGNUM 91)
+    (ZA_SAVED_REGNUM 92)
 
     ;; Represents the contents of the current function's ZA state in
     ;; abstract form.  At various times in the function, these contents
@@ -155,10 +159,10 @@
     ;;
     ;; The contents persist even when the architected ZA is off.  Private-ZA
     ;; functions have no effect on its contents.
-    (ZA_REGNUM 92)
+    (ZA_REGNUM 93)
 
     ;; Similarly represents the contents of the current function's ZT0 state.
-    (ZT0_REGNUM 93)
+    (ZT0_REGNUM 94)
 
     (FIRST_FAKE_REGNUM	LOWERING_REGNUM)
     (LAST_FAKE_REGNUM	ZT0_REGNUM)
@@ -194,8 +198,10 @@
     UNSPEC_AUTIB1716
     UNSPEC_AUTIASP
     UNSPEC_AUTIBSP
+    UNSPEC_BSL
     UNSPEC_CALLEE_ABI
     UNSPEC_CASESI
+    UNSPEC_COMBINE
     UNSPEC_CPYMEM
     UNSPEC_CRC32B
     UNSPEC_CRC32CB
@@ -205,6 +211,8 @@
     UNSPEC_CRC32H
     UNSPEC_CRC32W
     UNSPEC_CRC32X
+    UNSPEC_DUP
+    UNSPEC_DUP_LANE
     UNSPEC_FCVTZS
     UNSPEC_FCVTZU
     UNSPEC_FJCVTZS
@@ -223,6 +231,7 @@
     UNSPEC_FRINTP
     UNSPEC_FRINTX
     UNSPEC_FRINTZ
+    UNSPEC_GET_LANE
     UNSPEC_GOTSMALLPIC
     UNSPEC_GOTSMALLPIC28K
     UNSPEC_GOTSMALLTLS
@@ -232,6 +241,10 @@
     UNSPEC_LDP_FST
     UNSPEC_LDP_SND
     UNSPEC_LD1
+    UNSPEC_LD1_DUP
+    UNSPEC_LD1x2
+    UNSPEC_LD1x3
+    UNSPEC_LD1x4
     UNSPEC_LD2
     UNSPEC_LD2_DREG
     UNSPEC_LD2_DUP
@@ -262,12 +275,17 @@
     UNSPEC_RBIT
     UNSPEC_SADALP
     UNSPEC_SCVTF
+    UNSPEC_SET_LANE
     UNSPEC_SETMEM
     UNSPEC_SISD_NEG
     UNSPEC_SISD_SSHL
     UNSPEC_SISD_USHL
     UNSPEC_SSHL_2S
     UNSPEC_ST1
+    UNSPEC_ST1_LANE
+    UNSPEC_ST1x2
+    UNSPEC_ST1x3
+    UNSPEC_ST1x4
     UNSPEC_ST2
     UNSPEC_ST3
     UNSPEC_ST4
@@ -311,6 +329,8 @@
     UNSPEC_UNPACKSLO
     UNSPEC_UNPACKULO
     UNSPEC_PACK
+    UNSPEC_VCREATE
+    UNSPEC_VEC_COPY
     UNSPEC_WHILEGE
     UNSPEC_WHILEGT
     UNSPEC_WHILEHI
@@ -337,6 +357,7 @@
     UNSPEC_UPDATE_FFRT
     UNSPEC_RDFFR
     UNSPEC_WRFFR
+    UNSPEC_WRITE_FPMR
     UNSPEC_SYSREG_RDI
     UNSPEC_SYSREG_RTI
     UNSPEC_SYSREG_WDI
@@ -1400,6 +1421,8 @@
      [w, r Z  ; neon_from_gp<q>, nosimd     ] fmov\t%s0, %w1
      [w, w    ; neon_dup       , simd       ] dup\t%<Vetype>0, %1.<v>[0]
      [w, w    ; neon_dup       , nosimd     ] fmov\t%s0, %s1
+     [Umv, rZ ; mrs            , *          ] msr\t%0, %x1
+     [r, Umv  ; mrs            , *          ] mrs\t%x0, %1
   }
 )
 
@@ -1462,6 +1485,8 @@
      [r  , w  ; f_mrc    , fp  , 4] fmov\t%w0, %s1
      [w  , w  ; fmov     , fp  , 4] fmov\t%s0, %s1
      [w  , Ds ; neon_move, simd, 4] << aarch64_output_scalar_simd_mov_immediate (operands[1], SImode);
+     [Umv, rZ ; mrs      , *   , 4] msr\t%0, %x1
+     [r, Umv  ; mrs      , *   , 4] mrs\t%x0, %1
   }
   "CONST_INT_P (operands[1]) && !aarch64_move_imm (INTVAL (operands[1]), SImode)
     && REG_P (operands[0]) && GP_REGNUM_P (REGNO (operands[0]))"
@@ -1500,6 +1525,8 @@
      [w, w  ; fmov     , fp  , 4] fmov\t%d0, %d1
      [w, Dd ; neon_move, simd, 4] << aarch64_output_scalar_simd_mov_immediate (operands[1], DImode);
      [w, Dx ; neon_move, simd, 8] #
+     [Umv, rZ; mrs      , *   , 4] msr\t%0, %x1
+     [r, Umv; mrs      , *   , 4] mrs\t%0, %1
   }
   "CONST_INT_P (operands[1])
    && REG_P (operands[0])
@@ -1748,6 +1775,44 @@
     aarch64_split_128bit_move (operands[0], operands[1]);
     DONE;
   }
+)
+
+;; The preferred way of writing to the FPMR is to test whether it already
+;; has the desired value and branch around the write if so.  This reduces
+;; the number of redundant FPMR writes caused by ABI boundaries, such as in:
+;;
+;;    for (...)
+;;      fp8_kernel (..., fpmr_value);
+;;
+;; Without this optimization, fp8_kernel would set FPMR to fpmr_value each
+;; time that it is called.
+;;
+;; We do this as a split so that hardreg_pre can optimize the moves first.
+(define_split
+  [(set (reg:DI FPM_REGNUM)
+        (match_operand:DI 0 "aarch64_reg_or_zero"))]
+  "TARGET_FP8 && !TARGET_CHEAP_FPMR_WRITE && can_create_pseudo_p ()"
+  [(const_int 0)]
+  {
+    auto label = gen_label_rtx ();
+    rtx current = copy_to_reg (gen_rtx_REG (DImode, FPM_REGNUM));
+    rtx cond = gen_rtx_EQ (VOIDmode, current, operands[0]);
+    emit_jump_insn (gen_cbranchdi4 (cond, current, operands[0], label));
+    emit_insn (gen_aarch64_write_fpmr (operands[0]));
+    emit_label (label);
+    DONE;
+  }
+)
+
+;; A write to the FPMR that is already protected by a conditional branch.
+;; Since this instruction is introduced late, it shouldn't matter too much
+;; that we're using an unspec for a move.
+(define_insn "aarch64_write_fpmr"
+  [(set (reg:DI FPM_REGNUM)
+        (unspec:DI [(match_operand:DI 0 "aarch64_reg_or_zero" "rZ")]
+		   UNSPEC_WRITE_FPMR))]
+  "TARGET_FP8"
+  "msr\tfpmr, %x0"
 )
 
 (define_expand "aarch64_cpymemdi"
@@ -2768,8 +2833,8 @@
 (define_insn "*adds_<optab><ALLX:mode>_shift_<GPI:mode>"
   [(set (reg:CC_NZ CC_REGNUM)
 	(compare:CC_NZ
-	 (plus:GPI (ashift:GPI 
-		    (ANY_EXTEND:GPI 
+	 (plus:GPI (ashift:GPI
+		    (ANY_EXTEND:GPI
 		     (match_operand:ALLX 1 "register_operand" "r"))
 		    (match_operand 2 "aarch64_imm3" "Ui3"))
 		   (match_operand:GPI 3 "register_operand" "rk"))
@@ -2787,7 +2852,7 @@
   [(set (reg:CC_NZ CC_REGNUM)
 	(compare:CC_NZ
 	 (minus:GPI (match_operand:GPI 1 "register_operand" "rk")
-		    (ashift:GPI 
+		    (ashift:GPI
 		     (ANY_EXTEND:GPI
 		      (match_operand:ALLX 2 "register_operand" "r"))
 		     (match_operand 3 "aarch64_imm3" "Ui3")))

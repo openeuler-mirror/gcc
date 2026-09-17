@@ -257,6 +257,16 @@ aarch64_update_cpp_builtins (cpp_reader *pfile)
   aarch64_def_or_undef (TARGET_SVE_BF16,
 			"__ARM_FEATURE_SVE_BF16", pfile);
 
+  aarch64_def_or_undef (TARGET_FP8, "__ARM_FEATURE_FP8", pfile);
+  aarch64_def_or_undef (TARGET_FAMINMAX, "__ARM_FEATURE_FAMINMAX", pfile);
+  aarch64_def_or_undef (TARGET_LUT, "__ARM_FEATURE_LUT", pfile);
+
+  aarch64_def_or_undef (TARGET_FP8DOT2, "__ARM_FEATURE_FP8DOT2", pfile);
+
+  aarch64_def_or_undef (TARGET_FP8DOT4, "__ARM_FEATURE_FP8DOT4", pfile);
+
+  aarch64_def_or_undef (TARGET_FP8FMA, "__ARM_FEATURE_FP8FMA", pfile);
+
   aarch64_def_or_undef (TARGET_LS64,
 			"__ARM_FEATURE_LS64", pfile);
   aarch64_def_or_undef (TARGET_RCPC, "__ARM_FEATURE_RCPC", pfile);
@@ -276,6 +286,11 @@ aarch64_update_cpp_builtins (cpp_reader *pfile)
   cpp_undef (pfile, "__FLT_EVAL_METHOD_C99__");
   builtin_define_with_int_value ("__FLT_EVAL_METHOD_C99__",
 				 c_flt_eval_method (false));
+
+  aarch64_def_or_undef (TARGET_F8F16MM, "__ARM_FEATURE_F8F16MM", pfile);
+  aarch64_def_or_undef (TARGET_F8F32MM, "__ARM_FEATURE_F8F32MM", pfile);
+  aarch64_def_or_undef (TARGET_SVE_F16F32MM, "__ARM_FEATURE_SVE_F16F32MM",
+			pfile);
 }
 
 /* Implement TARGET_CPU_CPP_BUILTINS.  */

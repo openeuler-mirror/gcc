@@ -96,6 +96,7 @@ apply_predication (const function_instance &instance, tree return_type,
    B       - bfloat16_t
    c       - a predicate-as-counter
    h<elt>  - a half-sized version of <elt>
+   M       - mfloat8_t
    p       - a predicate (represented as TYPE_SUFFIX_b)
    q<elt>  - a quarter-sized version of <elt>
    s<bits> - a signed type with the given number of bits
@@ -139,6 +140,9 @@ parse_element_type (const function_instance &instance, const char *&format)
 
   if (ch == 'B')
     return TYPE_SUFFIX_bf16;
+
+  if (ch == 'M')
+    return TYPE_SUFFIX_mf8;
 
   if (ch == 'q')
     {
@@ -325,6 +329,8 @@ parse_signature (const function_instance &instance, const char *format,
 	argument_types.quick_push (argument_type);
     }
   gcc_assert (format[0] == 0);
+  if (instance.fpm_mode == FPM_set)
+    argument_types.quick_push (get_typenode_from_name (UINT64_TYPE));
   return return_type;
 }
 
@@ -349,8 +355,8 @@ build_one (function_builder &b, const char *signature,
   /* Byte forms of svdupq take 16 arguments.  */
   auto_vec<tree, 16> argument_types;
   function_instance instance (group.base_name, *group.base, *group.shape,
-			      mode_suffix_id, group.types[ti],
-			      group.groups[gi], group.preds[pi]);
+			      mode_suffix_id, group.types[ti], group.groups[gi],
+			      group.preds[pi], group.fpm_mode);
   tree return_type = parse_signature (instance, signature, argument_types);
   apply_predication (instance, return_type, argument_types);
   b.add_unique_function (instance, return_type, argument_types,
@@ -882,6 +888,8 @@ struct luti_lane_zt_base : public nonoverloaded_base
 /* sv<t0>_t svfoo[_t0](sv<t0>_t, sv<t0:quarter>_t,
 		       sv<t0:quarter>_t)  (for integer t0)
    sv<t0>_t svmmla[_t0](sv<t0>_t, sv<t0>_t, sv<t0>_t)  (for floating-point t0)
+   sv<t0>_t svmmla[_t0](sv<t0>_t, sv<t1>_t, sv<t1>_t)
+		       (for floating-point t0, t1)
 
    The functions act like the equivalent of "ternary_qq" for integer elements
    and normal vector-only ternary functions for floating-point elements.  */
@@ -891,40 +899,54 @@ struct mmla_def : public overloaded_base<0>
   build (function_builder &b, const function_group_info &group) const override
   {
     b.add_overloaded_functions (group, MODE_none);
-    /* svmmla is distributed over several extensions.  Allow the common
-       denominator to define the overloaded svmmla function without
-       defining any specific versions.  */
-    if (group.types[0][0] != NUM_TYPE_SUFFIXES)
+    if (type_suffixes[group.types[0][0]].float_p)
       {
-	if (type_suffixes[group.types[0][0]].float_p)
+	if (group.types[0][1] == NUM_TYPE_SUFFIXES)
 	  build_all (b, "v0,v0,v0,v0", group, MODE_none);
 	else
-	  build_all (b, "v0,v0,vq0,vq0", group, MODE_none);
+	  build_all (b, "v0,v0,v1,v1", group, MODE_none);
       }
+    else
+      build_all (b, "v0,v0,vq0,vq0", group, MODE_none);
   }
 
   tree
   resolve (function_resolver &r) const override
   {
     unsigned int i, nargs;
-    type_suffix_index type;
+    type_suffix_index type1, type2;
     if (!r.check_gp_argument (3, i, nargs)
-	|| (type = r.infer_vector_type (i)) == NUM_TYPE_SUFFIXES)
+	|| (type1 = r.infer_vector_type (i)) == NUM_TYPE_SUFFIXES
+	|| (type2 = r.infer_vector_type (i + 1)) == NUM_TYPE_SUFFIXES)
       return error_mark_node;
 
+    bool float_p = type_suffixes[type1].float_p;
     /* Make sure that the function exists now, since not all forms
        follow a set pattern after this point.  */
-    tree res = r.resolve_to (r.mode_suffix_id, type);
+    tree res = (float_p && type1 != type2)
+	       ? r.resolve_to (r.mode_suffix_id, type1, type2)
+	       : r.resolve_to (r.mode_suffix_id, type1);
     if (res == error_mark_node)
       return res;
 
-    bool float_p = type_suffixes[type].float_p;
-    unsigned int modifier = float_p ? r.SAME_SIZE : r.QUARTER_SIZE;
-    if (!r.require_derived_vector_type (i + 1, i, type, r.SAME_TYPE_CLASS,
-					modifier)
-	|| !r.require_derived_vector_type (i + 2, i, type, r.SAME_TYPE_CLASS,
-					   modifier))
-      return error_mark_node;
+    if (float_p)
+      {
+	/* In the float case, require arg i+1 to have same type as i+2.  */
+	if (!r.require_derived_vector_type (i + 2, i + 1, type2,
+					    r.SAME_TYPE_CLASS, r.SAME_SIZE))
+	  return error_mark_node;
+      }
+    else
+      {
+	/* In the int case, require arg i+1 and i+2 to have a quarter the size
+	   of arg i.  */
+	if (!r.require_derived_vector_type (i + 1, i, type1, r.SAME_TYPE_CLASS,
+					    r.QUARTER_SIZE)
+	    || !r.require_derived_vector_type (i + 2, i, type1,
+					       r.SAME_TYPE_CLASS,
+					       r.QUARTER_SIZE))
+	  return error_mark_node;
+      }
 
     return res;
   }
@@ -3718,6 +3740,34 @@ struct ternary_bfloat_def
 };
 SHAPE (ternary_bfloat)
 
+/* sv<t0>_t svfoo[_t0](sv<t0>_t, svmfloat8_t, svmfloat8_t).  */
+struct ternary_mfloat8_def
+    : public ternary_resize2_base<8, TYPE_mfloat, TYPE_mfloat>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    gcc_assert (group.fpm_mode == FPM_set);
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "v0,v0,vM,vM", group, MODE_none);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    type_suffix_index type;
+    if (!r.check_num_arguments (4)
+	|| (type = r.infer_vector_type (0)) == NUM_TYPE_SUFFIXES
+	|| !r.require_vector_type (1, VECTOR_TYPE_svmfloat8_t)
+	|| !r.require_vector_type (2, VECTOR_TYPE_svmfloat8_t)
+	|| !r.require_scalar_type (3, "uint64_t"))
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, type, TYPE_SUFFIX_mf8, GROUP_none);
+  }
+};
+SHAPE (ternary_mfloat8)
+
 /* sv<t0>_t svfoo[_t0](sv<t0>_t, svbfloat16_t, svbfloat16_t, uint64_t)
 
    where the final argument is an integer constant expression in the range
@@ -3731,6 +3781,64 @@ SHAPE (ternary_bfloat_lane)
    [0, 3].  */
 typedef ternary_bfloat_lane_base<2> ternary_bfloat_lanex2_def;
 SHAPE (ternary_bfloat_lanex2)
+
+/* sv<t0>_t svfoo[_t0](sv<t0>_t, svmfloat8_t, svmfloat8_t, uint64_t)
+
+   where the final argument is an integer constant expression in the range
+   [0, 15].  */
+struct ternary_mfloat8_lane_def
+    : public ternary_resize2_lane_base<8, TYPE_mfloat, TYPE_mfloat>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    gcc_assert (group.fpm_mode == FPM_set);
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "v0,v0,vM,vM,su64", group, MODE_none);
+  }
+
+  bool
+  check (function_checker &c) const override
+  {
+    return c.require_immediate_lane_index (3, 2, 1);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    type_suffix_index type;
+    if (!r.check_num_arguments (5)
+	|| (type = r.infer_vector_type (0)) == NUM_TYPE_SUFFIXES
+	|| !r.require_vector_type (1, VECTOR_TYPE_svmfloat8_t)
+	|| !r.require_vector_type (2, VECTOR_TYPE_svmfloat8_t)
+	|| !r.require_integer_immediate (3)
+	|| !r.require_scalar_type (4, "uint64_t"))
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, type, TYPE_SUFFIX_mf8, GROUP_none);
+  }
+};
+SHAPE (ternary_mfloat8_lane)
+
+/* sv<t0>_t svfoo[_t0](sv<t0>_t, svmfloat8_t, svmfloat8_t, uint64_t)
+
+   where the final argument is an integer constant expression in the range
+   [0, 7] or [0, 3].  */
+struct ternary_mfloat8_lane_group_selection_def
+    : public ternary_mfloat8_lane_def
+{
+  bool
+  check (function_checker &c) const override
+  {
+    machine_mode mode = c.vector_mode (0);
+    if (mode == E_VNx8HFmode)
+      return c.require_immediate_lane_index (3, 2, 2);
+    else if (mode == E_VNx4SFmode)
+      return c.require_immediate_lane_index (3, 2, 4);
+    gcc_unreachable ();
+  }
+};
+SHAPE (ternary_mfloat8_lane_group_selection)
 
 /* sv<t0>_t svfoo[_t0](sv<t0>_t, svbfloatt16_t, svbfloat16_t)
    sv<t0>_t svfoo[_n_t0](sv<t0>_t, svbfloat16_t, bfloat16_t).  */
@@ -3746,6 +3854,42 @@ struct ternary_bfloat_opt_n_def
   }
 };
 SHAPE (ternary_bfloat_opt_n)
+
+/* sv<t0>_t svfoo[_t0](sv<t0>_t, svmfloatt8_t, svmfloat8_t)
+   sv<t0>_t svfoo[_n_t0](sv<t0>_t, svmfloat8_t, bfloat8_t).  */
+struct ternary_mfloat8_opt_n_def
+    : public ternary_resize2_opt_n_base<8, TYPE_mfloat, TYPE_mfloat>
+{
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    gcc_assert (group.fpm_mode == FPM_set);
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "v0,v0,vM,vM", group, MODE_none);
+    build_all (b, "v0,v0,vM,sM", group, MODE_n);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    type_suffix_index type;
+    if (!r.check_num_arguments (4)
+	|| (type = r.infer_vector_type (0)) == NUM_TYPE_SUFFIXES
+	|| !r.require_vector_type (1, VECTOR_TYPE_svmfloat8_t)
+	|| !r.require_vector_or_scalar_type (2)
+	|| !r.require_scalar_type (3, "uint64_t"))
+      return error_mark_node;
+
+    auto mode = r.mode_suffix_id;
+    if (r.scalar_argument_p (2))
+      mode = MODE_n;
+    else if (!r.require_vector_type (2, VECTOR_TYPE_svmfloat8_t))
+      return error_mark_node;
+
+    return r.resolve_to (mode, type, TYPE_SUFFIX_mf8, GROUP_none);
+  }
+};
+SHAPE (ternary_mfloat8_opt_n)
 
 /* sv<t0>_t svfoo[_t0](sv<t0>_t, sv<t0:int:quarter>_t, sv<t0:uint:quarter>_t,
 		       uint64_t)
@@ -4315,6 +4459,46 @@ struct unary_convert_narrowt_def : public overloaded_base<1>
 };
 SHAPE (unary_convert_narrowt)
 
+/* sv<t0>_t svfoo_t0[_t1_g](sv<t0>_t, sv<t1>x<g_t, fpm_t)
+
+   Similar to unary_convert_narrowt but for tuple arguments with support for
+   modal floating point.  */
+struct unary_convertxn_narrowt_def : public overloaded_base<1>
+{
+  bool
+  explicit_group_suffix_p () const override
+  {
+    return false;
+  }
+
+  bool
+  has_merge_argument_p (const function_instance &, unsigned int) const override
+  {
+    return true;
+  }
+
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "v0,v0,t1", group, MODE_none);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    gcc_assert(r.fpm_mode == FPM_set);
+    sve_type type;
+    if (!r.check_num_arguments (3)
+        || !(type = r.infer_sve_type (1))
+	|| !r.require_scalar_type (2, "uint64_t"))
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, type);
+  }
+};
+SHAPE (unary_convertxn_narrowt)
+
 /* sv<t0>x<g0>_t svfoo_t0[_t1_g](sv<t1>x<g1>_t)
 
    where the target type <t0> must be specified explicitly but the
@@ -4346,6 +4530,42 @@ struct unary_convertxn_def : public unary_convert_def
   }
 };
 SHAPE (unary_convertxn)
+
+/* sv<t0>_t svfoo_t0[_t1_g](sv<t1>x<g1>_t)
+
+   where the target type <t0> must be specified explicitly but the
+   source type <t1> can be inferred.
+
+   Functions with a group suffix are unpredicated. */
+struct unary_convertxn_narrow_def : public unary_convert_def
+{
+  bool
+  explicit_group_suffix_p () const override
+  {
+    return false;
+  }
+
+  void
+  build (function_builder &b, const function_group_info &group) const override
+  {
+    b.add_overloaded_functions (group, MODE_none);
+    build_all (b, "v0,t1", group, MODE_none);
+  }
+
+  tree
+  resolve (function_resolver &r) const override
+  {
+    gcc_assert(r.fpm_mode == FPM_set);
+    sve_type type;
+    if (!r.check_num_arguments (2)
+        || !(type = r.infer_sve_type (0))
+	|| !r.require_scalar_type (1, "uint64_t"))
+      return error_mark_node;
+
+    return r.resolve_to (r.mode_suffix_id, type);
+  }
+};
+SHAPE (unary_convertxn_narrow)
 
 /* sv<t0>_t svfoo[_t0](sv<t0:half>_t).  */
 struct unary_long_def : public overloaded_base<0>

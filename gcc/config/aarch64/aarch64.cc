@@ -1732,7 +1732,7 @@ aarch64_ldn_stn_vectors (machine_mode mode)
 
 /* Given an Advanced SIMD vector mode MODE and a tuple size NELEMS, return the
    corresponding vector structure mode.  */
-static opt_machine_mode
+opt_machine_mode
 aarch64_advsimd_vector_array_mode (machine_mode mode,
 				   unsigned HOST_WIDE_INT nelems)
 {
@@ -2013,6 +2013,7 @@ aarch64_hard_regno_nregs (unsigned regno, machine_mode mode)
     case PR_HI_REGS:
       return mode == VNx32BImode ? 2 : 1;
 
+    case MOVEABLE_SYSREGS:
     case FFR_REGS:
     case PR_AND_FFR_REGS:
     case FAKE_REGS:
@@ -2039,6 +2040,9 @@ aarch64_hard_regno_mode_ok (unsigned regno, machine_mode mode)
   if (regno == VG_REGNUM)
     /* This must have the same size as _Unwind_Word.  */
     return mode == DImode;
+
+  if (regno == FPM_REGNUM)
+    return mode == QImode || mode == HImode || mode == SImode || mode == DImode;
 
   unsigned int vec_flags = aarch64_classify_vector_mode (mode);
   if (vec_flags == VEC_SVE_PRED)
@@ -5548,7 +5552,7 @@ aarch64_expand_sve_const_vector (rtx target, rtx src)
 	 targets, the layout of the 128-bit vector in an Advanced SIMD
 	 register would be different from its layout in an SVE register,
 	 but this 128-bit vector is a memory value only.  */
-      machine_mode vq_mode = aarch64_vq_mode (elt_mode).require ();
+      machine_mode vq_mode = aarch64_v128_mode (elt_mode).require ();
       rtx vq_value = simplify_gen_subreg (vq_mode, src, mode, 0);
       if (vq_value && aarch64_expand_sve_ld1rq (target, vq_value))
 	return target;
@@ -5560,7 +5564,7 @@ aarch64_expand_sve_const_vector (rtx target, rtx src)
 	 See if we can load them using an Advanced SIMD move and then
 	 duplicate it to fill a vector.  This is better than using a GPR
 	 move because it keeps everything in the same register file.  */
-      machine_mode vq_mode = aarch64_vq_mode (elt_mode).require ();
+      machine_mode vq_mode = aarch64_v128_mode (elt_mode).require ();
       rtx_vector_builder builder (vq_mode, npatterns, 1);
       for (unsigned int i = 0; i < npatterns; ++i)
 	{
@@ -12676,6 +12680,9 @@ aarch64_regno_regclass (unsigned regno)
   if (PR_REGNUM_P (regno))
     return PR_LO_REGNUM_P (regno) ? PR_LO_REGS : PR_HI_REGS;
 
+  if (regno == FPM_REGNUM)
+    return MOVEABLE_SYSREGS;
+
   if (regno == FFR_REGNUM || regno == FFRT_REGNUM)
     return FFR_REGS;
 
@@ -13058,6 +13065,7 @@ aarch64_class_max_nregs (reg_class_t regclass, machine_mode mode)
     case PR_HI_REGS:
       return mode == VNx32BImode ? 2 : 1;
 
+    case MOVEABLE_SYSREGS:
     case STACK_REG:
     case FFR_REGS:
     case PR_AND_FFR_REGS:
@@ -22090,7 +22098,8 @@ aarch64_vfp_is_call_or_return_candidate (machine_mode mode,
 
   if ((!composite_p
        && (GET_MODE_CLASS (mode) == MODE_FLOAT
-	   || GET_MODE_CLASS (mode) == MODE_DECIMAL_FLOAT))
+	   || GET_MODE_CLASS (mode) == MODE_DECIMAL_FLOAT
+	   || (type && TYPE_MAIN_VARIANT (type) == aarch64_mfp8_type_node)))
       || aarch64_short_vector_p (type, mode))
     {
       *count = 1;
@@ -22210,10 +22219,34 @@ aarch64_full_sve_mode (scalar_mode mode)
     }
 }
 
+/* Return the 64-bit Advanced SIMD vector mode for element mode MODE,
+   if it exists.  */
+opt_machine_mode
+aarch64_v64_mode (scalar_mode mode)
+{
+  switch (mode)
+    {
+    case E_SFmode:
+      return V2SFmode;
+    case E_HFmode:
+      return V4HFmode;
+    case E_BFmode:
+      return V4BFmode;
+    case E_SImode:
+      return V2SImode;
+    case E_HImode:
+      return V4HImode;
+    case E_QImode:
+      return V8QImode;
+    default:
+      return {};
+    }
+}
+
 /* Return the 128-bit Advanced SIMD vector mode for element mode MODE,
    if it exists.  */
 opt_machine_mode
-aarch64_vq_mode (scalar_mode mode)
+aarch64_v128_mode (scalar_mode mode)
 {
   switch (mode)
     {
@@ -22252,25 +22285,9 @@ aarch64_simd_container_mode (scalar_mode mode, poly_int64 width)
   if (TARGET_BASE_SIMD)
     {
       if (known_eq (width, 128))
-	return aarch64_vq_mode (mode).else_mode (word_mode);
+	return aarch64_v128_mode (mode).else_mode (word_mode);
       else
-	switch (mode)
-	  {
-	  case E_SFmode:
-	    return V2SFmode;
-	  case E_HFmode:
-	    return V4HFmode;
-	  case E_BFmode:
-	    return V4BFmode;
-	  case E_SImode:
-	    return V2SImode;
-	  case E_HImode:
-	    return V4HImode;
-	  case E_QImode:
-	    return V8QImode;
-	  default:
-	    break;
-	  }
+	return aarch64_v64_mode (mode).else_mode (word_mode);
     }
   return word_mode;
 }
@@ -22330,7 +22347,7 @@ aarch64_preferred_simd_mode (scalar_mode mode)
   if (TARGET_SVE && aarch64_cmp_autovec_modes (VNx16QImode, V16QImode))
     return aarch64_full_sve_mode (mode).else_mode (word_mode);
   if (TARGET_SIMD)
-    return aarch64_vq_mode (mode).else_mode (word_mode);
+    return aarch64_v128_mode (mode).else_mode (word_mode);
   return word_mode;
 }
 
@@ -22438,6 +22455,10 @@ aarch64_mangle_type (const_tree type)
 	return "Dh";
     }
 
+  /* Modal 8 bit floating point types.  */
+  if (TYPE_MAIN_VARIANT (type) == aarch64_mfp8_type_node)
+    return "u6__mfp8";
+
   /* Mangle AArch64-specific internal types.  TYPE_NAME is non-NULL_TREE for
      builtin types.  */
   if (TYPE_NAME (type) != NULL)
@@ -22449,6 +22470,29 @@ aarch64_mangle_type (const_tree type)
     }
 
   /* Use the default mangling.  */
+  return NULL;
+}
+
+/* Implement TARGET_INVALID_CONVERSION.  */
+
+static const char *
+aarch64_invalid_conversion (const_tree fromtype, const_tree totype)
+{
+  /* Do not allow conversions to/from FP8. But do allow conversions between
+     volatile and const variants of __mfp8. */
+  bool fromtype_is_fp8
+      = (TYPE_MAIN_VARIANT (fromtype) == aarch64_mfp8_type_node);
+  bool totype_is_fp8 = (TYPE_MAIN_VARIANT (totype) == aarch64_mfp8_type_node);
+
+  if (fromtype_is_fp8 && totype_is_fp8)
+    return NULL;
+
+  if (fromtype_is_fp8)
+    return N_ ("invalid conversion from type %<mfloat8_t%>");
+  if (totype_is_fp8)
+    return N_ ("invalid conversion to type %<mfloat8_t%>");
+
+  /* Conversion allowed.  */
   return NULL;
 }
 
@@ -29320,8 +29364,20 @@ aarch64_stack_protect_guard (void)
   return NULL_TREE;
 }
 
-/* Return the diagnostic message string if the binary operation OP is
-   not permitted on TYPE1 and TYPE2, NULL otherwise.  */
+/* Implement TARGET_INVALID_UNARY_OP.  */
+
+static const char *
+aarch64_invalid_unary_op (int op, const_tree type)
+{
+  /* Reject all single-operand operations on __mfp8 except for &.  */
+  if (TYPE_MAIN_VARIANT (type) == aarch64_mfp8_type_node && op != ADDR_EXPR)
+    return N_ ("operation not permitted on type %<mfloat8_t%>");
+
+  /* Operation allowed.  */
+  return NULL;
+}
+
+/* Implement TARGET_INVALID_BINARY_OP.  */
 
 static const char *
 aarch64_invalid_binary_op (int op ATTRIBUTE_UNUSED, const_tree type1,
@@ -29334,6 +29390,11 @@ aarch64_invalid_binary_op (int op ATTRIBUTE_UNUSED, const_tree type1,
       && (aarch64_sve::builtin_type_p (type1)
 	  != aarch64_sve::builtin_type_p (type2)))
     return N_("cannot combine GNU and SVE vectors in a binary operation");
+
+  /* Reject all 2-operand operations on __mfp8.  */
+  if (TYPE_MAIN_VARIANT (type1) == aarch64_mfp8_type_node
+      || TYPE_MAIN_VARIANT (type2) == aarch64_mfp8_type_node)
+    return N_ ("operation not permitted on type %<mfloat8_t%>");
 
   /* Operation allowed.  */
   return NULL;
@@ -30682,6 +30743,70 @@ aarch64_retrieve_sysreg (const char *regname, bool write_p, bool is128op)
   return sysreg->encoding;
 }
 
+/* Report that LOCATION has a call to FNDECL in which argument ARGNO
+   was not an integer constant expression.  ARGNO counts from zero.  */
+void
+aarch64::report_non_ice (location_t location, tree fndecl, unsigned int argno)
+{
+  error_at (location, "argument %d of %qE must be an integer constant"
+	    " expression", argno + 1, fndecl);
+}
+
+/* Report that LOCATION has a call to FNDECL in which argument ARGNO has
+   the value ACTUAL, whereas the function requires a value in the range
+   [MIN, MAX].  ARGNO counts from zero.  */
+void
+aarch64::report_out_of_range (location_t location, tree fndecl,
+			      unsigned int argno, HOST_WIDE_INT actual,
+			      HOST_WIDE_INT min, HOST_WIDE_INT max)
+{
+  if (min == max)
+    error_at (location, "passing %wd to argument %d of %qE, which expects"
+	      " the value %wd", actual, argno + 1, fndecl, min);
+  else
+    error_at (location, "passing %wd to argument %d of %qE, which expects"
+	      " a value in the range [%wd, %wd]", actual, argno + 1, fndecl,
+	      min, max);
+}
+
+/* Report that LOCATION has a call to FNDECL in which argument ARGNO has
+   the value ACTUAL, whereas the function requires either VALUE0 or
+   VALUE1.  ARGNO counts from zero.  */
+void
+aarch64::report_neither_nor (location_t location, tree fndecl,
+			     unsigned int argno, HOST_WIDE_INT actual,
+			     HOST_WIDE_INT value0, HOST_WIDE_INT value1)
+{
+  error_at (location, "passing %wd to argument %d of %qE, which expects"
+	    " either %wd or %wd", actual, argno + 1, fndecl, value0, value1);
+}
+
+/* Report that LOCATION has a call to FNDECL in which argument ARGNO has
+   the value ACTUAL, whereas the function requires one of VALUE0..3.
+   ARGNO counts from zero.  */
+void
+aarch64::report_not_one_of (location_t location, tree fndecl,
+			    unsigned int argno, HOST_WIDE_INT actual,
+			    HOST_WIDE_INT value0, HOST_WIDE_INT value1,
+			    HOST_WIDE_INT value2,
+			    HOST_WIDE_INT value3)
+{
+  error_at (location, "passing %wd to argument %d of %qE, which expects"
+	    " %wd, %wd, %wd or %wd", actual, argno + 1, fndecl, value0, value1,
+	    value2, value3);
+}
+
+/* Report that LOCATION has a call to FNDECL in which argument ARGNO has
+   the value ACTUAL, whereas the function requires a valid value of
+   enum type ENUMTYPE.  ARGNO counts from zero.  */
+void
+aarch64::report_not_enum (location_t location, tree fndecl, unsigned int argno,
+			  HOST_WIDE_INT actual, tree enumtype)
+{
+  error_at (location, "passing %wd to argument %d of %qE, which expects"
+	    " a valid %qT value", actual, argno + 1, fndecl, enumtype);
+}
+
 /* Target-specific selftests.  */
 
 #if CHECKING_P
@@ -31082,6 +31207,12 @@ aarch64_libgcc_floating_mode_supported_p
 
 #undef TARGET_MANGLE_TYPE
 #define TARGET_MANGLE_TYPE aarch64_mangle_type
+
+#undef TARGET_INVALID_CONVERSION
+#define TARGET_INVALID_CONVERSION aarch64_invalid_conversion
+
+#undef TARGET_INVALID_UNARY_OP
+#define TARGET_INVALID_UNARY_OP aarch64_invalid_unary_op
 
 #undef TARGET_INVALID_BINARY_OP
 #define TARGET_INVALID_BINARY_OP aarch64_invalid_binary_op

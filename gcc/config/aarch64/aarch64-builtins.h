@@ -28,6 +28,8 @@ enum aarch64_type_qualifiers
   qualifier_const = 0x2, /* 1 << 1  */
   /* T *foo.  */
   qualifier_pointer = 0x4, /* 1 << 2  */
+  /* const T *foo.  */
+  qualifier_const_pointer = 0x6,
   /* Used when expanding arguments if an operand could
      be an immediate.  */
   qualifier_immediate = 0x8, /* 1 << 3  */
@@ -54,6 +56,8 @@ enum aarch64_type_qualifiers
   /* Lane indices selected in quadtuplets. - must be in range, and flipped for
      bigendian.  */
   qualifier_lane_quadtup_index = 0x1000,
+  /* Modal FP types.  */
+  qualifier_modal_float = 0x2000,
 };
 
 #define ENTRY(E, M, Q, G) E,

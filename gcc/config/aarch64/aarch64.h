@@ -49,7 +49,7 @@
 #define TARGET_CPU_CPP_BUILTINS()	\
   aarch64_cpu_cpp_builtins (pfile)
 
-
+
 
 #define REGISTER_TARGET_PRAGMAS() aarch64_register_pragmas ()
 
@@ -404,6 +404,13 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* CSSC instructions are enabled through +cssc.  */
 #define TARGET_CSSC AARCH64_HAVE_ISA (CSSC)
 
+/* F8F32MM instructions, enabled through +f8f32mm.  */
+#define TARGET_F8F32MM (AARCH64_HAVE_ISA (F8F32MM))
+/* F8F16MM instructions, enabled through +f8f16mm.  */
+#define TARGET_F8F16MM (AARCH64_HAVE_ISA (F8F16MM))
+/* SVE_F16F32MM instructions, enabled through +sve-f16f32mm.  */
+#define TARGET_SVE_F16F32MM (AARCH64_HAVE_ISA (SVE_F16F32MM))
+
 /* Make sure this is always defined so we don't have to check for ifdefs
    but rather use normal ifs.  */
 #ifndef TARGET_FIX_ERR_A53_835769_DEFAULT
@@ -463,8 +470,55 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
     enabled through +gcs.  */
 #define TARGET_GCS AARCH64_HAVE_ISA (GCS)
 
+/* Floating Point Absolute Maximum/Minimum extension instructions are
+   enabled through +faminmax.  */
+#define TARGET_FAMINMAX AARCH64_HAVE_ISA (FAMINMAX)
+/* Lookup table (LUTI) extension instructions are enabled through +lut.  */
+#define TARGET_LUT AARCH64_HAVE_ISA (LUT)
+
+
 #define TARGET_FPRCVT (AARCH64_HAVE_ISA (FPRCVT))
 
+
+/* fp8 instructions are enabled through +fp8.  */
+#define TARGET_FP8 AARCH64_HAVE_ISA (FP8)
+
+/* See the comment above the tuning flag for details.  */
+#define TARGET_CHEAP_FPMR_WRITE \
+  (bool (aarch64_tune_params.extra_tuning_flags \
+	 & AARCH64_EXTRA_TUNE_CHEAP_FPMR_WRITE))
+
+/* Some fp8 instructions require +fp8 and one of +sve2 or +sme2.  */
+#define TARGET_SSVE_FP8 (TARGET_FP8 \
+			 && (TARGET_SVE2 || TARGET_STREAMING) \
+			 && (TARGET_SME2 || TARGET_NON_STREAMING))
+
+/* fp8 multiply-accumulate instructions are enabled through +fp8fma.  */
+#define TARGET_FP8FMA AARCH64_HAVE_ISA (FP8FMA)
+
+/* SVE2 versions of fp8 multiply-accumulate instructions are enabled for
+   non-streaming mode by +fp8fma and for streaming mode by +ssve-fp8fma.  */
+#define TARGET_SSVE_FP8FMA \
+  (((TARGET_SVE2 && TARGET_FP8FMA) || TARGET_STREAMING) \
+   && (AARCH64_HAVE_ISA (SSVE_FP8FMA) || TARGET_NON_STREAMING))
+
+/* fp8 four way dot product enabled through +fp8dot4.  */
+#define TARGET_FP8DOT4 AARCH64_HAVE_ISA (FP8DOT4)
+
+/* Streaming versions of fp8 four way dot product instructions are enabled
+through +ssve-fp8dot4.  */
+#define TARGET_SSVE_FP8DOT4 ((\
+		(TARGET_SVE2 && TARGET_FP8DOT4) || TARGET_STREAMING) \
+		&& (AARCH64_HAVE_ISA(SSVE_FP8DOT4) || TARGET_NON_STREAMING))
+
+/* fp8 two way dot product enabled through +fp8dot2.  */
+#define TARGET_FP8DOT2 AARCH64_HAVE_ISA (FP8DOT2)
+
+/* Streaming versions of fp8 two way dot product instructions are enabled
+through +ssve-fp8dot2.  */
+#define TARGET_SSVE_FP8DOT2 ((\
+		(TARGET_SVE2 && TARGET_FP8DOT2) || TARGET_STREAMING) \
+		&& (AARCH64_HAVE_ISA(SSVE_FP8DOT2) || TARGET_NON_STREAMING))
 
 /* Standard register usage.  */
 
@@ -520,6 +574,7 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
     1, 1, 1, 1,			/* SFP, AP, CC, VG */	\
     0, 0, 0, 0,   0, 0, 0, 0,   /* P0 - P7 */           \
     0, 0, 0, 0,   0, 0, 0, 0,   /* P8 - P15 */          \
+    1,				/* FPMR */		\
     1, 1,			/* FFR and FFRT */	\
     1, 1, 1, 1, 1, 1, 1, 1	/* Fake registers */	\
   }
@@ -544,6 +599,7 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
     1, 1, 1, 0,			/* SFP, AP, CC, VG */	\
     1, 1, 1, 1,   1, 1, 1, 1,	/* P0 - P7 */		\
     1, 1, 1, 1,   1, 1, 1, 1,	/* P8 - P15 */		\
+    1,				/* FPMR */		\
     1, 1,			/* FFR and FFRT */	\
     0, 0, 0, 0, 0, 0, 0, 0	/* Fake registers */	\
   }
@@ -561,6 +617,7 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
     "sfp", "ap",  "cc",  "vg",					\
     "p0",  "p1",  "p2",  "p3",  "p4",  "p5",  "p6",  "p7",	\
     "p8",  "p9",  "p10", "p11", "p12", "p13", "p14", "p15",	\
+    "fpmr",							\
     "ffr", "ffrt",						\
     "lowering", "tpidr2_block", "sme_state", "tpidr2_setup",	\
     "za_free", "za_saved", "za", "zt0"				\
@@ -750,7 +807,7 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 
 #define FAKE_REGNUM_P(REGNO) \
   IN_RANGE (REGNO, FIRST_FAKE_REGNUM, LAST_FAKE_REGNUM)
-
+
 /* Register and constant classes.  */
 
 enum reg_class
@@ -772,6 +829,7 @@ enum reg_class
   PR_REGS,
   FFR_REGS,
   PR_AND_FFR_REGS,
+  MOVEABLE_SYSREGS,
   FAKE_REGS,
   ALL_REGS,
   LIM_REG_CLASSES		/* Last */
@@ -798,6 +856,7 @@ enum reg_class
   "PR_REGS",					\
   "FFR_REGS",					\
   "PR_AND_FFR_REGS",				\
+  "MOVEABLE_SYSREGS",				\
   "FAKE_REGS",					\
   "ALL_REGS"					\
 }
@@ -819,10 +878,11 @@ enum reg_class
   { 0x00000000, 0x00000000, 0x00000ff0 },	/* PR_LO_REGS */	\
   { 0x00000000, 0x00000000, 0x000ff000 },	/* PR_HI_REGS */	\
   { 0x00000000, 0x00000000, 0x000ffff0 },	/* PR_REGS */		\
-  { 0x00000000, 0x00000000, 0x00300000 },	/* FFR_REGS */		\
-  { 0x00000000, 0x00000000, 0x003ffff0 },	/* PR_AND_FFR_REGS */	\
-  { 0x00000000, 0x00000000, 0x3fc00000 },	/* FAKE_REGS */		\
-  { 0xffffffff, 0xffffffff, 0x000fffff }	/* ALL_REGS */		\
+  { 0x00000000, 0x00000000, 0x00600000 },	/* FFR_REGS */		\
+  { 0x00000000, 0x00000000, 0x006ffff0 },	/* PR_AND_FFR_REGS */	\
+  { 0x00000000, 0x00000000, 0x00100000 },	/* MOVEABLE_SYSREGS */	\
+  { 0x00000000, 0x00000000, 0x7f800000 },	/* FAKE_REGS */		\
+  { 0xffffffff, 0xffffffff, 0x001fffff }	/* ALL_REGS */		\
 }
 
 #define REGNO_REG_CLASS(REGNO)	aarch64_regno_regclass (REGNO)
@@ -875,7 +935,7 @@ extern enum aarch64_processor aarch64_tune;
 
 /* RTL generation support.  */
 #define INIT_EXPANDERS aarch64_init_expanders ()
-
+
 
 /* Stack layout; function entry, exit and calling.  */
 #define STACK_GROWS_DOWNWARD	1
@@ -1142,7 +1202,7 @@ typedef struct
 
 #define FUNCTION_ARG_REGNO_P(REGNO) \
   aarch64_function_arg_regno_p(REGNO)
-
+
 
 /* ISA Features.  */
 
@@ -1284,7 +1344,7 @@ typedef struct
 /* To start with.  */
 #define BRANCH_COST(SPEED_P, PREDICTABLE_P) \
   (aarch64_branch_cost (SPEED_P, PREDICTABLE_P))
-
+
 
 /* Assembly output.  */
 
@@ -1431,6 +1491,11 @@ extern const char *aarch64_rewrite_mcpu (int argc, const char **argv);
   { "asm_cpu_spec",		ASM_CPU_SPEC }
 
 #define ASM_OUTPUT_POOL_EPILOGUE  aarch64_asm_output_pool_epilogue
+
+/* This type is the user-visible __mfp8, and a pointer to that type.  We
+   need it in many places in the backend.  Defined in aarch64-builtins.cc.  */
+extern GTY(()) tree aarch64_mfp8_type_node;
+extern GTY(()) tree aarch64_mfp8_ptr_type_node;
 
 /* This type is the user-visible __fp16, and a pointer to that type.  We
    need it in many places in the backend.  Defined in aarch64-builtins.cc.  */
