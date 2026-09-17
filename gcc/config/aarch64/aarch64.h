@@ -281,6 +281,11 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 #define AARCH64_FL_SPE_FDS	   AARCH64_FL_V8_9A
 #define AARCH64_FL_TCR2	   AARCH64_FL_V8_9A
 
+/* Armv9.4-A extension feature bits defined in Binutils but absent from GCC,
+   aliased to their base architecture.  */
+#define AARCH64_FL_E3DSE	   AARCH64_FL_V9_4A
+#define AARCH64_FL_STEP2	   AARCH64_FL_V9_4A
+
 #define TARGET_V8R AARCH64_HAVE_ISA (V8R)
 #define TARGET_V9A AARCH64_HAVE_ISA (V9A)
 
