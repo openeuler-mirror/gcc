@@ -134,6 +134,73 @@ private:
   uint8_t bit_width;
   const char *null_name = "";
 
+  bool find_element_64bit_type_p (tree type)
+  {
+    if (type == nullptr)
+      return false;
+
+    type = TYPE_MAIN_VARIANT (type);
+    if (TREE_CODE (type) == INTEGER_TYPE)
+      return TYPE_PRECISION (type) == 64;
+
+    if (TREE_CODE (type) != POINTER_TYPE)
+      return false;
+
+    /* The u64 SVE helper reads pointer elements in 8-byte units.  Require
+       a 64-bit pointer representation; targets with a different pointer
+       size conservatively fall back to the scalar std::find path.  */
+    tree size = TYPE_SIZE (type);
+    return size && tree_fits_uhwi_p (size) && tree_to_uhwi (size) == 64;
+  }
+
+  bool pointer_to_64bit_find_element_p (tree type)
+  {
+    if (type == nullptr || TREE_CODE (type) != POINTER_TYPE)
+      return false;
+
+    return find_element_64bit_type_p (TREE_TYPE (type));
+  }
+
+  tree normal_iterator_pointer_type (tree type)
+  {
+    if (type == nullptr || TREE_CODE (type) != RECORD_TYPE)
+      return nullptr;
+
+    tree pointer_field = nullptr;
+    unsigned field_count = 0;
+    for (tree field = TYPE_FIELDS (type); field; field = DECL_CHAIN (field))
+    {
+      if (TREE_CODE (field) != FIELD_DECL)
+	continue;
+
+      pointer_field = field;
+      field_count++;
+    }
+
+    if (field_count != 1
+      || DECL_NAME (pointer_field) == nullptr
+      || strcmp (IDENTIFIER_POINTER (DECL_NAME (pointer_field)), "_M_current") != 0)
+      return nullptr;
+
+    tree field_type = TREE_TYPE (pointer_field);
+    return field_type && TREE_CODE (field_type) == POINTER_TYPE ? field_type : nullptr;
+  }
+
+  /* Return true if TYPE is a pointer to a record type.  Such values are
+     not valid element values for the u64 SVE find helper.  */
+  bool pointer_to_record_type_p (tree type)
+  {
+    if (type == nullptr || TREE_CODE (type) != POINTER_TYPE)
+      return false;
+
+    tree pointed_type = TREE_TYPE (type);
+    if (pointed_type == nullptr)
+      return false;
+
+    pointed_type = TYPE_MAIN_VARIANT (pointed_type);
+    return TREE_CODE (pointed_type) == RECORD_TYPE;
+  }
+
   bool std_find_check (gimple *stmt)
   {
     if (!is_gimple_call (stmt))
@@ -149,6 +216,9 @@ private:
 
     if (DECL_CONTEXT (fndecl) == nullptr
       || TREE_CODE (DECL_CONTEXT (fndecl)) != NAMESPACE_DECL)
+      return false;
+
+    if (DECL_NAME (DECL_CONTEXT (fndecl)) == nullptr)
       return false;
 
     const char *namespace_name
@@ -186,19 +256,26 @@ private:
 	return false;
 
       this->bit_width = 64;
-    } else if (TREE_CODE (main_type) == POINTER_TYPE)
+    } else if (TREE_CODE (main_type) == POINTER_TYPE) {
+      if (pointer_to_record_type_p (main_type))
+	return false;
       this->bit_width = 64;
+    }
+
     else
       return false;
 
     tree arg1_type = TREE_TYPE (arg1);
     if (TREE_CODE (arg1_type) == POINTER_TYPE)
-      return true;
+      return pointer_to_64bit_find_element_p (arg1_type);
     else if (TREE_CODE (arg1_type) == RECORD_TYPE)
     {
       const char *type_name = get_type_name_arg (arg1_type);
       if (strcmp (type_name, "__normal_iterator") == 0)
-	return true;
+      {
+	      tree arg1_pointer_type = normal_iterator_pointer_type (arg1_type);
+	      return pointer_to_64bit_find_element_p (arg1_pointer_type);
+      }
     }
 
     return false;
