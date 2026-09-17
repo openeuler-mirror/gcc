@@ -82,7 +82,30 @@ EOF
 gcc -O2 -march=armv9-a+fp8 -c /tmp/t.c -o /tmp/t.o && echo END_TO_END_OK
 ```
 
-## 四、在 binutils 补齐之前
+## 四、系统寄存器不在此列
+
+`__arm_rsr` / `__arm_wsr` 访问的系统寄存器**没有 binutils 版本要求**，不要照第一节的清单去等。
+
+GCC 从不输出寄存器名，输出的是通用编码形式：
+
+```
+__builtin_aarch64_rsr64 ("hfgitr2_el2")  →  mrs x0, s3_4_c3_c1_7
+__builtin_aarch64_rsr64 ("vdisr_el3")    →  mrs x0, s3_6_c12_c1_1
+```
+
+`s<op0>_<op1>_c<CRn>_c<CRm>_<op2>` 自 Armv8.0 起就是合法语法，任何汇编器都接受。
+实测（2026-09-17）：本仓库编译器 `gcc -c` 直接产出 `.o`，同样的编码在 binutils 2.41
+上可汇编。
+
+寄存器**名字**只在 GCC 内部用于查 `aarch64-sys-regs.def`，决定
+`__arm_rsr("名字")` 在编译期是否被接受，名字不进汇编。因此
+`as` 拒绝 `msr sctlr2_el1, x0`（2.41 拒、2.42 接受）这件事，与这条路径无关。
+
+受此影响的特性：FEAT_Debugv8p9、FEAT_SPE_FDS、FEAT_RASv2、FEAT_SCTLR2、
+FEAT_SEBEP、FEAT_FGT2、FEAT_STEP2、FEAT_E3DSE —— 它们在 GCC 里只有系统寄存器名，
+现在即可使用。FEAT_SPE_EFT 与 FEAT_FPAR 在上游 GCC 中没有任何表示。
+
+## 五、在 binutils 补齐之前
 
 - 编译器侧功能完整：`-march=...+fp8` 等选项可用，intrinsic 可以正常展开，
   `-S` 能看到正确的指令序列，测试用例（全部为 `dg-do compile`）也能通过。
