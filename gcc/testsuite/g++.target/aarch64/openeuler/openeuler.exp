@@ -1,0 +1,30 @@
+# G++ testsuite driver for openEuler-specific AArch64 feature tests.
+#
+# The C++ side of what this fork adds to the AArch64 testsuite lives here.
+# Options follow g++.target/aarch64/aarch64.exp, which is where these tests
+# came from.
+#
+# Run only this suite with:
+#   make check-g++ RUNTESTFLAGS="openeuler.exp"
+
+# Exit immediately if this isn't an AArch64 target.
+if ![istarget aarch64*-*-*] then {
+  return
+}
+
+# Load support procs.
+load_lib g++-dg.exp
+
+global DEFAULT_CXXFLAGS
+if ![info exists DEFAULT_CXXFLAGS] then {
+    set DEFAULT_CXXFLAGS " -pedantic-errors"
+}
+
+# Initialize `dg'.
+dg-init
+
+dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.C]] \
+    "" $DEFAULT_CXXFLAGS
+
+# All done.
+dg-finish
