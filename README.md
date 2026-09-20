@@ -21,6 +21,8 @@ gcc is a generic and open source compiler
 
 #### 参与贡献
 
+提交前的本地检查和 CI 接入方式见 [GCC 补丁检查指南](contrib/README.pre-commit.md)。
+
 1.  Fork 本仓库
 2.  新建 Feat_xxx 分支
 3.  提交代码

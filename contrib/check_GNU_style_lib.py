@@ -268,6 +268,11 @@ class SpacesAndTabsMixedTest(unittest.TestCase):
         self.assertIsNone(r)
 
 def check_GNU_style_file(file, format):
+    """Report patch diagnostics and return 0 if clean, or 1 if errors exist.
+
+    Leave process termination to the caller so this function can be used by
+    both the command-line checker and the pre-commit adapter.
+    """
     checks = [LineLengthCheck(), SpacesCheck(), TrailingWhitespaceCheck(),
         SentenceSeparatorCheck(), SentenceEndOfCommentCheck(),
         SentenceDotEndCheck(), FunctionParenthesisCheck(),
@@ -297,28 +302,25 @@ def check_GNU_style_file(file, format):
     if format == 'stdio':
         fn = lambda x: x.error_message
         i = 1
-        for (k, errors) in groupby(sorted(errors, key = fn), fn):
-            errors = list(errors)
+        for (k, group) in groupby(sorted(errors, key = fn), fn):
+            group_errors = list(group)
             print('=== ERROR type #%d: %s (%d error(s)) ==='
-                % (i, k, len(errors)))
+                % (i, k, len(group_errors)))
             i += 1
-            for e in errors:
+            for e in group_errors:
                 print(e.error_location () + e.console_error)
             print()
 
-        exit(0 if len(errors) == 0 else 1)
     elif format == 'quickfix':
         f = 'errors.err'
         with open(f, 'w+') as qf:
             for e in errors:
                 qf.write('%s%s\n' % (e.error_location(), e.error_message))
-        if len(errors) == 0:
-            exit(0)
-        else:
+        if len(errors) != 0:
             print('%d error(s) written to %s file.' % (len(errors), f))
-            exit(1)
     else:
         assert False
+    return 0 if len(errors) == 0 else 1
 
 if __name__ == '__main__':
     unittest.main()
