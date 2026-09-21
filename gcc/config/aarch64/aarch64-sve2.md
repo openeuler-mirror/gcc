@@ -3594,9 +3594,8 @@
 	     UNSPEC_REVD_ONLY)]
 	  UNSPEC_PRED_X))]
   "TARGET_SVE2p1_OR_SME"
-  {@ [ cons: =0 , 1   , 2 ; attrs: movprfx ]
-     [ w        , Upl , 0 ; *              ] revd\t%0.q, %1/m, %2.q
-     [ ?&w      , Upl , w ; yes            ] movprfx\t%0, %2\;revd\t%0.q, %1/m, %2.q
+  {@ [ cons: =0 , 1   , 2 ]
+     [ w        , Upl , 0 ] revd\t%0.q, %1/m, %2.q
   }
 )
 
@@ -3610,9 +3609,8 @@
 	   (match_operand:SVE_FULL 3 "register_operand")]
 	  UNSPEC_SEL))]
   "TARGET_SVE2p1_OR_SME"
-  {@ [ cons: =0 , 1   , 2 , 3  ; attrs: movprfx ]
-     [ w        , Upl , w , 0  ; *              ] revd\t%0.q, %1/m, %2.q
-     [ ?&w      , Upl , w , w  ; yes            ] movprfx\t%0, %3\;revd\t%0.q, %1/m, %2.q
+  {@ [ cons: =0 , 1   , 2 , 3 ]
+     [ w        , Upl , w , 0 ] revd\t%0.q, %1/m, %2.q
   }
 )
 
