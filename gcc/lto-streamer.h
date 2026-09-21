@@ -122,7 +122,11 @@ along with GCC; see the file COPYING3.  If not see
      form followed by the data for the string.  */
 
 #define LTO_major_version GCC_major_version
-#define LTO_minor_version 0
+/* Bumped to 1 by the AArch64 feature-flag and instruction-set work on this
+   branch: cl_target_option_stream_out gained two more 64-bit words, and the
+   mode and AdvSIMD builtin numbering shifted.  Both sides of a mix are
+   14.x, so only this minor version distinguishes them.  */
+#define LTO_minor_version 1
 
 typedef unsigned char	lto_decl_flags_t;
 
