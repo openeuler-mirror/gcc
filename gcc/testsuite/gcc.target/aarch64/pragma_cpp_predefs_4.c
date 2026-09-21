@@ -141,6 +141,11 @@
 #error Foo
 #endif
 
+#pragma GCC target "arch=armv9.5-a"
+#ifndef __ARM_FEATURE_FAMINMAX
+#error Foo
+#endif
+
 #pragma GCC target "arch=armv8-a+faminmax"
 #ifndef __ARM_FEATURE_FAMINMAX
 #error Foo
