@@ -1,0 +1,26 @@
+minimum_pre_commit_version: '3.2.0'
+default_stages: [pre-commit, manual]
+fail_fast: false
+
+# These hooks inspect the staged patch, or PRE_COMMIT_FROM_REF...TO_REF in CI.
+# Each invocation checks its filename batch, with adapter exclusions applied.
+# Setup and CI migration: contrib/README.pre-commit.md
+repos:
+  - repo: local
+    hooks:
+      - id: gcc-patch-whitespace
+        name: GCC patch whitespace
+        entry: python contrib/pre_commit.py whitespace
+        language: python
+        additional_dependencies: [unidiff==0.7.5, termcolor==2.4.0]
+        pass_filenames: true
+        always_run: true
+      - id: gcc-patch-gnu-style
+        name: GCC patch GNU style (advisory)
+        entry: python contrib/pre_commit.py --advisory gnu-style
+        language: python
+        additional_dependencies: [unidiff==0.7.5, termcolor==2.4.0]
+        pass_filenames: true
+        always_run: true
+        # Successful hooks normally hide output; retain advisory diagnostics.
+        verbose: true
