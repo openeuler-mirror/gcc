@@ -1236,4 +1236,7 @@ extern void aarch64_adjust_reg_alloc_order ();
 bool aarch64_optimize_mode_switching (aarch64_mode_entity);
 void aarch64_restore_za (rtx);
 
+extern rtx aarch64_gen_compare_zero_and_branch (rtx_code code, rtx x,
+						rtx_code_label *label);
+
 #endif /* GCC_AARCH64_PROTOS_H */
