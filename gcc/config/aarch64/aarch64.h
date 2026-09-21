@@ -482,7 +482,7 @@ constexpr auto AARCH64_FL_DEFAULT_ISA_MODE ATTRIBUTE_UNUSED
 /* Floating Point Absolute Maximum/Minimum extension instructions are
    enabled through +faminmax.  */
 #define TARGET_FAMINMAX AARCH64_HAVE_ISA (FAMINMAX)
-#define TARGET_SVE_FAMINMAX (TARGET_SVE && TARGET_FAMINMAX)
+
 /* Lookup table (LUTI) extension instructions are enabled through +lut.  */
 #define TARGET_LUT AARCH64_HAVE_ISA (LUT)
 
@@ -531,6 +531,10 @@ through +ssve-fp8dot2.  */
 		&& (AARCH64_HAVE_ISA(SSVE_FP8DOT2) || TARGET_NON_STREAMING))
 
 /* Combinatorial tests.  */
+
+#define TARGET_SVE2_OR_SME2 \
+  ((TARGET_SVE2 || TARGET_STREAMING) \
+   && (TARGET_SME2 || TARGET_NON_STREAMING))
 
 /* There's no need to check TARGET_SME for streaming or streaming-compatible
    functions, since streaming mode itself implies SME.  */
