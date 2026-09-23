@@ -4298,17 +4298,19 @@ loop_distribution::insert_temp_arrays (loop_p loop, vec<gimple *> seed_stmts,
 {
   struct graph *flow_only_rdg = build_rdg (loop, NULL);
   gcc_checking_assert (flow_only_rdg != NULL);
+  loop_vec_info vinfo = loop_vec_info_for_loop (loop);
   tree iv = get_iv_from_seed (flow_only_rdg, seed_stmts);
   if (iv == NULL)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Loop %d no temp array insertion: failed to get"
 			    " iteration variable.\n", loop->num);
+      delete vinfo;
+      loop->aux = NULL;
       free_rdg (flow_only_rdg);
       return false;
   }
   auto_bitmap cut_points;
-  loop_vec_info vinfo = loop_vec_info_for_loop (loop);
   unsigned n_cut_points = get_cut_points (flow_only_rdg, cut_points, vinfo);
   delete vinfo;
   loop->aux = NULL;
