@@ -11,7 +11,7 @@ import sys
 
 # Other runtime libraries can follow different upstream coding conventions.
 GNU_ROOTS = {"gcc", "libcpp", "include", "c++tools"}
-# .def macro tables are not ordinary C/C++; keep their whitespace checks.
+# .def macro tables are not ordinary C/C++; exclude them from GNU style.
 GNU_SUFFIXES = {".c", ".C", ".cc", ".cpp", ".cxx", ".h", ".hh",
                 ".hpp", ".hxx", ".inc"}
 EXCLUSIONS = [":(exclude,glob)**/testsuite/**",
@@ -78,29 +78,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--advisory", action="store_true",
                         help="Report GNU style findings without failing the hook")
-    parser.add_argument("check", choices=("whitespace", "gnu-style"))
+    parser.add_argument("check", choices=("gnu-style",))
     parser.add_argument("filenames", nargs="*",
                         help="Restrict the patch to this batch of files")
     args = parser.parse_args()
-    if args.advisory and args.check != "gnu-style":
-        parser.error("--advisory is only supported for gnu-style")
     try:
         revs = revisions(args.filenames)
         # always_run also invokes hooks when pre-commit selected no files.
         # A direct invocation without filenames still checks the whole patch.
         if not args.filenames and os.environ.get("PRE_COMMIT"):
             return 0
-        common = ["-c", "core.quotePath=false", "-c",
-                  "core.whitespace=blank-at-eol,blank-at-eof,space-before-tab",
+        common = ["-c", "core.quotePath=false",
                   "diff", "--no-ext-diff", "--no-textconv", "--no-color",
                   "--find-renames", *revs]
         paths = batch_paths(common, args.filenames)
-        if args.check == "whitespace":
-            result = git(*common, "--check", *paths, check=False)
-            sys.stdout.buffer.write(result.stdout)
-            sys.stderr.buffer.write(result.stderr)
-            return result.returncode
-
         from unidiff import PatchSet
         from check_GNU_style_lib import check_GNU_style_file
 

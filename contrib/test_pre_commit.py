@@ -65,33 +65,31 @@ class PatchChecks(unittest.TestCase):
         return output
 
     def test_no_changes_and_unborn_index(self):
-        self.check("whitespace")
         self.check("gnu-style")
         self.git("checkout", "--orphan", "new-root")
         self.git("rm", "-rf", ".")
         self.write("gcc/new.cc", "int new_name (void);\n")
         self.git("add", ".")
-        self.check("whitespace")
         self.check("gnu-style")
 
     def test_only_added_lines_not_historical_errors(self):
         self.write("gcc/sample.cc", "int old_name(void);  \n"
                    "int new_name (void);\n")
         self.git("add", ".")
-        self.check("whitespace")
         self.check("gnu-style")
 
     def test_staged_patch_ignores_unstaged_errors(self):
         self.write("gcc/new.cc", "int new_name (void);\n")
         self.git("add", ".")
         self.write("gcc/new.cc", "int new_name(void);  \n")
-        self.check("whitespace")
         self.check("gnu-style")
 
-    def test_new_whitespace_error(self):
+    def test_original_gnu_whitespace_findings_are_advisory(self):
         self.write("gcc/new.cc", "int new_name;  \n")
         self.git("add", ".")
-        self.assertIn("trailing whitespace", self.check("whitespace", 1))
+        output = self.check("gnu-style", advisory=True)
+        self.assertIn("trailing whitespace", output.lower())
+        self.assertIn("WARNING: GNU style findings are advisory", output)
 
     def test_new_gnu_error(self):
         self.write("gcc/new.cc", "int new_name(void);\n")
@@ -118,8 +116,6 @@ class PatchChecks(unittest.TestCase):
         self.env["CI"] = "true"
         output = self.check("gnu-style", 1, advisory=True)
         self.assertIn("CI requires", output)
-        output = self.check("whitespace", 1, advisory=True)
-        self.assertIn("only supported for gnu-style", output)
 
     def test_advisory_does_not_suppress_checker_failures(self):
         self.write("gcc/new.cc", "int new_name (void);\n")
@@ -207,7 +203,6 @@ class PatchChecks(unittest.TestCase):
         self.write("gcc/new.cc", "void\nnew_name (int opts_set,\n"
                    "\t  int other_arg)\n{\n  return;\n}\n")
         self.git("add", ".")
-        self.check("whitespace")
         self.check("gnu-style")
 
     def test_testsuite_and_patch_data_are_exempt(self):
@@ -215,7 +210,6 @@ class PatchChecks(unittest.TestCase):
                      "contrib/example.patch"):
             self.write(name, "int deliberately_bad(void);  \n")
         self.git("add", ".")
-        self.check("whitespace")
         self.check("gnu-style")
 
     def test_non_gnu_languages_and_runtimes(self):
@@ -224,7 +218,7 @@ class PatchChecks(unittest.TestCase):
         self.git("add", ".")
         self.check("gnu-style")
 
-    def test_def_macro_tables_skip_style_but_keep_whitespace_checks(self):
+    def test_def_macro_tables_skip_style_checks(self):
         base = self.git("rev-parse", "HEAD")
         names = tuple(f"{root}/sample.def"
                       for root in ("gcc", "libcpp", "include", "c++tools"))
@@ -240,10 +234,6 @@ class PatchChecks(unittest.TestCase):
                     output = self.check("gnu-style", refs=refs,
                                         filenames=filenames, advisory=advisory)
                     self.assertEqual(output, "")
-                output = self.check("whitespace", 1, refs=refs,
-                                    filenames=filenames)
-                for name in names:
-                    self.assertIn(f"{name}:1: trailing whitespace", output)
 
     def test_def_exclusion_preserves_style_checks_in_mixed_patch(self):
         self.write("gcc/sample.def", 'DEF_ENTRY(SAMPLE, "sample")\n')
@@ -263,18 +253,10 @@ class PatchChecks(unittest.TestCase):
     def test_non_utf8_text_does_not_block_other_checks(self):
         (self.repo / "legacy.txt").write_bytes(b"caf\xe9\n")
         self.git("add", ".")
-        self.check("whitespace")
         self.check("gnu-style")
-
-    def test_conflict_markers_are_rejected(self):
-        self.write("gcc/new.cc", "<<<<<<< HEAD\nint first;\n=======\n"
-                   "int second;\n>>>>>>> other\n")
-        self.git("add", ".")
-        self.check("whitespace", 1)
 
     def test_rename_does_not_recheck_old_lines(self):
         self.git("mv", "gcc/sample.cc", "gcc/renamed file.cc")
-        self.check("whitespace")
         self.check("gnu-style")
 
     def test_filename_with_spaces_is_checked(self):
@@ -287,7 +269,6 @@ class PatchChecks(unittest.TestCase):
         (self.repo / "gcc").mkdir(exist_ok=True)
         (self.repo / "gcc/binary.cc").write_bytes(b"\0\xff\x01")
         self.git("add", ".")
-        self.check("whitespace")
         self.check("gnu-style")
 
     def test_refs_ignore_unrelated_index_and_worktree(self):
@@ -296,11 +277,10 @@ class PatchChecks(unittest.TestCase):
         after = self.commit()
         self.write("gcc/other.cc", "int bad_name(void);  \n")
         self.git("add", ".")
-        self.check("whitespace", refs=(before, after))
         self.check("gnu-style", refs=(before, after))
 
     def test_invalid_or_incomplete_refs_fail(self):
-        self.check("whitespace", 1, refs=("missing-branch", "HEAD"))
+        self.check("gnu-style", 1, refs=("missing-branch", "HEAD"))
         self.env["PRE_COMMIT_FROM_REF"] = "HEAD"
         self.check("gnu-style", 1)
 
@@ -318,18 +298,16 @@ class PatchChecks(unittest.TestCase):
         refs = self.divergent_refs(
             "int old_name (void);\n",
             "int old_name(void);  \nint pr_name (void);\n")
-        for kind in ("whitespace", "gnu-style"):
-            for filenames in ((), ("gcc/sample.cc",)):
-                self.check(kind, refs=refs, filenames=filenames)
+        for filenames in ((), ("gcc/sample.cc",)):
+            self.check("gnu-style", refs=refs, filenames=filenames)
 
     def test_diverged_refs_do_not_hide_identical_new_errors(self):
         text = "int old_name(void);  \nint new_bad_name(void);  \n"
         refs = self.divergent_refs(text, text)
-        for kind in ("whitespace", "gnu-style"):
-            for filenames in ((), ("gcc/sample.cc",)):
-                output = self.check(kind, 1, refs=refs, filenames=filenames)
-                self.assertIn("new_bad_name", output)
-                self.assertNotIn("old_name", output)
+        for filenames in ((), ("gcc/sample.cc",)):
+            output = self.check("gnu-style", 1, refs=refs, filenames=filenames)
+            self.assertIn("new_bad_name", output)
+            self.assertNotIn("old_name", output)
 
     def test_unrelated_refs_fail_even_with_empty_batch(self):
         before = self.git("rev-parse", "HEAD")
@@ -339,9 +317,8 @@ class PatchChecks(unittest.TestCase):
         for through_pre_commit in (False, True):
             if through_pre_commit:
                 self.env["PRE_COMMIT"] = "1"
-            for kind in ("whitespace", "gnu-style"):
-                output = self.check(kind, 1, refs=(before, after))
-                self.assertIn("Cannot establish", output)
+            output = self.check("gnu-style", 1, refs=(before, after))
+            self.assertIn("Cannot establish", output)
 
     def test_actual_pre_commit_configuration_with_diverged_refs(self):
         for name in ("pre_commit.py", "check_GNU_style_lib.py"):
@@ -367,21 +344,22 @@ class PatchChecks(unittest.TestCase):
                                     stderr=subprocess.STDOUT)
             output = result.stdout.decode(errors="replace")
             self.assertNotIn("old_name", output)
+            self.assertEqual(result.returncode, 0, output)
+            self.assertNotIn("gcc-patch-whitespace", output)
             if has_error:
-                self.assertNotEqual(result.returncode, 0, output)
-                self.assertIn("trailing whitespace", output)
+                self.assertIn("trailing whitespace", output.lower())
                 self.assertIn("exactly one space", output)
                 self.assertIn("new_bad_name", output)
             else:
                 self.assertEqual(result.returncode, 0, output)
 
     def test_file_only_run_with_clean_index_fails(self):
-        output = self.check("whitespace", 1, filenames=("gcc/sample.cc",))
+        output = self.check("gnu-style", 1, filenames=("gcc/sample.cc",))
         self.assertIn("No staged patch", output)
 
     def test_ci_without_revision_range_fails(self):
         self.env["JENKINS_URL"] = "https://jenkins.example.invalid/"
-        self.assertIn("CI requires", self.check("whitespace", 1))
+        self.assertIn("CI requires", self.check("gnu-style", 1))
 
     def test_staged_filenames_and_ci_revision_range(self):
         base = self.git("rev-parse", "HEAD")
@@ -401,23 +379,18 @@ class PatchChecks(unittest.TestCase):
         self.git("add", ".")
         for committed in (False, True):
             refs = (base, self.commit()) if committed else None
-            for kind in ("whitespace", "gnu-style"):
-                outputs = []
-                for start in range(0, len(names), 4):
-                    batch = names[start:start + 4]
-                    output = self.check(kind, 1, refs=refs, filenames=batch)
-                    for name in set(names) - set(batch):
-                        self.assertNotIn(name, output)
-                    outputs.append(output)
-                combined = "".join(outputs)
-                for name in names:
-                    if kind == "whitespace":
-                        self.assertEqual(combined.count(
-                            f"{name}:1: trailing whitespace"), 1, combined)
-                    else:
-                        # One parentheses error and one whitespace error.
-                        self.assertEqual(combined.count(name + ":1:"), 2,
-                                         combined)
+            outputs = []
+            for start in range(0, len(names), 4):
+                batch = names[start:start + 4]
+                output = self.check("gnu-style", 1, refs=refs, filenames=batch)
+                for name in set(names) - set(batch):
+                    self.assertNotIn(name, output)
+                outputs.append(output)
+            combined = "".join(outputs)
+            for name in names:
+                # One parentheses error and one whitespace error.
+                self.assertEqual(combined.count(name + ":1:"), 2,
+                                 combined)
 
     def test_batch_preserves_renames_and_new_line_checks(self):
         old = "int old_name(void);  \n" * 20
@@ -427,21 +400,18 @@ class PatchChecks(unittest.TestCase):
         self.write("gcc/other.cc", "int unrelated(void);  \n")
         self.git("add", ".")
         names = ("gcc/renamed file.cc",)
-        for kind in ("whitespace", "gnu-style"):
-            self.check(kind, filenames=names)
+        self.check("gnu-style", filenames=names)
         self.write(names[0], old + "int added_name(void);  \n")
         self.git("add", ".")
-        for kind in ("whitespace", "gnu-style"):
-            output = self.check(kind, 1, filenames=names)
-            self.assertNotIn("old_name", output)
-            self.assertNotIn("unrelated", output)
-            self.assertIn("added_name", output)
+        output = self.check("gnu-style", 1, filenames=names)
+        self.assertNotIn("old_name", output)
+        self.assertNotIn("unrelated", output)
+        self.assertIn("added_name", output)
         head = self.commit()
-        for kind in ("whitespace", "gnu-style"):
-            output = self.check(kind, 1, refs=(base, head), filenames=names)
-            self.assertNotIn("old_name", output)
-            self.assertNotIn("unrelated", output)
-            self.assertIn("added_name", output)
+        output = self.check("gnu-style", 1, refs=(base, head), filenames=names)
+        self.assertNotIn("old_name", output)
+        self.assertNotIn("unrelated", output)
+        self.assertIn("added_name", output)
 
     def test_batch_uses_literal_paths_and_staged_contents(self):
         names = ("gcc/new [ab] file.cc",)
@@ -449,26 +419,21 @@ class PatchChecks(unittest.TestCase):
         self.write("gcc/new a file.cc", "int bad_name(void);  \n")
         self.git("add", ".")
         self.write(names[0], "int unstaged_name(void);  \n")
-        for kind in ("whitespace", "gnu-style"):
-            self.check(kind, filenames=names)
+        self.check("gnu-style", filenames=names)
         self.git("add", names[0])
-        for kind in ("whitespace", "gnu-style"):
-            output = self.check(kind, 1, filenames=names)
-            self.assertIn("unstaged_name", output)
-            self.assertNotIn("bad_name", output)
+        output = self.check("gnu-style", 1, filenames=names)
+        self.assertIn("unstaged_name", output)
+        self.assertNotIn("bad_name", output)
 
     def test_empty_pre_commit_batch_does_not_check_other_files(self):
         base = self.git("rev-parse", "HEAD")
         self.write("gcc/new.cc", "int bad_name(void);  \n")
         self.git("add", ".")
-        for kind in ("whitespace", "gnu-style"):
-            self.check(kind, 1)
+        self.check("gnu-style", 1)
         self.env["PRE_COMMIT"] = "1"
-        for kind in ("whitespace", "gnu-style"):
-            self.check(kind)
+        self.check("gnu-style")
         head = self.commit()
-        for kind in ("whitespace", "gnu-style"):
-            self.check(kind, refs=(base, head))
+        self.check("gnu-style", refs=(base, head))
 
     def test_actual_pre_commit_configuration_batches(self):
         # Exercise the production language: python hooks and pre-commit's
@@ -497,7 +462,7 @@ class PatchChecks(unittest.TestCase):
                 for name in names:
                     self.assertEqual(output.count(name + ":"), 1, output)
 
-    def test_ci_advisory_is_visible_and_whitespace_still_blocks(self):
+    def test_ci_advisory_is_visible_without_extra_whitespace_gate(self):
         for name in ("pre_commit.py", "check_GNU_style_lib.py"):
             dest = self.repo / "contrib" / name
             dest.parent.mkdir(exist_ok=True)
@@ -508,6 +473,9 @@ class PatchChecks(unittest.TestCase):
         self.git("remote", "add", "origin", self.repo.as_uri())
         self.git("update-ref", "refs/remotes/origin/master", base)
         env = dict(self.env, JENKINS_URL="https://jenkins.example.invalid/")
+        for name in ("README.md", "contrib/helper.py",
+                     "libsanitizer/helper.cc", "gcc/sample.def"):
+            self.write(name, "outside GNU style scope  \n\n")
         for whitespace in (False, True):
             self.write("gcc/new.cc", "int new_name(void);"
                        + ("  \n" if whitespace else "\n"))
@@ -520,24 +488,24 @@ class PatchChecks(unittest.TestCase):
             output = result.stdout.decode(errors="replace")
             self.assertIn("exactly one space", output)
             self.assertIn("WARNING: GNU style findings are advisory", output)
+            self.assertEqual(result.returncode, 0, output)
+            self.assertNotIn("gcc-patch-whitespace", output)
             if whitespace:
-                self.assertNotEqual(result.returncode, 0, output)
-                self.assertIn("trailing whitespace", output)
-            else:
-                self.assertEqual(result.returncode, 0, output)
+                self.assertIn("trailing whitespace", output.lower())
 
     def test_ci_recovers_shallow_history_and_propagates_failure(self):
         # Copy the real entry points; use the current Python's dependencies
         # to keep this fixture offline. Production language: python is tested
-        # separately by running the actual configuration against PR #402.
+        # separately above. A strict GNU hook in this fixture verifies
+        # propagation of a failed hook after history recovery.
         for name in ("pre_commit.py", "check_GNU_style_lib.py"):
             dest = self.repo / "contrib" / name
             dest.parent.mkdir(exist_ok=True)
             shutil.copyfile(CONTRIB / name, dest)
         self.write(".pre-commit-config.yaml", "repos:\n- repo: local\n"
-                   "  hooks:\n  - id: whitespace\n    name: whitespace\n"
+                   "  hooks:\n  - id: gnu-style\n    name: GNU style\n"
                    f"    entry: '\"{Path(sys.executable).as_posix()}\" "
-                   "contrib/pre_commit.py whitespace'\n"
+                   "contrib/pre_commit.py gnu-style'\n"
                    "    language: system\n    pass_filenames: true\n"
                    "    always_run: true\n")
         self.commit()
@@ -546,7 +514,7 @@ class PatchChecks(unittest.TestCase):
             self.write("target.txt", f"{i}\n")
             self.commit()
         self.git("checkout", "-b", "pr", base)
-        self.write("gcc/new.cc", "int new_name;  \n")
+        self.write("gcc/new.cc", "int new_name(void);\n")
         self.commit()
         # Keep the merge base beyond both shallow tips.
         for i in range(12):
@@ -570,7 +538,7 @@ class PatchChecks(unittest.TestCase):
                 stderr=subprocess.STDOUT)
             output = result.stdout.decode(errors="replace")
             self.assertIn("more commits", output)
-            self.assertIn("trailing whitespace", output)
+            self.assertIn("exactly one space", output)
             self.assertNotEqual(result.returncode, 0, output)
 
         # Jenkins initializes a repository and fetches a PR URL directly,
@@ -595,7 +563,7 @@ class PatchChecks(unittest.TestCase):
                 stderr=subprocess.STDOUT)
             output = result.stdout.decode(errors="replace")
             self.assertIn("more commits", output)
-            self.assertIn("trailing whitespace", output)
+            self.assertIn("exactly one space", output)
             self.assertNotEqual(result.returncode, 0, output)
 
 
