@@ -1918,7 +1918,11 @@
 ;; Without this optimization, fp8_kernel would set FPMR to fpmr_value each
 ;; time that it is called.
 ;;
-;; We do this as a split so that hardreg_pre can optimize the moves first.
+;; Upstream does this as a split so that its hardreg PRE pass can optimize
+;; the moves first.  This tree does not have that pass, so repeated writes
+;; of the same value each emit their own mrs/cmp/branch/msr sequence; the
+;; split is kept so that the generated code and any later backport of the
+;; pass stay aligned with upstream.
 (define_split
   [(set (reg:DI FPM_REGNUM)
         (match_operand:DI 0 "aarch64_reg_or_zero"))]
