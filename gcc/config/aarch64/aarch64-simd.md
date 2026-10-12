@@ -2566,9 +2566,9 @@
 )
 
 ;; FP vector operations.
-;; AArch64 AdvSIMD supports single-precision (32-bit) and
+;; AArch64 AdvSIMD supports single-precision (32-bit) and 
 ;; double-precision (64-bit) floating-point data types and arithmetic as
-;; defined by the IEEE 754-2008 standard.  This makes them vectorizable
+;; defined by the IEEE 754-2008 standard.  This makes them vectorizable 
 ;; without the need for -ffast-math or -funsafe-math-optimizations.
 ;;
 ;; Floating-point operations can raise an exception.  Vectorizing such
@@ -4622,7 +4622,7 @@
 
 (define_expand "widen_ssum<mode>3"
   [(set (match_operand:<VDBLW> 0 "register_operand")
-	(plus:<VDBLW> (sign_extend:<VDBLW>
+	(plus:<VDBLW> (sign_extend:<VDBLW> 
 		        (match_operand:VQW 1 "register_operand"))
 		      (match_operand:<VDBLW> 2 "register_operand")))]
   "TARGET_SIMD"
@@ -4650,7 +4650,7 @@
 
 (define_expand "widen_usum<mode>3"
   [(set (match_operand:<VDBLW> 0 "register_operand")
-	(plus:<VDBLW> (zero_extend:<VDBLW>
+	(plus:<VDBLW> (zero_extend:<VDBLW> 
 		        (match_operand:VQW 1 "register_operand"))
 		      (match_operand:<VDBLW> 2 "register_operand")))]
   "TARGET_SIMD"

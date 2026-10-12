@@ -1151,7 +1151,7 @@ aarch64_simd_builtin_type (machine_mode mode,
 
   return type;
 }
-
+ 
 static void
 aarch64_init_simd_builtin_types (void)
 {
@@ -2765,7 +2765,7 @@ aarch64_general_check_builtin_call (location_t location, vec<location_t>,
 }
 
 /* Implement TARGET_GET_CRC_BUILTIN_CODE  */
-unsigned
+unsigned 
 get_crc_builtin_code(unsigned code, bool)
 {
   if (code > AARCH64_BUILTIN_CRC32W)

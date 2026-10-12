@@ -2968,8 +2968,8 @@
 (define_insn "*adds_<optab><ALLX:mode>_shift_<GPI:mode>"
   [(set (reg:CC_NZ CC_REGNUM)
 	(compare:CC_NZ
-	 (plus:GPI (ashift:GPI
-		    (ANY_EXTEND:GPI
+	 (plus:GPI (ashift:GPI 
+		    (ANY_EXTEND:GPI 
 		     (match_operand:ALLX 1 "register_operand" "r"))
 		    (match_operand 2 "aarch64_imm3" "Ui3"))
 		   (match_operand:GPI 3 "register_operand" "rk"))
@@ -2987,7 +2987,7 @@
   [(set (reg:CC_NZ CC_REGNUM)
 	(compare:CC_NZ
 	 (minus:GPI (match_operand:GPI 1 "register_operand" "rk")
-		    (ashift:GPI
+		    (ashift:GPI 
 		     (ANY_EXTEND:GPI
 		      (match_operand:ALLX 2 "register_operand" "r"))
 		     (match_operand 3 "aarch64_imm3" "Ui3")))
