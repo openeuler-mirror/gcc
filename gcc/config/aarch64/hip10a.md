@@ -50,7 +50,8 @@
                 neon_fp_abs_s,neon_fp_abs_s_q,neon_fp_abs_d,\
                 neon_fp_neg_s,neon_fp_neg_s_q,neon_fp_neg_d,neon_fp_neg_d_q,\
                 neon_move,neon_move_q,\
-                neon_ins,neon_ins_q")
+                neon_ins,neon_ins_q,\
+                neon_permute,neon_permute_q")
           (const_string "hip10a_neon_base1")
         (eq_attr "type" "neon_abd,neon_abd_q,\
                 neon_tbl1,neon_tbl1_q,\
