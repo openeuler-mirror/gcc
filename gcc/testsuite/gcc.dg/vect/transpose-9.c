@@ -1,5 +1,8 @@
-/* An unsuccessful temp-array insertion must release
-   the loop vectorization info before later vectorizer passes run.  */
+/* Exercise the failed iteration-variable lookup in temp-array insertion.
+   This test does not reproduce the original SLP lifetime ICE: without
+   the fix, the later vectorizer reanalyzes this loop and overwrites the
+   stale loop->aux instead of deleting the old loop_vec_info.  The dump
+   check below verifies only that the early return is reached.  */
 /* { dg-do compile { target aarch64*-*-linux* } } */
 /* { dg-options "-O3 -ftree-slp-transpose-vectorize -fdump-tree-ldist-details" } */
 
