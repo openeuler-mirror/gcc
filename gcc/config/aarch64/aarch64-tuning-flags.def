@@ -54,4 +54,19 @@ AARCH64_EXTRA_TUNING_OPTION ("avoid_cross_loop_fma", AVOID_CROSS_LOOP_FMA)
 
 AARCH64_EXTRA_TUNING_OPTION ("fully_pipelined_fma", FULLY_PIPELINED_FMA)
 
+/* Whether writes to the FPMR are cheap enough that:
+
+       msr     fpmr, <value>
+
+   is better than:
+
+       mrs     tmp, fpmr
+       cmp     tmp, <value>
+       beq     1f
+       msr     fpmr, <value>
+     1:
+
+   even when the branch is predictably taken.  */
+AARCH64_EXTRA_TUNING_OPTION ("cheap_fpmr_write", CHEAP_FPMR_WRITE)
+
 #undef AARCH64_EXTRA_TUNING_OPTION

@@ -21772,7 +21772,8 @@ and the features that they enable by default:
 @item @samp{armv9.1-a} @tab Armv9.1-A @tab @samp{armv9-a}, @samp{+bf16}, @samp{+i8mm}
 @item @samp{armv9.2-a} @tab Armv9.2-A @tab @samp{armv9.1-a}, @samp{+ls64}
 @item @samp{armv9.3-a} @tab Armv9.3-A @tab @samp{armv9.2-a}, @samp{+mops}
-@item @samp{armv9.4-a} @tab Armv9.4-A @tab @samp{armv9.3-a}
+@item @samp{armv9.4-a} @tab Armv9.4-A @tab @samp{armv9.3-a}, @samp{+sve2p1}
+@item @samp{armv9.5-a} @tab Armv9.5-A @tab @samp{armv9.4-a}, @samp{cpa}, @samp{+faminmax}, @samp{+lut}
 @item @samp{armv8-r} @tab Armv8-R @tab @samp{armv8-r}
 @end multitable
 
@@ -22070,6 +22071,8 @@ Enable SVE2 sm4 instructions.  This also enables SVE2 instructions.
 Enable SVE2 aes instructions.  This also enables SVE2 instructions.
 @item sve2-sha3
 Enable SVE2 sha3 instructions.  This also enables SVE2 instructions.
+@item sve2p1
+Enable SVE2.1 instructions.  This also enables SVE2 instructions.
 @item tme
 Enable the Transactional Memory Extension.
 @item i8mm
@@ -22103,6 +22106,9 @@ Enable the Flag Manipulation instructions Extension.
 Enable the Pointer Authentication Extension.
 @item cssc
 Enable the Common Short Sequence Compression instructions.
+@item cmpbr
+Enable the shorter compare and branch instructions, @code{cbb}, @code{cbh} and
+@code{cb}.
 @item sme
 Enable the Scalable Matrix Extension.
 @item sme-i16i64
@@ -22119,10 +22125,43 @@ Enable support for 128-bit system register read/write instructions.
 This also enables the LSE128 extension.
 @item gcs
 Enable support for Armv9.4-a Guarded Control Stack extension.
+@item tlbid
+Enable the TLBI Domains Extension.
+@item lsui
+Enable the Unprivileged Load-Store instructions.
+@item fprcvt
+Enable the floating-point and integer conversion instructions that take
+their operand in, or produce their result in, a SIMD and floating-point
+register.
 @item the
 Enable support for Armv8.9-a/9.4-a translation hardening extension.
 @item rcpc3
 Enable the RCpc3 (Release Consistency) extension.
+@item fp8
+Enable the fp8 (8-bit floating point) extension.
+@item fp8fma
+Enable the fp8 (8-bit floating point) multiply accumulate extension.
+@item ssve-fp8fma
+Enable the fp8 (8-bit floating point) multiply accumulate extension in streaming
+mode.
+@item fp8dot4
+Enable the fp8 (8-bit floating point) to single-precision 4-way dot product
+extension.
+@item ssve-fp8dot4
+Enable the fp8 (8-bit floating point) to single-precision 4-way dot product
+extension in streaming mode.
+@item fp8dot2
+Enable the fp8 (8-bit floating point) to half-precision 2-way dot product
+extension.
+@item ssve-fp8dot2
+Enable the fp8 (8-bit floating point) to half-precision 2-way dot product
+extension in streaming mode.
+@item faminmax
+Enable the Floating Point Absolute Maximum/Minimum extension.
+@item lut
+Enable the Lookup Table extension.
+@item cpa
+Enable the Checked Pointer Arithmetic instructions.
 
 @end table
 

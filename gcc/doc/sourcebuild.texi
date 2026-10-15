@@ -1128,6 +1128,11 @@ by the specified floating-point factor.
 @subsubsection Skip a test for some targets
 
 @table @code
+@item @{ dg-do-if @var{action} @{ @var{selector} @} @}
+Same as dg-do if the selector matches and the test hasn't already been
+marked as unsupported.  Use it to override an action on a target while
+leaving the default action alone for other targets.
+
 @item @{ dg-skip-if @var{comment} @{ @var{selector} @} [@{ @var{include-opts} @} [@{ @var{exclude-opts} @}]] @}
 Arguments @var{include-opts} and @var{exclude-opts} are lists in which
 each element is a string of zero or more GCC options.
@@ -2354,6 +2359,12 @@ whether it does so by default).
 @itemx aarch64_sve1024_hw
 @itemx aarch64_sve2048_hw
 Like @code{aarch64_sve_hw}, but also test for an exact hardware vector length.
+@item aarch64_sve2_hw
+AArch64 target that is able to generate and execute SVE2 code (regardless of
+whether it does so by default).
+@item aarch64_sve2p1_hw
+AArch64 target that is able to generate and execute SVE2.1 code (regardless of
+whether it does so by default).
 
 @item aarch64_fjcvtzs_hw
 AArch64 target that is able to generate and execute armv8.3-a FJCVTZS

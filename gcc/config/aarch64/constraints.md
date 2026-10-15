@@ -77,6 +77,9 @@
 (define_register_constraint "Uph" "PR_HI_REGS"
   "SVE predicate registers p8 - p15.")
 
+(define_register_constraint "Umv" "MOVEABLE_SYSREGS"
+  "@internal System Registers suitable for moving rather than requiring an unspec msr")
+
 (define_constraint "c"
  "@internal The condition code register."
   (match_operand 0 "cc_register"))
@@ -300,6 +303,18 @@
   A constraint that matches the integers 0...7."
   (and (match_code "const_int")
        (match_test "(unsigned HOST_WIDE_INT) ival <= 7")))
+
+(define_constraint "Uc0"
+  "@internal
+  A constraint that matches the integers 0...63."
+  (and (match_code "const_int")
+       (match_test "IN_RANGE (ival, 0, 63)")))
+
+(define_constraint "Uc1"
+  "@internal
+  A constraint that matches the integers 0...62."
+  (and (match_code "const_int")
+       (match_test "IN_RANGE (ival, 0, 62)")))
 
 (define_constraint "Up3"
   "@internal
@@ -663,6 +678,12 @@
    A constraint that matches an immediate operand valid for SVE MUL,
    SMAX and SMIN operations."
  (match_operand 0 "aarch64_sve_vsm_immediate"))
+
+(define_constraint "vs1"
+  "@internal
+ A constraint that matches a vector of immediate one."
+ (and (match_code "const,const_vector")
+      (match_test "op == CONST1_RTX (GET_MODE (op))")))
 
 (define_constraint "vsA"
   "@internal

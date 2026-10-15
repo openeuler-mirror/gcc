@@ -107,10 +107,14 @@
     (P14_REGNUM		82)
     (P15_REGNUM		83)
     (LAST_SAVED_REGNUM	83)
-    (FFR_REGNUM		84)
+
+    ;; Floating Point Mode Register, used in FP8 insns.
+    (FPM_REGNUM		84)
+
+    (FFR_REGNUM		85)
     ;; "FFR token": a fake register used for representing the scheduling
     ;; restrictions on FFR-related operations.
-    (FFRT_REGNUM	85)
+    (FFRT_REGNUM	86)
 
     ;; ----------------------------------------------------------------
     ;; Fake registers
@@ -122,17 +126,17 @@
     ;; ABI-related lowering is needed.  These placeholders read and
     ;; write this register.  Instructions that depend on the lowering
     ;; read the register.
-    (LOWERING_REGNUM 86)
+    (LOWERING_REGNUM 87)
 
     ;; Represents the contents of the current function's TPIDR2 block,
     ;; in abstract form.
-    (TPIDR2_BLOCK_REGNUM 87)
+    (TPIDR2_BLOCK_REGNUM 88)
 
     ;; Holds the value that the current function wants PSTATE.ZA to be.
     ;; The actual value can sometimes vary, because it does not track
     ;; changes to PSTATE.ZA that happen during a lazy save and restore.
     ;; Those effects are instead tracked by ZA_SAVED_REGNUM.
-    (SME_STATE_REGNUM 88)
+    (SME_STATE_REGNUM 89)
 
     ;; Instructions write to this register if they set TPIDR2_EL0 to a
     ;; well-defined value.  Instructions read from the register if they
@@ -140,14 +144,14 @@
     ;;
     ;; The register does not model the architected TPIDR2_ELO, just the
     ;; current function's management of it.
-    (TPIDR2_SETUP_REGNUM 89)
+    (TPIDR2_SETUP_REGNUM 90)
 
     ;; Represents the property "has an incoming lazy save been committed?".
-    (ZA_FREE_REGNUM 90)
+    (ZA_FREE_REGNUM 91)
 
     ;; Represents the property "are the current function's ZA contents
     ;; stored in the lazy save buffer, rather than in ZA itself?".
-    (ZA_SAVED_REGNUM 91)
+    (ZA_SAVED_REGNUM 92)
 
     ;; Represents the contents of the current function's ZA state in
     ;; abstract form.  At various times in the function, these contents
@@ -155,10 +159,10 @@
     ;;
     ;; The contents persist even when the architected ZA is off.  Private-ZA
     ;; functions have no effect on its contents.
-    (ZA_REGNUM 92)
+    (ZA_REGNUM 93)
 
     ;; Similarly represents the contents of the current function's ZT0 state.
-    (ZT0_REGNUM 93)
+    (ZT0_REGNUM 94)
 
     (FIRST_FAKE_REGNUM	LOWERING_REGNUM)
     (LAST_FAKE_REGNUM	ZT0_REGNUM)
@@ -194,8 +198,10 @@
     UNSPEC_AUTIB1716
     UNSPEC_AUTIASP
     UNSPEC_AUTIBSP
+    UNSPEC_BSL
     UNSPEC_CALLEE_ABI
     UNSPEC_CASESI
+    UNSPEC_COMBINE
     UNSPEC_CPYMEM
     UNSPEC_CRC32B
     UNSPEC_CRC32CB
@@ -205,6 +211,8 @@
     UNSPEC_CRC32H
     UNSPEC_CRC32W
     UNSPEC_CRC32X
+    UNSPEC_DUP
+    UNSPEC_DUP_LANE
     UNSPEC_FCVTZS
     UNSPEC_FCVTZU
     UNSPEC_FJCVTZS
@@ -223,6 +231,7 @@
     UNSPEC_FRINTP
     UNSPEC_FRINTX
     UNSPEC_FRINTZ
+    UNSPEC_GET_LANE
     UNSPEC_GOTSMALLPIC
     UNSPEC_GOTSMALLPIC28K
     UNSPEC_GOTSMALLTLS
@@ -232,6 +241,10 @@
     UNSPEC_LDP_FST
     UNSPEC_LDP_SND
     UNSPEC_LD1
+    UNSPEC_LD1_DUP
+    UNSPEC_LD1x2
+    UNSPEC_LD1x3
+    UNSPEC_LD1x4
     UNSPEC_LD2
     UNSPEC_LD2_DREG
     UNSPEC_LD2_DUP
@@ -262,12 +275,17 @@
     UNSPEC_RBIT
     UNSPEC_SADALP
     UNSPEC_SCVTF
+    UNSPEC_SET_LANE
     UNSPEC_SETMEM
     UNSPEC_SISD_NEG
     UNSPEC_SISD_SSHL
     UNSPEC_SISD_USHL
     UNSPEC_SSHL_2S
     UNSPEC_ST1
+    UNSPEC_ST1_LANE
+    UNSPEC_ST1x2
+    UNSPEC_ST1x3
+    UNSPEC_ST1x4
     UNSPEC_ST2
     UNSPEC_ST3
     UNSPEC_ST4
@@ -311,6 +329,8 @@
     UNSPEC_UNPACKSLO
     UNSPEC_UNPACKULO
     UNSPEC_PACK
+    UNSPEC_VCREATE
+    UNSPEC_VEC_COPY
     UNSPEC_WHILEGE
     UNSPEC_WHILEGT
     UNSPEC_WHILEHI
@@ -337,6 +357,7 @@
     UNSPEC_UPDATE_FFRT
     UNSPEC_RDFFR
     UNSPEC_WRFFR
+    UNSPEC_WRITE_FPMR
     UNSPEC_SYSREG_RDI
     UNSPEC_SYSREG_RTI
     UNSPEC_SYSREG_WDI
@@ -378,6 +399,7 @@
     UNSPECV_BTI_C		; Represent BTI c.
     UNSPECV_BTI_J		; Represent BTI j.
     UNSPECV_BTI_JC		; Represent BTI jc.
+    UNSPECV_CHKFEAT		; Represent CHKFEAT X16.
     UNSPECV_TSTART		; Represent transaction start.
     UNSPECV_TCOMMIT		; Represent transaction commit.
     UNSPECV_TCANCEL		; Represent transaction cancel.
@@ -435,7 +457,7 @@
 ;; Q registers and is equivalent to "simd".
 
 (define_enum "arches" [any rcpc8_4 fp fp_q base_simd nobase_simd
-		       simd nosimd sve fp16 sme])
+		       simd nosimd sve fp16 sme fprcvt])
 
 (define_enum_attr "arch" "arches" (const_string "any"))
 
@@ -464,7 +486,7 @@
 	(eq_attr "arch" "any")
 
 	(and (eq_attr "arch" "rcpc8_4")
-	     (match_test "AARCH64_ISA_RCPC8_4"))
+	     (match_test "TARGET_RCPC2"))
 
 	(and (eq_attr "arch" "fp")
 	     (match_test "TARGET_FLOAT"))
@@ -488,7 +510,10 @@
 	     (match_test "TARGET_SVE"))
 
 	(and (eq_attr "arch" "sme")
-	     (match_test "TARGET_SME")))
+	     (match_test "TARGET_SME"))
+
+	(and (eq_attr "arch" "fprcvt")
+	     (match_test "TARGET_FPRCVT")))
     (const_string "yes")
     (const_string "no")))
 
@@ -501,9 +526,7 @@
 ;; Attribute that specifies whether we are dealing with a branch to a
 ;; label that is far away, i.e. further away than the maximum/minimum
 ;; representable in a signed 21-bits number.
-;; 0 :=: no
-;; 1 :=: yes
-(define_attr "far_branch" "" (const_int 0))
+(define_attr "far_branch" "no,yes" (const_string "no"))
 
 ;; Attribute that specifies whether the alternative uses MOVPRFX.
 (define_attr "movprfx" "no,yes" (const_string "no"))
@@ -621,6 +644,10 @@
  "msrr\t%x0, %x1, %H1"
 )
 
+;; -------------------------------------------------------------------
+;; Unconditional jumps
+;; -------------------------------------------------------------------
+
 (define_insn "indirect_jump"
   [(set (pc) (match_operand:DI 0 "register_operand" "r"))]
   ""
@@ -639,43 +666,357 @@
   [(set_attr "type" "branch")]
 )
 
-(define_expand "cbranch<mode>4"
+;; Maximum PC-relative positive/negative displacements for various branching
+;; instructions.
+(define_constants
+  [
+    ;; +/- 1MiB.  Used by B.<cond>, CBZ, CBNZ.
+    (BRANCH_LEN_P_1MiB  1048572)
+    (BRANCH_LEN_N_1MiB -1048576)
+
+    ;; +/- 32KiB.  Used by TBZ, TBNZ.
+    (BRANCH_LEN_P_32KiB  32764)
+    (BRANCH_LEN_N_32KiB -32768)
+
+    ;; +/- 1KiB.  Used by CBB<cond>, CBH<cond>, CB<cond>.
+    (BRANCH_LEN_P_1KiB  1020)
+    (BRANCH_LEN_N_1KiB -1024)
+  ]
+)
+
+;; -------------------------------------------------------------------
+;; Conditional jumps
+;; -------------------------------------------------------------------
+
+;; The order of the rules below is important.
+;; Higher priority rules are preferred because they can express larger
+;; displacements.
+;; 1) EQ/NE comparisons against zero are handled by CBZ/CBNZ.
+;; 2) LT/GE comparisons against zero are handled by TBZ/TBNZ.
+;; 3) When the CMPBR extension is enabled:
+;;   a) Comparisons between two registers are handled by
+;;      CBB<cond>/CBH<cond>/CB<cond>.
+;;   b) Comparisons between a GP register and an in range immediate are
+;;      handled by CB<cond> (immediate).
+;; 4) Otherwise, emit a CMP+B<cond> sequence.
+;; -------------------------------------------------------------------
+
+(define_expand "cbranch<GPI:mode>4"
   [(set (pc) (if_then_else (match_operator 0 "aarch64_comparison_operator"
 			    [(match_operand:GPI 1 "register_operand")
 			     (match_operand:GPI 2 "aarch64_plus_operand")])
-			   (label_ref (match_operand 3 "" ""))
+			   (label_ref (match_operand 3))
 			   (pc)))]
   ""
-  "
-  operands[1] = aarch64_gen_compare_reg (GET_CODE (operands[0]), operands[1],
-					 operands[2]);
-  operands[2] = const0_rtx;
-  "
+  {
+    if (TARGET_CMPBR && aarch64_cb_rhs (GET_CODE (operands[0]), operands[2]))
+      {
+	/* The branch is supported natively.  */
+      }
+    else
+      {
+        operands[1] = aarch64_gen_compare_reg (GET_CODE (operands[0]),
+					       operands[1], operands[2]);
+        operands[2] = const0_rtx;
+      }
+  }
+)
+
+(define_expand "cbranch<SHORT:mode>4"
+  [(set (pc) (if_then_else (match_operator 0 "aarch64_comparison_operator"
+			    [(match_operand:SHORT 1 "register_operand")
+			     (match_operand:SHORT 2 "aarch64_reg_or_zero")])
+			   (label_ref (match_operand 3))
+			   (pc)))]
+  "TARGET_CMPBR"
+  ""
 )
 
 (define_expand "cbranch<mode>4"
   [(set (pc) (if_then_else (match_operator 0 "aarch64_comparison_operator"
 			    [(match_operand:GPF 1 "register_operand")
 			     (match_operand:GPF 2 "aarch64_fp_compare_operand")])
-			   (label_ref (match_operand 3 "" ""))
+			   (label_ref (match_operand 3))
 			   (pc)))]
   ""
-  "
-  operands[1] = aarch64_gen_compare_reg (GET_CODE (operands[0]), operands[1],
-					 operands[2]);
-  operands[2] = const0_rtx;
-  "
+  {
+    operands[1] = aarch64_gen_compare_reg (GET_CODE (operands[0]), operands[1],
+					   operands[2]);
+    operands[2] = const0_rtx;
+  }
 )
 
 (define_expand "cbranchcc4"
-  [(set (pc) (if_then_else
-	      (match_operator 0 "aarch64_comparison_operator"
-	       [(match_operand 1 "cc_register")
-	        (match_operand 2 "const0_operand")])
-	      (label_ref (match_operand 3 "" ""))
-	      (pc)))]
+  [(set (pc) (if_then_else (match_operator 0 "aarch64_comparison_operator"
+			    [(match_operand 1 "cc_register")
+			     (match_operand 2 "const0_operand")])
+			   (label_ref (match_operand 3))
+			   (pc)))]
   ""
-  "")
+  ""
+)
+
+;; For an EQ/NE comparison against zero, emit `CBZ`/`CBNZ`
+(define_insn "*aarch64_cbz<optab><mode>"
+  [(set (pc) (if_then_else (EQL (match_operand:GPI 0 "register_operand" "r")
+				(const_int 0))
+			   (label_ref (match_operand 1))
+			   (pc)))]
+  "!aarch64_track_speculation"
+  {
+    if (get_attr_length (insn) == 8)
+      return aarch64_gen_far_branch (operands, 1, "Lcb", "<inv_cb>\\t%<w>0, ");
+    else
+      return "<cbz>\\t%<w>0, %l1";
+  }
+  [(set_attr "type" "branch")
+   (set (attr "length")
+	(if_then_else (and (ge (minus (match_dup 1) (pc))
+			       (const_int BRANCH_LEN_N_1MiB))
+			   (lt (minus (match_dup 1) (pc))
+			       (const_int BRANCH_LEN_P_1MiB)))
+		      (const_int 4)
+		      (const_int 8)))
+   (set (attr "far_branch")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1MiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1MiB)))
+		      (const_string "no")
+		      (const_string "yes")))]
+)
+
+;; For an LT/GE comparison against zero, emit `TBZ`/`TBNZ`
+(define_insn "*aarch64_tbz<optab><mode>1"
+  [(set (pc) (if_then_else (LTGE (match_operand:ALLI 0 "register_operand" "r")
+				 (const_int 0))
+			   (label_ref (match_operand 1))
+			   (pc)))]
+  "!aarch64_track_speculation"
+  {
+    if (get_attr_length (insn) == 4)
+      return "<tbz>\t%<w>0, <sizem1>, %l1";
+    return aarch64_gen_far_branch (operands, 1, "Ltb",
+				   "<inv_tb>\\t%<w>0, <sizem1>, ");
+  }
+  [(set_attr "type" "branch")
+   (set (attr "length")
+	(if_then_else (and (ge (minus (match_dup 1) (pc))
+			       (const_int BRANCH_LEN_N_32KiB))
+			   (lt (minus (match_dup 1) (pc))
+			       (const_int BRANCH_LEN_P_32KiB)))
+		      (const_int 4)
+		      (const_int 8)))
+   (set (attr "far_branch")
+	(if_then_else (and (ge (minus (match_dup 1) (pc))
+			       (const_int BRANCH_LEN_N_32KiB))
+			   (lt (minus (match_dup 1) (pc))
+			       (const_int BRANCH_LEN_P_32KiB)))
+		      (const_string "no")
+		      (const_string "yes")))]
+)
+
+;; Emit a `CB<cond> (register)` or `CB<cond> (immediate)` instruction.
+;; The immediate range depends on the comparison code.
+(define_insn "*aarch64_cb<code><mode>"
+  [(set (pc) (if_then_else
+		(INT_CMP
+		  (match_operand:GPI 0 "register_operand" "r")
+		  (match_operand:GPI 1
+		    "aarch64_reg_<cmpbr_imm_constraint>_operand"
+		    "r<cmpbr_imm_constraint>"))
+		(label_ref (match_operand 2))
+		(pc)))]
+  "TARGET_CMPBR"
+  {
+    if (get_attr_length (insn) == 4)
+      return "cb<cmp_op>\t%<w>0, %<w>1, %l2";
+    return aarch64_gen_far_branch (operands, 2, "L",
+		"cb<inv_cmp_op>\t%<w>0, %<w>1, ");
+  }
+  [(set_attr "type" "branch")
+   (set (attr "length")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1KiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1KiB)))
+		      (const_int 4)
+		      (const_int 8)))
+   (set (attr "far_branch")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1KiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1KiB)))
+		      (const_string "no")
+		      (const_string "yes")))]
+)
+
+;; Emit a `CBB<cond> (register)` or `CBH<cond> (register)` instruction.
+(define_insn "aarch64_cb<INT_CMP:code><SHORT:mode>"
+  [(set (pc) (if_then_else (INT_CMP
+			     (match_operand:SHORT 0 "register_operand" "r")
+			     (match_operand:SHORT 1 "aarch64_reg_or_zero" "rZ"))
+			   (label_ref (match_operand 2))
+			   (pc)))]
+  "TARGET_CMPBR"
+  {
+    return (get_attr_far_branch (insn) == FAR_BRANCH_NO)
+      ? "cb<SHORT:cmpbr_suffix><INT_CMP:cmp_op>\\t%<w>0, %<w>1, %l2"
+      : aarch64_gen_far_branch (operands, 2, "L",
+          "cb<SHORT:cmpbr_suffix><INT_CMP:inv_cmp_op>\\t%<w>0, %<w>1, ");
+  }
+  [(set_attr "type" "branch")
+   (set (attr "length")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1KiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1KiB)))
+		      (const_int 4)
+		      (const_int 8)))
+   (set (attr "far_branch")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1KiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1KiB)))
+		      (const_string "no")
+		      (const_string "yes")))]
+)
+
+;; Emit `B<cond>`, assuming that the condition is already in the CC register.
+(define_insn "aarch64_bcond"
+  [(set (pc) (if_then_else (match_operator 0 "aarch64_comparison_operator"
+			    [(match_operand 1 "cc_register")
+			     (const_int 0)])
+			   (label_ref (match_operand 2))
+			   (pc)))]
+  ""
+  {
+    /* GCC's traditional style has been to use "beq" instead of "b.eq", etc.,
+       but the "." is required for SVE conditions.  */
+    bool use_dot_p = GET_MODE (operands[1]) == CC_NZCmode;
+    if (get_attr_length (insn) == 8)
+      return aarch64_gen_far_branch (operands, 2, "Lbcond",
+				     use_dot_p ? "b.%M0\\t" : "b%M0\\t");
+    else
+      return use_dot_p ? "b.%m0\\t%l2" : "b%m0\\t%l2";
+  }
+  [(set_attr "type" "branch")
+   (set (attr "length")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1MiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1MiB)))
+		      (const_int 4)
+		      (const_int 8)))
+   (set (attr "far_branch")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1MiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1MiB)))
+		      (const_string "no")
+		      (const_string "yes")))]
+)
+
+;; For a 24-bit immediate CST we can optimize the compare for equality
+;; and branch sequence from:
+;; 	mov	x0, #imm1
+;; 	movk	x0, #imm2, lsl 16 /* x0 contains CST.  */
+;; 	cmp	x1, x0
+;; 	b<ne,eq> .Label
+;; into the shorter:
+;; 	sub	x0, x1, #(CST & 0xfff000)
+;; 	subs	x0, x0, #(CST & 0x000fff)
+;; 	b<ne,eq> .Label
+(define_insn_and_split "*aarch64_bcond_wide_imm<GPI:mode>"
+  [(set (pc) (if_then_else (EQL (match_operand:GPI 0 "register_operand" "r")
+			        (match_operand:GPI 1 "aarch64_imm24" "n"))
+			   (label_ref:P (match_operand 2))
+			   (pc)))]
+  "!aarch64_move_imm (INTVAL (operands[1]), <GPI:MODE>mode)
+   && !aarch64_plus_operand (operands[1], <GPI:MODE>mode)
+   && !reload_completed"
+  "#"
+  "&& true"
+  [(const_int 0)]
+  {
+    HOST_WIDE_INT lo_imm = UINTVAL (operands[1]) & 0xfff;
+    HOST_WIDE_INT hi_imm = UINTVAL (operands[1]) & 0xfff000;
+    rtx tmp = gen_reg_rtx (<GPI:MODE>mode);
+    emit_insn (gen_add<GPI:mode>3 (tmp, operands[0], GEN_INT (-hi_imm)));
+    emit_insn (gen_add<GPI:mode>3_compare0 (tmp, tmp, GEN_INT (-lo_imm)));
+    rtx cc_reg = gen_rtx_REG (CC_NZmode, CC_REGNUM);
+    rtx cmp_rtx = gen_rtx_fmt_ee (<EQL:CMP>, <GPI:MODE>mode,
+				  cc_reg, const0_rtx);
+    emit_jump_insn (gen_aarch64_bcond (cmp_rtx, cc_reg, operands[2]));
+    DONE;
+  }
+)
+
+;; -------------------------------------------------------------------
+;; Test bit and branch
+;; -------------------------------------------------------------------
+
+(define_expand "tbranch_<code><mode>3"
+  [(set (pc) (if_then_else (EQL
+			     (match_operand:SHORT 0 "register_operand")
+			     (match_operand 1 "const0_operand"))
+			   (label_ref (match_operand 2 ""))
+			   (pc)))]
+  ""
+{
+  rtx bitvalue = gen_reg_rtx (<ZEROM>mode);
+  rtx reg = gen_lowpart (<ZEROM>mode, operands[0]);
+  rtx val = gen_int_mode (HOST_WIDE_INT_1U << UINTVAL (operands[1]),
+			  <MODE>mode);
+  emit_insn (gen_and<zerom>3 (bitvalue, reg, val));
+  operands[1] = const0_rtx;
+  operands[0] = aarch64_gen_compare_reg (<CODE>, bitvalue,
+					 operands[1]);
+})
+
+(define_insn "@aarch64_tbz<optab><ALLI:mode><GPI:mode>"
+  [(set (pc) (if_then_else (EQL
+			     (zero_extract:GPI
+			       (match_operand:ALLI 0 "register_operand" "r")
+			       (const_int 1)
+			       (match_operand 1 "aarch64_simd_shift_imm_<ALLI:mode>" "n"))
+			     (const_int 0))
+			   (label_ref (match_operand 2))
+			   (pc)))
+   (clobber (reg:CC CC_REGNUM))]
+  "!aarch64_track_speculation"
+  {
+    if (get_attr_length (insn) == 8)
+      {
+	if (get_attr_far_branch (insn) == 1)
+	  return aarch64_gen_far_branch (operands, 2, "Ltb",
+					 "<inv_tb>\\t%<ALLI:w>0, %1, ");
+	else
+	  {
+	    operands[1] = GEN_INT (HOST_WIDE_INT_1U << UINTVAL (operands[1]));
+	    return "tst\t%<ALLI:w>0, %1\;<bcond>\t%l2";
+	  }
+      }
+    else
+      return "<tbz>\t%<ALLI:w>0, %1, %l2";
+  }
+  [(set_attr "type" "branch")
+   (set (attr "length")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_32KiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_32KiB)))
+		      (const_int 4)
+		      (const_int 8)))
+   (set (attr "far_branch")
+	(if_then_else (and (ge (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_N_1MiB))
+			   (lt (minus (match_dup 2) (pc))
+			       (const_int BRANCH_LEN_P_1MiB)))
+		      (const_string "no")
+		      (const_string "yes")))]
+
+)
 
 (define_insn "@ccmp<CC_ONLY:mode><GPI:mode>"
   [(set (match_operand:CC_ONLY 1 "cc_register")
@@ -803,71 +1144,6 @@
 
     emit_insn (gen_csneg3<mode>_insn (operands[0], cond,
 				       masked_neg, masked_pos));
-    DONE;
-  }
-)
-
-(define_insn "condjump"
-  [(set (pc) (if_then_else (match_operator 0 "aarch64_comparison_operator"
-			    [(match_operand 1 "cc_register" "") (const_int 0)])
-			   (label_ref (match_operand 2 "" ""))
-			   (pc)))]
-  ""
-  {
-    /* GCC's traditional style has been to use "beq" instead of "b.eq", etc.,
-       but the "." is required for SVE conditions.  */
-    bool use_dot_p = GET_MODE (operands[1]) == CC_NZCmode;
-    if (get_attr_length (insn) == 8)
-      return aarch64_gen_far_branch (operands, 2, "Lbcond",
-				     use_dot_p ? "b.%M0\\t" : "b%M0\\t");
-    else
-      return use_dot_p ? "b.%m0\\t%l2" : "b%m0\\t%l2";
-  }
-  [(set_attr "type" "branch")
-   (set (attr "length")
-	(if_then_else (and (ge (minus (match_dup 2) (pc)) (const_int -1048576))
-			   (lt (minus (match_dup 2) (pc)) (const_int 1048572)))
-		      (const_int 4)
-		      (const_int 8)))
-   (set (attr "far_branch")
-	(if_then_else (and (ge (minus (match_dup 2) (pc)) (const_int -1048576))
-			   (lt (minus (match_dup 2) (pc)) (const_int 1048572)))
-		      (const_int 0)
-		      (const_int 1)))]
-)
-
-;; For a 24-bit immediate CST we can optimize the compare for equality
-;; and branch sequence from:
-;; 	mov	x0, #imm1
-;; 	movk	x0, #imm2, lsl 16 /* x0 contains CST.  */
-;; 	cmp	x1, x0
-;; 	b<ne,eq> .Label
-;; into the shorter:
-;; 	sub	x0, x1, #(CST & 0xfff000)
-;; 	subs	x0, x0, #(CST & 0x000fff)
-;; 	b<ne,eq> .Label
-(define_insn_and_split "*compare_condjump<GPI:mode>"
-  [(set (pc) (if_then_else (EQL
-			      (match_operand:GPI 0 "register_operand" "r")
-			      (match_operand:GPI 1 "aarch64_imm24" "n"))
-			   (label_ref:P (match_operand 2 "" ""))
-			   (pc)))]
-  "!aarch64_move_imm (INTVAL (operands[1]), <GPI:MODE>mode)
-   && !aarch64_plus_operand (operands[1], <GPI:MODE>mode)
-   && !reload_completed"
-  "#"
-  "&& true"
-  [(const_int 0)]
-  {
-    HOST_WIDE_INT lo_imm = UINTVAL (operands[1]) & 0xfff;
-    HOST_WIDE_INT hi_imm = UINTVAL (operands[1]) & 0xfff000;
-    rtx tmp = gen_reg_rtx (<GPI:MODE>mode);
-    emit_insn (gen_add<GPI:mode>3 (tmp, operands[0], GEN_INT (-hi_imm)));
-    emit_insn (gen_add<GPI:mode>3_compare0 (tmp, tmp, GEN_INT (-lo_imm)));
-    rtx cc_reg = gen_rtx_REG (CC_NZmode, CC_REGNUM);
-    rtx cmp_rtx = gen_rtx_fmt_ee (<EQL:CMP>, <GPI:MODE>mode,
-				  cc_reg, const0_rtx);
-    emit_jump_insn (gen_condjump (cmp_rtx, cc_reg, operands[2]));
     DONE;
   }
 )
@@ -1061,127 +1337,6 @@
   }
   [(set_attr "type" "branch")
    (set_attr "sls_length" "retbr")]
-)
-
-(define_insn "aarch64_cb<optab><mode>1"
-  [(set (pc) (if_then_else (EQL (match_operand:GPI 0 "register_operand" "r")
-				(const_int 0))
-			   (label_ref (match_operand 1 "" ""))
-			   (pc)))]
-  "!aarch64_track_speculation"
-  {
-    if (get_attr_length (insn) == 8)
-      return aarch64_gen_far_branch (operands, 1, "Lcb", "<inv_cb>\\t%<w>0, ");
-    else
-      return "<cbz>\\t%<w>0, %l1";
-  }
-  [(set_attr "type" "branch")
-   (set (attr "length")
-	(if_then_else (and (ge (minus (match_dup 1) (pc)) (const_int -1048576))
-			   (lt (minus (match_dup 1) (pc)) (const_int 1048572)))
-		      (const_int 4)
-		      (const_int 8)))
-   (set (attr "far_branch")
-	(if_then_else (and (ge (minus (match_dup 2) (pc)) (const_int -1048576))
-			   (lt (minus (match_dup 2) (pc)) (const_int 1048572)))
-		      (const_int 0)
-		      (const_int 1)))]
-)
-
-(define_expand "tbranch_<code><mode>3"
-  [(set (pc) (if_then_else
-              (EQL (match_operand:SHORT 0 "register_operand")
-                   (match_operand 1 "const0_operand"))
-              (label_ref (match_operand 2 ""))
-              (pc)))]
-  ""
-{
-  rtx bitvalue = gen_reg_rtx (<ZEROM>mode);
-  rtx reg = gen_lowpart (<ZEROM>mode, operands[0]);
-  rtx val = gen_int_mode (HOST_WIDE_INT_1U << UINTVAL (operands[1]), <MODE>mode);
-  emit_insn (gen_and<zerom>3 (bitvalue, reg, val));
-  operands[1] = const0_rtx;
-  operands[0] = aarch64_gen_compare_reg (<CODE>, bitvalue,
-					 operands[1]);
-})
-
-(define_insn "@aarch64_tb<optab><ALLI:mode><GPI:mode>"
-  [(set (pc) (if_then_else
-	      (EQL (zero_extract:GPI (match_operand:ALLI 0 "register_operand" "r")
-				     (const_int 1)
-				     (match_operand 1
-				       "aarch64_simd_shift_imm_<ALLI:mode>" "n"))
-		   (const_int 0))
-	     (label_ref (match_operand 2 "" ""))
-	     (pc)))
-   (clobber (reg:CC CC_REGNUM))]
-  "!aarch64_track_speculation"
-  {
-    if (get_attr_length (insn) == 8)
-      {
-	if (get_attr_far_branch (insn) == 1)
-	  return aarch64_gen_far_branch (operands, 2, "Ltb",
-					 "<inv_tb>\\t%<ALLI:w>0, %1, ");
-	else
-	  {
-	    operands[1] = GEN_INT (HOST_WIDE_INT_1U << UINTVAL (operands[1]));
-	    return "tst\t%<ALLI:w>0, %1\;<bcond>\t%l2";
-	  }
-      }
-    else
-      return "<tbz>\t%<ALLI:w>0, %1, %l2";
-  }
-  [(set_attr "type" "branch")
-   (set (attr "length")
-	(if_then_else (and (ge (minus (match_dup 2) (pc)) (const_int -32768))
-			   (lt (minus (match_dup 2) (pc)) (const_int 32764)))
-		      (const_int 4)
-		      (const_int 8)))
-   (set (attr "far_branch")
-	(if_then_else (and (ge (minus (match_dup 2) (pc)) (const_int -1048576))
-			   (lt (minus (match_dup 2) (pc)) (const_int 1048572)))
-		      (const_int 0)
-		      (const_int 1)))]
-
-)
-
-(define_insn "*cb<optab><mode>1"
-  [(set (pc) (if_then_else (LTGE (match_operand:ALLI 0 "register_operand" "r")
-				 (const_int 0))
-			   (label_ref (match_operand 1 "" ""))
-			   (pc)))
-   (clobber (reg:CC CC_REGNUM))]
-  "!aarch64_track_speculation"
-  {
-    if (get_attr_length (insn) == 8)
-      {
-	if (get_attr_far_branch (insn) == 1)
-	  return aarch64_gen_far_branch (operands, 1, "Ltb",
-					 "<inv_tb>\\t%<w>0, <sizem1>, ");
-	else
-	  {
-	    char buf[64];
-	    uint64_t val = ((uint64_t) 1)
-		<< (GET_MODE_SIZE (<MODE>mode) * BITS_PER_UNIT - 1);
-	    sprintf (buf, "tst\t%%<w>0, %" PRId64, val);
-	    output_asm_insn (buf, operands);
-	    return "<bcond>\t%l1";
-	  }
-      }
-    else
-      return "<tbz>\t%<w>0, <sizem1>, %l1";
-  }
-  [(set_attr "type" "branch")
-   (set (attr "length")
-	(if_then_else (and (ge (minus (match_dup 1) (pc)) (const_int -32768))
-			   (lt (minus (match_dup 1) (pc)) (const_int 32764)))
-		      (const_int 4)
-		      (const_int 8)))
-   (set (attr "far_branch")
-	(if_then_else (and (ge (minus (match_dup 1) (pc)) (const_int -1048576))
-			   (lt (minus (match_dup 1) (pc)) (const_int 1048572)))
-		      (const_int 0)
-		      (const_int 1)))]
 )
 
 ;; -------------------------------------------------------------------
@@ -1397,6 +1552,8 @@
      [w, r Z  ; neon_from_gp<q>, nosimd     ] fmov\t%s0, %w1
      [w, w    ; neon_dup       , simd       ] dup\t%<Vetype>0, %1.<v>[0]
      [w, w    ; neon_dup       , nosimd     ] fmov\t%s0, %s1
+     [Umv, rZ ; mrs            , *          ] msr\t%0, %x1
+     [r, Umv  ; mrs            , *          ] mrs\t%x0, %1
   }
 )
 
@@ -1459,6 +1616,8 @@
      [r  , w  ; f_mrc    , fp  , 4] fmov\t%w0, %s1
      [w  , w  ; fmov     , fp  , 4] fmov\t%s0, %s1
      [w  , Ds ; neon_move, simd, 4] << aarch64_output_scalar_simd_mov_immediate (operands[1], SImode);
+     [Umv, rZ ; mrs      , *   , 4] msr\t%0, %x1
+     [r, Umv  ; mrs      , *   , 4] mrs\t%x0, %1
   }
   "CONST_INT_P (operands[1]) && !aarch64_move_imm (INTVAL (operands[1]), SImode)
     && REG_P (operands[0]) && GP_REGNUM_P (REGNO (operands[0]))"
@@ -1497,6 +1656,8 @@
      [w, w  ; fmov     , fp  , 4] fmov\t%d0, %d1
      [w, Dd ; neon_move, simd, 4] << aarch64_output_scalar_simd_mov_immediate (operands[1], DImode);
      [w, Dx ; neon_move, simd, 8] #
+     [Umv, rZ; mrs      , *   , 4] msr\t%0, %x1
+     [r, Umv; mrs      , *   , 4] mrs\t%0, %1
   }
   "CONST_INT_P (operands[1])
    && REG_P (operands[0])
@@ -1745,6 +1906,48 @@
     aarch64_split_128bit_move (operands[0], operands[1]);
     DONE;
   }
+)
+
+;; The preferred way of writing to the FPMR is to test whether it already
+;; has the desired value and branch around the write if so.  This reduces
+;; the number of redundant FPMR writes caused by ABI boundaries, such as in:
+;;
+;;    for (...)
+;;      fp8_kernel (..., fpmr_value);
+;;
+;; Without this optimization, fp8_kernel would set FPMR to fpmr_value each
+;; time that it is called.
+;;
+;; Upstream does this as a split so that its hardreg PRE pass can optimize
+;; the moves first.  This tree does not have that pass, so repeated writes
+;; of the same value each emit their own mrs/cmp/branch/msr sequence; the
+;; split is kept so that the generated code and any later backport of the
+;; pass stay aligned with upstream.
+(define_split
+  [(set (reg:DI FPM_REGNUM)
+        (match_operand:DI 0 "aarch64_reg_or_zero"))]
+  "TARGET_FP8 && !TARGET_CHEAP_FPMR_WRITE && can_create_pseudo_p ()"
+  [(const_int 0)]
+  {
+    auto label = gen_label_rtx ();
+    rtx current = copy_to_reg (gen_rtx_REG (DImode, FPM_REGNUM));
+    rtx cond = gen_rtx_EQ (VOIDmode, current, operands[0]);
+    emit_jump_insn (gen_cbranchdi4 (cond, current, operands[0], label));
+    emit_insn (gen_aarch64_write_fpmr (operands[0]));
+    emit_label (label);
+    DONE;
+  }
+)
+
+;; A write to the FPMR that is already protected by a conditional branch.
+;; Since this instruction is introduced late, it shouldn't matter too much
+;; that we're using an unspec for a move.
+(define_insn "aarch64_write_fpmr"
+  [(set (reg:DI FPM_REGNUM)
+        (unspec:DI [(match_operand:DI 0 "aarch64_reg_or_zero" "rZ")]
+		   UNSPEC_WRITE_FPMR))]
+  "TARGET_FP8"
+  "msr\tfpmr, %x0"
 )
 
 (define_expand "aarch64_cpymemdi"
@@ -4463,15 +4666,21 @@
 			   (match_operand:ALLI 3 "register_operand")))]
   ""
   {
-    rtx ccreg;
     enum rtx_code code = GET_CODE (operands[1]);
-
     if (code == UNEQ || code == LTGT)
       FAIL;
 
-    ccreg = aarch64_gen_compare_reg (code, XEXP (operands[1], 0),
-				     XEXP (operands[1], 1));
-    operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+    rtx ccreg = XEXP (operands[1], 0);
+    enum machine_mode ccmode = GET_MODE (ccreg);
+    if (GET_MODE_CLASS (ccmode) == MODE_CC)
+      gcc_assert (XEXP (operands[1], 1) == const0_rtx);
+    else if (ccmode == QImode || ccmode == HImode)
+      FAIL;
+    else
+      {
+	ccreg = aarch64_gen_compare_reg (code, ccreg, XEXP (operands[1], 1));
+	operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+      }
   }
 )
 
@@ -4482,15 +4691,21 @@
 			  (match_operand:GPF 3 "register_operand")))]
   ""
   {
-    rtx ccreg;
     enum rtx_code code = GET_CODE (operands[1]);
-
     if (code == UNEQ || code == LTGT)
       FAIL;
 
-    ccreg = aarch64_gen_compare_reg (code, XEXP (operands[1], 0),
-				  XEXP (operands[1], 1));
-    operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+    rtx ccreg = XEXP (operands[1], 0);
+    enum machine_mode ccmode = GET_MODE (ccreg);
+    if (GET_MODE_CLASS (ccmode) == MODE_CC)
+      gcc_assert (XEXP (operands[1], 1) == const0_rtx);
+    else if (ccmode == QImode || ccmode == HImode)
+      FAIL;
+    else
+      {
+	ccreg = aarch64_gen_compare_reg (code, ccreg, XEXP (operands[1], 1));
+	operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+      }
   }
 )
 
@@ -4501,15 +4716,21 @@
 			  (match_operand:GPF 3 "register_operand")))]
   ""
   {
-    rtx ccreg;
     enum rtx_code code = GET_CODE (operands[1]);
-
     if (code == UNEQ || code == LTGT)
       FAIL;
 
-    ccreg = aarch64_gen_compare_reg (code, XEXP (operands[1], 0),
-				  XEXP (operands[1], 1));
-    operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+    rtx ccreg = XEXP (operands[1], 0);
+    enum machine_mode ccmode = GET_MODE (ccreg);
+    if (GET_MODE_CLASS (ccmode) == MODE_CC)
+      gcc_assert (XEXP (operands[1], 1) == const0_rtx);
+    else if (ccmode == QImode || ccmode == HImode)
+      FAIL;
+    else
+      {
+	ccreg = aarch64_gen_compare_reg (code, ccreg, XEXP (operands[1], 1));
+	operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+      }
   }
 )
 
@@ -4520,15 +4741,21 @@
 			  (match_operand:GPI 3 "register_operand")))]
   ""
   {
-    rtx ccreg;
     enum rtx_code code = GET_CODE (operands[1]);
-
     if (code == UNEQ || code == LTGT)
       FAIL;
 
-    ccreg = aarch64_gen_compare_reg (code, XEXP (operands[1], 0),
-				      XEXP (operands[1], 1));
-    operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+    rtx ccreg = XEXP (operands[1], 0);
+    enum machine_mode ccmode = GET_MODE (ccreg);
+    if (GET_MODE_CLASS (ccmode) == MODE_CC)
+      gcc_assert (XEXP (operands[1], 1) == const0_rtx);
+    else if (ccmode == QImode || ccmode == HImode)
+      FAIL;
+    else
+      {
+	ccreg = aarch64_gen_compare_reg (code, ccreg, XEXP (operands[1], 1));
+	operands[1] = gen_rtx_fmt_ee (code, VOIDmode, ccreg, const0_rtx);
+      }
   }
 )
 
@@ -5323,9 +5550,9 @@
 ;; MOV	w0, v2.b[0]
 
 (define_expand "popcount<mode>2"
-  [(set (match_operand:GPI 0 "register_operand")
-	(popcount:GPI (match_operand:GPI 1 "register_operand")))]
-  "TARGET_CSSC || TARGET_SIMD"
+  [(set (match_operand:ALLI 0 "register_operand")
+	(popcount:ALLI (match_operand:ALLI 1 "register_operand")))]
+  "TARGET_CSSC ? GET_MODE_BITSIZE (<MODE>mode) >= 32 : TARGET_SIMD"
 {
   if (!TARGET_CSSC)
     {
@@ -5333,20 +5560,44 @@
       rtx v1 = gen_reg_rtx (V8QImode);
       rtx in = operands[1];
       rtx out = operands[0];
-      if(<MODE>mode == SImode)
-	{
-	  rtx tmp;
-	  tmp = gen_reg_rtx (DImode);
-	  /* If we have SImode, zero extend to DImode, pop count does
-	     not change if we have extra zeros. */
-	  emit_insn (gen_zero_extendsidi2 (tmp, in));
-	  in = tmp;
-	}
+      /* SImode and HImode should be zero extended to DImode.
+	 popcount does not change if we have extra zeros.  */
+      if (<MODE>mode == SImode || <MODE>mode == HImode)
+	in = convert_to_mode (DImode, in, true);
+
       emit_move_insn (v, gen_lowpart (V8QImode, in));
       emit_insn (gen_popcountv8qi2 (v1, v));
-      emit_insn (gen_aarch64_zero_extend<mode>_reduc_plus_v8qi (out, v1));
+      /* QImode, just extract from the v8qi vector.  */
+      if (<MODE>mode == QImode)
+	emit_move_insn (out, gen_lowpart (QImode, v1));
+      /* HI and SI, reduction is zero extended to SImode. */
+      else if (<MODE>mode == SImode || <MODE>mode == HImode)
+	{
+	  rtx out1 = gen_reg_rtx (SImode);
+	  emit_insn (gen_aarch64_zero_extendsi_reduc_plus_v8qi (out1, v1));
+	  emit_move_insn (out, gen_lowpart (<MODE>mode, out1));
+	}
+      /* DImode, reduction is zero extended to DImode. */
+      else
+	{
+	  gcc_assert (<MODE>mode == DImode);
+	  emit_insn (gen_aarch64_zero_extenddi_reduc_plus_v8qi (out, v1));
+	}
       DONE;
     }
+})
+
+(define_expand "popcountti2"
+  [(match_operand:DI 0 "register_operand")
+   (match_operand:TI 1 "register_operand")]
+  "TARGET_SIMD && !TARGET_CSSC"
+{
+  rtx v = gen_reg_rtx (V16QImode);
+  rtx v1 = gen_reg_rtx (V16QImode);
+  emit_move_insn (v, gen_lowpart (V16QImode, operands[1]));
+  emit_insn (gen_popcountv16qi2 (v1, v));
+  emit_insn (gen_aarch64_zero_extenddi_reduc_plus_v16qi (operands[0], v1));
+  DONE;
 })
 
 (define_insn "clrsb<mode>2"
@@ -6580,13 +6831,15 @@
 ;; frcvt floating-point round to integer and convert standard patterns.
 ;; Expands to lbtrunc, lceil, lfloor, lround.
 (define_insn "l<fcvt_pattern><su_optab><GPF_F16:mode><GPI:mode>2"
-  [(set (match_operand:GPI 0 "register_operand" "=r")
+  [(set (match_operand:GPI 0 "register_operand")
 	(FIXUORS:GPI
-	  (unspec:GPF_F16 [(match_operand:GPF_F16 1 "register_operand" "w")]
+	  (unspec:GPF_F16 [(match_operand:GPF_F16 1 "register_operand")]
 	   FCVT)))]
-  "TARGET_FLOAT"
-  "fcvt<frint_suffix><su>\\t%<GPI:w>0, %<GPF_F16:s>1"
-  [(set_attr "type" "f_cvtf2i")]
+  ""
+  {@ [ cons: =0 , 1 ; attrs: type , arch   ]
+     [ r        , w ; f_cvtf2i    , fp     ] fcvt<frint_suffix><su>\t%<GPI:w>0, %<GPF_F16:s>1
+     [ w        , w ; f_cvtf2i    , fprcvt ] fcvt<frint_suffix><su>\t%<GPI:v>0, %<GPF_F16:s>1
+  }
 )
 
 (define_insn "*aarch64_fcvt<su_optab><GPF:mode><GPI:mode>2_mult"
@@ -6767,32 +7020,38 @@
 ;; Convert HF -> SI or DI
 
 (define_insn "<optab>_trunchf<GPI:mode>2"
-  [(set (match_operand:GPI 0 "register_operand" "=r")
-	(FIXUORS:GPI (match_operand:HF 1 "register_operand" "w")))]
+  [(set (match_operand:GPI 0 "register_operand")
+	(FIXUORS:GPI (match_operand:HF 1 "register_operand")))]
   "TARGET_FP_F16INST"
-  "fcvtz<su>\t%<w>0, %h1"
-  [(set_attr "type" "f_cvtf2i")]
+  {@ [ cons: =0 , 1 ; attrs: type , arch   ]
+     [ r        , w ; f_cvtf2i    , fp     ] fcvtz<su>\t%<w>0, %h1
+     [ w        , w ; f_cvtf2i    , fprcvt ] fcvtz<su>\t%<s>0, %h1
+  }
 )
 
 ;; Convert DF -> SI or SF -> DI which can only be accomplished with
 ;; input in a fp register and output in a integer register
 
 (define_insn "<optab>_trunc<fcvt_change_mode><GPI:mode>2"
-  [(set (match_operand:GPI 0 "register_operand" "=r")
-	(FIXUORS:GPI (match_operand:<FCVT_CHANGE_MODE> 1 "register_operand" "w")))]
+  [(set (match_operand:GPI 0 "register_operand")
+	(FIXUORS:GPI (match_operand:<FCVT_CHANGE_MODE> 1 "register_operand")))]
   "TARGET_FLOAT"
-  "fcvtz<su>\t%<w>0, %<fpw>1"
-  [(set_attr "type" "f_cvtf2i")]
+  {@ [ cons: =0 , 1 ; attrs: type      , arch   ]
+     [ r        , w ; f_cvtf2i         , fp     ] fcvtz<su>\t%<w>0, %<fpw>1
+     [ w        , w ; f_cvtf2i         , fprcvt ] fcvtz<su>\t%<s>0, %<fpw>1
+  }
 )
 
 (define_insn "*fix_to_zero_extend<mode>di2"
-  [(set (match_operand:DI 0 "register_operand" "=r")
+  [(set (match_operand:DI 0 "register_operand")
 	(zero_extend:DI
 	 (unsigned_fix:SI
-	  (match_operand:GPF 1 "register_operand" "w"))))]
+	  (match_operand:GPF 1 "register_operand"))))]
   "TARGET_FLOAT"
-  "fcvtzu\t%w0, %<s>1"
-  [(set_attr "type" "f_cvtf2i")]
+  {@ [ cons: =0 , 1 ; attrs: type      , arch   ]
+     [ r        , w ; f_cvtf2i         , fp     ] fcvtzu\t%w0, %<s>1
+     [ w        , w ; f_cvtf2i         , fprcvt ] fcvtzu\t%s0, %<s>1
+  }
 )
 
 ;; Equal width integer to fp and multiply combine.
@@ -6845,10 +7104,13 @@
 
 ;; Unequal width integer to fp conversions.
 (define_insn "<optab><fcvt_iesize><GPF:mode>2"
-  [(set (match_operand:GPF 0 "register_operand" "=w")
-        (FLOATUORS:GPF (match_operand:<FCVT_IESIZE> 1 "register_operand" "r")))]
+  [(set (match_operand:GPF 0 "register_operand")
+	(FLOATUORS:GPF (match_operand:<FCVT_IESIZE> 1 "register_operand")))]
   "TARGET_FLOAT"
-  "<su_optab>cvtf\t%<GPF:s>0, %<w2>1"
+  {@ [ cons: =0 , 1 ; attrs: type      , arch   ]
+     [ w        , r ; f_cvti2f         , fp     ] <su_optab>cvtf\t%<GPF:s>0, %<w2>1
+     [ w        , w ; f_cvti2f         , fprcvt ] <su_optab>cvtf\t%<GPF:s>0, %<fpw>1
+  }
   [(set_attr "type" "f_cvti2f")]
 )
 
@@ -6860,11 +7122,13 @@
 ;; of the mid-end logic.
 
 (define_insn "aarch64_fp16_<optab><mode>hf2"
-  [(set (match_operand:HF 0 "register_operand" "=w")
-	(FLOATUORS:HF (match_operand:GPI 1 "register_operand" "r")))]
+  [(set (match_operand:HF 0 "register_operand")
+	(FLOATUORS:HF (match_operand:GPI 1 "register_operand")))]
   "TARGET_FP_F16INST"
-  "<su_optab>cvtf\t%h0, %<w>1"
-  [(set_attr "type" "f_cvti2f")]
+  {@ [ cons: =0 , 1 ; attrs: type , arch   ]
+     [ w        , r ; f_cvti2f    , fp     ] <su_optab>cvtf\t%h0, %<w>1
+     [ w        , w ; f_cvti2f    , fprcvt ] <su_optab>cvtf\t%h0, %<v>1
+  }
 )
 
 (define_expand "<optab>sihf2"
@@ -7809,8 +8073,8 @@
 	     : gen_stack_protect_test_si) (operands[0], operands[1]));
 
   rtx cc_reg = gen_rtx_REG (CCmode, CC_REGNUM);
-  emit_jump_insn (gen_condjump (gen_rtx_EQ (VOIDmode, cc_reg, const0_rtx),
-				cc_reg, operands[2]));
+  emit_jump_insn (gen_aarch64_bcond (gen_rtx_EQ (VOIDmode, cc_reg, const0_rtx),
+				     cc_reg, operands[2]));
   DONE;
 })
 
@@ -8271,6 +8535,14 @@
 		   UNSPEC_RESTORE_NZCV))]
   ""
   "msr\tnzcv, %0"
+)
+
+;; CHKFEAT instruction
+(define_insn "aarch64_chkfeat"
+  [(set (reg:DI R16_REGNUM)
+        (unspec_volatile:DI [(reg:DI R16_REGNUM)] UNSPECV_CHKFEAT))]
+  ""
+  "hint\\t40 // chkfeat x16"
 )
 
 ;; AdvSIMD Stuff

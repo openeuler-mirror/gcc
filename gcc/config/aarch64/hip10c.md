@@ -142,7 +142,8 @@
                    neon_fp_sqrt_d,neon_fp_sqrt_d_q")
            (const_string "hip10c_neon_fp_sqrt")
          (eq_attr "type" "neon_dup,neon_dup_q,\
-                   neon_ins,neon_ins_q")
+                   neon_ins,neon_ins_q,\
+                   neon_permute,neon_permute_q")
            (const_string "hip10c_neon_ins")
          (eq_attr "type" "neon_load1_1reg,neon_load1_1reg_q,\
                    neon_load1_2reg,neon_load1_2reg_q,\

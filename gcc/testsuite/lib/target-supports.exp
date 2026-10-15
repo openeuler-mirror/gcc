@@ -6268,6 +6268,23 @@ proc check_effective_target_aarch64_sve2_hw { } {
     }]
 }
 
+# Return true if this is an AArch64 target that can run SVE2.1 code.
+
+proc check_effective_target_aarch64_sve2p1_hw { } {
+    if { ![istarget aarch64*-*-*] } {
+	return 0
+    }
+    return [check_runtime aarch64_sve2p1_hw_available {
+	#pragma GCC target "+sve2p1"
+	int
+	main (void)
+	{
+	  asm volatile ("dupq z0.b, z0.b[0]");
+	  return 0;
+	}
+    }]
+}
+
 # Return true if this is an AArch64 target that can run SVE code and
 # if its SVE vectors have exactly BITS bits.
 
@@ -12224,7 +12241,10 @@ proc check_effective_target_aarch64_tiny { } {
 
 foreach { aarch64_ext } { "fp" "simd" "crypto" "crc" "lse" "dotprod" "sve"
 			  "i8mm" "f32mm" "f64mm" "bf16" "sb" "sve2" "ls64"
-			  "sme" "sme-i16i64" "sme2" } {
+			  "sme" "sme-i16i64" "sme2" "fp8" "fp8fma" "ssve-fp8fma"
+			  "fp8dot2" "ssve-fp8dot2" "fp8dot4" "ssve-fp8dot4"
+			  "f8f16mm" "f8f32mm" "sve-f16f32mm" "faminmax" "lut"
+			  "cmpbr" } {
     eval [string map [list FUNC $aarch64_ext] {
 	proc check_effective_target_aarch64_asm_FUNC_ok { } {
 	  if { [istarget aarch64*-*-*] } {
@@ -12236,6 +12256,16 @@ foreach { aarch64_ext } { "fp" "simd" "crypto" "crc" "lse" "dotprod" "sve"
 	  }
 	}
     }]
+}
+
+proc check_effective_target_aarch64_asm_sve2p1_ok { } {
+    if { [istarget aarch64*-*-*] } {
+	return [check_no_compiler_messages aarch64_sve2p1_assembler object {
+	    __asm__ (".arch_extension sve2p1; ld1w {z0.q},p7/z,[x0]");
+	} "-march=armv8-a+sve2p1"]
+    } else {
+	return 0
+    }
 }
 
 proc check_effective_target_aarch64_small { } {
