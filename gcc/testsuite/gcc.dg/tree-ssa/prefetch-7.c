@@ -32,8 +32,8 @@ void test(int *p)
     a[i] = 0;
 }
 
-/* { dg-final { scan-tree-dump-times "Issued prefetch" 5 "aprefetch" } } */
-/* { dg-final { scan-tree-dump-times "Issued nontemporal prefetch" 2 "aprefetch" } } */
-/* { dg-final { scan-tree-dump-times "a nontemporal store" 0 "aprefetch" } } */
+/* { dg-final { scan-tree-dump-times "Issued prefetch" 5 "aprefetch2" } } */
+/* { dg-final { scan-tree-dump-times "Issued nontemporal prefetch" 2 "aprefetch2" } } */
+/* { dg-final { scan-tree-dump-times "a nontemporal store" 0 "aprefetch2" } } */
 
 /* { dg-final { scan-tree-dump-times "builtin_prefetch" 7 "optimized" } } */

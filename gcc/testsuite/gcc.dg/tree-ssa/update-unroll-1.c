@@ -16,5 +16,5 @@ int foo(unsigned n)
 /* We used to make the probability that the body of the loop (unrolled
    to enable prefetching) is entered 0, which is not correct.  */
 
-/* { dg-final { scan-tree-dump-not "Invalid sum" "aprefetch"} } */
-/* { dg-final { scan-tree-dump-not "SUCC: 7 .100.0%" "aprefetch"} } */
+/* { dg-final { scan-tree-dump-not "Invalid sum" "aprefetch2"} } */
+/* { dg-final { scan-tree-dump-not "SUCC: 7 .100.0%" "aprefetch2"} } */

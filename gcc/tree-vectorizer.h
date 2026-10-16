@@ -829,6 +829,10 @@ public:
      epilogue of loop.  */
   bool epil_using_partial_vectors_p;
 
+  /* True if alignment analysis has fallen back to ordinary stores after
+     failing to align all nontemporal store candidates.  */
+  bool ignore_nontemporal_alignment;
+
   /* The bias for len_load and len_store.  For now, only 0 and -1 are
      supported.  -1 must be used when a backend does not support
      len_load/len_store with a length of zero.  */

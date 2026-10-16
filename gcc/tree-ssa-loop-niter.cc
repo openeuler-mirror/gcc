@@ -4621,6 +4621,155 @@ estimated_stmt_executions_int (class loop *loop)
   return snit < 0 ? -1 : snit;
 }
 
+/* Extract x from type conversion.  ie:
+   a=(uint64_t)b, we can use this function to get b from a.  */
+
+static tree
+get_oldest_def_with_type_conv (tree t)
+{
+  auto ssa = t;
+  while (ssa && TREE_CODE (ssa) == SSA_NAME)
+    {
+      auto g = SSA_NAME_DEF_STMT (ssa);
+      if (!is_gimple_assign (g))
+	break;
+      auto rhs_code = gimple_assign_rhs_code (g);
+      if (rhs_code != NOP_EXPR && rhs_code != SSA_NAME)
+	break;
+      ssa = gimple_assign_rhs1 (g);
+    }
+  return ssa;
+}
+
+/* Recursively traces the SSA variable OP to obtain the original loop's
+   constant iteration count from an OpenMP outlined function.  Only supports
+   cases where the trip count is an INTEGER_CST.  The trip count can only be
+   determined when OpenMP static scheduling is used without a specified chunk
+   size.  */
+
+static HOST_WIDE_INT
+get_omp_orig_loop_niters (tree op)
+{
+  HOST_WIDE_INT niters = -1;
+  tree rhs1 = NULL_TREE, rhs2 = NULL_TREE, fndecl, arg;
+  gimple *def;
+  gphi *phi;
+  unsigned num_args;
+  enum tree_code code;
+
+  if (!op)
+    return niters;
+
+  if (TREE_CODE (op) != SSA_NAME)
+    return niters;
+
+  def = SSA_NAME_DEF_STMT (op);
+  if (!def)
+    return niters;
+
+  if (gimple_code (def) == GIMPLE_PHI)
+    {
+      /* Only handle PHI nodes in the outermost loop.  */
+      if (gimple_bb (def)->loop_father != current_loops->tree_root)
+	return niters;
+
+      phi = as_a<gphi *> (def);
+      num_args = gimple_phi_num_args (phi);
+      if (num_args > 2)
+	return niters;
+
+      /* Recursively trace PHI arguments.  */
+      for (unsigned i = 0; i < num_args; i++)
+	{
+	  arg = gimple_phi_arg_def (phi, i);
+	  niters = get_omp_orig_loop_niters (arg);
+	  if (niters != -1)
+	    break;
+	}
+      return niters;
+    }
+
+  if (!is_gimple_assign (def))
+    return niters;
+  code = gimple_assign_rhs_code (def);
+  rhs1 = gimple_assign_rhs1 (def);
+
+  if (code == COND_EXPR)
+    return get_omp_orig_loop_niters (gimple_assign_rhs2 (def));
+
+  /* Recursively trace rhs1 if not a division/modulo or not a constant.  */
+  if (code != TRUNC_MOD_EXPR && code != TRUNC_DIV_EXPR)
+    return get_omp_orig_loop_niters (rhs1);
+  else if (TREE_CODE (rhs1) != INTEGER_CST)
+    return get_omp_orig_loop_niters (rhs1);
+
+  /* Find the expression q = n / nthreads or tt = n % nthreads.  */
+  rhs2 = gimple_assign_rhs2 (def);
+  rhs2 = get_oldest_def_with_type_conv (rhs2);
+  def = SSA_NAME_DEF_STMT (rhs2);
+  if (def && is_gimple_call (def))
+    {
+      fndecl = gimple_call_fndecl (def);
+      if (fndecl
+	  && (fndecl_built_in_p (fndecl, BUILT_IN_OMP_GET_NUM_THREADS)
+	      || fndecl_built_in_p (fndecl, BUILT_IN_OMP_GET_THREAD_NUM)))
+	return tree_fits_shwi_p (rhs1) ? tree_to_shwi (rhs1) : -1;
+    }
+  niters = get_omp_orig_loop_niters (rhs2);
+
+  return niters;
+}
+
+/* Recursively traverses all operands of NITERS_EXPR to determine if the
+   expression depends on the number of OpenMP threads, where NITERS_EXPR
+   is typically of the form (upper bound - lower bound + 1) for a thread's task.
+   If a dependency is found, NITERS is updated with the trip count of the
+   original loop corresponding to the OpenMP outlined function.  */
+
+static void
+traverse_niters_expr_operands (HOST_WIDE_INT *niters, tree niters_expr)
+{
+  if (!niters_expr)
+    return;
+
+  unsigned n = TREE_OPERAND_LENGTH (niters_expr);
+  if (n == 0)
+    {
+      *niters = get_omp_orig_loop_niters (niters_expr);
+      return;
+    }
+
+  for (unsigned i = 0; i < n; i++)
+    {
+      tree op = TREE_OPERAND (niters_expr, i);
+      if (TREE_CODE (op) == INTEGER_CST)
+	continue;
+
+      if (TREE_CODE (op) == NOP_EXPR)
+	op = TREE_OPERAND (op, 0);
+      traverse_niters_expr_operands (niters, op);
+    }
+}
+
+/* Get the constant niters of the original loop from an OpenMP outlined
+   function.  Only supports the case where niters is an INTEGER_CST.  */
+
+HOST_WIDE_INT
+get_const_niters_from_omp_outlined (class loop *loop)
+{
+  HOST_WIDE_INT niters = -1;
+  tree niters_expr = number_of_latch_executions (loop);
+  if (TREE_CODE (niters_expr) == COND_EXPR)
+    niters_expr = TREE_OPERAND (niters_expr, 1);
+
+  niters_expr = analyze_scalar_evolution (loop, niters_expr);
+  if (!niters_expr || chrec_contains_undetermined (niters_expr))
+    return niters;
+
+  traverse_niters_expr_operands (&niters, niters_expr);
+  return niters;
+}
+
 /* Sets NIT to the maximum number of executions of the latch of the
    LOOP, plus one.  If we have no reliable estimate, the function returns
    false, otherwise returns true.  */

@@ -848,6 +848,7 @@ _loop_vec_info::_loop_vec_info (class loop *loop_in, vec_info_shared *shared)
     can_use_partial_vectors_p (param_vect_partial_vector_usage != 0),
     using_partial_vectors_p (false),
     epil_using_partial_vectors_p (false),
+    ignore_nontemporal_alignment (false),
     partial_load_store_bias (0),
     peeling_for_gaps (false),
     peeling_for_niter (false),
@@ -2434,6 +2435,7 @@ start_over:
   /* Do not invoke vect_enhance_data_refs_alignment for epilogue
      vectorization, since we do not want to add extra peeling or
      add versioning for alignment.  */
+  loop_vinfo->ignore_nontemporal_alignment = false;
   if (!LOOP_VINFO_EPILOGUE_P (loop_vinfo))
     /* This pass will decide on using loop versioning and/or loop peeling in
        order to enhance the alignment of data references in the loop.  */

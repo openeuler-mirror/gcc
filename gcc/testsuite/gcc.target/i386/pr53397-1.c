@@ -21,6 +21,6 @@ void prefetch_when_non_constant_step_is_invariant(int step, int n)
      }
 }
 
-/* { dg-final { scan-tree-dump "Issued prefetch" "aprefetch" } } */
+/* { dg-final { scan-tree-dump "Issued prefetch" "aprefetch2" } } */
 /* { dg-final { scan-assembler "prefetcht0" } } */
 

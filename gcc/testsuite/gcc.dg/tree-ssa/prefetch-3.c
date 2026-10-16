@@ -18,4 +18,4 @@ double test(void)
   return sum;
 }
 
-/* { dg-final { scan-tree-dump-times "unroll factor 4" 1 "aprefetch" } } */
+/* { dg-final { scan-tree-dump-times "unroll factor 4" 1 "aprefetch2" } } */

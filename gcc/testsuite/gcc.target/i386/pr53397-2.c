@@ -20,7 +20,7 @@ void donot_prefetch_when_non_constant_step_is_variant(int step, int n)
      } 
 }
 
-/* { dg-final { scan-tree-dump "Not prefetching" "aprefetch" } } */
-/* { dg-final { scan-tree-dump "loop variant step" "aprefetch" } } */
+/* { dg-final { scan-tree-dump "Not prefetching" "aprefetch2" } } */
+/* { dg-final { scan-tree-dump "loop variant step" "aprefetch2" } } */
 
 

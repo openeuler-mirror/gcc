@@ -44,5 +44,5 @@ double test(void)
   return sum;
 }
 
-/* { dg-final { scan-tree-dump-times "Issued prefetch" 5 "aprefetch" } } */
-/* { dg-final { scan-tree-dump-times "Issued nontemporal prefetch" 3 "aprefetch" } } */
+/* { dg-final { scan-tree-dump-times "Issued prefetch" 5 "aprefetch2" } } */
+/* { dg-final { scan-tree-dump-times "Issued nontemporal prefetch" 3 "aprefetch2" } } */

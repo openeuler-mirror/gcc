@@ -46,6 +46,7 @@ extern HOST_WIDE_INT likely_max_loop_iterations_int (class loop *);
 extern HOST_WIDE_INT max_stmt_executions_int (class loop *);
 extern HOST_WIDE_INT likely_max_stmt_executions_int (class loop *);
 extern HOST_WIDE_INT estimated_stmt_executions_int (class loop *);
+extern HOST_WIDE_INT get_const_niters_from_omp_outlined (class loop *);
 extern bool max_stmt_executions (class loop *, widest_int *);
 extern bool likely_max_stmt_executions (class loop *, widest_int *);
 extern bool estimated_stmt_executions (class loop *, widest_int *);
