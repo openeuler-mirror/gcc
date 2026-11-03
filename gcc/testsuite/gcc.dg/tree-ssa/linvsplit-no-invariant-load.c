@@ -17,4 +17,6 @@ linvsplit_no_invariant_load (const float *__restrict weights,
 
 /* { dg-final { scan-tree-dump "loop invariant split: no outer-invariant inner load" "linvsplit" } } */
 /* { dg-final { scan-tree-dump-not "loop invariant split: split inner loop" "linvsplit" } } */
+/* No dependence graph is needed for a nest without a candidate load.  */
+/* { dg-final { scan-tree-dump-not "compute_affine_dependence" "linvsplit" } } */
 

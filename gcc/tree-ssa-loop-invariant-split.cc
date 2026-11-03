@@ -35,6 +35,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-ssa-loop-manip.h"
 #include "tree-into-ssa.h"
 #include "cfgloop.h"
+#include "cfgloopmanip.h"
 #include "cfghooks.h"
 #include "tree-scalar-evolution.h"
 #include "tree-ssa-loop-ivopts.h"
@@ -52,6 +53,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-inline.h"
 #include "cfgexpand.h"
 #include "dumpfile.h"
+#include "tree-eh.h"
 
 /* This pass performs a deliberately conservative first form of loop nest
    splitting.  For a strict two-level nest
@@ -71,10 +73,21 @@ along with GCC; see the file COPYING3.  If not see
    j-only data that a later vectorizer/unroller/LIM phase sees in each outer
    loop copy.
 
-   The legality checks intentionally reject anything outside this simple
-   pattern.  In particular, memory dependences must either be proven absent or
-   be the exact zero-distance dependences that naturally occur between accesses
-   in the same original iteration.  */
+   The legality checks establish the following induction on chunks.  On entry
+   to chunk K for outer iteration I, each accumulator equals its value just
+   before that chunk in the original execution.  Chunk zero uses the original
+   initializer; subsequent chunks read the previous chunk's unconditional
+   store.  Carry addresses are nonwrapping affine functions with disjoint
+   storage for distinct I, and distinct memory references involving a write
+   must be independent.  Thus no intervening outer iteration can overwrite a
+   carry or change an input.  Inner iterations retain their original order.
+
+   Outer scalar recurrences must be affine and independent of the inner loop.
+   The inner loop executes on every outer iteration, and its only observable
+   scalar live-outs are the carry stores.  These restrictions also ensure that
+   repeating the outer setup and control for each chunk preserves the original
+   iteration space and initializers.  In particular, loop-tree nesting alone
+   is not a sufficient legality test.  */
 
 namespace {
 
@@ -89,30 +102,29 @@ struct inner_control
   gphi *iv_phi;
   gcond *exit_cond;
   tree init;
-  tree next;
   tree bound;
-  enum tree_code code;
 };
 
 struct carry_info
 {
   gphi *phi;
-  unsigned phi_index;
+  gassign *store;
   tree store_ref;
+  tree address;
 };
 
 struct split_plan
 {
   class loop *outer;
   class loop *inner;
+  inner_control control;
   auto_vec<split_chunk, 8> chunks;
   auto_vec<carry_info, 1> carries;
+  auto_vec<gimple *, 8> address_defs;
   unsigned HOST_WIDE_INT chunk_iters;
   unsigned HOST_WIDE_INT chunk_bytes;
   unsigned HOST_WIDE_INT bytes_per_inner_iter;
 };
-
-static int transformed_loop_marker;
 
 static dump_user_location_t
 linvsplit_location (class loop *loop)
@@ -211,9 +223,7 @@ match_inner_control (class loop *inner, unsigned HOST_WIDE_INT trip,
 	  control->iv_phi = phi;
 	  control->exit_cond = cond;
 	  control->init = init;
-	  control->next = next;
 	  control->bound = rhs;
-	  control->code = gimple_cond_code (cond);
 	  return true;
 	default:
 	  continue;
@@ -242,7 +252,7 @@ strict_two_level_nest_p (class loop *outer, class loop **inner)
 static bool
 stmt_side_effects_forbidden_p (gimple *stmt)
 {
-  if (gimple_has_volatile_ops (stmt))
+  if (gimple_has_volatile_ops (stmt) || stmt_could_throw_p (cfun, stmt))
     return true;
 
   switch (gimple_code (stmt))
@@ -264,7 +274,9 @@ static bool
 copyable_loop_nest_p (class loop *outer)
 {
   basic_block *bbs = get_loop_body (outer);
-  bool ok = can_copy_bbs_p (bbs, outer->num_nodes);
+  /* slpeel_can_duplicate_loop_p checks can_copy_bbs_p once, after the
+     inexpensive legality and profitability filters.  */
+  bool ok = true;
 
   for (unsigned i = 0; ok && i < outer->num_nodes; ++i)
     {
@@ -409,62 +421,55 @@ collect_candidate_loads (class loop *outer, class loop *inner,
   return found;
 }
 
+/* The carry address check below proves absence of cross-iteration self
+   dependences.  Check every distinct pair involving a write, including pairs
+   of different carry stores.  Do not build read-read relations or retain a
+   quadratic-sized DDR graph just to discard it afterwards.  */
 static bool
-stmt_writes_ref_p (gimple *stmt, tree ref)
-{
-  if (!stmt || gimple_code (stmt) != GIMPLE_ASSIGN)
-    return false;
-
-  gassign *assign = as_a<gassign *> (stmt);
-  return (gimple_store_p (assign)
-	  && operand_equal_p (gimple_assign_lhs (assign), ref, 0));
-}
-
-static bool
-carry_store_dependence_p (ddr_p ddr, const split_plan *plan)
-{
-  if (!DR_IS_WRITE (DDR_A (ddr)) || !DR_IS_WRITE (DDR_B (ddr)))
-    return false;
-
-  for (const carry_info &carry : plan->carries)
-    if (stmt_writes_ref_p (DR_STMT (DDR_A (ddr)), carry.store_ref)
-	&& stmt_writes_ref_p (DR_STMT (DDR_B (ddr)), carry.store_ref))
-      return true;
-
-  return false;
-}
-
-static bool
-safe_data_dependences_p (class loop *outer, vec<ddr_p> *ddrs,
+safe_data_dependences_p (class loop *outer, const vec<loop_p> &loop_nest,
+			 const vec<data_reference_p> &datarefs,
 			 const split_plan *plan)
 {
-  for (ddr_p ddr : *ddrs)
-    {
-      if (DR_IS_READ (DDR_A (ddr)) && DR_IS_READ (DDR_B (ddr)))
-	continue;
+  hash_set<gimple *> carry_stores;
+  for (const carry_info &carry : plan->carries)
+    carry_stores.add (carry.store);
 
-      if (DDR_ARE_DEPENDENT (ddr) == chrec_known)
-	continue;
+  auto_vec<unsigned, 4> writes;
+  for (unsigned i = 0; i < datarefs.length (); ++i)
+    if (DR_IS_WRITE (datarefs[i]))
+      {
+	if (!carry_stores.contains (DR_STMT (datarefs[i])))
+	  {
+	    linvsplit_missed (outer, "store is not an unconditional carry");
+	    return false;
+	  }
+	writes.safe_push (i);
+      }
 
-      if (carry_store_dependence_p (ddr, plan))
-	continue;
+  for (unsigned i : writes)
+    for (unsigned j = 0; j < datarefs.length (); ++j)
+      {
+	/* Each write-write pair is checked only once.  */
+	if (i == j || (DR_IS_WRITE (datarefs[j]) && j < i))
+	  continue;
 
-      if (DDR_ARE_DEPENDENT (ddr) == chrec_dont_know
-	  || DDR_NUM_DIST_VECTS (ddr) != 1)
-	{
-	  linvsplit_missed (outer, "alias or dependence analysis is unknown");
-	  return false;
-	}
+	ddr_p ddr = initialize_data_dependence_relation (datarefs[i],
+						       datarefs[j], loop_nest);
+	compute_affine_dependence (ddr, outer);
+	tree dependent = DDR_ARE_DEPENDENT (ddr);
+	free_dependence_relation (ddr);
+	if (dependent == chrec_dont_know)
+	  {
+	    linvsplit_missed (outer, "alias or dependence analysis is unknown");
+	    return false;
+	  }
 
-      lambda_vector dist = DDR_DIST_VECT (ddr, 0);
-      if (!lambda_vector_zerop (dist, DDR_NB_LOOPS (ddr))
-	  || DR_IS_WRITE (DDR_A (ddr))
-	  || DR_IS_WRITE (DDR_B (ddr)))
-	{
-	  linvsplit_missed (outer, "loop-carried memory dependence");
-	  return false;
-	}
-    }
+	if (dependent != chrec_known)
+	  {
+	    linvsplit_missed (outer, "loop-carried memory dependence");
+	    return false;
+	  }
+      }
 
   return true;
 }
@@ -513,11 +518,23 @@ find_carry_store_for_phi (class loop *outer, class loop *inner,
       && gimple_assign_rhs1 (assign) == live_out)
     {
       tree ref = gimple_assign_lhs (assign);
-      if (expr_invariant_in_loop_p (inner, ref)
+      if (!may_be_nonaddressable_p (ref)
+	  && expr_invariant_in_loop_p (inner, ref)
 	  && !expr_invariant_in_loop_p (outer, ref))
 	{
+	  basic_block bb = gimple_bb (assign);
+	  if (!flow_bb_inside_loop_p (outer, bb)
+	      || !dominated_by_p (CDI_DOMINATORS, bb,
+				  single_exit (inner)->dest)
+	      || !dominated_by_p (CDI_DOMINATORS, outer->latch, bb)
+	      || !dominated_by_p (CDI_DOMINATORS, single_exit (outer)->src,
+				  bb))
+	    return false;
+
 	  carry->phi = phi;
+	  carry->store = assign;
 	  carry->store_ref = ref;
+	  carry->address = build_fold_addr_expr (unshare_expr (ref));
 	  return true;
 	}
     }
@@ -531,13 +548,11 @@ collect_carries (class loop *outer, class loop *inner, inner_control *control,
 {
   edge entry = loop_preheader_edge (inner);
   edge latch = loop_latch_edge (inner);
-  unsigned phi_index = 0;
 
   for (gphi_iterator psi = gsi_start_phis (inner->header);
        !gsi_end_p (psi); gsi_next (&psi))
     {
       gphi *phi = psi.phi ();
-      unsigned this_phi_index = phi_index++;
       if (virtual_operand_p (PHI_RESULT (phi)) || phi == control->iv_phi)
 	continue;
 
@@ -551,11 +566,130 @@ collect_carries (class loop *outer, class loop *inner, inner_control *control,
 	  linvsplit_missed (phi, "no carry store for inner live-out value");
 	  return false;
 	}
-      carry.phi_index = this_phi_index;
       plan->carries.safe_push (carry);
     }
 
   return true;
+}
+
+/* The outer iteration space and setup must not depend on a partial inner
+   result.  LCSSA lets us check every escaping inner value at its single exit,
+   rather than only checking the inner header PHIs.  */
+static bool
+independent_outer_iterations_p (const split_plan *plan)
+{
+  class loop *outer = plan->outer;
+  class loop *inner = plan->inner;
+  edge exit = single_exit (inner);
+  if (!single_pred_p (exit->dest)
+      || !dominated_by_p (CDI_DOMINATORS, outer->latch, exit->dest)
+      || !dominated_by_p (CDI_DOMINATORS, single_exit (outer)->src,
+			 exit->dest)
+      || !dominated_by_p (CDI_DOMINATORS, inner->latch, exit->src))
+    return false;
+
+  for (gphi_iterator psi = gsi_start_phis (outer->header);
+       !gsi_end_p (psi); gsi_next (&psi))
+    {
+      tree result = PHI_RESULT (psi.phi ());
+      if (virtual_operand_p (result))
+	continue;
+      affine_iv iv;
+      if (!simple_iv (outer, outer, result, &iv, true))
+	return false;
+    }
+
+  hash_set<tree> live_outs;
+  for (const carry_info &carry : plan->carries)
+    live_outs.add (gimple_assign_rhs1 (carry.store));
+
+  for (gphi_iterator psi = gsi_start_phis (exit->dest);
+       !gsi_end_p (psi); gsi_next (&psi))
+    {
+      tree result = PHI_RESULT (psi.phi ());
+      if (virtual_operand_p (result) || live_outs.contains (result))
+	continue;
+      use_operand_p use_p;
+      imm_use_iterator iter;
+      FOR_EACH_IMM_USE_FAST (use_p, iter, result)
+	if (!is_gimple_debug (USE_STMT (use_p)))
+	  return false;
+    }
+  return true;
+}
+
+/* Prove the write self-dependence explicitly.  A syntactically varying
+   address need not be injective (consider out[i & 1] or out[i * stride]).
+   Require a nonwrapping affine byte address whose constant stride is at
+   least the access size.  This also excludes partially overlapping stores.  */
+static bool
+disjoint_carry_iterations_p (class loop *outer, const carry_info &carry)
+{
+  affine_iv iv;
+  unsigned HOST_WIDE_INT size = ref_size_bytes (carry.store_ref);
+  if (!size
+      || !simple_iv (outer, outer, carry.address, &iv, false)
+      || !iv.no_overflow
+      || !tree_fits_shwi_p (iv.step))
+    return false;
+
+  HOST_WIDE_INT step = tree_to_shwi (iv.step);
+  unsigned HOST_WIDE_INT abs_step = step;
+  if (step < 0)
+    abs_step = -abs_step;
+  return abs_step >= size;
+}
+
+struct address_def_collector
+{
+  class loop *inner;
+  auto_vec<gimple *, 8> *defs;
+  hash_set<tree> visited;
+};
+
+/* Collect in dependency order the pure address definitions that have to move
+   before INNER.  This is a preflight check: never mutate the CFG or leave a
+   partially reconstructed address behind when a dependency is unavailable.  */
+static bool
+collect_address_name (tree name, address_def_collector *collector)
+{
+  if (SSA_NAME_IS_DEFAULT_DEF (name))
+    return true;
+
+  gimple *def = SSA_NAME_DEF_STMT (name);
+  basic_block bb = gimple_bb (def);
+  basic_block preheader = loop_preheader_edge (collector->inner)->src;
+  if (bb && dominated_by_p (CDI_DOMINATORS, preheader, bb))
+    return true;
+
+  if (!bb || flow_bb_inside_loop_p (collector->inner, bb)
+      || !is_gimple_assign (def) || gimple_vuse (def)
+      || gimple_has_side_effects (def) || gimple_could_trap_p (def)
+      || stmt_could_throw_p (cfun, def)
+      || SSA_NAME_OCCURS_IN_ABNORMAL_PHI (name))
+    return false;
+
+  if (collector->visited.add (name))
+    return true;
+
+  ssa_op_iter iter;
+  tree use;
+  FOR_EACH_SSA_TREE_OPERAND (use, def, iter, SSA_OP_USE)
+    if (!collect_address_name (use, collector))
+      return false;
+
+  collector->defs->safe_push (def);
+  return true;
+}
+
+static tree
+collect_address_defs (tree *tp, int *walk_subtrees, void *data)
+{
+  if (TREE_CODE (*tp) != SSA_NAME)
+    return NULL_TREE;
+  *walk_subtrees = 0;
+  return collect_address_name (*tp, (address_def_collector *) data)
+    ? NULL_TREE : *tp;
 }
 
 static bool
@@ -668,7 +802,8 @@ compute_split_chunks (class loop *outer, unsigned HOST_WIDE_INT inner_trip,
       return false;
     }
 
-  unsigned HOST_WIDE_INT copies = CEIL (inner_trip, chunk_iters);
+  unsigned HOST_WIDE_INT copies = (inner_trip / chunk_iters
+				  + (inner_trip % chunk_iters != 0));
   if (copies > (unsigned HOST_WIDE_INT) param_loop_invariant_split_max_copies)
     {
       linvsplit_missed (outer, "max copies limit reached");
@@ -679,12 +814,13 @@ compute_split_chunks (class loop *outer, unsigned HOST_WIDE_INT inner_trip,
   plan->chunk_bytes = chunk_iters * bytes_per_iter;
   plan->bytes_per_inner_iter = bytes_per_iter;
 
-  for (unsigned HOST_WIDE_INT low = 0; low < inner_trip; low += chunk_iters)
+  for (unsigned HOST_WIDE_INT low = 0; low < inner_trip;)
     {
       split_chunk chunk;
       chunk.low = low;
-      chunk.high = MIN (inner_trip, low + chunk_iters);
+      chunk.high = low + MIN (chunk_iters, inner_trip - low);
       plan->chunks.safe_push (chunk);
+      low = chunk.high;
     }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -723,13 +859,6 @@ analyze_loop_nest (class loop *outer, split_plan *plan)
       return false;
     }
 
-  edge outer_exit = single_exit (outer);
-  if (!slpeel_can_duplicate_loop_p (outer, outer_exit, outer_exit))
-    {
-      linvsplit_missed (outer, "loop nest is not in duplicable canonical form");
-      return false;
-    }
-
   unsigned HOST_WIDE_INT inner_trip = 0;
   if (!constant_inner_trip_count (inner, &inner_trip))
     {
@@ -737,51 +866,75 @@ analyze_loop_nest (class loop *outer, split_plan *plan)
       return false;
     }
 
-  inner_control control;
-  if (!match_inner_control (inner, inner_trip, &control))
+  if (!match_inner_control (inner, inner_trip, &plan->control))
     {
       linvsplit_missed (inner, "inner induction variable is not canonical");
       return false;
     }
 
+  plan->outer = outer;
+  plan->inner = inner;
+  if (!collect_carries (outer, inner, &plan->control, plan))
+    return false;
+
+  if (!independent_outer_iterations_p (plan))
+    {
+      linvsplit_missed (outer, "unsupported scalar or control dependence");
+      return false;
+    }
+
+  address_def_collector collector;
+  collector.inner = inner;
+  collector.defs = &plan->address_defs;
+  for (carry_info &carry : plan->carries)
+    {
+      if (!disjoint_carry_iterations_p (outer, carry))
+	{
+	  linvsplit_missed (carry.store,
+			    "carry addresses may overlap across iterations");
+	  return false;
+	}
+
+      if (walk_tree_without_duplicates (&carry.store_ref, collect_address_defs,
+					&collector))
+	{
+	  linvsplit_missed (carry.store, "carry address cannot be made available");
+	  return false;
+	}
+    }
+
   auto_vec<loop_p, 2> loop_nest;
   auto_vec<data_reference_p, 16> datarefs;
-  auto_vec<ddr_p, 16> ddrs;
-  if (!compute_data_dependences_for_loop (outer, true, &loop_nest,
-					  &datarefs, &ddrs))
+  if (!find_loop_nest (outer, &loop_nest)
+      || find_data_references_in_loop (outer, &datarefs) == chrec_dont_know
+      || datarefs.length () > (unsigned) param_loop_max_datarefs_for_datadeps)
     {
       linvsplit_missed (outer, "data reference analysis failed");
       free_data_refs (datarefs);
-      free_dependence_relations (ddrs);
       return false;
     }
 
-  plan->outer = outer;
-  plan->inner = inner;
-  bool ok = collect_carries (outer, inner, &control, plan);
-  if (!ok)
-    {
-      free_data_refs (datarefs);
-      free_dependence_relations (ddrs);
-      return false;
-    }
-
-  ok = safe_data_dependences_p (outer, &ddrs, plan);
   unsigned HOST_WIDE_INT bytes_per_iter = 0;
-  if (ok
-      && !collect_candidate_loads (outer, inner, &datarefs, &bytes_per_iter))
-    {
-      linvsplit_missed (inner, "no outer-invariant inner load");
-      ok = false;
-    }
+  bool ok = collect_candidate_loads (outer, inner, &datarefs, &bytes_per_iter);
+  if (!ok)
+    linvsplit_missed (inner, "no outer-invariant inner load");
+  else
+    ok = compute_split_chunks (outer, inner_trip, bytes_per_iter, plan);
+
+  if (ok)
+    ok = safe_data_dependences_p (outer, loop_nest, datarefs, plan);
 
   free_data_refs (datarefs);
-  free_dependence_relations (ddrs);
-
   if (!ok)
     return false;
 
-  return compute_split_chunks (outer, inner_trip, bytes_per_iter, plan);
+  edge outer_exit = single_exit (outer);
+  if (!slpeel_can_duplicate_loop_p (outer, outer_exit, outer_exit))
+    {
+      linvsplit_missed (outer, "loop nest is not in duplicable canonical form");
+      return false;
+    }
+  return true;
 }
 
 static tree
@@ -799,91 +952,70 @@ replace_phi_entry_arg (gphi *phi, tree value)
 }
 
 static void
-patch_inner_loop_bounds (class loop *inner, const split_chunk &chunk)
+patch_inner_loop_bounds (class loop *inner, const inner_control &control,
+			 const split_chunk &chunk)
 {
-  unsigned HOST_WIDE_INT trip;
-  inner_control control;
-  gcc_assert (constant_inner_trip_count (inner, &trip));
-  gcc_assert (match_inner_control (inner, trip, &control));
-
   tree low = build_index_cst_like (control.init, chunk.low);
   tree high = build_index_cst_like (control.bound, chunk.high);
   replace_phi_entry_arg (control.iv_phi, low);
   gimple_cond_set_rhs (control.exit_cond, high);
   update_stmt (control.exit_cond);
+  scale_loop_profile (inner, profile_probability::always (),
+		      chunk.high - chunk.low - 1);
 }
 
-static gphi *
-find_matching_carry_phi (class loop *inner, const carry_info &carry)
+/* Use the copier's SSA map while it is live, instead of relying on PHI
+   positions or rediscovering carry stores after changing loop bounds.  */
+static tree
+copied_name (tree name)
 {
-  unsigned phi_index = 0;
-  for (gphi_iterator psi = gsi_start_phis (inner->header);
-       !gsi_end_p (psi); gsi_next (&psi))
-    {
-      gphi *phi = psi.phi ();
-      if (phi_index++ != carry.phi_index)
-	continue;
-
-      if (types_compatible_p (TREE_TYPE (PHI_RESULT (phi)),
-			      TREE_TYPE (PHI_RESULT (carry.phi))))
-	return phi;
-      return NULL;
-    }
-
-  return NULL;
+  if (TREE_CODE (name) == SSA_NAME && !SSA_NAME_IS_DEFAULT_DEF (name)
+      && get_bb_copy (gimple_bb (SSA_NAME_DEF_STMT (name))))
+    if (tree copy = get_current_def (name))
+      return copy;
+  return name;
 }
 
 static tree
-rematerialize_address_ssa (tree addr)
+copy_reference_name (tree *tp, int *walk_subtrees, void *)
 {
-  if (TREE_CODE (addr) != SSA_NAME || SSA_NAME_IS_DEFAULT_DEF (addr))
-    return addr;
-
-  gimple *def = SSA_NAME_DEF_STMT (addr);
-  if (!def || gimple_code (def) != GIMPLE_ASSIGN || gimple_vuse (def))
-    return addr;
-
-  return unshare_expr (gimple_assign_rhs_to_tree (def));
+  if (TREE_CODE (*tp) == SSA_NAME)
+    {
+      *tp = copied_name (*tp);
+      *walk_subtrees = 0;
+    }
+  return NULL_TREE;
 }
 
 static void
-insert_carry_loads (class loop *outer, class loop *inner,
-		    const split_plan *plan)
+insert_carry_load (class loop *inner, const carry_info &carry)
 {
-  edge entry = loop_preheader_edge (inner);
-  gimple_stmt_iterator gsi = gsi_last_bb (entry->src);
-
-  for (const carry_info &carry : plan->carries)
-    {
-      gphi *phi = find_matching_carry_phi (inner, carry);
-      gcc_assert (phi);
-
-      carry_info local_carry;
-      if (!find_carry_store_for_phi (outer, inner, phi, &local_carry))
-	{
-	  linvsplit_missed (phi, "no carry store in copied loop");
-	  continue;
-	}
-
-      tree addr = build_fold_addr_expr (unshare_expr (local_carry.store_ref));
-      addr = rematerialize_address_ssa (addr);
-      addr = force_gimple_operand_gsi (&gsi, addr, true, NULL_TREE, false,
-				       GSI_CONTINUE_LINKING);
-      tree ref = build2 (MEM_REF, TREE_TYPE (local_carry.store_ref), addr,
-			 build_int_cst (reference_alias_ptr_type
-					  (local_carry.store_ref), 0));
-      tree lhs = make_temp_ssa_name (TREE_TYPE (ref), NULL, "linvsplit_carry");
-      gassign *load = gimple_build_assign (lhs, ref);
-      gsi_insert_after (&gsi, load, GSI_NEW_STMT);
-      replace_phi_entry_arg (phi, lhs);
-    }
+  /* Preserve the store reference's alignment, alias and storage attributes.  */
+  tree ref = unshare_expr (carry.store_ref);
+  tree lhs = make_temp_ssa_name (TREE_TYPE (ref), NULL, "linvsplit_carry");
+  gassign *load = gimple_build_assign (lhs, ref);
+  gsi_insert_on_edge_immediate (loop_preheader_edge (inner), load);
+  replace_phi_entry_arg (carry.phi, lhs);
 }
 
-static bool
+static void
 apply_split_plan (split_plan *plan)
 {
+  /* All legality checks have succeeded.  Make the complete address DAG
+     available before the inner loop, then let loop copying rename it.  */
+  basic_block preheader = loop_preheader_edge (plan->inner)->src;
+  for (gimple *def : plan->address_defs)
+    {
+      gimple_stmt_iterator gsi = gsi_for_stmt (def);
+      gsi_move_to_bb_end (&gsi, preheader);
+    }
   auto_vec<class loop *, 8> outer_loops;
   outer_loops.safe_push (plan->outer);
+  auto_vec<inner_control, 8> controls;
+  controls.safe_push (plan->control);
+  auto_vec<carry_info, 8> carries;
+  carries.safe_splice (plan->carries);
+  unsigned num_carries = plan->carries.length ();
 
   initialize_original_copy_tables ();
   for (unsigned i = 1; i < plan->chunks.length (); ++i)
@@ -894,13 +1026,26 @@ apply_split_plan (split_plan *plan)
 	= slpeel_tree_duplicate_loop_to_edge_cfg (base, base_exit, base,
 						  base_exit, base_exit, NULL,
 						  false /* flow_loops */);
-      if (!copy)
-	{
-	  free_original_copy_tables ();
-	  linvsplit_missed (base, "loop copy failed");
-	  return false;
-	}
+      /* The preflight checked duplicability, and BASE_EXIT is by
+	 construction the exit edge required by the copying interface.  */
+      gcc_assert (copy);
       outer_loops.safe_push (copy);
+      inner_control control = controls[i - 1];
+      control.iv_phi = as_a<gphi *> (SSA_NAME_DEF_STMT
+				    (copied_name (PHI_RESULT (control.iv_phi))));
+      control.exit_cond = as_a<gcond *> (gsi_stmt (gsi_last_bb
+			 (get_bb_copy (gimple_bb (control.exit_cond)))));
+      controls.safe_push (control);
+      for (unsigned j = 0; j < num_carries; ++j)
+	{
+	  carry_info carry = carries[(i - 1) * num_carries + j];
+	  carry.phi = as_a<gphi *> (SSA_NAME_DEF_STMT
+				   (copied_name (PHI_RESULT (carry.phi))));
+	  carry.store_ref = unshare_expr (carry.store_ref);
+	  walk_tree_without_duplicates (&carry.store_ref, copy_reference_name,
+					NULL);
+	  carries.safe_push (carry);
+	}
       reset_original_copy_tables ();
     }
   free_original_copy_tables ();
@@ -909,12 +1054,10 @@ apply_split_plan (split_plan *plan)
     {
       class loop *outer = outer_loops[i];
       class loop *inner = outer->inner;
-      outer->aux = &transformed_loop_marker;
-      if (inner)
-	inner->aux = &transformed_loop_marker;
-      patch_inner_loop_bounds (inner, plan->chunks[i]);
+      patch_inner_loop_bounds (inner, controls[i], plan->chunks[i]);
       if (i != 0)
-	insert_carry_loads (outer, inner, plan);
+	for (unsigned j = 0; j < num_carries; ++j)
+	  insert_carry_load (inner, carries[i * num_carries + j]);
     }
 
   if (dump_file)
@@ -932,8 +1075,6 @@ apply_split_plan (split_plan *plan)
 		     plan->chunks.length (),
 		     (unsigned long long) plan->chunk_iters,
 		     (unsigned long long) plan->chunk_bytes);
-
-  return true;
 }
 
 static bool
@@ -966,42 +1107,30 @@ tree_ssa_loop_invariant_split (function *fun)
   gcc_assert (scev_initialized_p ());
   calculate_dominance_info (CDI_DOMINATORS);
 
-  const unsigned max_transforms = param_loop_invariant_split_max_copies;
-  unsigned transforms = 0;
-  bool try_again;
-  do
-    {
-      try_again = false;
-      for (auto loop : loops_list (fun, LI_FROM_INNERMOST))
-	{
-	  class loop *inner = NULL;
-	  if (loop->aux == &transformed_loop_marker)
-	    continue;
-	  if (!strict_two_level_nest_p (loop, &inner))
-	    continue;
-	  if (inner->aux == &transformed_loop_marker)
-	    continue;
-
-	  split_plan plan;
-	  if (!analyze_loop_nest (loop, &plan))
-	    continue;
-
-	  if (apply_split_plan (&plan))
-	    {
-	      changed = true;
-	      try_again = true;
-	      ++transforms;
-	      scev_reset ();
-	      free_numbers_of_iterations_estimates (fun);
-	      break;
-	    }
-	}
-    }
-  while (try_again && transforms < max_transforms);
-
+  /* Strict two-level candidates are disjoint.  Snapshot them before copying:
+     a transformed nest cannot expose another eligible original nest, and a
+     failed candidate need not be reanalyzed after every successful split.
+     The per-nest max-copies parameter is not a function-wide transform
+     limit.  */
+  auto_vec<class loop *, 8> candidates;
   for (auto loop : loops_list (fun, LI_FROM_INNERMOST))
-    if (loop->aux == &transformed_loop_marker)
-      loop->aux = NULL;
+    {
+      class loop *inner = NULL;
+      if (strict_two_level_nest_p (loop, &inner))
+	candidates.safe_push (loop);
+    }
+
+  for (class loop *loop : candidates)
+    {
+      split_plan plan;
+      if (!analyze_loop_nest (loop, &plan))
+	continue;
+      apply_split_plan (&plan);
+      changed = true;
+      /* Freeing the estimates also clears loop->nb_iterations.  */
+      scev_reset_htab ();
+      free_numbers_of_iterations_estimates (fun);
+    }
 
   if (!changed)
     return 0;
