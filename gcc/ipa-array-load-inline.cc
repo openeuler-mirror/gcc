@@ -738,26 +738,6 @@ stmt_executes_before_bb_end_p (gimple *stmt, basic_block bb)
   return false;
 }
 
-static loop_p
-iv_loop_for_index (tree index, gimple *use_stmt)
-{
-  index = strip_ssa_copy (index);
-  if (!index || TREE_CODE (index) != SSA_NAME)
-    return nullptr;
-
-  gimple *def = SSA_NAME_DEF_STMT (index);
-  if (!def || gimple_code (def) != GIMPLE_PHI || !current_loops)
-    return nullptr;
-
-  basic_block header = gimple_bb (as_a<gphi *> (def));
-  loop_p loop = header ? header->loop_father : nullptr;
-  if (!loop || loop == current_loops->tree_root || header != loop->header
-      || !flow_bb_inside_loop_p (loop, gimple_bb (use_stmt)))
-    return nullptr;
-
-  return loop;
-}
-
 static bool
 loop_has_positive_constant_iterations_p (loop_p loop)
 {
@@ -799,7 +779,9 @@ loop_initialization_precedes_stmt_p (array_access &store, gimple *stmt)
   auto_vec<loop_p, 4> loops;
   for (unsigned i = 0; i < store.indices.length (); ++i)
     {
-      loop_p loop = iv_loop_for_index (store.indices[i], store.stmt);
+      /* These loops were recorded only after validating every index cast.
+	 The pass retains loop structures until all candidates are processed.  */
+      loop_p loop = store.index_loops[i];
       if (!loop)
 	continue;
 
@@ -1072,7 +1054,9 @@ loop_initialization_precedes_function_exit_p (array_access &store)
   auto_vec<loop_p, 4> loops;
   for (unsigned i = 0; i < store.indices.length (); ++i)
     {
-      loop_p loop = iv_loop_for_index (store.indices[i], store.stmt);
+      /* These loops were recorded only after validating every index cast.
+	 The pass retains loop structures until all candidates are processed.  */
+      loop_p loop = store.index_loops[i];
       if (!loop)
 	continue;
 
@@ -2112,14 +2096,6 @@ guarded_load_prover::load_safe (array_access &load)
   return safe;
 }
 
-static tree
-canonical_index (tree index)
-{
-  index = strip_ssa_copy (index);
-  STRIP_NOPS (index);
-  return strip_ssa_copy (index);
-}
-
 static bool
 simple_step_one_phi_p (gphi *phi, loop_p loop)
 {
@@ -2144,19 +2120,60 @@ simple_step_one_phi_p (gphi *phi, loop_p loop)
 	 && tree_int_cst_equal (op1, integer_one_node);
 }
 
+/* Record every type in an integral copy/conversion chain.  This does not
+   establish that the conversions preserve values: the complete IV range must
+   fit *every* recorded type before the caller can use the underlying IV.
+   In particular, a widening cast must not hide an earlier truncation.  */
+static tree
+index_before_conversions (tree index, auto_vec<tree, 8> &types)
+{
+  while (index && INTEGRAL_TYPE_P (TREE_TYPE (index)))
+    {
+      types.safe_push (TREE_TYPE (index));
+      if (TREE_CODE (index) != SSA_NAME)
+	break;
+      gimple *def = SSA_NAME_DEF_STMT (index);
+      if (!is_gimple_assign (def)
+	  || (!gimple_assign_single_p (def)
+	      && !CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (def))))
+	break;
+      tree rhs = gimple_assign_rhs1 (def);
+      if (TREE_CODE (rhs) != SSA_NAME && TREE_CODE (rhs) != INTEGER_CST)
+	break;
+      index = rhs;
+    }
+  return index;
+}
+
+/* The recognized indices are nonnegative.  Requiring the largest value to
+   fit each type makes every conversion an identity on the entire interval,
+   including changes of signedness and safe narrowing conversions.  */
+static bool
+index_range_fits_types_p (unsigned high, const auto_vec<tree, 8> &types)
+{
+  widest_int max_index = high;
+  for (tree type : types)
+    if (!wi::fits_to_tree_p (max_index, type))
+      return false;
+  return true;
+}
+
 static bool
 simple_iv_range (tree index, gimple *use_stmt, unsigned &low, unsigned &high,
 		 loop_p &source_loop)
 {
   source_loop = nullptr;
-  index = strip_ssa_copy (index);
+  auto_vec<tree, 8> types;
+  index = index_before_conversions (index, types);
+  if (!index || !INTEGRAL_TYPE_P (TREE_TYPE (index)))
+    return false;
   if (tree_uhwi_p (index, low))
     {
       high = low;
-      return true;
+      return index_range_fits_types_p (high, types);
     }
 
-  if (!index || TREE_CODE (index) != SSA_NAME)
+  if (TREE_CODE (index) != SSA_NAME)
     return false;
 
   gimple *def = SSA_NAME_DEF_STMT (index);
@@ -2194,6 +2211,8 @@ simple_iv_range (tree index, gimple *use_stmt, unsigned &low, unsigned &high,
 
   low = 0;
   high = niter_value - 1;
+  if (!index_range_fits_types_p (high, types))
+    return false;
   source_loop = loop;
   return true;
 }
@@ -2224,7 +2243,6 @@ access_ranges_p (array_candidate &cand, array_access &access)
   if (cand.dims.length () > 1)
     {
       auto_vec<loop_p, 4> varying_loops;
-      auto_vec<unsigned, 4> varying_dims;
       for (unsigned i = 0; i < access.index_loops.length (); ++i)
 	{
 	  if (access.lows[i] == access.highs[i])
@@ -2237,13 +2255,6 @@ access_ranges_p (array_candidate &cand, array_access &access)
 	  for (unsigned j = 0; j < varying_loops.length (); ++j)
 	    {
 	      loop_p seen = varying_loops[j];
-	      unsigned seen_dim = varying_dims[j];
-	      tree idx = canonical_index (access.indices[i]);
-	      tree seen_idx = canonical_index (access.indices[seen_dim]);
-	      if (idx == seen_idx || access.indices[i] == access.indices[seen_dim]
-		  || operand_equal_p (idx, seen_idx))
-		return false;
-
 	      if (seen == loop || seen->num == loop->num)
 		return false;
 
@@ -2253,7 +2264,6 @@ access_ranges_p (array_candidate &cand, array_access &access)
 	    }
 
 	  varying_loops.safe_push (loop);
-	  varying_dims.safe_push (i);
 	}
     }
 
