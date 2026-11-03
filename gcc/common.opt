@@ -1136,7 +1136,7 @@ Do the loop crc conversion.
 
 floop-sve-mode-opt
 Common Var(flag_loop_sve_mode_opt) Optimization
-Optimization of adding sve mode for some loop
+Optimization of adding sve mode for some loop.
 
 fauto-inc-dec
 Common Var(flag_auto_inc_dec) Init(1) Optimization
@@ -2075,7 +2075,7 @@ Does nothing. Preserved for backward compatibility.
 
 fipa-alignment-propagation
 Common Var(flag_ipa_alignment_propagation) Init(0) Optimization
-Propagate alignment of local variable's address
+Propagate alignment of local variable's address.
 
 fipa-localize-array
 Common Var(flag_ipa_localize_array) Init(0) Optimization
@@ -3908,10 +3908,10 @@ Allow RTL if-conversion pass to deal with complicated cmps (can increase compila
 
 ffind-with-sve
 Common Var(flag_find_with_sve) Init(0) Optimization
-Enable replace std::find with sve
+Enable replace std::find with sve.
 
 fsve-expand-std-find-threshold
 Common Var(sve_expand_std_find_threshold) Init(8) Optimization
-Minimal length of the array to search
+Minimal length of the array to search.
 
 ; This comment is to ensure we retain the blank line above.
