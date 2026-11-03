@@ -1061,7 +1061,7 @@ BUILD_LIBDEPS= $(BUILD_LIBIBERTY)
 # How to link with both our special library facilities
 # and the system's installed libraries.
 LIBS = @LIBS@ libcommon.a $(CPPLIB) $(LIBINTL) $(LIBICONV) $(LIBBACKTRACE) \
-	$(LIBIBERTY) $(LIBDECNUMBER) $(HOST_LIBS)
+	$(LIBIBERTY) $(LIBDECNUMBER) $(HOST_LIBS) @DL_LIB@
 BACKENDLIBS = $(ISLLIBS) $(GMPLIBS) $(PLUGINLIBS) $(HOST_LIBS) \
 	$(ZLIB) $(ZSTD_LIB)
 # Any system libraries needed just for GNAT.
