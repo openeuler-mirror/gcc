@@ -1,6 +1,8 @@
 /* { dg-do compile } */
 /* { dg-options "-O3 -fno-devirtualize -fno-ipa-cp -fno-ipa-cp-clone -fipa-array-load-inline -fdump-ipa-array-load-inline-details" } */
 
+/* A vtable address reference alone does not prove that all virtual callers
+   are visible.  Keep the load until object escape is accounted for.  */
 static unsigned tbl[4];
 
 namespace {
@@ -42,5 +44,5 @@ main ()
 }
 
 /* { dg-final { scan-ipa-dump "array-load-inline: candidate array tbl" "array-load-inline" } } */
-/* { dg-final { scan-ipa-dump "array-load-inline: inlined load of tbl" "array-load-inline" } } */
-/* { dg-final { scan-ipa-dump-not "array-load-inline: reject tbl: init does not dominate load" "array-load-inline" } } */
+/* { dg-final { scan-ipa-dump-not "array-load-inline: inlined load of tbl" "array-load-inline" } } */
+/* { dg-final { scan-ipa-dump "array-load-inline: reject tbl: load function is externally reachable" "array-load-inline" } } */

@@ -44,38 +44,80 @@ extern void release_defs (gimple *);
 
 namespace {
 
-/* Keep IPA analyses scoped to NODE and restore the previous function context
-   on exit.  The source branch provides this helper from a separate IPA utility
-   commit; keep the pass self-contained on GCC 14.  */
+/* A candidate has one explicit, nonvolatile store region covering every
+   element.  Its value must be a pure expression of the array indices.  For
+   each load, prove that the entire region has been initialized, either
+   locally or on every possible entry to the function.  A dominating dynamic
+   store alone does not establish completion of an initialization loop.
+
+   The guard fallback must account for every nonzero guard write, and prove
+   that the nonzero branch edge is unavoidable on a path to the load.  Neither
+   an address reference in a vtable nor a visible function body closes the
+   set of possible callers.  Unknown entries or escaping guards are rejected.
+   Loads and stores change only after these proofs and formula validation.  */
+
+/* Retain function analyses until the pass finishes.  Nested proofs may revisit
+   a function, so individual queries must not finalize loops or free dominance
+   information owned by another query.  The rewrites do not change CFGs.  */
+class function_analysis_cache
+{
+  struct state
+  {
+    function *fn;
+    bool had_dominators;
+    bool initialized_loops;
+  };
+  auto_vec<state> functions;
+  hash_map<function *, unsigned> positions;
+
+public:
+  void prepare (unsigned loop_flags)
+  {
+    unsigned *slot = positions.get (cfun);
+    unsigned pos;
+    if (!slot)
+      {
+	pos = functions.length ();
+	state entry = { cfun, dom_info_available_p (CDI_DOMINATORS), false };
+	functions.safe_push (entry);
+	positions.put (cfun, pos);
+      }
+    else
+      pos = *slot;
+
+    calculate_dominance_info (CDI_DOMINATORS);
+    if (loop_flags && !functions[pos].initialized_loops)
+      {
+	loop_optimizer_init (loop_flags);
+	functions[pos].initialized_loops = true;
+      }
+  }
+
+  ~function_analysis_cache ()
+  {
+    for (const state &entry : functions)
+      {
+	push_cfun (entry.fn);
+	if (entry.initialized_loops)
+	  loop_optimizer_finalize ();
+	if (!entry.had_dominators)
+	  free_dominance_info (CDI_DOMINATORS);
+	pop_cfun ();
+      }
+  }
+};
+
 class cfun_saver
 {
 public:
-  explicit cfun_saver (cgraph_node *node)
-    : need_finalize_loop_optimizer (false)
+  cfun_saver (function_analysis_cache &analyses, cgraph_node *node,
+	      unsigned loop_flags = 0)
   {
     push_cfun (DECL_STRUCT_FUNCTION (node->decl));
-    calculate_dominance_info (CDI_DOMINATORS);
-    calculate_dominance_info (CDI_POST_DOMINATORS);
+    analyses.prepare (loop_flags);
   }
 
-  cfun_saver (cgraph_node *node, unsigned loop_flags)
-    : cfun_saver (node)
-  {
-    loop_optimizer_init (loop_flags);
-    need_finalize_loop_optimizer = true;
-  }
-
-  ~cfun_saver ()
-  {
-    if (need_finalize_loop_optimizer)
-      loop_optimizer_finalize ();
-    free_dominance_info (CDI_POST_DOMINATORS);
-    free_dominance_info (CDI_DOMINATORS);
-    pop_cfun ();
-  }
-
-private:
-  bool need_finalize_loop_optimizer;
+  ~cfun_saver () { pop_cfun (); }
 };
 
 static bool
@@ -93,7 +135,7 @@ fixed_array_dims_p (tree type, auto_vec<unsigned> &dims, tree &elt_type)
 	return false;
 
       unsigned HOST_WIDE_INT maxv = tree_to_uhwi (TYPE_MAX_VALUE (domain));
-      if (maxv == HOST_WIDE_INT_M1U)
+      if (maxv >= UINT_MAX)
 	return false;
 
       dims.safe_push ((unsigned) maxv + 1);
@@ -155,55 +197,6 @@ expr_contains_decl_p (tree expr, tree decl)
   return false;
 }
 
-static bool
-loose_array_ref_decl_p (tree expr, tree &decl, unsigned &depth)
-{
-  if (!expr)
-    return false;
-
-  if (TREE_CODE (expr) == ARRAY_REF)
-    {
-      depth = 0;
-      tree t = expr;
-      while (t && TREE_CODE (t) == ARRAY_REF)
-	{
-	  ++depth;
-	  t = TREE_OPERAND (t, 0);
-	}
-
-      if (t && TREE_CODE (t) == VAR_DECL)
-	{
-	  decl = t;
-	  return true;
-	}
-    }
-
-  tree found_decl = nullptr;
-  unsigned found_depth = 0;
-  tree_code code = TREE_CODE (expr);
-  int len = TREE_CODE_LENGTH (code);
-  for (int i = 0; i < len; ++i)
-    {
-      tree op_decl = nullptr;
-      unsigned op_depth = 0;
-      if (!loose_array_ref_decl_p (TREE_OPERAND (expr, i), op_decl, op_depth))
-	continue;
-
-      if (found_decl && found_decl != op_decl)
-	return false;
-
-      found_decl = op_decl;
-      found_depth = op_depth;
-    }
-
-  if (!found_decl)
-    return false;
-
-  decl = found_decl;
-  depth = found_depth;
-  return true;
-}
-
 static void
 dump_candidate (tree decl, const auto_vec<unsigned> &dims)
 {
@@ -226,9 +219,7 @@ struct array_access
 {
   cgraph_node *node = nullptr;
   gimple *stmt = nullptr;
-  bool store = false;
   tree rhs = nullptr;
-  tree lhs = nullptr;
   auto_vec<tree, 4> indices;
   auto_vec<unsigned, 4> lows;
   auto_vec<unsigned, 4> highs;
@@ -238,6 +229,15 @@ struct array_access
 class array_candidate
 {
 public:
+  explicit array_candidate (function_analysis_cache &cache)
+    : analyses (cache)
+  {}
+
+  function_analysis_cache &analyses;
+  hash_map<gimple *, bool> initialized_before;
+  hash_map<cgraph_node *, bool> initializes_on_return;
+  hash_map<gimple *, bool> load_dominance;
+
   varpool_node *var = nullptr;
   tree decl = nullptr;
   tree elem_type = nullptr;
@@ -260,7 +260,7 @@ public:
   }
 
   bool init (varpool_node *);
-  array_access *record_access (cgraph_node *, gimple *, bool, tree, tree,
+  array_access *record_access (cgraph_node *, gimple *, bool, tree,
 			       const auto_vec<tree> &);
 };
 
@@ -347,10 +347,12 @@ public:
 					 auto_vec<cgraph_node *, 16> &);
   entry_proof_tree_node *lookup (cgraph_node *);
   void clear ();
+  void collect_component (cgraph_node *node,
+			  auto_vec<cgraph_node *, 16> &component)
+  { scc_cache.collect_component (node, component); }
 
 private:
   entry_proof_tree_node &entry_tree_for_node (cgraph_node *);
-  bool all_store_nodes_called_before_stmt_cached_p (cgraph_node *, gimple *);
   void record_entry_component (const auto_vec<cgraph_node *, 16> &,
 			       entry_proof_tree_node &);
   bool callsite_has_initialized_p (cgraph_edge *,
@@ -362,15 +364,10 @@ private:
   bool direct_callers_prove_entry_init_p
     (const auto_vec<cgraph_node *, 16> &, auto_vec<cgraph_node *, 16> &,
      entry_proof_tree_node &, bool &);
-  bool indirect_vtable_callers_prove_entry_init_p
-    (const auto_vec<cgraph_node *, 16> &, auto_vec<cgraph_node *, 16> &,
-     entry_proof_tree_node &, bool &);
-  bool finish_entry_proof (const auto_vec<cgraph_node *, 16> &, bool, bool,
-			   entry_proof_tree_node &);
+  bool finish_entry_proof (bool, bool, entry_proof_tree_node &);
 
   array_candidate *cand = nullptr;
   entry_proof_tree_map nodes;
-  hash_map<gimple *, bool> store_before_stmt_cache;
   cgraph_scc_cache scc_cache;
   auto_vec<entry_proof_tree_node *, 16> allocated_nodes;
 };
@@ -393,6 +390,9 @@ tree_uhwi_p (tree t, unsigned &value)
   if (!t || TREE_CODE (t) != INTEGER_CST || !tree_fits_uhwi_p (t))
     return false;
 
+  if (tree_to_uhwi (t) > UINT_MAX)
+    return false;
+
   value = (unsigned) tree_to_uhwi (t);
   return true;
 }
@@ -408,6 +408,10 @@ strip_ssa_copy (tree var)
 
       tree rhs = gimple_assign_rhs1 (stmt);
       if (!rhs || TREE_CODE (rhs) != SSA_NAME)
+	break;
+
+      if (gimple_assign_cast_p (stmt)
+	  && !tree_nop_conversion_p (TREE_TYPE (var), TREE_TYPE (rhs)))
 	break;
 
       var = rhs;
@@ -427,8 +431,8 @@ dump_candidate_reject (array_candidate &cand)
 class scev_context
 {
 public:
-  scev_context ()
-    : active (!scev_initialized_p ())
+  explicit scev_context (bool enabled = true)
+    : active (enabled && !scev_initialized_p ())
   {
     if (active)
       scev_initialize ();
@@ -483,14 +487,12 @@ array_candidate::init (varpool_node *node)
 
 array_access *
 array_candidate::record_access (cgraph_node *node, gimple *stmt,
-				bool is_store, tree lhs, tree rhs,
+				bool is_store, tree rhs,
 				const auto_vec<tree> &indices)
 {
   array_access *access = new array_access;
   access->node = node;
   access->stmt = stmt;
-  access->store = is_store;
-  access->lhs = lhs;
   access->rhs = rhs;
   for (unsigned i = 0; i < indices.length (); ++i)
     access->indices.safe_push (indices[i]);
@@ -849,76 +851,41 @@ loop_initialization_precedes_stmt_p (array_access &store, gimple *stmt)
 					   loop_latch_edge (innermost)->src);
 }
 
+/* Statement dominance only proves that one dynamic store has executed.
+   For a varying region it cannot establish that all elements were written.  */
 static bool
-stores_in_node_before_stmt_p (array_candidate &cand, cgraph_node *node,
-			      gimple *stmt)
+single_element_store_p (const array_access &store)
 {
-  scoped_dump_file no_dump;
-  cfun_saver save (node, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  calculate_dominance_info (CDI_DOMINATORS);
-  scev_context scev;
-
-  for (unsigned i = 0; i < cand.stores.length (); ++i)
-    {
-      array_access *store = cand.stores[i];
-      if (store->node != node)
-	continue;
-
-      if (!stmt_dominated_by_p (stmt, store->stmt)
-	  && !loop_initialization_precedes_stmt_p (*store, stmt))
-	return false;
-    }
-
+  for (unsigned i = 0; i < store.lows.length (); ++i)
+    if (store.lows[i] != store.highs[i])
+      return false;
   return true;
+}
+
+static bool
+store_initialization_precedes_stmt_p (array_access &store, gimple *stmt)
+{
+  if (single_element_store_p (store))
+    return stmt_dominated_by_p (stmt, store.stmt);
+  return loop_initialization_precedes_stmt_p (store, stmt);
 }
 
 static bool
 analyzable_node_p (cgraph_node *node)
 {
-  if (!node || !node->real_symbol_p () || !node->definition
-      || !node->has_gimple_body_p () || node->inlined_to)
-    return false;
-
-  if (!node->address_taken)
-    return true;
-
-  if (node->externally_visible || DECL_EXTERNAL (node->decl)
-      || node->used_from_other_partition)
-    return false;
-
-  ipa_ref *ref = nullptr;
-  bool saw_addr_ref = false;
-  for (unsigned i = 0; node->iterate_referring (i, ref); ++i)
-    {
-      if (ref->use != IPA_REF_ADDR)
-	continue;
-
-      saw_addr_ref = true;
-      if (!ref->referring || !VAR_P (ref->referring->decl)
-	  || !DECL_VIRTUAL_P (ref->referring->decl))
-	return false;
-    }
-
-  return saw_addr_ref;
-}
-
-static bool
-node_has_only_vtable_address_refs_p (cgraph_node *node)
-{
   return node && node->real_symbol_p () && node->definition
-	 && node->has_gimple_body_p () && !node->inlined_to
-	 && node->address_taken && analyzable_node_p (node);
+	 && node->has_gimple_body_p () && !node->inlined_to;
 }
 
+/* Only these nodes may derive an entry fact from their recorded callers.
+   Public symbols, aliases and indirect entries can have unrecorded callers.  */
 static bool
-indirect_edge_targets_node_p (cgraph_edge *edge, cgraph_node *node)
+closed_entry_p (cgraph_node *node)
 {
-  if (!edge->indirect_unknown_callee || !edge->indirect_info
-      || !edge->indirect_info->polymorphic)
-    return false;
-
-  vec<cgraph_node *> targets = possible_polymorphic_call_targets (edge);
-  return targets.contains (node);
+  return analyzable_node_p (node)
+	 && !node->externally_visible && !DECL_EXTERNAL (node->decl)
+	 && !node->used_from_other_partition && !node->address_taken
+	 && !node->force_output && !node->has_aliases_p ();
 }
 
 static void
@@ -935,11 +902,6 @@ dump_unanalyzable_node_details (cgraph_node *node)
 	   node->real_symbol_p (), node->definition,
 	   node->has_gimple_body_p (), node->inlined_to != nullptr,
 	   node->address_taken);
-
-  if (node_has_only_vtable_address_refs_p (node))
-    fprintf (dump_file,
-	     "array-load-inline:     address is only recorded in visible "
-	     "virtual tables\n");
 
   if (!node->address_taken)
     return;
@@ -1169,8 +1131,8 @@ store_node_initializes_before_return_p (array_candidate &cand,
     return false;
 
   scoped_dump_file no_dump;
-  cfun_saver save (store_node, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  calculate_dominance_info (CDI_DOMINATORS);
+  cfun_saver save (cand.analyses, store_node,
+		  LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
   scev_context scev;
 
   bool saw_store = false;
@@ -1181,76 +1143,69 @@ store_node_initializes_before_return_p (array_candidate &cand,
 	continue;
 
       saw_store = true;
-      if (!stmt_dominates_function_exit_p (store->stmt)
-	  && !loop_initialization_precedes_function_exit_p (*store))
+      if (single_element_store_p (*store)
+	  ? !stmt_dominates_function_exit_p (store->stmt)
+	  : !loop_initialization_precedes_function_exit_p (*store))
 	return false;
     }
 
   return saw_store;
 }
 
+/* Coverage currently admits one store region.  Memoize both successful and
+   failed callee summaries, so a diamond-shaped call graph is visited once.
+   A recursive dependency is conservatively false; it is not an entry fact.  */
 static bool
 callee_guarantees_store_node_p (array_candidate &cand, cgraph_node *callee,
 				cgraph_node *store_node,
 				auto_vec<cgraph_node *, 16> &stack)
 {
-  if (callee == store_node)
-    return store_node_initializes_before_return_p (cand, store_node);
+  gcc_assert (cand.stores.length () == 1);
+  if (bool *cached = cand.initializes_on_return.get (callee))
+    return *cached;
+  if (stack.contains (callee))
+    return false;
 
-  return node_calls_store_node_before_return_p (cand, callee, store_node, stack);
+  bool result = callee == store_node
+		? store_node_initializes_before_return_p (cand, store_node)
+		: node_calls_store_node_before_return_p (cand, callee,
+							 store_node, stack);
+  cand.initializes_on_return.put (callee, result);
+  return result;
 }
 
 static bool
 all_store_nodes_called_before_stmt_p (array_candidate &cand, cgraph_node *caller,
 				      gimple *stmt)
 {
+  if (bool *cached = cand.initialized_before.get (stmt))
+    return *cached;
+
+  gcc_assert (cand.stores.length () == 1);
   scoped_dump_file no_dump;
-  cfun_saver save (caller, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  calculate_dominance_info (CDI_DOMINATORS);
-  scev_context scev;
-
-  auto_vec<cgraph_node *, 8> seen;
-  for (unsigned i = 0; i < cand.stores.length (); ++i)
-    {
-      cgraph_node *store_node = cand.stores[i]->node;
-      if (seen.contains (store_node))
-	continue;
-      seen.safe_push (store_node);
-
-      bool found = false;
-      if (store_node == caller)
-	{
-	  found = true;
-	  for (unsigned j = 0; j < cand.stores.length (); ++j)
-	    {
-	      array_access *store = cand.stores[j];
-	      if (store->node != caller)
-		continue;
-
-	      if (!stmt_dominated_by_p (stmt, store->stmt)
-		  && !loop_initialization_precedes_stmt_p (*store, stmt))
-		return false;
-	    }
-	}
-      else
-	for (cgraph_edge *e = caller->callees; e; e = e->next_callee)
+  array_access &store = *cand.stores[0];
+  bool local = store.node == caller;
+  cfun_saver save (cand.analyses, caller,
+		  local ? LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS : 0);
+  scev_context scev (local);
+  bool initialized = false;
+  if (store.node == caller)
+    initialized = store_initialization_precedes_stmt_p (store, stmt);
+  else
+    for (cgraph_edge *e = caller->callees; e; e = e->next_callee)
+      {
+	auto_vec<cgraph_node *, 16> stack;
+	if (e->callee && e->call_stmt && e->binds_to_current_def_p ()
+	    && stmt_dominated_by_p (stmt, e->call_stmt)
+	    && callee_guarantees_store_node_p (cand, e->callee,
+					       store.node, stack))
 	  {
-	    auto_vec<cgraph_node *, 16> stack;
-	    if (e->callee && e->call_stmt
-		&& stmt_dominated_by_p (stmt, e->call_stmt)
-		&& callee_guarantees_store_node_p (cand, e->callee,
-						   store_node, stack))
-	      {
-		found = true;
-		break;
-	      }
+	    initialized = true;
+	    break;
 	  }
-
-      if (!found)
-	return false;
-    }
-
-  return true;
+      }
+  cand.initialized_before.put (stmt, initialized);
+  return initialized;
 }
 
 static bool
@@ -1265,13 +1220,12 @@ node_calls_store_node_before_return_p (array_candidate &cand,
   stack.safe_push (node);
 
   scoped_dump_file no_dump;
-  cfun_saver save (node, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  calculate_dominance_info (CDI_DOMINATORS);
+  cfun_saver save (cand.analyses, node);
 
   bool found = false;
   for (cgraph_edge *e = node->callees; e; e = e->next_callee)
     {
-      if (!e->callee || !e->call_stmt
+      if (!e->callee || !e->call_stmt || !e->binds_to_current_def_p ()
 	  || !stmt_dominates_function_exit_p (e->call_stmt))
 	continue;
 
@@ -1312,7 +1266,6 @@ entry_proof_cache::clear ()
     delete allocated_nodes[i];
   allocated_nodes.truncate (0);
   nodes.empty ();
-  store_before_stmt_cache.empty ();
   cand = nullptr;
 }
 
@@ -1327,18 +1280,6 @@ entry_proof_cache::entry_tree_for_node (cgraph_node *node)
       allocated_nodes.safe_push (tree);
     }
   return *tree;
-}
-
-bool
-entry_proof_cache::all_store_nodes_called_before_stmt_cached_p
-  (cgraph_node *node, gimple *stmt)
-{
-  if (bool *cached = store_before_stmt_cache.get (stmt))
-    return *cached;
-
-  bool initialized = all_store_nodes_called_before_stmt_p (*cand, node, stmt);
-  store_before_stmt_cache.put (stmt, initialized);
-  return initialized;
 }
 
 void
@@ -1370,7 +1311,7 @@ entry_proof_cache::callsite_has_initialized_p
     }
 
   if (function_entry_has_initialized_p (edge->caller, stack)
-      || all_store_nodes_called_before_stmt_cached_p (edge->caller,
+      || all_store_nodes_called_before_stmt_p (*cand, edge->caller,
 						      edge->call_stmt))
     return true;
 
@@ -1435,66 +1376,9 @@ entry_proof_cache::direct_callers_prove_entry_init_p
 }
 
 bool
-entry_proof_cache::indirect_vtable_callers_prove_entry_init_p
-  (const auto_vec<cgraph_node *, 16> &component,
-   auto_vec<cgraph_node *, 16> &stack, entry_proof_tree_node &tree,
-   bool &saw_caller)
-{
-  for (unsigned i = 0; i < component.length (); ++i)
-    {
-      cgraph_node *callee = component[i];
-      if (!node_has_only_vtable_address_refs_p (callee))
-	continue;
-
-      cgraph_node *caller = nullptr;
-      FOR_EACH_FUNCTION (caller)
-	{
-	  if (!analyzable_node_p (caller))
-	    continue;
-
-	  for (cgraph_edge *e = caller->indirect_calls; e; e = e->next_callee)
-	    {
-	      if (!e->call_stmt || !indirect_edge_targets_node_p (e, callee)
-		  || component.contains (caller))
-		continue;
-
-	      if (stack.contains (caller))
-		{
-		  tree.add_failed_caller_edge (e);
-		  return false;
-		}
-
-	      saw_caller = true;
-	      if (!prove_callsite_initialized (e, stack, tree))
-		return false;
-	    }
-	}
-    }
-
-  return true;
-}
-
-static bool
-component_has_vtable_entry_p (const auto_vec<cgraph_node *, 16> &component)
-{
-  for (unsigned i = 0; i < component.length (); ++i)
-    if (node_has_only_vtable_address_refs_p (component[i]))
-      return true;
-
-  return false;
-}
-
-bool
 entry_proof_cache::finish_entry_proof
-  (const auto_vec<cgraph_node *, 16> &component,
-   bool saw_caller, bool ok, entry_proof_tree_node &tree)
+  (bool saw_caller, bool ok, entry_proof_tree_node &tree)
 {
-  if (!saw_caller && ok && component_has_vtable_entry_p (component))
-    {
-      tree.set_entry_result (true, nullptr);
-      return true;
-    }
-
   if (!saw_caller && ok)
     tree.set_entry_result (false, "function entry has no visible callers");
   else if (ok)
@@ -1511,7 +1395,7 @@ entry_proof_cache::function_entry_has_initialized_p
   if (cached_tree && cached_tree->entry_status_known)
     return cached_tree->entry_has_initialized;
 
-  if (!analyzable_node_p (node))
+  if (!closed_entry_p (node))
     {
       entry_proof_tree_node &tree = entry_tree_for_node (node);
       tree.set_single_node (node);
@@ -1523,7 +1407,7 @@ entry_proof_cache::function_entry_has_initialized_p
   auto_vec<cgraph_node *, 16> component;
   scc_cache.collect_component (node, component);
   for (unsigned i = 0; i < component.length (); ++i)
-    if (stack.contains (component[i]))
+    if (!closed_entry_p (component[i]) || stack.contains (component[i]))
       return false;
 
   entry_proof_tree_node &tree = entry_tree_for_node (node);
@@ -1537,12 +1421,10 @@ entry_proof_cache::function_entry_has_initialized_p
 
   bool saw_caller = false;
   bool ok = direct_callers_prove_entry_init_p (component, stack, tree,
-					       saw_caller)
-	    && indirect_vtable_callers_prove_entry_init_p (component, stack,
-							   tree, saw_caller);
+					       saw_caller);
 
   stack.truncate (stack_len);
-  return finish_entry_proof (component, saw_caller, ok, tree);
+  return finish_entry_proof (saw_caller, ok, tree);
 }
 
 static bool
@@ -1574,10 +1456,15 @@ struct guard_store
   gimple *stmt = nullptr;
 };
 
-struct guard_path_state
+struct guard_path_states
 {
-  basic_block bb = nullptr;
-  bool initialized = false;
+  hash_set<basic_block> uninitialized;
+  hash_set<basic_block> initialized;
+
+  bool add (basic_block bb, bool init)
+  {
+    return init ? initialized.add (bb) : uninitialized.add (bb);
+  }
 };
 
 class guarded_load_prover
@@ -1598,7 +1485,6 @@ private:
     (const auto_vec<guard_store, 8> &);
   bool guard_store_guarantees_target_init_p (guard_store &);
   bool target_load_stmt_p (gimple *);
-  bool all_store_nodes_called_before_stmt_cached_p (cgraph_node *, gimple *);
   bool callee_guarantees_all_store_nodes_p
     (cgraph_node *, auto_vec<cgraph_node *, 16> &);
   bool function_has_no_target_load_before_init_p
@@ -1609,7 +1495,7 @@ private:
     (cgraph_node *, gimple *, bool &, auto_vec<cgraph_node *, 16> &);
   bool paths_from_bb_have_no_target_load_before_init_p
     (cgraph_node *, basic_block, gimple *, bool,
-     auto_vec<guard_path_state, 16> &, auto_vec<cgraph_node *, 16> &);
+     guard_path_states &, auto_vec<cgraph_node *, 16> &);
   bool expr_zero_if_guard_zero_p (tree, tree &, auto_vec<tree, 8> &);
   bool ssa_name_zero_if_guard_zero_p (tree, tree &, auto_vec<tree, 8> &);
   bool edge_requires_guard_nonzero_p (edge, tree &);
@@ -1625,10 +1511,8 @@ private:
   auto_vec<guard_decl_result, 4> guard_cache;
   hash_map<gimple *, bool> load_safe_cache;
   hash_map<basic_block, bool> bb_guard_cache;
-  hash_map<gimple *, bool> store_before_stmt_cache;
   hash_map<cgraph_edge *, bool> callsite_safe_cache;
   hash_map<cgraph_node *, bool> function_entry_safe_cache;
-  cgraph_scc_cache scc_cache;
 };
 
 bool
@@ -1711,16 +1595,6 @@ scan_guard_decl_stmt (cgraph_node *node, gimple *stmt, tree guard_decl,
   bool rhs_ref = rhs && extract_array_ref (rhs, ref_decl, rhs_indices)
 		 && ref_decl == guard_decl;
 
-  unsigned ref_depth = 0;
-  if (!lhs_ref && lhs
-      && loose_array_ref_decl_p (lhs, ref_decl, ref_depth)
-      && ref_decl == guard_decl && ref_depth == dims.length ())
-    lhs_ref = true;
-  if (!rhs_ref && rhs
-      && loose_array_ref_decl_p (rhs, ref_decl, ref_depth)
-      && ref_decl == guard_decl && ref_depth == dims.length ())
-    rhs_ref = true;
-
   if ((lhs && expr_contains_decl_p (lhs, guard_decl) && !lhs_ref)
       || (rhs && expr_contains_decl_p (rhs, guard_decl) && !rhs_ref)
       || (gimple_num_ops (stmt) > 2
@@ -1751,25 +1625,25 @@ guarded_load_prover::scan_guard_decl_store_nodes
    auto_vec<guard_store, 8> &guard_stores)
 {
   guard_stores.truncate (0);
+  varpool_node *var = varpool_node::get (guard_decl);
+  if (!var || !var->all_refs_explicit_p ())
+    return false;
 
-  cgraph_node *node = nullptr;
-  FOR_EACH_FUNCTION (node)
+  hash_set<gimple *> seen;
+  ipa_ref *ref;
+  for (unsigned i = 0; var->iterate_referring (i, ref); ++i)
     {
+      if (ref->use == IPA_REF_ADDR || ref->use == IPA_REF_ALIAS || !ref->stmt)
+	return false;
+      cgraph_node *node = dyn_cast<cgraph_node *> (ref->referring);
       if (!visible_node_with_body_p (node))
+	return false;
+      if (seen.add (ref->stmt))
 	continue;
-
-      scoped_dump_file no_dump;
-      cfun_saver save (node);
-
-      basic_block bb;
-      FOR_EACH_BB_FN (bb, cfun)
-	for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
-	     gsi_next (&gsi))
-	  if (!scan_guard_decl_stmt (node, gsi_stmt (gsi), guard_decl, dims,
-				     guard_stores))
-	    return false;
+      if (!scan_guard_decl_stmt (node, ref->stmt, guard_decl, dims,
+				 guard_stores))
+	return false;
     }
-
   return true;
 }
 
@@ -1809,46 +1683,11 @@ guarded_load_prover::target_load_stmt_p (gimple *stmt)
 }
 
 bool
-guarded_load_prover::all_store_nodes_called_before_stmt_cached_p
-  (cgraph_node *node, gimple *stmt)
-{
-  if (bool *cached = store_before_stmt_cache.get (stmt))
-    return *cached;
-
-  bool initialized = all_store_nodes_called_before_stmt_p (cand, node, stmt);
-  store_before_stmt_cache.put (stmt, initialized);
-  return initialized;
-}
-
-bool
 guarded_load_prover::callee_guarantees_all_store_nodes_p
   (cgraph_node *callee, auto_vec<cgraph_node *, 16> &stack)
 {
-  auto_vec<cgraph_node *, 8> target_nodes;
-  for (unsigned i = 0; i < cand.stores.length (); ++i)
-    {
-      cgraph_node *node = cand.stores[i]->node;
-      if (!target_nodes.contains (node))
-	target_nodes.safe_push (node);
-    }
-
-  for (unsigned i = 0; i < target_nodes.length (); ++i)
-    if (!callee_guarantees_store_node_p (cand, callee, target_nodes[i],
-					 stack))
-      return false;
-
-  return !target_nodes.is_empty ();
-}
-
-static bool
-guard_path_state_seen_p (const auto_vec<guard_path_state, 16> &seen,
-			 basic_block bb, bool initialized)
-{
-  for (unsigned i = 0; i < seen.length (); ++i)
-    if (seen[i].bb == bb && seen[i].initialized == initialized)
-      return true;
-
-  return false;
+  return callee_guarantees_store_node_p (cand, callee, cand.stores[0]->node,
+				       stack);
 }
 
 bool
@@ -1859,7 +1698,7 @@ guarded_load_prover::path_stmt_has_no_target_load_before_init_p
   if (initialized)
     return true;
 
-  if (all_store_nodes_called_before_stmt_cached_p (node, stmt))
+  if (all_store_nodes_called_before_stmt_p (cand, node, stmt))
     {
       initialized = true;
       return true;
@@ -1872,7 +1711,8 @@ guarded_load_prover::path_stmt_has_no_target_load_before_init_p
     return true;
 
   cgraph_edge *edge = node->get_edge (stmt);
-  if (!edge || edge->indirect_unknown_callee || !edge->callee)
+  if (!edge || edge->indirect_unknown_callee || !edge->callee
+      || !edge->binds_to_current_def_p ())
     return false;
 
   if (!function_has_no_target_load_before_init_p
@@ -1889,22 +1729,14 @@ guarded_load_prover::path_stmt_has_no_target_load_before_init_p
 bool
 guarded_load_prover::paths_from_bb_have_no_target_load_before_init_p
   (cgraph_node *node, basic_block bb, gimple *start_after, bool initialized,
-   auto_vec<guard_path_state, 16> &seen,
+   guard_path_states &seen,
    auto_vec<cgraph_node *, 16> &call_stack)
 {
   if (!bb || bb == EXIT_BLOCK_PTR_FOR_FN (cfun))
     return initialized;
 
-  if (!start_after)
-    {
-      if (guard_path_state_seen_p (seen, bb, initialized))
-	return true;
-
-      guard_path_state state;
-      state.bb = bb;
-      state.initialized = initialized;
-      seen.safe_push (state);
-    }
+  if (!start_after && seen.add (bb, initialized))
+    return true;
 
   bool past_start = start_after == nullptr;
   for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
@@ -1955,11 +1787,9 @@ guarded_load_prover::function_has_no_target_load_before_init_p
   call_stack.safe_push (node);
 
   scoped_dump_file no_dump;
-  cfun_saver save (node, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  calculate_dominance_info (CDI_DOMINATORS);
-  scev_context scev;
+  cfun_saver save (cand.analyses, node);
 
-  auto_vec<guard_path_state, 16> seen;
+  guard_path_states seen;
   bool ok = true;
   edge e;
   edge_iterator ei;
@@ -1983,11 +1813,9 @@ guarded_load_prover::paths_from_stmt_have_no_target_load_before_init_p
     return false;
 
   scoped_dump_file no_dump;
-  cfun_saver save (node, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  calculate_dominance_info (CDI_DOMINATORS);
-  scev_context scev;
+  cfun_saver save (cand.analyses, node);
 
-  auto_vec<guard_path_state, 16> seen;
+  guard_path_states seen;
   auto_vec<cgraph_node *, 16> call_stack;
   call_stack.safe_push (node);
   return paths_from_bb_have_no_target_load_before_init_p
@@ -2000,7 +1828,7 @@ guarded_load_prover::guard_store_guarantees_target_init_p (guard_store &store)
   if (!store.node || !store.stmt)
     return false;
 
-  return all_store_nodes_called_before_stmt_cached_p (store.node, store.stmt)
+  return all_store_nodes_called_before_stmt_p (cand, store.node, store.stmt)
 	 || paths_from_stmt_have_no_target_load_before_init_p (store.node,
 							       store.stmt);
 }
@@ -2075,17 +1903,6 @@ guarded_load_prover::expr_zero_if_guard_zero_p
       return true;
     }
 
-  unsigned ref_depth = 0;
-  if (loose_array_ref_decl_p (expr, ref_decl, ref_depth)
-      && guard_decl_zero_until_target_initialized_p (ref_decl))
-    {
-      if (guard_decl && guard_decl != ref_decl)
-	return false;
-
-      guard_decl = ref_decl;
-      return true;
-    }
-
   return false;
 }
 
@@ -2131,8 +1948,7 @@ guarded_load_prover::bb_guarded_by_false_condition_without_init_p
     return *cached;
 
   scoped_dump_file no_dump;
-  cfun_saver save (node);
-  calculate_dominance_info (CDI_DOMINATORS);
+  cfun_saver save (cand.analyses, node);
 
   auto_vec<edge, 16> guard_edges;
   basic_block bb;
@@ -2142,13 +1958,13 @@ guarded_load_prover::bb_guarded_by_false_condition_without_init_p
       edge_iterator ei;
       FOR_EACH_EDGE (e, ei, bb->succs)
 	if (e->dest && e->dest != EXIT_BLOCK_PTR_FOR_FN (cfun)
+	    && single_pred_p (e->dest)
 	    && dominated_by_p (CDI_DOMINATORS, target_bb, e->dest))
 	  guard_edges.safe_push (e);
     }
 
-  /* edge_requires_guard_nonzero_p can recursively analyze other functions,
-     including NODE itself, and cfun_saver releases dominator info on exit.
-     Keep all dominance queries in the collection phase above.  */
+  /* Inspect guards after collecting the controlling edges.  The recursive
+     guard proofs share this pass's function analyses.  */
   for (unsigned i = 0; i < guard_edges.length (); ++i)
     {
       edge e = guard_edges[i];
@@ -2176,14 +1992,14 @@ guarded_load_prover::function_entry_safe_without_init_p
   if (bool *cached = function_entry_safe_cache.get (node))
     return *cached;
 
-  if (!analyzable_node_p (node) || stack.contains (node))
+  if (!closed_entry_p (node) || stack.contains (node))
     return false;
 
   auto_vec<cgraph_node *, 16> component;
-  scc_cache.collect_component (node, component);
+  entry_cache.collect_component (node, component);
 
   for (unsigned i = 0; i < component.length (); ++i)
-    if (stack.contains (component[i]))
+    if (!closed_entry_p (component[i]) || stack.contains (component[i]))
       return false;
 
   unsigned stack_len = stack.length ();
@@ -2241,7 +2057,7 @@ guarded_load_prover::callsite_safe_without_init_p
       return true;
     }
 
-  if (all_store_nodes_called_before_stmt_cached_p (edge->caller,
+  if (all_store_nodes_called_before_stmt_p (cand, edge->caller,
 						   edge->call_stmt))
     {
       callsite_safe_cache.put (edge, true);
@@ -2445,70 +2261,6 @@ access_ranges_p (array_candidate &cand, array_access &access)
 }
 
 static bool
-regions_overlap_p (array_access &a, array_access &b)
-{
-  for (unsigned i = 0; i < a.lows.length (); ++i)
-    if (a.highs[i] < b.lows[i] || b.highs[i] < a.lows[i])
-      return false;
-
-  return true;
-}
-
-static bool
-store_has_rectangular_iteration_space_p (array_candidate &cand,
-					 array_access &store)
-{
-  if (cand.dims.length () <= 1)
-    return true;
-
-  scoped_dump_file no_dump;
-  cfun_saver save (store.node, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  scev_context scev;
-
-  auto_vec<loop_p, 4> loops;
-  for (unsigned i = 0; i < store.indices.length (); ++i)
-    {
-      if (store.lows[i] == store.highs[i])
-	continue;
-
-      loop_p loop = iv_loop_for_index (store.indices[i], store.stmt);
-      if (!loop)
-	return false;
-
-      for (unsigned j = 0; j < loops.length (); ++j)
-	{
-	  if (loops[j] == loop || loops[j]->num == loop->num)
-	    return false;
-	  if (!loop_contains_p (loops[j], loop)
-	      && !loop_contains_p (loop, loops[j]))
-	    return false;
-	}
-
-      loops.safe_push (loop);
-    }
-
-  return true;
-}
-
-static unsigned HOST_WIDE_INT
-region_elements (array_access &access)
-{
-  unsigned HOST_WIDE_INT elements = 1;
-  for (unsigned i = 0; i < access.lows.length (); ++i)
-    elements *= (unsigned HOST_WIDE_INT) access.highs[i] - access.lows[i] + 1;
-  return elements;
-}
-
-static unsigned HOST_WIDE_INT
-array_elements (const auto_vec<unsigned> &dims)
-{
-  unsigned HOST_WIDE_INT elements = 1;
-  for (unsigned i = 0; i < dims.length (); ++i)
-    elements *= dims[i];
-  return elements;
-}
-
-static bool
 simple_code_p (tree_code code)
 {
   switch (code)
@@ -2550,17 +2302,20 @@ simple_code_p (tree_code code)
 class formula_expander
 {
 public:
-  formula_expander (const auto_vec<tree, 4> &formals,
-		    const auto_vec<tree> &actuals)
-    : formals (formals), actuals (actuals)
+  /* A null SEQ validates the formula without constructing expressions.
+     Otherwise each expanded node is materialized once in SEQ, preserving
+     the sharing of the source SSA DAG through GIMPLE generation.  */
+  formula_expander (const vec<tree> &formals, const vec<tree> &actuals,
+		    gimple_seq *seq = nullptr)
+    : formals (formals), actuals (actuals), seq (seq)
   {}
 
   tree expand (tree expr);
 
-  bool ok () const { return reason == nullptr; }
   const char *failure () const { return reason ? reason : ""; }
 
 private:
+  tree expand_1 (tree);
   tree expand_assign (gimple *);
   void fail (const char *msg)
   {
@@ -2568,10 +2323,14 @@ private:
       reason = msg;
   }
 
-  const auto_vec<tree, 4> &formals;
-  const auto_vec<tree> &actuals;
+  const vec<tree> &formals;
+  const vec<tree> &actuals;
+  gimple_seq *seq;
   const char *reason = nullptr;
   hash_set<tree> visiting;
+  hash_map<tree, tree> expanded;
+  unsigned depth = 0;
+  unsigned nodes = 0;
 };
 
 tree
@@ -2600,6 +2359,8 @@ formula_expander::expand_assign (gimple *stmt)
 	tree op0 = expand (gimple_assign_rhs1 (stmt));
 	if (!op0)
 	  return nullptr;
+	if (!seq)
+	  return gimple_assign_lhs (stmt);
 	return fold_build1 (code, TREE_TYPE (gimple_assign_lhs (stmt)), op0);
       }
 
@@ -2609,6 +2370,8 @@ formula_expander::expand_assign (gimple *stmt)
 	tree op1 = expand (gimple_assign_rhs2 (stmt));
 	if (!op0 || !op1)
 	  return nullptr;
+	if (!seq)
+	  return gimple_assign_lhs (stmt);
 	return fold_build2 (code, TREE_TYPE (gimple_assign_lhs (stmt)), op0,
 			    op1);
       }
@@ -2620,6 +2383,8 @@ formula_expander::expand_assign (gimple *stmt)
 	tree op2 = expand (gimple_assign_rhs3 (stmt));
 	if (!op0 || !op1 || !op2)
 	  return nullptr;
+	if (!seq)
+	  return gimple_assign_lhs (stmt);
 	return fold_build3 (code, TREE_TYPE (gimple_assign_lhs (stmt)),
 			    op0, op1, op2);
       }
@@ -2635,14 +2400,44 @@ formula_expander::expand (tree expr)
 {
   if (!expr || reason)
     return nullptr;
+  if (tree *cached = expanded.get (expr))
+    return *cached;
+
+  /* Resource limits, independent of profitability: bound recursion and
+     generated IR even for unusually large input expressions.  */
+  if (depth >= 256 || nodes >= 4096)
+    {
+      fail ("formula exceeds analysis limits");
+      return nullptr;
+    }
+  ++depth;
+  ++nodes;
+  tree value = expand_1 (expr);
+  --depth;
+  if (value && seq)
+    {
+      gimple_seq stmts = NULL;
+      value = force_gimple_operand (value, &stmts, true, NULL_TREE);
+      gimple_seq_add_seq (seq, stmts);
+    }
+  if (value)
+    expanded.put (expr, value);
+  return value;
+}
+
+tree
+formula_expander::expand_1 (tree expr)
+{
+  if (!expr || reason)
+    return nullptr;
 
   for (unsigned i = 0; i < formals.length (); ++i)
     if (operand_equal_p (expr, formals[i]))
-      return fold_convert (TREE_TYPE (expr), actuals[i]);
+      return seq ? fold_convert (TREE_TYPE (expr), actuals[i]) : expr;
 
   tree_code code = TREE_CODE (expr);
   if (TREE_CODE_CLASS (code) == tcc_constant)
-    return unshare_expr (expr);
+    return seq ? unshare_expr (expr) : expr;
 
   if (code == SSA_NAME)
     {
@@ -2688,6 +2483,8 @@ formula_expander::expand (tree expr)
 	tree op0 = expand (TREE_OPERAND (expr, 0));
 	if (!op0)
 	  return nullptr;
+	if (!seq)
+	  return expr;
 	return fold_build1 (code, TREE_TYPE (expr), op0);
       }
 
@@ -2697,6 +2494,8 @@ formula_expander::expand (tree expr)
 	tree op1 = expand (TREE_OPERAND (expr, 1));
 	if (!op0 || !op1)
 	  return nullptr;
+	if (!seq)
+	  return expr;
 	return fold_build2 (code, TREE_TYPE (expr), op0, op1);
       }
 
@@ -2707,6 +2506,8 @@ formula_expander::expand (tree expr)
 	tree op2 = expand (TREE_OPERAND (expr, 2));
 	if (!op0 || !op1 || !op2)
 	  return nullptr;
+	if (!seq)
+	  return expr;
 	return fold_build3 (code, TREE_TYPE (expr), op0, op1, op2);
       }
 
@@ -2726,37 +2527,26 @@ full_region_p (array_candidate &cand, array_access &region)
   return true;
 }
 
-static tree
-build_generic_formula (array_candidate &cand, const auto_vec<tree> &load_indices)
+static bool
+validate_formula (array_candidate &cand)
 {
-  tree result = nullptr;
-  if (cand.stores.length () > 1)
+  array_access &store = *cand.stores[0];
+  formula_expander validator (store.indices, store.indices);
+  if (!validator.expand (store.rhs))
     {
-      cand.reject_reason = "multiple store regions are not supported";
-      return nullptr;
+      cand.reject_reason = validator.failure ();
+      return false;
     }
+  return true;
+}
 
-  for (int i = (int) cand.stores.length () - 1; i >= 0; --i)
-    {
-      array_access *store = cand.stores[i];
-      formula_expander expander (store->indices, load_indices);
-      tree formula = expander.expand (store->rhs);
-      if (!formula)
-	{
-	  cand.reject_reason = expander.failure ();
-	  return nullptr;
-	}
-
-      if (!result || full_region_p (cand, *store))
-	result = formula;
-      else
-	{
-	  cand.reject_reason = "multiple store regions are not supported";
-	  return nullptr;
-	}
-    }
-
-  return result;
+static tree
+build_generic_formula (array_candidate &cand, const vec<tree> &load_indices,
+		       gimple_seq *seq)
+{
+  array_access &store = *cand.stores[0];
+  formula_expander expander (store.indices, load_indices, seq);
+  return expander.expand (store.rhs);
 }
 
 class array_load_inliner
@@ -2775,12 +2565,13 @@ private:
 				   dominance_failure &);
   bool prove_dominance (array_candidate &);
   bool prove_guarded_loads (array_candidate &);
-  unsigned rewrite_function (cgraph_node *, array_candidate &);
+  void rewrite_load (array_candidate &, array_access &);
   bool store_removable_p (array_candidate &, array_access *);
   void remove_store (array_candidate &, array_access *);
   bool remove_stores (array_candidate &);
   void process_candidate (varpool_node *);
 
+  function_analysis_cache analyses;
   bool changed = false;
   bool removed_stores = false;
   dominance_failure dom_failure;
@@ -2831,9 +2622,12 @@ array_load_inliner::collect_stmt_accesses (cgraph_node *node, gimple *stmt,
 	    }
 
 	  array_access *access
-	    = cand.record_access (node, stmt, true, lhs, rhs, indices);
+	    = cand.record_access (node, stmt, true, rhs, indices);
 	  if (!access_ranges_p (cand, *access))
-	    cand.reject_reason = "not fully initialized";
+	    {
+	      cand.reject_reason = "not fully initialized";
+	      return false;
+	    }
 	}
       else if (rhs_ref)
 	{
@@ -2844,7 +2638,7 @@ array_load_inliner::collect_stmt_accesses (cgraph_node *node, gimple *stmt,
 	      return false;
 	    }
 
-	  cand.record_access (node, stmt, false, lhs, rhs, indices);
+	  cand.record_access (node, stmt, false, rhs, indices);
 	}
 
       return true;
@@ -2866,20 +2660,21 @@ array_load_inliner::collect_accesses_in_node (cgraph_node *node,
 					      const auto_vec<ipa_ref *, 32> &refs)
 {
   scoped_dump_file no_dump;
-  cfun_saver save (node, LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
-  scev_context scev;
+  bool has_store = false;
+  for (ipa_ref *ref : refs)
+    if (ref->use == IPA_REF_STORE)
+      has_store = true;
+  cfun_saver save (cand.analyses, node,
+		  has_store ? LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS : 0);
+  scev_context scev (has_store);
 
-  auto_vec<gimple *, 16> seen_stmts;
+  hash_set<gimple *> seen_stmts;
   for (unsigned i = 0; i < refs.length (); ++i)
     {
       ipa_ref *ref = refs[i];
-      if (ref->referring != node)
+      gcc_assert (ref->referring == node);
+      if (seen_stmts.add (ref->stmt))
 	continue;
-
-      if (seen_stmts.contains (ref->stmt))
-	continue;
-
-      seen_stmts.safe_push (ref->stmt);
       if (!collect_stmt_accesses (node, ref->stmt, cand))
 	return false;
     }
@@ -2902,8 +2697,9 @@ array_load_inliner::collect_accesses (array_candidate &cand)
       return false;
     }
 
-  auto_vec<cgraph_node *, 16> nodes;
-  auto_vec<ipa_ref *, 32> refs;
+  hash_map<cgraph_node *, auto_vec<ipa_ref *, 32> *> refs_by_node;
+  auto_delete_vec<auto_vec<ipa_ref *, 32>> grouped_refs;
+  unsigned ref_count = 0;
   ipa_ref *ref = nullptr;
   for (unsigned i = 0; cand.var->iterate_referring (i, ref); ++i)
     {
@@ -2920,19 +2716,28 @@ array_load_inliner::collect_accesses (array_candidate &cand)
 	  return false;
 	}
 
-      refs.safe_push (ref);
-      if (!nodes.contains (node))
-	nodes.safe_push (node);
+      auto_vec<ipa_ref *, 32> *&refs = refs_by_node.get_or_insert (node);
+      if (!refs)
+	{
+	  refs = new auto_vec<ipa_ref *, 32>;
+	  grouped_refs.safe_push (refs);
+	}
+      refs->safe_push (ref);
+      ++ref_count;
     }
 
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file,
 	     "array-load-inline: collect %s: scanning %u reference stmts "
-	     "in %u functions\n", cand.name (), refs.length (), nodes.length ());
+	     "in %u functions\n", cand.name (), ref_count,
+	     grouped_refs.length ());
 
-  for (unsigned i = 0; i < nodes.length (); ++i)
-    if (!collect_accesses_in_node (nodes[i], cand, refs))
+  for (auto refs : grouped_refs)
+    {
+      cgraph_node *node = as_a<cgraph_node *> ((*refs)[0]->referring);
+      if (!collect_accesses_in_node (node, cand, *refs))
 	return false;
+    }
 
   return true;
 }
@@ -2940,17 +2745,7 @@ array_load_inliner::collect_accesses (array_candidate &cand)
 static bool
 load_function_closed_world_p (cgraph_node *node)
 {
-  if (!visible_node_with_body_p (node))
-    return false;
-
-  if (DECL_EXTERNAL (node->decl) || node->externally_visible
-      || node->used_from_other_partition)
-    return false;
-
-  if (node->address_taken && !node_has_only_vtable_address_refs_p (node))
-    return false;
-
-  return true;
+  return closed_entry_p (node);
 }
 
 bool
@@ -2984,49 +2779,26 @@ array_load_inliner::prove_closed_world (array_candidate &cand)
 bool
 array_load_inliner::prove_coverage (array_candidate &cand)
 {
-  if (cand.stores.is_empty ())
+  if (cand.stores.length () != 1)
     {
-      cand.reject_reason = "not fully initialized";
+      cand.reject_reason = cand.stores.is_empty ()
+			   ? "not fully initialized"
+			   : "multiple store regions are not supported";
       return false;
     }
 
-  unsigned HOST_WIDE_INT covered = 0;
-  for (unsigned i = 0; i < cand.stores.length (); ++i)
-    {
-      array_access *store = cand.stores[i];
-      if (store->lows.length () != cand.dims.length ())
-	{
-	  cand.reject_reason = "not fully initialized";
-	  return false;
-	}
-
-      if (!store_has_rectangular_iteration_space_p (cand, *store))
-	{
-	  cand.reject_reason = "not fully initialized";
-	  return false;
-	}
-
-      for (unsigned j = i + 1; j < cand.stores.length (); ++j)
-	if (regions_overlap_p (*store, *cand.stores[j]))
-	  {
-	    cand.reject_reason = "multiple stores to element";
-	    return false;
-	  }
-
-      covered += region_elements (*store);
-    }
-
-  if (covered != array_elements (cand.dims))
+  array_access &store = *cand.stores[0];
+  if (store.lows.length () != cand.dims.length ()
+      || !full_region_p (cand, store))
     {
       cand.reject_reason = "not fully initialized";
       return false;
     }
 
   if (dump_file)
-    fprintf (dump_file, "array-load-inline: %s initialization coverage "
-	     HOST_WIDE_INT_PRINT_UNSIGNED "/" HOST_WIDE_INT_PRINT_UNSIGNED "\n",
-	     cand.name (), covered, array_elements (cand.dims));
-
+    fprintf (dump_file,
+	     "array-load-inline: %s initialization coverage complete\n",
+	     cand.name ());
   return true;
 }
 
@@ -3035,50 +2807,32 @@ array_load_inliner::all_stores_dominate_load_p (array_candidate &cand,
 						array_access &load,
 						dominance_failure &failure)
 {
-  if (!stores_in_node_before_stmt_p (cand, load.node, load.stmt))
-    {
-      failure.set_at_load (load,
-			   "stores in load function do not dominate load");
-      return false;
-    }
-
-  bool has_remote_store = false;
-  for (unsigned i = 0; i < cand.stores.length (); ++i)
-    if (cand.stores[i]->node != load.node)
-      {
-	has_remote_store = true;
-	break;
-      }
-
-  if (!has_remote_store)
-    return true;
+  if (bool *cached = cand.load_dominance.get (load.stmt))
+    return *cached;
 
   auto_vec<cgraph_node *, 16> stack;
-  if (entry_cache.function_entry_has_initialized_p (load.node, stack))
-    return true;
-
-  if (all_store_nodes_called_before_stmt_p (cand, load.node, load.stmt))
-    return true;
-
-  failure.set (load, "initialization does not dominate load statement",
-	       nullptr);
-  return false;
+  entry_proof_tree_node *entry = entry_cache.lookup (load.node);
+  bool initialized
+    = (entry && entry->entry_status_known && entry->entry_has_initialized)
+      || all_store_nodes_called_before_stmt_p (cand, load.node, load.stmt)
+      || entry_cache.function_entry_has_initialized_p (load.node, stack);
+  cand.load_dominance.put (load.stmt, initialized);
+  if (!initialized)
+    failure.set_at_load (load,
+			 "initialization does not dominate load statement");
+  return initialized;
 }
 
 bool
 array_load_inliner::prove_dominance (array_candidate &cand)
 {
   dom_failure.clear ();
-
-  for (unsigned i = 0; i < cand.loads.length (); ++i)
-    {
-      if (!all_stores_dominate_load_p (cand, *cand.loads[i], dom_failure))
-	{
-	  cand.reject_reason = "init does not dominate load";
-	  return false;
-	}
-    }
-
+  for (array_access *load : cand.loads)
+    if (!all_stores_dominate_load_p (cand, *load, dom_failure))
+      {
+	cand.reject_reason = "init does not dominate load";
+	return false;
+      }
   return true;
 }
 
@@ -3118,69 +2872,31 @@ array_load_inliner::prove_guarded_loads (array_candidate &cand)
   return true;
 }
 
-unsigned
-array_load_inliner::rewrite_function (cgraph_node *node, array_candidate &cand)
+void
+array_load_inliner::rewrite_load (array_candidate &cand, array_access &load)
 {
-  unsigned rewritten = 0;
+  cgraph_node *node = load.node;
+  cfun_saver save (cand.analyses, node);
+  gimple *stmt = load.stmt;
+  gimple_stmt_iterator gsi = gsi_for_stmt (stmt);
+  gimple_seq seq = NULL;
+  tree value = build_generic_formula (cand, load.indices, &seq);
+  gcc_assert (value);
+  gsi_insert_seq_before (&gsi, seq, GSI_SAME_STMT);
+  gimple *new_stmt = gimple_build_assign (gimple_assign_lhs (stmt), value);
+  gimple_set_location (new_stmt, gimple_location (stmt));
 
-  if (!visible_node_with_body_p (node))
-    return 0;
+  if (dump_file)
+    {
+      fprintf (dump_file, "array-load-inline: inlined load of %s in %s: ",
+	       cand.name (), node->name ());
+      print_gimple_stmt (dump_file, stmt, 0, TDF_SLIM);
+    }
 
-  cfun_saver save (node);
-
-  basic_block bb;
-  FOR_EACH_BB_FN (bb, cfun)
-    for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);)
-      {
-	gimple *stmt = gsi_stmt (gsi);
-	if (!gimple_assign_single_p (stmt))
-	  {
-	    gsi_next (&gsi);
-	    continue;
-	  }
-
-	tree lhs = gimple_assign_lhs (stmt);
-	tree rhs = gimple_assign_rhs1 (stmt);
-	tree ref_decl = nullptr;
-	auto_vec<tree> indices;
-	if (!extract_array_ref (rhs, ref_decl, indices) || ref_decl != cand.decl
-	    || indices.length () != cand.dims.length ())
-	  {
-	    gsi_next (&gsi);
-	    continue;
-	  }
-
-	tree expr = build_generic_formula (cand, indices);
-
-	if (!expr)
-	  {
-	    gsi_next (&gsi);
-	    continue;
-	  }
-
-	location_t loc = gimple_location (stmt);
-	tree value = force_gimple_operand_gsi (&gsi, expr, true, NULL_TREE,
-					       true, GSI_SAME_STMT);
-	gimple *new_stmt = gimple_build_assign (lhs, value);
-	gimple_set_location (new_stmt, loc);
-
-	if (dump_file)
-	  {
-	    fprintf (dump_file, "array-load-inline: inlined load of %s in %s: ",
-		     cand.name (), node->name ());
-	    print_gimple_stmt (dump_file, stmt, 0, TDF_SLIM);
-	  }
-
-	node->remove_stmt_references (stmt);
-	gsi_replace (&gsi, new_stmt, true);
-	node->record_stmt_references (new_stmt);
-
-	changed = true;
-	rewritten++;
-	gsi_next (&gsi);
-      }
-
-  return rewritten;
+  node->remove_stmt_references (stmt);
+  gsi_replace (&gsi, new_stmt, true);
+  node->record_stmt_references (new_stmt);
+  changed = true;
 }
 
 bool
@@ -3191,7 +2907,7 @@ array_load_inliner::store_removable_p (array_candidate &cand,
   if (!visible_node_with_body_p (node))
     return false;
 
-  cfun_saver save (node);
+  cfun_saver save (cand.analyses, node);
 
   gimple_stmt_iterator gsi = gsi_for_stmt (store->stmt);
   gimple *stmt = gsi_stmt (gsi);
@@ -3206,7 +2922,7 @@ void
 array_load_inliner::remove_store (array_candidate &cand, array_access *store)
 {
   cgraph_node *node = store->node;
-  cfun_saver save (node);
+  cfun_saver save (cand.analyses, node);
 
   gimple_stmt_iterator gsi = gsi_for_stmt (store->stmt);
   gimple *stmt = gsi_stmt (gsi);
@@ -3251,7 +2967,7 @@ array_load_inliner::remove_stores (array_candidate &cand)
 void
 array_load_inliner::process_candidate (varpool_node *var)
 {
-  array_candidate cand;
+  array_candidate cand (analyses);
 
   if (!cand.init (var))
     return;
@@ -3275,7 +2991,8 @@ array_load_inliner::process_candidate (varpool_node *var)
 
   dump_candidate (cand.decl, cand.dims);
 
-  if (!prove_coverage (cand) || !prove_closed_world (cand))
+  if (!prove_coverage (cand) || !prove_closed_world (cand)
+      || !validate_formula (cand))
     {
       dump_candidate_reject (cand);
       return;
@@ -3288,12 +3005,10 @@ array_load_inliner::process_candidate (varpool_node *var)
       return;
     }
 
-  unsigned rewritten_loads = 0;
-  cgraph_node *node = nullptr;
-  FOR_EACH_FUNCTION (node)
-    rewritten_loads += rewrite_function (node, cand);
+  for (array_access *load : cand.loads)
+    rewrite_load (cand, *load);
 
-  if (rewritten_loads == cand.loads.length () && remove_stores (cand))
+  if (remove_stores (cand))
     return;
 
   if (!dump_file)
@@ -3303,10 +3018,6 @@ array_load_inliner::process_candidate (varpool_node *var)
 	   "array-load-inline: symbol %s not removed in this pass; later "
 	   "DCE/varpool cleanup must remove it if no references remain\n",
 	   cand.name ());
-
-  if (!rewritten_loads)
-    fprintf (dump_file, "array-load-inline: no loads found for %s\n",
-	     cand.name ());
 }
 
 unsigned
