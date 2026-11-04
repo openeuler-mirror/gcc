@@ -627,7 +627,8 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-coalesce-vars  -ftree-copy-prop  -ftree-dce  -ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
 -ftree-loop-if-convert  -ftree-loop-im
--ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
+-ftree-phiprop  -ftree-phiprop-disjoint-stores
+-ftree-loop-distribution  -ftree-loop-distribute-patterns
 -ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
 -ftree-loop-vectorize
 -ftree-parallelize-loops=@var{n}  -ftree-pre  -ftree-partial-pre  -ftree-pta
@@ -13737,6 +13738,14 @@ Propagate information about uses of a value up the definition chain
 in order to simplify the definitions.  For example, this pass strips
 sign operations if the sign of a value never matters.  The flag is
 enabled by default at @option{-O1} and higher.
+
+@opindex ftree-phiprop-disjoint-stores
+@item -ftree-phiprop-disjoint-stores
+Propagate scalar loads through PHIs of automatic object addresses even
+when intervening stores change virtual memory state, provided that alias
+analysis proves that each crossed store cannot modify any incoming object.
+The relaxation is limited to loads in the PHI block and preserves the
+memory state on each incoming edge.  It is disabled by default.
 
 @opindex fssa-phiopt
 @item -fssa-phiopt
