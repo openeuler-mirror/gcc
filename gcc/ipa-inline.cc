@@ -584,6 +584,77 @@ enum can_inline_edge_by_limits_flags
   CAN_INLINE_REPORT = 8,
 };
 
+/* A character-state helper inside a retained immutable-argument clone can
+   expose substantially more constant folding than the scalar IPA estimate
+   predicts.  This is a profitability hint only: can_inline_edge_p and the
+   option/EH/target checks below still establish that inlining is legal.
+   Bound both individual growth and the complete residual function, and
+   exclude recursive expansion.  No application syntax is interpreted.  */
+
+static bool
+immutable_program_inline_p (cgraph_edge *e)
+{
+  if (!opt_for_fn (e->caller->decl, flag_ipa_value_specialization)
+      || e->recursive_p ())
+    return false;
+  cgraph_node *root = e->caller->inlined_to
+		     ? e->caller->inlined_to : e->caller;
+  bool immutable_context = root->ipa_immutable_program;
+  if (!immutable_context
+      && opt_for_fn (e->caller->decl, flag_ipa_value_specialization))
+    {
+      /* Inlined nodes retain the proven immutable-argument clone marker.
+	 Follow only the actual inline ancestry, never unrelated callees or
+	 general callers.  The root-size and depth limits below still bound
+	 growth of the complete resulting function.  */
+      unsigned context_depth = 0;
+      for (cgraph_node *n = e->caller; n->inlined_to;
+	   n = n->callers->caller)
+	{
+	  if (++context_depth > 4)
+	    break;
+	  if (n->ipa_immutable_program)
+	    {
+	      immutable_context = true;
+	      break;
+	    }
+	}
+    }
+  if (!immutable_context || !e->maybe_hot_p ())
+    return false;
+  cgraph_node *callee = e->callee->ultimate_alias_target ();
+  if (!callee || !callee->definition || callee == root)
+    return false;
+  unsigned depth = 0;
+  for (cgraph_node *n = e->caller; n->inlined_to; n = n->callers->caller)
+    {
+      if (++depth > 4 || n->decl == callee->decl)
+	return false;
+    }
+  bool expand = opt_for_fn (root->decl, flag_ipa_immutable_helper_expansion);
+  if (estimate_edge_growth (e) > (expand ? 4096 : 1200)
+      || estimate_size_after_inlining (root, e) > (expand ? 65536 : 4096))
+    return false;
+  tree result = TREE_TYPE (TREE_TYPE (callee->decl));
+  if (!INTEGRAL_TYPE_P (result) && !POINTER_TYPE_P (result))
+    return false;
+  for (tree args = TYPE_ARG_TYPES (TREE_TYPE (callee->decl));
+       args; args = TREE_CHAIN (args))
+    {
+      tree type = TREE_VALUE (args);
+      if (!POINTER_TYPE_P (type))
+	continue;
+      type = TREE_TYPE (type);
+      if (POINTER_TYPE_P (type))
+	type = TREE_TYPE (type);
+      if (TREE_CODE (type) == INTEGER_TYPE
+	  && TYPE_PRECISION (type) == BITS_PER_UNIT
+	  && TYPE_READONLY (type) && !TYPE_VOLATILE (type))
+	return true;
+    }
+  return false;
+}
+
 /* Decide if we can inline the edge and possibly update
    inline_failed reason.  
    We check whether inlining is possible at all and whether
@@ -615,6 +686,7 @@ can_inline_edge_by_limits_p (struct cgraph_edge *e, int flags)
 	  || (!DECL_DISREGARD_INLINE_LIMITS (callee->decl)
 	      && !lookup_attribute ("flatten",
 			 DECL_ATTRIBUTES (caller->decl))))
+      && !immutable_program_inline_p (e)
       && !caller_growth_limits (e))
     inlinable = false;
   else if (callee->externally_visible
@@ -1041,6 +1113,8 @@ want_inline_small_function_p (struct cgraph_edge *e, bool report)
   if (cgraph_inline_failed_type (e->inline_failed) == CIF_FINAL_ERROR)
     want_inline = false;
   else if (DECL_DISREGARD_INLINE_LIMITS (callee->decl))
+    ;
+  else if (immutable_program_inline_p (e))
     ;
   else if (!DECL_DECLARED_INLINE_P (callee->decl)
 	   && !opt_for_fn (e->caller->decl, flag_inline_small_functions))
@@ -2379,7 +2453,8 @@ inline_small_functions (void)
       where = edge->caller;
 
       if (overall_size + growth > compute_max_insns (where, min_size)
-	  && !DECL_DISREGARD_INLINE_LIMITS (callee->decl))
+	  && !DECL_DISREGARD_INLINE_LIMITS (callee->decl)
+	  && !immutable_program_inline_p (edge))
 	{
 	  edge->inline_failed = CIF_INLINE_UNIT_GROWTH_LIMIT;
 	  report_inline_failed_reason (edge);
@@ -2468,6 +2543,13 @@ inline_small_functions (void)
 	  int old_size = ipa_size_summaries->get (where)->size;
 	  sreal old_time = ipa_fn_summaries->get (where)->time;
 
+	  if (dump_file && immutable_program_inline_p (edge))
+	    {
+	      fprintf (dump_file, "Inlining bounded immutable program helper.\n");
+	      if (!where->ipa_immutable_program)
+		fprintf (dump_file,
+			 "Inlining inherited immutable program helper.\n");
+	    }
 	  inline_call (edge, true, &new_indirect_edges, &overall_size, true);
 	  reset_edge_caches (edge->callee);
 	  add_new_edges_to_heap (&edge_heap, new_indirect_edges);

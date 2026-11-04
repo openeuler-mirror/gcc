@@ -1083,6 +1083,125 @@ adjust_loop_info_after_peeling (class loop *loop, int npeel, bool precise)
     }
 }
 
+/* Follow a pointer SSA value through simple copies and constant pointer
+   adjustments.  Return the addressed object when the chain starts at a
+   compile-time address, otherwise return NULL_TREE.  */
+
+static tree
+readonly_pointer_base_object_1 (tree value, unsigned depth, unsigned &remaining)
+{
+  if (!value || depth == 0 || remaining == 0)
+    return NULL_TREE;
+
+  --remaining;
+  STRIP_NOPS (value);
+  if (TREE_CODE (value) == ADDR_EXPR)
+    {
+      tree object = TREE_OPERAND (value, 0);
+      while (handled_component_p (object))
+	object = TREE_OPERAND (object, 0);
+      return object;
+    }
+
+  if (TREE_CODE (value) != SSA_NAME)
+    return NULL_TREE;
+
+  gimple *def = SSA_NAME_DEF_STMT (value);
+  if (!is_gimple_assign (def))
+    return NULL_TREE;
+
+  enum tree_code code = gimple_assign_rhs_code (def);
+  if (code == SSA_NAME || CONVERT_EXPR_CODE_P (code)
+      || code == ADDR_EXPR)
+    return readonly_pointer_base_object_1 (gimple_assign_rhs1 (def), depth - 1, remaining);
+
+  if ((code == POINTER_PLUS_EXPR || code == PLUS_EXPR)
+      && TREE_CODE (gimple_assign_rhs2 (def)) == INTEGER_CST)
+    return readonly_pointer_base_object_1 (gimple_assign_rhs1 (def), depth - 1, remaining);
+
+  return NULL_TREE;
+}
+
+/* Keep branching PHI exploration linear in a small fixed budget.  This only
+   supplies the existing peeling profitability hint; the caller still
+   verifies the complete immutable initializer, and no loop exit is removed
+   based on this result.  Cycles or unknown incoming values are rejected.  */
+
+static tree
+readonly_pointer_base_object (tree value, unsigned depth)
+{
+  unsigned remaining = 64;
+  return readonly_pointer_base_object_1 (value, depth, remaining);
+}
+
+/* If LOOP belongs to an IPA constant-propagation clone and a pointer PHI is
+   initialized from a fully known immutable byte array, return a conservative
+   number of iterations to peel.  Peeling exposes a distinct constant offset
+   to CCP in each copy, which is useful for bytecode, delimiter and small
+   table interpreters.  The object-size and absolute caps prevent path or code
+   growth from becoming unbounded.  */
+
+static unsigned
+ipa_readonly_value_peel_count (class loop *loop)
+{
+  if (!flag_ipa_value_specialization)
+    return 0;
+
+  cgraph_node *node = cgraph_node::get (current_function_decl);
+  if (!node
+      || (!node->ipcp_clone && !node->ipa_value_specialized))
+    return 0;
+
+  edge preheader = loop_preheader_edge (loop);
+  if (!preheader)
+    return 0;
+
+  for (gphi_iterator gpi = gsi_start_phis (loop->header);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    {
+      gphi *phi = gpi.phi ();
+      tree result = gimple_phi_result (phi);
+      if (!POINTER_TYPE_P (TREE_TYPE (result)))
+	continue;
+
+      tree value = PHI_ARG_DEF_FROM_EDGE (phi, preheader);
+      tree object = readonly_pointer_base_object (value, 12);
+      if (!object)
+	continue;
+
+      tree initial = NULL_TREE;
+      if (TREE_CODE (object) == STRING_CST)
+	initial = object;
+      else if ((TREE_CODE (object) == VAR_DECL
+		|| TREE_CODE (object) == CONST_DECL)
+	       && DECL_INITIAL (object)
+	       && TREE_CONSTANT (DECL_INITIAL (object))
+	       && (TREE_READONLY (object)
+		   || (TREE_CODE (object) == VAR_DECL
+		       && DECL_IN_CONSTANT_POOL (object))))
+	initial = DECL_INITIAL (object);
+
+      unsigned HOST_WIDE_INT bytes = 0;
+      if (initial && TREE_CODE (initial) == STRING_CST)
+	bytes = TREE_STRING_LENGTH (initial);
+      else if (initial && TREE_TYPE (object)
+	       && TYPE_SIZE_UNIT (TREE_TYPE (object))
+	       && tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (object))))
+	bytes = tree_to_uhwi (TYPE_SIZE_UNIT (TREE_TYPE (object)));
+
+      if (bytes > 1 && bytes <= 64)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Peeling IPA readonly-value loop %d for "
+		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states.\n",
+		     loop->num, bytes);
+	  return (unsigned) bytes;
+	}
+    }
+
+  return 0;
+}
+
 /* If the loop is expected to iterate N times and is
    small enough, duplicate the loop body N+1 times before
    the loop itself.  This way the hot path will never
@@ -1098,6 +1217,9 @@ try_peel_loop (class loop *loop,
   struct loop_size size;
   int peeled_size;
 
+  unsigned readonly_npeel = ipa_readonly_value_peel_count (loop);
+  bool readonly_specialization = readonly_npeel != 0;
+
   if (!flag_peel_loops
       || param_max_peel_times <= 0
       || !peeled_loops)
@@ -1112,7 +1234,7 @@ try_peel_loop (class loop *loop,
 
   /* We don't peel loops that will be unrolled as this can duplicate a
      loop more times than the user requested.  */
-  if (loop->unroll)
+  if (loop->unroll && !readonly_specialization)
     {
       if (dump_file)
         fprintf (dump_file, "Not peeling: user didn't want it peeled.\n");
@@ -1122,7 +1244,7 @@ try_peel_loop (class loop *loop,
   /* Peel only innermost loops.
      While the code is perfectly capable of peeling non-innermost loops,
      the heuristics would probably need some improvements. */
-  if (loop->inner)
+  if (loop->inner && !readonly_specialization)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: outer loop\n");
@@ -1137,9 +1259,14 @@ try_peel_loop (class loop *loop,
     }
 
   /* Check if there is an estimate on the number of iterations.  */
-  npeel = estimated_loop_iterations_int (loop);
-  if (npeel < 0)
-    npeel = likely_max_loop_iterations_int (loop);
+  if (readonly_specialization)
+    npeel = readonly_npeel - 1;
+  else
+    {
+      npeel = estimated_loop_iterations_int (loop);
+      if (npeel < 0)
+	npeel = likely_max_loop_iterations_int (loop);
+    }
   if (npeel < 0)
     {
       if (dump_file)
@@ -1147,7 +1274,7 @@ try_peel_loop (class loop *loop,
 	         "estimated\n");
       return false;
     }
-  if (maxiter >= 0 && maxiter <= npeel)
+  if (!readonly_specialization && maxiter >= 0 && maxiter <= npeel)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: upper bound is known so can "
@@ -1158,7 +1285,7 @@ try_peel_loop (class loop *loop,
   /* We want to peel estimated number of iterations + 1 (so we never
      enter the loop on quick path).  Check against PARAM_MAX_PEEL_TIMES
      and be sure to avoid overflows.  */
-  if (npeel > param_max_peel_times - 1)
+  if (!readonly_specialization && npeel > param_max_peel_times - 1)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: rolls too much "
@@ -1167,11 +1294,26 @@ try_peel_loop (class loop *loop,
     }
   npeel++;
 
+  /* The readonly object size is only an upper bound on the number of byte
+     states available to the loop.  The loop itself may have a smaller,
+     independently proven upper bound (for example, a two-element pointer
+     array backed by 16 bytes).  Do not let the specialization override that
+     proof: adjust_loop_info_after_peeling requires the precise peel count not
+     to exceed it.  */
+  if (readonly_specialization && loop->any_upper_bound
+      && !wi::leu_p (npeel, loop->nb_iterations_upper_bound))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Not peeling IPA readonly-value loop: requested "
+		 "%i copies exceed known upper bound.\n", (int) npeel);
+      return false;
+    }
+
   /* Check peeled loops size.  */
   tree_estimate_loop_size (loop, exit, NULL, &size,
 			   param_max_peeled_insns);
   if ((peeled_size = estimated_peeled_sequence_size (&size, (int) npeel))
-      > param_max_peeled_insns)
+      > param_max_peeled_insns && !readonly_specialization)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: peeled sequence size is too large "

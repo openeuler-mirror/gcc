@@ -1251,3 +1251,27 @@ Common Joined UInteger Var(param_vrp_vector_threshold) Init(250) Optimization Pa
 Maximum number of basic blocks for VRP to use a basic cache vector.
 
 ; This comment is to ensure we retain the blank line above.
+
+-param=ipa-value-specialization-clone-growth-budget=
+Common Joined UInteger Var(param_ipa_immutable_clone_growth_budget) Init(32768) IntegerRange(0, 2147483647) Param Optimization
+Maximum extra estimated IPA clone instructions for repeated bounded immutable programs.
+
+-param=ipa-value-specialization-loop-growth-budget=
+Common Joined UInteger Var(param_ipa_loop_value_clone_growth_budget) Init(131072) IntegerRange(0, 2147483647) Param Optimization
+Maximum extra estimated IPA clone instructions for immutable values in static loop contexts.
+
+-param=ipa-value-specialization-cold-growth-budget=
+Common Joined UInteger Var(param_ipa_cold_immutable_growth_budget) Init(1024) IntegerRange(0, 65536) Param Optimization
+Independent estimated instruction budget for statically cold immutable clones.
+
+-param=ipa-immutable-clone-growth-budget=
+Common Joined Alias(-param=ipa-value-specialization-clone-growth-budget=)
+Compatibility spelling of --param=ipa-value-specialization-clone-growth-budget=.
+
+-param=ipa-loop-value-clone-growth-budget=
+Common Joined Alias(-param=ipa-value-specialization-loop-growth-budget=)
+Compatibility spelling of --param=ipa-value-specialization-loop-growth-budget=.
+
+-param=ipa-cold-immutable-growth-budget=
+Common Joined Alias(-param=ipa-value-specialization-cold-growth-budget=)
+Compatibility spelling of --param=ipa-value-specialization-cold-growth-budget=.

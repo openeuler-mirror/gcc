@@ -4161,3 +4161,47 @@ Common Var(sve_expand_std_find_threshold) Init(8) Optimization
 Minimal length of the array to search
 
 ; This comment is to ensure we retain the blank line above.
+
+fipa-value-specialization-clone-budget
+Common Var(flag_ipa_immutable_clone_budget) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Consider bounded repeated immutable programs using a dedicated IPA clone profitability budget.
+
+fipa-value-specialization-loop
+Common Var(flag_ipa_loop_value_specialization) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Specialize immutable arguments at a single call site in a bounded static loop context.
+
+fipa-value-specialization-shared-loop
+Common Var(flag_ipa_shared_loop_value_specialization) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Allow shared immutable values in hot loop contexts to use the IPA loop clone reserve.
+
+fipa-value-specialization-cold
+Common Var(flag_ipa_bounded_cold_immutable_specialization) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Admit bounded immutable value clones rejected only by static coldness.
+
+fipa-value-specialization-helper-expansion
+Common Var(flag_ipa_immutable_helper_expansion) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Allow larger bounded helper inlining in immutable specialization contexts.
+
+fipa-value-specialization
+Common Var(flag_ipa_value_specialization) Optimization Init(0)
+Specialize calls for immutable constant-object values and expose their states to scalar optimization.
+
+fipa-immutable-clone-budget
+Common Alias(fipa-value-specialization-clone-budget)
+Deprecated spelling of -fipa-value-specialization-clone-budget.
+
+fipa-loop-value-specialization
+Common Alias(fipa-value-specialization-loop)
+Deprecated spelling of -fipa-value-specialization-loop.
+
+fipa-shared-loop-value-specialization
+Common Alias(fipa-value-specialization-shared-loop)
+Deprecated spelling of -fipa-value-specialization-shared-loop.
+
+fipa-bounded-cold-immutable-specialization
+Common Alias(fipa-value-specialization-cold)
+Deprecated spelling of -fipa-value-specialization-cold.
+
+fipa-immutable-helper-expansion
+Common Alias(fipa-value-specialization-helper-expansion)
+Deprecated spelling of -fipa-value-specialization-helper-expansion.
