@@ -13060,10 +13060,12 @@ are enabled independently at different optimization levels.
 @opindex fcomponent-type-flow
 @item -fcomponent-type-flow
 Use C++ type-flow information to optimize repeated run-time type checks.
-For zero-offset pointer @code{dynamic_cast} expressions, GCC emits a small
-per-call-site, thread-local positive cache.  A cache miss, a failed cast, and
-hierarchies requiring pointer adjustment continue to use the complete ABI
-run-time check.
+At optimization levels @option{-O2} and above, zero-offset pointer
+@code{dynamic_cast} expressions use a small per-call-site, thread-local
+positive cache.  Only successful results equal to the source address enter
+this cache.  A cache miss, a failed cast, and casts requiring pointer
+adjustment continue to use the complete ABI run-time check.  Constant
+evaluation uses the original cast without accessing the cache.
 
 During speculative devirtualization, this option also permits GCC to select a
 target shared by a uniquely dominant number of live virtual tables when there

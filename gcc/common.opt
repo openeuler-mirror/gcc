@@ -1237,7 +1237,7 @@ Looks for opportunities to reduce stack adjustments and stack references.
 
 fcomponent-type-flow
 Common Var(flag_component_type_flow) Optimization
-Use type-flow information to optimize repeated C++ run-time type checks.
+Optimize repeated C++ dynamic casts and speculative devirtualization using type-flow information.
 
 fcommon
 Common Var(flag_no_common,0) Init(1)

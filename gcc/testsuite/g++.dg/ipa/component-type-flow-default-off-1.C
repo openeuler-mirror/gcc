@@ -1,5 +1,5 @@
 /* Verify that component type-flow is opt-in at -O2.  */
-/* { dg-do compile } */
+/* { dg-do compile { target c++11 } } */
 /* { dg-options "-O2 -fdump-tree-gimple -fdump-ipa-devirt-details" } */
 
 struct CastBase

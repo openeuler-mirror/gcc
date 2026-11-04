@@ -1,6 +1,7 @@
 // Verify dynamic_cast through a public non-virtual single-inheritance chain,
 // including the general-RTTI fallbacks used for other hierarchy shapes.
-// { dg-do run }
+// { dg-do run { target c++11 } }
+// { dg-options "-O2 -fcomponent-type-flow" }
 
 struct A
 {

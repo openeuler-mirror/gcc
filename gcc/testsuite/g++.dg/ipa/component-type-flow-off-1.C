@@ -1,5 +1,5 @@
 /* Verify that the explicit off switch preserves the original transforms.  */
-/* { dg-do compile } */
+/* { dg-do compile { target c++11 } } */
 /* { dg-options "-O2 -fno-component-type-flow -fdump-tree-gimple -fdump-ipa-devirt-details" } */
 
 struct CastBase

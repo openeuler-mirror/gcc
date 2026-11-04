@@ -1,6 +1,6 @@
 /* Verify that a virtual target shared by a dominant number of live vtables is
    selected speculatively, while the uncommon target still uses the fallback.  */
-/* { dg-do run } */
+/* { dg-do run { target c++11 } } */
 /* { dg-options "-O2 -fcomponent-type-flow -fdump-ipa-devirt-details" } */
 
 struct Base
