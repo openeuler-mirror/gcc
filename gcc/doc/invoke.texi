@@ -555,7 +555,7 @@ Objective-C and Objective-C++ Dialects}.
 -fauto-inc-dec  -fbranch-probabilities
 -fbuiltin-will-return
 -fcaller-saves
--fcombine-stack-adjustments  -fconserve-stack
+-fcombine-stack-adjustments  -fbit-scan-loop-idiom  -fconserve-stack
 -ffold-mem-offsets
 -fcompare-elim  -fcprop-registers  -fcrossjumping
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules
@@ -13111,6 +13111,17 @@ defaults to off.  On AVR and MSP430, this option is completely disabled.
 
 Passes that use the dataflow information
 are enabled independently at different optimization levels.
+
+@opindex fbit-scan-loop-idiom
+@item -fbit-scan-loop-idiom
+Recognize unsigned bit-scan loops whose induction value is multiplied or
+added to itself, or divided by two, and express their final values with
+count-leading-zero or count-trailing-zero operations.  The transformation
+preserves the result defined for a zero input and rejects signed division.
+
+This extends the shift-based loop idioms recognized by GCC 14.  It is disabled
+by default at every optimization level; @option{-fno-bit-scan-loop-idiom}
+therefore preserves the original recognition policy.
 
 @opindex fdevirtualize
 @item -fdevirtualize

@@ -1274,6 +1274,10 @@ fcombine-stack-adjustments
 Common Var(flag_combine_stack_adjustments) Optimization
 Looks for opportunities to reduce stack adjustments and stack references.
 
+fbit-scan-loop-idiom
+Common Var(flag_bit_scan_loop_idiom) Init(0) Optimization
+Recognize multiply, add, and divide forms of bit-scan loops.
+
 fcommon
 Common Var(flag_no_common,0) Init(1)
 Put uninitialized globals in the common section.
