@@ -577,6 +577,7 @@ Objective-C and Objective-C++ Dialects}.
 -fipa-value-specialization -fipa-value-specialization-clone-budget
 -fipa-value-specialization-loop -fipa-value-specialization-shared-loop
 -fipa-value-specialization-cold -fipa-value-specialization-helper-expansion
+-ftree-immutable-loop-specialization  -ftree-immutable-loop-specialization-cursor
 -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm}
@@ -13680,6 +13681,60 @@ from 4096 to 65536.  Disabling this option restores the smaller limits without
 disabling the basic helper inlining policy.  Helper eligibility, the four-level
 depth bound and ordinary target, exception and inlining legality are unchanged.
 
+@item -ftree-immutable-loop-specialization
+@opindex ftree-immutable-loop-specialization
+Run two loop and scalar simplification stages in functions containing
+IPA-specialized immutable arguments, after initial SSA simplification,
+access diagnostics and builtin constant folding.  Each stage uses the existing loop
+peeling, constant propagation, forward propagation, dead code elimination,
+redundancy elimination and dominator optimization passes.  Path cleanup
+between stages exposes further constant states to the next peeling stage.  The immutable peeling heuristic is limited to
+@option{--param=immutable-state-peel-limit} copies per loop (eight by
+default, at most 64) and 32768 estimated instructions of growth per stage.  Function entry
+size is bounded, and normal loop bounds and residual control flow are
+preserved.  The regular later loop pipeline still runs.
+
+This option requires @option{-fipa-value-specialization} and is disabled by
+default.  It also enables
+@option{-ftree-immutable-loop-specialization-cursor} unless that option was
+explicitly disabled.  Use
+@option{-ftree-immutable-loop-specialization
+-fno-tree-immutable-loop-specialization-cursor} for loop specialization alone;
+the explicit cursor setting takes precedence regardless of option order.
+
+Constant-address tracking can follow a pointer PHI when every incoming
+value refers to the same object.  It examines at most eight PHI arguments
+and 64 values per query, rejecting cycles and unknown or differing objects.
+The complete immutable initializer must still be available.  This is only
+a peeling profitability hint; it does not prove an iteration count or
+permit removal of a residual loop.
+
+@item -ftree-immutable-loop-specialization-cursor
+@opindex ftree-immutable-loop-specialization-cursor
+Specialize bounded control-flow paths entered with a pointer into an immutable
+object.  This pass runs after loop optimization, and therefore after early
+compact event caching, IPA cloning and inlining.  It interprets PHIs from the
+actual incoming edge and uses ordinary constant folding to prove branch
+outcomes.  Unknown conditions and their side exits are retained, as are
+residual loops.  No runtime trip bound is inferred from the object size.
+
+At most eight path-threading and scalar-cleanup rounds run per eligible
+function.  The generic path copier restricts each duplicated region to one
+loop; exception and abnormal edges are excluded.  Constant propagation,
+forward propagation, dead code elimination and redundancy elimination follow
+only rounds that changed the CFG.  Statement and recursive valueization
+work is bounded independently of code growth.  This option is disabled unless enabled explicitly or by
+@option{-ftree-immutable-loop-specialization}.  It may be enabled independently
+of loop specialization.  An explicit positive or negative cursor setting
+takes precedence over the loop option regardless of their order.  The pass
+requires optimization level @option{-O2} or higher and
+@option{-fthread-jumps}.
+
+This transformation does not replace length-aware string comparisons with
+zero-terminated comparisons or infer application-specific string grammars.
+The parameters @option{immutable-cursor-max-path-insns} and
+@option{immutable-cursor-growth-budget} bound copied code.
+
 @opindex fipa-cp-clone
 @item -fipa-cp-clone
 Perform function cloning to make interprocedural constant propagation stronger.
@@ -16740,6 +16795,23 @@ reserve.  The default is 131072.  Zero disables extra loop-reserve admissions.
 @item ipa-value-specialization-cold-growth-budget
 Maximum extra estimated clone instructions admitted by the cold immutable
 route.  The default is 1024.  Zero disables additional cold admissions.
+
+@item immutable-state-peel-limit
+Maximum copies peeled from one immutable state loop per specialization
+stage when @option{-ftree-immutable-loop-specialization} is enabled.
+The default is eight and the range is one through 64.  The initializer
+size and per-stage growth budget can further limit peeling; the residual
+loop and all runtime exits remain unless ordinary simplification removes them.
+
+@item immutable-cursor-max-path-insns
+Maximum estimated instructions copied by one path under
+@option{-ftree-immutable-loop-specialization-cursor}.  The default is 64 and
+permitted values range from 1 through 1024.  Cost is charged before cleanup.
+
+@item immutable-cursor-growth-budget
+Maximum cumulative estimated copied instructions per function under
+@option{-ftree-immutable-loop-specialization-cursor}.  The default is 1024 and
+permitted values range from 0 through 65536.  Zero disables this specialization.
 
 @item ipa-cp-eval-threshold
 IPA-CP calculates its own score of cloning profitability heuristics

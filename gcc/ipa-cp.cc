@@ -6340,6 +6340,8 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
      candidates.  */
   if (readonly_program)
     {
+      if (opt_for_fn (node->decl, flag_tree_immutable_loop_specialization))
+	val->spec_node->ipa_value_specialized = true;
       if (opt_for_fn (node->decl, flag_ipa_value_specialization)
 	  && (callers.length () >= 2 || loop_program))
 	{

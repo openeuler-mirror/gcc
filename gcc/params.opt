@@ -1275,3 +1275,16 @@ Compatibility spelling of --param=ipa-value-specialization-loop-growth-budget=.
 -param=ipa-cold-immutable-growth-budget=
 Common Joined Alias(-param=ipa-value-specialization-cold-growth-budget=)
 Compatibility spelling of --param=ipa-value-specialization-cold-growth-budget=.
+
+
+-param=immutable-state-peel-limit=
+Common Joined UInteger Var(param_immutable_state_peel_limit) Init(8) IntegerRange(1, 64) Param Optimization
+Maximum copies peeled from an immutable state loop in each specialization stage.
+
+-param=immutable-cursor-max-path-insns=
+Common Joined UInteger Var(param_immutable_cursor_max_path_insns) Init(64) IntegerRange(1, 1024) Param Optimization
+Maximum copied instruction estimate for one immutable cursor path.
+
+-param=immutable-cursor-growth-budget=
+Common Joined UInteger Var(param_immutable_cursor_growth_budget) Init(1024) IntegerRange(0, 65536) Param Optimization
+Maximum cumulative copied instruction estimate for immutable cursor specialization in one function.

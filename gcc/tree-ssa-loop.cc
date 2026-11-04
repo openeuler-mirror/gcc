@@ -24,6 +24,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree.h"
 #include "gimple.h"
 #include "tree-pass.h"
+#include "cgraph.h"
 #include "memmodel.h"
 #include "tm_p.h"
 #include "fold-const.h"
@@ -741,3 +742,194 @@ tree_num_loop_insns (class loop *loop, eni_weights *weights)
 
 
 
+
+/* Run the existing loop/scalar machinery after initial SSA simplification,
+   access diagnostics and builtin-constant folding.  Interleave path cleanup
+   so a peeled state does not obscure the next constant state.  The gate bounds the initial function size; the
+   peeling code independently bounds each stage's growth.  All runtime
+   branches and the residual loop remain unless normal folding proves them
+   redundant.  */
+
+namespace {
+
+const pass_data pass_data_immutable_loop_specialization =
+{
+  GIMPLE_PASS,
+  "immutable-loop",
+  OPTGROUP_LOOP,
+  TV_TREE_LOOP,
+  PROP_cfg | PROP_ssa,
+  0, 0, 0, 0
+};
+
+class pass_immutable_loop_specialization : public gimple_opt_pass
+{
+public:
+  pass_immutable_loop_specialization (gcc::context *ctxt)
+    : gimple_opt_pass (pass_data_immutable_loop_specialization, ctxt)
+  {}
+
+  bool gate (function *fun) final override
+  {
+    if (!flag_tree_immutable_loop_specialization
+	|| !flag_ipa_value_specialization)
+      return false;
+    cgraph_node *node = cgraph_node::get (fun->decl);
+    if (!node || (!node->ipa_immutable_program && !node->ipa_value_specialized))
+      return false;
+    unsigned count = 0;
+    basic_block bb;
+    FOR_EACH_BB_FN (bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
+	   !gsi_end_p (gsi); gsi_next (&gsi))
+	if (++count > 8192)
+	  return false;
+    return true;
+  }
+};
+
+} // anonymous namespace
+
+gimple_opt_pass *
+make_pass_immutable_loop_specialization (gcc::context *ctxt)
+{
+  return new pass_immutable_loop_specialization (ctxt);
+}
+
+/* Use distinct pass identities inside the optional pipeline.  Reusing the
+   registered scalar passes would renumber their dumps even when the new
+   option is disabled, breaking existing dump consumers and regression
+   tests.  Delegation keeps the existing implementation, gate, properties
+   and TODO actions, while the enclosing pass manager owns the new identity.  */
+
+namespace {
+
+enum immutable_stage_kind
+{
+  IMM_INIT, IMM_UNROLL, IMM_CCP, IMM_FORWPROP, IMM_DCE, IMM_DONE,
+  IMM_FRE, IMM_DOM
+};
+
+static gimple_opt_pass *
+immutable_inner_pass (gcc::context *ctxt, immutable_stage_kind kind)
+{
+  switch (kind)
+    {
+    case IMM_INIT: return make_pass_tree_loop_init (ctxt);
+    case IMM_UNROLL: return make_pass_complete_unroll (ctxt);
+    case IMM_CCP:
+      {
+	gimple_opt_pass *pass = make_pass_ccp (ctxt);
+	pass->set_pass_param (0, true);
+	return pass;
+      }
+    case IMM_FORWPROP: return make_pass_forwprop (ctxt);
+    case IMM_DCE: return make_pass_dce (ctxt);
+    case IMM_DONE: return make_pass_tree_loop_done (ctxt);
+    case IMM_FRE:
+      {
+	gimple_opt_pass *pass = make_pass_fre (ctxt);
+	pass->set_pass_param (0, true);
+	return pass;
+      }
+    case IMM_DOM:
+      {
+	gimple_opt_pass *pass = make_pass_dominator (ctxt);
+	pass->set_pass_param (0, false);
+	return pass;
+      }
+    }
+  gcc_unreachable ();
+}
+
+static pass_data
+immutable_stage_data (const gimple_opt_pass *inner, immutable_stage_kind kind)
+{
+  static const char *const names[] =
+    { "immutable-init", "immutable-unroll", "immutable-ccp",
+      "immutable-forwprop", "immutable-dce", "immutable-done",
+      "immutable-fre", "immutable-dom" };
+  pass_data data = *inner;
+  data.name = names[kind];
+  return data;
+}
+
+class pass_immutable_stage : public gimple_opt_pass
+{
+  immutable_stage_kind m_kind;
+  gimple_opt_pass *m_inner;
+
+  pass_immutable_stage (gcc::context *ctxt, immutable_stage_kind kind,
+		       gimple_opt_pass *inner)
+    : gimple_opt_pass (immutable_stage_data (inner, kind), ctxt),
+      m_kind (kind), m_inner (inner)
+  {}
+
+public:
+  pass_immutable_stage (gcc::context *ctxt, immutable_stage_kind kind)
+    : pass_immutable_stage (ctxt, kind, immutable_inner_pass (ctxt, kind))
+  {}
+
+  ~pass_immutable_stage () { delete m_inner; }
+
+  opt_pass *clone () final override
+  {
+    return new pass_immutable_stage (m_ctxt, m_kind);
+  }
+
+  bool gate (function *fun) final override { return m_inner->gate (fun); }
+  unsigned execute (function *fun) final override
+  {
+    return m_inner->execute (fun);
+  }
+};
+
+} // anonymous namespace
+
+gimple_opt_pass *
+make_pass_immutable_loop_init (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_INIT);
+}
+
+gimple_opt_pass *
+make_pass_immutable_unroll (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_UNROLL);
+}
+
+gimple_opt_pass *
+make_pass_immutable_ccp (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_CCP);
+}
+
+gimple_opt_pass *
+make_pass_immutable_forwprop (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_FORWPROP);
+}
+
+gimple_opt_pass *
+make_pass_immutable_dce (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_DCE);
+}
+
+gimple_opt_pass *
+make_pass_immutable_loop_done (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_DONE);
+}
+
+gimple_opt_pass *
+make_pass_immutable_fre (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_FRE);
+}
+
+gimple_opt_pass *
+make_pass_immutable_dom (gcc::context *ctxt)
+{
+  return new pass_immutable_stage (ctxt, IMM_DOM);
+}
