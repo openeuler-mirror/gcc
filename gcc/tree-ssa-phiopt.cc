@@ -194,6 +194,20 @@ match_split_word_bitcount_arm (tree arg, basic_block bb, bool add_p,
       if (!gimple_assign_cast_p (stmt)
 	  && gimple_assign_rhs_code (stmt) != SSA_NAME)
 	break;
+      if (gimple_assign_cast_p (stmt))
+	{
+	  tree type = TREE_TYPE (value);
+	  /* A normalized count for a 32-bit half is in [0, 31].  The
+	     plain arm is proved nonzero by the caller.  Only skip integer
+	     conversions that preserve that entire range; a signed five-bit
+	     destination, for example, changes counts 16 through 31.  */
+	  if (!CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (stmt))
+	      || !INTEGRAL_TYPE_P (type)
+	      || !INTEGRAL_TYPE_P (TREE_TYPE (gimple_assign_rhs1 (stmt)))
+	      || !int_fits_type_p (build_int_cst (integer_type_node, 0), type)
+	      || !int_fits_type_p (build_int_cst (integer_type_node, 31), type))
+	    return false;
+	}
       value = gimple_assign_rhs1 (stmt);
       ++count;
     }
