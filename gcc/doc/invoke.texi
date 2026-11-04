@@ -14174,6 +14174,15 @@ iterations of loops.
 This option is enabled at level @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
 
+@item -ftree-replacement-index-prefetch
+@opindex ftree-replacement-index-prefetch
+Use a new unsigned index written over a previously loaded index in a loop
+to prefetch indirect addresses derived from that old index.  The address
+computation must contain only a small number of pure operations and values
+already available at the replacement.  No additional data loads are issued.
+This transformation adds nonfaulting read hints on targets with prefetch
+support and is disabled by default.
+
 @opindex fprefetch-loop-arrays
 @item -fprefetch-loop-arrays
 If supported by the target machine, generate instructions to prefetch

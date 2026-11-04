@@ -2644,6 +2644,10 @@ fpredictive-commoning
 Common Var(flag_predictive_commoning) Optimization
 Run predictive commoning optimization.
 
+ftree-replacement-index-prefetch
+Common Var(flag_tree_replacement_index_prefetch) Init(0) Optimization
+Prefetch indirect addresses using an already computed replacement index.
+
 fprefetch-loop-arrays
 Common Var(flag_prefetch_loop_arrays) Init(-1) Optimization
 Generate prefetch instructions, if available, for arrays in loops.
