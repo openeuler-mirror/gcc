@@ -24,7 +24,8 @@
    out non-writable bits.
 
    The fast path interchanges the loops, updates complete words with one
-   masked read/modify/write and then applies the diagonal inversion.  Runtime
+   masked read/modify/write with the diagonal inversion in its desired value.
+   It retains presence and change tests to avoid introducing accesses.  Runtime
    base checks retain the original nest when the writable array shares its
    base with the mask or row-index array.  Recognition is based solely on
    CFG, SSA, induction, address and bit-operation properties.  */
@@ -92,6 +93,7 @@ struct candidate
   tree presence_base;
   tree row_offset;
   tree rotation_mod;
+  tree rotation_dividend;
   tree bit_mask;
   gassign *info_store;
 };
@@ -355,28 +357,179 @@ split_pointer_plus (tree pointer, tree *base, tree *offset)
   return true;
 }
 
+/* Ignore integral copies/conversions only where the subsequent bit operation
+   observes the low bits, or where the matched value is known to be 0/1.  */
 static tree
-find_modulo (tree value, tree outer_iv, tree bound, unsigned depth = 0)
+strip_integral_copies (tree value)
 {
-  if (!value || depth > 24 || TREE_CODE (value) != SSA_NAME)
-    return NULL_TREE;
-  gassign *def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (value));
-  if (!def)
-    return NULL_TREE;
-  if ((gimple_assign_rhs_code (def) == TRUNC_MOD_EXPR
-	|| gimple_assign_rhs_code (def) == FLOOR_MOD_EXPR)
-      && same_tree_p (gimple_assign_rhs2 (def), bound)
-      && value_depends_on_p (gimple_assign_rhs1 (def), outer_iv))
-    return value;
-  for (unsigned i = 1; i < gimple_num_ops (def); ++i)
+  for (unsigned int depth = 0; value && TREE_CODE (value) == SSA_NAME
+       && depth < 16; ++depth)
     {
-      tree found = find_modulo (gimple_op (def, i), outer_iv, bound,
-				depth + 1);
-      if (found)
-	return found;
+      gassign *def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (value));
+      if (!def)
+	break;
+      tree rhs = gimple_assign_rhs1 (def);
+      if (gimple_assign_rhs_code (def) == SSA_NAME)
+	value = rhs;
+      else if (CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (def))
+	       && INTEGRAL_TYPE_P (TREE_TYPE (value))
+	       && INTEGRAL_TYPE_P (TREE_TYPE (rhs))
+	       && TYPE_PRECISION (TREE_TYPE (value))
+		  >= TYPE_PRECISION (TREE_TYPE (rhs)))
+	value = rhs;
+      else
+	break;
     }
-  return NULL_TREE;
+  return value;
 }
+
+static gassign *
+binary_definition (tree value, enum tree_code code)
+{
+  value = strip_integral_copies (value);
+  if (!value || TREE_CODE (value) != SSA_NAME)
+    return NULL;
+  gassign *def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (value));
+  return def && gimple_assign_rhs_code (def) == code ? def : NULL;
+}
+
+static bool
+small_constant_p (tree value, unsigned HOST_WIDE_INT expected)
+{
+  return value && TREE_CODE (value) == INTEGER_CST
+	 && tree_fits_uhwi_p (value) && tree_to_uhwi (value) == expected;
+}
+
+static bool
+commutative_constant_operand (tree value, enum tree_code code,
+			      unsigned HOST_WIDE_INT constant, tree *other)
+{
+  gassign *def = binary_definition (value, code);
+  if (!def)
+    return false;
+  tree a = gimple_assign_rhs1 (def), b = gimple_assign_rhs2 (def);
+  if (small_constant_p (b, constant))
+    *other = a;
+  else if (small_constant_p (a, constant))
+    *other = b;
+  else
+    return false;
+  return true;
+}
+
+/* Count occurrences of IV in a same-type addition tree.  An arbitrary
+   dependency is not proof of the unit-stride permutation used by the fast
+   path.  Invariant terms are retained, and the runtime guard below excludes
+   negative dividends and wrapping additions over the whole iteration range.  */
+static int
+unit_stride_occurrences (tree value, tree iv, tree type, unsigned depth = 0)
+{
+  if (same_tree_p (value, iv))
+    return 1;
+  if (!value_depends_on_p (value, iv))
+    return 0;
+  if (depth > 24 || !value || TREE_CODE (value) != SSA_NAME)
+    return -1;
+  gassign *def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (value));
+  if (!def || gimple_assign_rhs_code (def) != PLUS_EXPR
+      || !types_compatible_p (TREE_TYPE (value), type)
+      || !types_compatible_p (TREE_TYPE (gimple_assign_rhs1 (def)), type)
+      || !types_compatible_p (TREE_TYPE (gimple_assign_rhs2 (def)), type))
+    return -1;
+  int a = unit_stride_occurrences (gimple_assign_rhs1 (def), iv, type,
+				   depth + 1);
+  int b = unit_stride_occurrences (gimple_assign_rhs2 (def), iv, type,
+				   depth + 1);
+  return a < 0 || b < 0 || a + b > 1 ? -1 : a + b;
+}
+
+static bool
+desired_bit_p (tree value, tree desired_xor)
+{
+  tree xor_value;
+  return commutative_constant_operand (value, BIT_AND_EXPR, 1, &xor_value)
+	 && same_tree_p (strip_integral_copies (xor_value), desired_xor);
+}
+
+static bool
+old_bit_p (tree value, tree old_info, tree shift)
+{
+  tree shifted;
+  if (!commutative_constant_operand (value, BIT_AND_EXPR, 1, &shifted))
+    return false;
+  gassign *def = binary_definition (shifted, RSHIFT_EXPR);
+  return def
+	 && same_tree_p (gimple_assign_rhs1 (def), old_info)
+	 && same_tree_p (strip_integral_copies (gimple_assign_rhs2 (def)),
+			 strip_integral_copies (shift));
+}
+
+static bool
+canonical_bit_index_p (candidate &cand, tree word_offset)
+{
+  gassign *mask_def = as_a<gassign *> (SSA_NAME_DEF_STMT (cand.bit_mask));
+  tree bit_index, mod, scaled;
+  if (!commutative_constant_operand (gimple_assign_rhs2 (mask_def),
+				     BIT_AND_EXPR, 31, &bit_index)
+      || !commutative_constant_operand (bit_index, PLUS_EXPR, 1, &mod))
+    return false;
+  mod = strip_integral_copies (mod);
+  if (!mod || TREE_CODE (mod) != SSA_NAME)
+    return false;
+  gassign *mod_def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (mod));
+  if (!mod_def
+      || (gimple_assign_rhs_code (mod_def) != TRUNC_MOD_EXPR
+	  && gimple_assign_rhs_code (mod_def) != FLOOR_MOD_EXPR)
+      || !same_tree_p (gimple_assign_rhs2 (mod_def), cand.outer_iv.bound)
+      || !types_compatible_p (TREE_TYPE (mod), TREE_TYPE (cand.outer_iv.bound)))
+    return false;
+  tree dividend = gimple_assign_rhs1 (mod_def);
+  if (unit_stride_occurrences (dividend, cand.outer_iv.value,
+			       TREE_TYPE (mod)) != 1)
+    return false;
+  if (!commutative_constant_operand (word_offset, MULT_EXPR, 4, &scaled))
+    return false;
+  gassign *word_def = binary_definition (scaled, RSHIFT_EXPR);
+  if (!word_def || !small_constant_p (gimple_assign_rhs2 (word_def), 5)
+      || !same_tree_p (strip_integral_copies (gimple_assign_rhs1 (word_def)),
+		       strip_integral_copies (bit_index)))
+    return false;
+  cand.rotation_mod = mod;
+  cand.rotation_dividend = dividend;
+  return true;
+}
+
+/* The fallback loop is bypassed, not copied into the fast path.  Every
+   observable operation must therefore be accounted for explicitly.  */
+static bool
+no_extra_side_effects_p (candidate &cand)
+{
+  bool safe = true;
+  basic_block *bbs = get_loop_body (cand.outer);
+  for (unsigned int i = 0; i < cand.outer->num_nodes && safe; ++i)
+    for (gimple_stmt_iterator gsi = gsi_start_bb (bbs[i]);
+	 !gsi_end_p (gsi); gsi_next (&gsi))
+      {
+	gimple *stmt = gsi_stmt (gsi);
+	if (is_gimple_debug (stmt) || gimple_code (stmt) == GIMPLE_PREDICT)
+	  continue;
+	if (gimple_has_volatile_ops (stmt)
+	    || (stmt != cand.info_store
+		&& (gimple_vdef (stmt) || gimple_has_side_effects (stmt)))
+	    || (!is_gimple_assign (stmt)
+		&& gimple_code (stmt) != GIMPLE_COND
+		&& gimple_code (stmt) != GIMPLE_LABEL
+		&& gimple_code (stmt) != GIMPLE_GOTO
+		&& gimple_code (stmt) != GIMPLE_NOP))
+	  {
+	    safe = false;
+	    break;
+	  }
+      }
+  free (bbs);
+  return safe;
+}
+
 
 static bool
 reject_candidate (class loop *inner, const char *reason)
@@ -423,6 +576,19 @@ find_candidate (class loop *inner, candidate *out)
     return reject_candidate (inner, "outer induction");
   if (!find_canonical_iv (inner, &cand.inner_iv))
     return reject_candidate (inner, "inner induction");
+  if (flag_trapv || flag_non_call_exceptions
+      || TYPE_PRECISION (unsigned_type_node) != 32
+      || !types_compatible_p (TREE_TYPE (cand.outer_iv.value),
+			      TREE_TYPE (cand.outer_iv.bound))
+      || !types_compatible_p (TREE_TYPE (cand.inner_iv.value),
+			      TREE_TYPE (cand.outer_iv.bound))
+      || TYPE_PRECISION (TREE_TYPE (cand.outer_iv.value)) < 32
+      || value_depends_on_p (cand.outer_iv.bound, cand.outer_iv.value)
+      || (TREE_CODE (cand.outer_iv.bound) == SSA_NAME
+	  && gimple_bb (SSA_NAME_DEF_STMT (cand.outer_iv.bound))
+	  && flow_bb_inside_loop_p
+	       (outer, gimple_bb (SSA_NAME_DEF_STMT (cand.outer_iv.bound)))))
+    return reject_candidate (inner, "induction types");
   if (!only_virtual_exit_phis_p (cand.outer_iv.exit->dest))
     return reject_candidate (inner, "exit phi");
 
@@ -460,9 +626,10 @@ find_candidate (class loop *inner, candidate *out)
 	    tree a = gimple_assign_rhs1 (assign);
 	    tree b = gimple_assign_rhs2 (assign);
 	    tree literal = NULL_TREE;
-	    if (value_depends_on_p (a, equality) && direct_memory_load_p (b, NULL))
+	    if (same_tree_p (strip_integral_copies (a), equality)
+		&& direct_memory_load_p (b, NULL))
 	      literal = b;
-	    else if (value_depends_on_p (b, equality)
+	    else if (same_tree_p (strip_integral_copies (b), equality)
 		     && direct_memory_load_p (a, NULL))
 	      literal = a;
 	    if (literal && INTEGRAL_TYPE_P (TREE_TYPE (literal))
@@ -517,6 +684,15 @@ find_candidate (class loop *inner, candidate *out)
 	  info_mem = lhs;
 	}
 
+  /* Do not inspect control dependencies until the complete store
+     pattern exists.  OLD_INFO alone can survive a rejected mask.  */
+  if (!cand.literal || !desired_xor || !cand.info_store
+      || !old_info || !info_mem)
+    {
+      free (bbs);
+      return reject_candidate (inner, "incomplete bit store");
+    }
+
   tree presence_mem = NULL_TREE;
   tree masked_presence = NULL_TREE;
   for (unsigned i = 0; i < inner->num_nodes && !presence_mem; ++i)
@@ -538,6 +714,8 @@ find_candidate (class loop *inner, candidate *out)
 	      masked_presence = gimple_assign_lhs (assign);
 	  }
 
+  tree shift = gimple_assign_rhs2
+    (as_a<gassign *> (SSA_NAME_DEF_STMT (cand.bit_mask)));
   bool presence_controls_store = false;
   bool desired_controls_store = false;
   for (unsigned i = 0; i < inner->num_nodes; ++i)
@@ -555,11 +733,12 @@ find_candidate (class loop *inner, candidate *out)
 
       tree a = gimple_cond_lhs (cond);
       tree b = gimple_cond_rhs (cond);
-      bool related = ((value_depends_on_p (a, desired_xor)
-		       && value_depends_on_p (b, old_info))
-		      || (value_depends_on_p (b, desired_xor)
-			  && value_depends_on_p (a, old_info)));
-      if (!related)
+      bool related = ((desired_bit_p (a, desired_xor)
+		       && old_bit_p (b, old_info, shift))
+		      || (desired_bit_p (b, desired_xor)
+			  && old_bit_p (a, old_info, shift)));
+      if (!related || (gimple_cond_code (cond) != EQ_EXPR
+		       && gimple_cond_code (cond) != NE_EXPR))
 	continue;
       bool unequal_is_true = gimple_cond_code (cond) == NE_EXPR;
       edge store_edge = true_or_false_edge (gimple_bb (cond), unequal_is_true);
@@ -573,6 +752,12 @@ find_candidate (class loop *inner, candidate *out)
   if (!cand.literal || !cand.info_store || !presence_mem
       || !presence_controls_store || !desired_controls_store)
     return reject_candidate (inner, "bit update diamond");
+
+  if (!INTEGRAL_TYPE_P (TREE_TYPE (info_mem))
+      || TYPE_PRECISION (TREE_TYPE (info_mem)) != 32
+      || !INTEGRAL_TYPE_P (TREE_TYPE (presence_mem))
+      || TYPE_PRECISION (TREE_TYPE (presence_mem)) != 32)
+    return reject_candidate (inner, "packed word type");
 
   tree info_ptr = memory_pointer (info_mem);
   tree presence_ptr = memory_pointer (presence_mem);
@@ -606,6 +791,8 @@ find_candidate (class loop *inner, candidate *out)
   else
     return reject_candidate (inner, "row offset dependence");
 
+  tree word_offset = same_tree_p (oa, cand.row_offset) ? ob : oa;
+
   tree literal_mem = NULL_TREE;
   if (!direct_memory_load_p (cand.literal, &literal_mem))
     return reject_candidate (inner, "literal load");
@@ -617,13 +804,10 @@ find_candidate (class loop *inner, candidate *out)
       || value_depends_on_p (cand.literal_base, cand.inner_iv.value))
     return reject_candidate (inner, "literal address");
 
-  gassign *mask_def
-    = as_a<gassign *> (SSA_NAME_DEF_STMT (cand.bit_mask));
-  cand.rotation_mod
-    = find_modulo (gimple_assign_rhs2 (mask_def), cand.outer_iv.value,
-		   cand.outer_iv.bound);
-  if (!cand.rotation_mod)
-    return reject_candidate (inner, "rotating bit index");
+  if (!canonical_bit_index_p (cand, word_offset))
+    return reject_candidate (inner, "canonical rotating bit index");
+  if (!no_extra_side_effects_p (cand))
+    return reject_candidate (inner, "unmodeled side effects");
 
   *out = cand;
   return true;
@@ -773,6 +957,7 @@ static basic_block
 new_bb_after (basic_block after, class loop *father)
 {
   basic_block bb = create_empty_bb (after);
+  bb->count = after->count;
   add_bb_to_loop (bb, father);
   return bb;
 }
@@ -809,6 +994,30 @@ clone_for_index (candidate &cand, tree value, tree old_index,
   return ctx.failed ? NULL_TREE : result;
 }
 
+/* Own the detached statements until every potentially failing clone has
+   succeeded.  Failed matching/cloning must not leave edges, blocks or SSA
+   definitions in the live function.  */
+struct pending_bitset_sequences
+{
+  gimple_seq init = NULL, guard = NULL, outer = NULL;
+  tree index = NULL_TREE, rotation = NULL_TREE;
+  bool committed = false;
+
+  ~pending_bitset_sequences ()
+  {
+    if (!committed)
+      {
+	gimple_seq_discard (outer);
+	gimple_seq_discard (guard);
+	gimple_seq_discard (init);
+	if (index)
+	  release_ssa_name (index);
+	if (rotation)
+	  release_ssa_name (rotation);
+      }
+  }
+};
+
 static bool
 transform_candidate (candidate &cand)
 {
@@ -817,58 +1026,92 @@ transform_candidate (candidate &cand)
   if (!original_pre || !original_exit)
     return false;
 
-  basic_block dispatch = split_edge (original_pre);
-  edge entry = single_pred_edge (dispatch);
-  basic_block entry_src = entry->src;
-  class loop *father = loop_outer (cand.outer);
-
-  basic_block init = new_bb_after (entry_src, father);
-  basic_block guard = new_bb_after (init, father);
-  basic_block outer_header = new_bb_after (guard, father);
-  basic_block word_loop = new_bb_after (outer_header, father);
-  basic_block diagonal_guard = new_bb_after (word_loop, father);
-  basic_block diagonal_test = new_bb_after (diagonal_guard, father);
-  basic_block diagonal_store = new_bb_after (diagonal_test, father);
-  basic_block outer_latch = new_bb_after (diagonal_store, father);
-  basic_block finish = new_bb_after (outer_latch, father);
-
-  redirect_edge_and_branch (entry, init);
-
   tree index_type = TREE_TYPE (cand.inner_iv.value);
   tree limit_type = TREE_TYPE (cand.outer_iv.bound);
   tree u32 = unsigned_type_node;
   tree u32_ptr = build_pointer_type (u32);
   tree all_ones = build_all_ones_cst (u32);
 
-  gimple_seq init_seq = NULL;
+  pending_bitset_sequences pending;
+  gimple_seq &init_seq = pending.init;
+  gimple_seq &guard_seq = pending.guard;
+  gimple_seq &outer_seq = pending.outer;
   clone_context init_ctx = {};
   init_ctx.scope = cand.outer;
   init_ctx.seq = &init_seq;
-  tree info_base = clone_value (cand.info_base, &init_ctx);
-  tree presence_base = clone_value (cand.presence_base, &init_ctx);
-  tree literal_base = clone_value (cand.literal_base, &init_ctx);
   tree row_count = clone_value (cand.inner_iv.bound, &init_ctx);
-  if (!info_base || !presence_base || !literal_base || !row_count
-	|| init_ctx.failed)
+  if (!row_count || init_ctx.failed)
     return false;
-  tree info_u32 = ssa_assign1 (&init_seq, u32_ptr, NOP_EXPR, info_base);
+  clone_context base_ctx = {};
+  base_ctx.scope = cand.outer;
+  base_ctx.seq = &guard_seq;
+  tree info_base = clone_value (cand.info_base, &base_ctx);
+  tree presence_base = clone_value (cand.presence_base, &base_ctx);
+  tree literal_base = clone_value (cand.literal_base, &base_ctx);
+  if (!info_base || !presence_base || !literal_base || base_ctx.failed)
+    return false;
+
+  clone_context rotation_ctx = {};
+  rotation_ctx.scope = cand.outer;
+  rotation_ctx.seq = &guard_seq;
+  rotation_ctx.replacements.safe_push
+    ({ cand.outer_iv.value, build_zero_cst (limit_type) });
+  tree initial_dividend = clone_value (cand.rotation_dividend, &rotation_ctx);
+  tree initial_rotation = clone_value (cand.rotation_mod, &rotation_ctx);
+  if (!initial_dividend || !initial_rotation || rotation_ctx.failed)
+    return false;
+
+  tree fast_i = pending.index = make_ssa_name (index_type);
+  tree bit_mod = pending.rotation = make_ssa_name (limit_type);
+  tree literal
+    = clone_for_index (cand, cand.literal, cand.inner_iv.value, fast_i,
+		       &outer_seq, cand.literal_base, literal_base);
+  if (!literal)
+    return false;
+  tree row_offset
+    = clone_for_index (cand, cand.row_offset, cand.inner_iv.value, fast_i,
+		       &outer_seq, cand.literal_base, literal_base,
+		       cand.literal, literal);
+  if (!row_offset)
+    return false;
+
+  /* All failure exits precede the first CFG mutation.  */
+  pending.committed = true;
+  basic_block dispatch = split_edge (original_pre);
+  edge entry = single_pred_edge (dispatch);
+  class loop *father = loop_outer (cand.outer);
+  basic_block limit_guard = new_bb_after (entry->src, father);
+  basic_block init = new_bb_after (limit_guard, father);
+  basic_block guard = new_bb_after (init, father);
+  basic_block outer_header = new_bb_after (guard, father);
+  basic_block word_header = new_bb_after (outer_header, father);
+  basic_block word_load = new_bb_after (word_header, father);
+  basic_block word_store = new_bb_after (word_load, father);
+  basic_block word_latch = new_bb_after (word_store, father);
+  basic_block outer_latch = new_bb_after (word_latch, father);
+  basic_block finish = new_bb_after (outer_latch, father);
+  redirect_edge_and_branch (entry, limit_guard);
+
+  tree info_u32 = ssa_assign1 (&guard_seq, u32_ptr, NOP_EXPR, info_base);
   tree presence_u32
-    = ssa_assign1 (&init_seq, u32_ptr, NOP_EXPR, presence_base);
+    = ssa_assign1 (&guard_seq, u32_ptr, NOP_EXPR, presence_base);
   tree literal_raw
-    = ssa_assign1 (&init_seq, ptr_type_node, NOP_EXPR, literal_base);
-  tree limit_positive
-    = ssa_assign2 (&init_seq, boolean_type_node, GT_EXPR,
-		   cand.outer_iv.bound, build_zero_cst (limit_type));
+    = ssa_assign1 (&guard_seq, ptr_type_node, NOP_EXPR, literal_base);
+  /* Preserve both zero-trip tests before evaluating any body-only loads.  */
+  gimple_seq limit_seq = NULL;
+  gimple_seq_add_stmt
+    (&limit_seq, gimple_build_cond (GT_EXPR, cand.outer_iv.bound,
+				    build_zero_cst (limit_type),
+				    NULL_TREE, NULL_TREE));
+  insert_seq (limit_guard, limit_seq);
   tree count_positive
     = ssa_assign2 (&init_seq, boolean_type_node, GT_EXPR,
 		   row_count, build_zero_cst (index_type));
-  tree can_transform = bool_and (&init_seq, limit_positive, count_positive);
   gimple_seq_add_stmt
-    (&init_seq, gimple_build_cond (NE_EXPR, can_transform,
+    (&init_seq, gimple_build_cond (NE_EXPR, count_positive,
 				   boolean_false_node, NULL_TREE, NULL_TREE));
   insert_seq (init, init_seq);
 
-  gimple_seq guard_seq = NULL;
   tree i_last
     = ssa_assign2 (&guard_seq, limit_type, RSHIFT_EXPR,
 		   cand.outer_iv.bound, build_int_cst (limit_type, 5));
@@ -888,19 +1131,27 @@ transform_candidate (candidate &cand)
     = ssa_assign2 (&guard_seq, boolean_type_node, LE_EXPR,
 		   cand.outer_iv.bound,
 		   build_int_cst (limit_type, MAX_FAST_BITS));
-  tree fast_ok
-    = bool_and (&guard_seq, info_presence_distinct,
-		info_literal_distinct);
+  tree fast_ok = bool_and (&guard_seq, info_presence_distinct,
+			  info_literal_distinct);
   fast_ok = bool_and (&guard_seq, fast_ok, bounded);
 
-  clone_context rotation_ctx = {};
-  rotation_ctx.scope = cand.outer;
-  rotation_ctx.seq = &guard_seq;
-  rotation_ctx.replacements.safe_push
-    ({ cand.outer_iv.value, build_zero_cst (TREE_TYPE (cand.outer_iv.value)) });
-  tree initial_rotation = clone_value (cand.rotation_mod, &rotation_ctx);
-  if (!initial_rotation || rotation_ctx.failed)
-    return false;
+  /* A unit-stride addition tree is a permutation only if no intermediate
+     wrapping can change its remainder.  The original first-iteration
+     expression computes INITIAL_DIVIDEND; guard its complete future range.  */
+  tree nonnegative
+    = ssa_assign2 (&guard_seq, boolean_type_node, GE_EXPR,
+		   initial_dividend, build_zero_cst (limit_type));
+  tree distance
+    = ssa_assign2 (&guard_seq, limit_type, MINUS_EXPR,
+		   cand.outer_iv.bound, build_int_cst (limit_type, 1));
+  tree room
+    = ssa_assign2 (&guard_seq, limit_type, MINUS_EXPR,
+		   TYPE_MAX_VALUE (limit_type), distance);
+  tree no_wrap
+    = ssa_assign2 (&guard_seq, boolean_type_node, LE_EXPR,
+		   initial_dividend, room);
+  fast_ok = bool_and (&guard_seq, fast_ok, nonnegative);
+  fast_ok = bool_and (&guard_seq, fast_ok, no_wrap);
   tree limit_u32
     = ssa_assign1 (&guard_seq, u32, NOP_EXPR, cand.outer_iv.bound);
   tree not_limit = ssa_assign1 (&guard_seq, u32, BIT_NOT_EXPR, limit_u32);
@@ -914,20 +1165,8 @@ transform_candidate (candidate &cand)
 				    NULL_TREE, NULL_TREE));
   insert_seq (guard, guard_seq);
 
-  tree fast_i = make_ssa_name (index_type);
-  tree bit_mod = make_ssa_name (TREE_TYPE (initial_rotation));
   gphi *fast_i_phi = create_phi_node (fast_i, outer_header);
   gphi *bit_mod_phi = create_phi_node (bit_mod, outer_header);
-  gimple_seq outer_seq = NULL;
-  tree literal
-    = clone_for_index (cand, cand.literal, cand.inner_iv.value, fast_i,
-		       &outer_seq, cand.literal_base, literal_base);
-  tree row_offset
-    = clone_for_index (cand, cand.row_offset, cand.inner_iv.value, fast_i,
-		       &outer_seq, cand.literal_base, literal_base,
-		       cand.literal, literal);
-  if (!literal || !row_offset)
-    return false;
   tree row_offset_size
     = ssa_assign1 (&outer_seq, size_type_node, NOP_EXPR, row_offset);
   tree info_row
@@ -942,10 +1181,31 @@ transform_candidate (candidate &cand)
   tree literal_bit_u32
     = ssa_assign1 (&outer_seq, u32, NOP_EXPR, literal_bit);
   tree value = ssa_assign1 (&outer_seq, u32, NEGATE_EXPR, literal_bit_u32);
+  tree diagonal_bit
+    = ssa_assign2 (&outer_seq, limit_type, PLUS_EXPR, bit_mod,
+		   build_int_cst (limit_type, 1));
+  tree wrapped
+    = ssa_assign2 (&outer_seq, boolean_type_node, EQ_EXPR,
+		   diagonal_bit, cand.outer_iv.bound);
+  tree bit_mod_next
+    = ssa_assign3 (&outer_seq, limit_type, COND_EXPR,
+		   wrapped, build_zero_cst (limit_type), diagonal_bit);
+  tree diag_word
+    = ssa_assign2 (&outer_seq, limit_type, RSHIFT_EXPR,
+		   diagonal_bit, build_int_cst (limit_type, 5));
+  tree diag_shift
+    = ssa_assign2 (&outer_seq, limit_type, BIT_AND_EXPR,
+		   diagonal_bit, build_int_cst (limit_type, 31));
+  tree diag_mask
+    = ssa_assign2 (&outer_seq, u32, LSHIFT_EXPR,
+		   build_int_cst (u32, 1), diag_shift);
+  tree has_diagonal
+    = ssa_assign2 (&outer_seq, boolean_type_node, LT_EXPR,
+		   fast_i, cand.outer_iv.bound);
   insert_seq (outer_header, outer_seq);
 
   tree word = make_ssa_name (limit_type);
-  gphi *word_phi = create_phi_node (word, word_loop);
+  gphi *word_phi = create_phi_node (word, word_header);
   gimple_seq word_seq = NULL;
   tree word_size
     = ssa_assign1 (&word_seq, size_type_node, NOP_EXPR, word);
@@ -958,9 +1218,6 @@ transform_candidate (candidate &cand)
   tree presence_word
     = ssa_assign2 (&word_seq, u32_ptr, POINTER_PLUS_EXPR,
 		   presence_row, word_offset);
-  tree old_value = make_ssa_name (u32);
-  gimple_seq_add_stmt
-    (&word_seq, gimple_build_assign (old_value, build_mem_ref (info_word)));
   tree presence_value = make_ssa_name (u32);
   gimple_seq_add_stmt
     (&word_seq,
@@ -985,99 +1242,53 @@ transform_candidate (candidate &cand)
     = ssa_assign1 (&word_seq, u32, BIT_NOT_EXPR, presence_value);
   tree writable
     = ssa_assign2 (&word_seq, u32, BIT_AND_EXPR, mask, not_presence);
-  tree changed_bits
-    = ssa_assign2 (&word_seq, u32, BIT_XOR_EXPR, old_value, value);
-  changed_bits
-    = ssa_assign2 (&word_seq, u32, BIT_AND_EXPR, changed_bits, writable);
-  tree new_value
-    = ssa_assign2 (&word_seq, u32, BIT_XOR_EXPR, old_value, changed_bits);
   gimple_seq_add_stmt
-    (&word_seq, gimple_build_assign (build_mem_ref (info_word), new_value));
+    (&word_seq, gimple_build_cond (NE_EXPR, writable, build_zero_cst (u32),
+				   NULL_TREE, NULL_TREE));
+  insert_seq (word_header, word_seq);
+
+  /* First preserve the original presence test.  Then form the complete final
+     desired word, including the diagonal, and only write actual changes.
+     A base fill followed by a diagonal XOR would introduce transient writes
+     even when the source never stores anything.  */
+  gimple_seq load_seq = NULL;
+  tree old_value = make_ssa_name (u32);
+  gimple_seq_add_stmt
+    (&load_seq, gimple_build_assign (old_value, build_mem_ref (info_word)));
+  tree diagonal_here
+    = ssa_assign2 (&load_seq, boolean_type_node, EQ_EXPR, word, diag_word);
+  diagonal_here = bool_and (&load_seq, has_diagonal, diagonal_here);
+  tree word_diag
+    = ssa_assign3 (&load_seq, u32, COND_EXPR, diagonal_here,
+		   diag_mask, build_zero_cst (u32));
+  tree desired = ssa_assign2 (&load_seq, u32, BIT_XOR_EXPR, value, word_diag);
+  tree changed_bits
+    = ssa_assign2 (&load_seq, u32, BIT_XOR_EXPR, old_value, desired);
+  changed_bits
+    = ssa_assign2 (&load_seq, u32, BIT_AND_EXPR, changed_bits, writable);
+  tree new_value
+    = ssa_assign2 (&load_seq, u32, BIT_XOR_EXPR, old_value, changed_bits);
+  gimple_seq_add_stmt
+    (&load_seq, gimple_build_cond (NE_EXPR, changed_bits, build_zero_cst (u32),
+				   NULL_TREE, NULL_TREE));
+  insert_seq (word_load, load_seq);
+  gimple_seq store_seq = NULL;
+  gimple_seq_add_stmt
+    (&store_seq, gimple_build_assign (build_mem_ref (info_word), new_value));
+  insert_seq (word_store, store_seq);
+
+  gimple_seq word_latch_seq = NULL;
   tree word_next
-    = ssa_assign2 (&word_seq, limit_type, PLUS_EXPR, word,
+    = ssa_assign2 (&word_latch_seq, limit_type, PLUS_EXPR, word,
 		   build_int_cst (limit_type, 1));
   tree more_words
-    = ssa_assign2 (&word_seq, boolean_type_node, LE_EXPR,
+    = ssa_assign2 (&word_latch_seq, boolean_type_node, LE_EXPR,
 		   word_next, i_last);
   gimple_seq_add_stmt
-    (&word_seq, gimple_build_cond (NE_EXPR, more_words,
-				   boolean_false_node, NULL_TREE, NULL_TREE));
-  insert_seq (word_loop, word_seq);
-
-  gimple_seq diag_guard_seq = NULL;
-  tree has_diagonal
-    = ssa_assign2 (&diag_guard_seq, boolean_type_node, LT_EXPR,
-		   fast_i, cand.outer_iv.bound);
-  gimple_seq_add_stmt
-    (&diag_guard_seq,
-     gimple_build_cond (NE_EXPR, has_diagonal, boolean_false_node,
-			NULL_TREE, NULL_TREE));
-  insert_seq (diagonal_guard, diag_guard_seq);
-
-  gimple_seq diag_test_seq = NULL;
-  tree diagonal_bit
-    = ssa_assign2 (&diag_test_seq, TREE_TYPE (bit_mod), PLUS_EXPR, bit_mod,
-		   build_int_cst (TREE_TYPE (bit_mod), 1));
-  tree wrapped
-    = ssa_assign2 (&diag_test_seq, boolean_type_node, EQ_EXPR,
-		   diagonal_bit, cand.outer_iv.bound);
-  tree bit_mod_next
-    = ssa_assign3 (&diag_test_seq, TREE_TYPE (bit_mod), COND_EXPR,
-		   wrapped, build_zero_cst (TREE_TYPE (bit_mod)),
-		   diagonal_bit);
-  tree diag_word
-    = ssa_assign2 (&diag_test_seq, TREE_TYPE (diagonal_bit), RSHIFT_EXPR,
-		   diagonal_bit,
-		   build_int_cst (TREE_TYPE (diagonal_bit), 5));
-  tree diag_word_size
-    = ssa_assign1 (&diag_test_seq, size_type_node, NOP_EXPR, diag_word);
-  tree diag_offset
-    = ssa_assign2 (&diag_test_seq, size_type_node, MULT_EXPR,
-		   diag_word_size, build_int_cst (size_type_node, 4));
-  tree diag_presence_ptr
-    = ssa_assign2 (&diag_test_seq, u32_ptr, POINTER_PLUS_EXPR,
-		   presence_row, diag_offset);
-  tree diag_presence = make_ssa_name (u32);
-  gimple_seq_add_stmt
-    (&diag_test_seq,
-     gimple_build_assign (diag_presence, build_mem_ref (diag_presence_ptr)));
-  tree diag_shift
-    = ssa_assign2 (&diag_test_seq, TREE_TYPE (diagonal_bit), BIT_AND_EXPR,
-		   diagonal_bit,
-		   build_int_cst (TREE_TYPE (diagonal_bit), 31));
-  tree shifted_presence
-    = ssa_assign2 (&diag_test_seq, u32, RSHIFT_EXPR,
-		   diag_presence, diag_shift);
-  tree presence_bit
-    = ssa_assign2 (&diag_test_seq, u32, BIT_AND_EXPR, shifted_presence,
-		   build_int_cst (u32, 1));
-  gimple_seq_add_stmt
-    (&diag_test_seq,
-     gimple_build_cond (EQ_EXPR, presence_bit, build_zero_cst (u32),
-			NULL_TREE, NULL_TREE));
-  insert_seq (diagonal_test, diag_test_seq);
-
-  gimple_seq diag_store_seq = NULL;
-  tree diag_info_ptr
-    = ssa_assign2 (&diag_store_seq, u32_ptr, POINTER_PLUS_EXPR,
-		   info_row, diag_offset);
-  tree diag_info = make_ssa_name (u32);
-  gimple_seq_add_stmt
-    (&diag_store_seq,
-     gimple_build_assign (diag_info, build_mem_ref (diag_info_ptr)));
-  tree diag_one = ssa_assign1 (&diag_store_seq, u32, NOP_EXPR,
-			       build_int_cst (u32, 1));
-  tree diag_mask
-    = ssa_assign2 (&diag_store_seq, u32, LSHIFT_EXPR, diag_one, diag_shift);
-  tree toggled
-    = ssa_assign2 (&diag_store_seq, u32, BIT_XOR_EXPR, diag_info, diag_mask);
-  gimple_seq_add_stmt
-    (&diag_store_seq,
-     gimple_build_assign (build_mem_ref (diag_info_ptr), toggled));
-  insert_seq (diagonal_store, diag_store_seq);
-
-  tree latch_bit_mod = make_ssa_name (TREE_TYPE (bit_mod));
-  gphi *latch_bit_phi = create_phi_node (latch_bit_mod, outer_latch);
+    (&word_latch_seq, gimple_build_cond (NE_EXPR, more_words,
+					 boolean_false_node,
+					 NULL_TREE, NULL_TREE));
+  insert_seq (word_latch, word_latch_seq);
   gimple_seq latch_seq = NULL;
   tree fast_i_next
     = ssa_assign2 (&latch_seq, index_type, PLUS_EXPR, fast_i,
@@ -1087,9 +1298,13 @@ transform_candidate (candidate &cand)
 		   fast_i_next, row_count);
   gimple_seq_add_stmt
     (&latch_seq, gimple_build_cond (NE_EXPR, more_rows, boolean_false_node,
-				   NULL_TREE, NULL_TREE));
+				    NULL_TREE, NULL_TREE));
   insert_seq (outer_latch, latch_seq);
 
+  edge limit_yes = make_edge (limit_guard, init, EDGE_TRUE_VALUE);
+  edge limit_no = make_edge (limit_guard, dispatch, EDGE_FALSE_VALUE);
+  limit_yes->probability = profile_probability::likely ();
+  limit_no->probability = limit_yes->probability.invert ();
   edge init_guard = make_edge (init, guard, EDGE_TRUE_VALUE);
   edge init_fallback = make_edge (init, dispatch, EDGE_FALSE_VALUE);
   init_guard->probability = profile_probability::likely ();
@@ -1098,41 +1313,37 @@ transform_candidate (candidate &cand)
   edge guard_fallback = make_edge (guard, dispatch, EDGE_FALSE_VALUE);
   guard_fast->probability = profile_probability::likely ();
   guard_fallback->probability = guard_fast->probability.invert ();
-  edge outer_word = make_edge (outer_header, word_loop, EDGE_FALLTHRU);
-  edge word_back = make_edge (word_loop, word_loop, EDGE_TRUE_VALUE);
-  edge word_done = make_edge (word_loop, diagonal_guard, EDGE_FALSE_VALUE);
+  edge outer_word = make_edge (outer_header, word_header, EDGE_FALLTHRU);
+  outer_word->probability = profile_probability::always ();
+  edge load_yes = make_edge (word_header, word_load, EDGE_TRUE_VALUE);
+  edge load_no = make_edge (word_header, word_latch, EDGE_FALSE_VALUE);
+  load_yes->probability = profile_probability::likely ();
+  load_no->probability = load_yes->probability.invert ();
+  edge store_yes = make_edge (word_load, word_store, EDGE_TRUE_VALUE);
+  edge store_no = make_edge (word_load, word_latch, EDGE_FALSE_VALUE);
+  store_yes->probability = profile_probability::likely ();
+  store_no->probability = store_yes->probability.invert ();
+  make_edge (word_store, word_latch, EDGE_FALLTHRU)->probability
+    = profile_probability::always ();
+  edge word_back = make_edge (word_latch, word_header, EDGE_TRUE_VALUE);
+  edge word_done = make_edge (word_latch, outer_latch, EDGE_FALSE_VALUE);
   word_back->probability = profile_probability::likely ();
   word_done->probability = word_back->probability.invert ();
-  edge diag_yes
-    = make_edge (diagonal_guard, diagonal_test, EDGE_TRUE_VALUE);
-  edge diag_no = make_edge (diagonal_guard, outer_latch, EDGE_FALSE_VALUE);
-  diag_yes->probability = profile_probability::likely ();
-  diag_no->probability = diag_yes->probability.invert ();
-  edge diag_store
-    = make_edge (diagonal_test, diagonal_store, EDGE_TRUE_VALUE);
-  edge diag_skip = make_edge (diagonal_test, outer_latch, EDGE_FALSE_VALUE);
-  diag_store->probability = profile_probability::likely ();
-  diag_skip->probability = diag_store->probability.invert ();
-  edge diag_store_done
-    = make_edge (diagonal_store, outer_latch, EDGE_FALLTHRU);
   edge outer_back = make_edge (outer_latch, outer_header, EDGE_TRUE_VALUE);
   edge outer_done = make_edge (outer_latch, finish, EDGE_FALSE_VALUE);
   outer_back->probability = profile_probability::likely ();
   outer_done->probability = outer_back->probability.invert ();
-  make_edge (finish, original_exit->dest, EDGE_FALLTHRU);
+  make_edge (finish, original_exit->dest, EDGE_FALLTHRU)->probability
+    = profile_probability::always ();
 
   add_phi_arg (fast_i_phi, build_zero_cst (index_type), guard_fast,
 	       UNKNOWN_LOCATION);
   add_phi_arg (fast_i_phi, fast_i_next, outer_back, UNKNOWN_LOCATION);
   add_phi_arg (bit_mod_phi, initial_rotation, guard_fast, UNKNOWN_LOCATION);
-  add_phi_arg (bit_mod_phi, latch_bit_mod, outer_back, UNKNOWN_LOCATION);
+  add_phi_arg (bit_mod_phi, bit_mod_next, outer_back, UNKNOWN_LOCATION);
   add_phi_arg (word_phi, build_zero_cst (limit_type), outer_word,
 	       UNKNOWN_LOCATION);
   add_phi_arg (word_phi, word_next, word_back, UNKNOWN_LOCATION);
-  add_phi_arg (latch_bit_phi, bit_mod, diag_no, UNKNOWN_LOCATION);
-  add_phi_arg (latch_bit_phi, bit_mod_next, diag_skip, UNKNOWN_LOCATION);
-  add_phi_arg (latch_bit_phi, bit_mod_next, diag_store_done,
-	       UNKNOWN_LOCATION);
 
   if (dump_file)
     fprintf (dump_file,
@@ -1140,10 +1351,10 @@ transform_candidate (candidate &cand)
 	     "for loops %d/%d (max bits %llu)\n",
 	     function_name (cfun), cand.outer->num, cand.inner->num,
 	     (unsigned long long) MAX_FAST_BITS);
-
   mark_virtual_operands_for_renaming (cfun);
   return true;
 }
+
 
 /* Normalize potential pattern loop nests before regular IPA inlining.  A
    continue predictor can occupy an otherwise empty block until the late
@@ -1244,7 +1455,9 @@ public:
 	cleanup_tree_cfg ();
 	checking_verify_ssa (true, true);
       }
-    return 0;
+    /* Detached loads can request virtual SSA renaming even when
+       a later clone fails and their sequences are discarded.  */
+    return need_ssa_update_p (fun) ? TODO_update_ssa : 0;
   }
 };
 

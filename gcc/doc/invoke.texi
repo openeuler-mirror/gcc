@@ -13883,7 +13883,11 @@ original loop nest is retained as a fallback when packed arrays have the same
 base, when the writable array has the same base as the row-index array, or
 when the packed-bit range is outside the profitability bound.  The transformed
 idiom requires distinct packed storage objects, as in the source-level
-row-major form.  This option is disabled by default.
+row-major form.  Only exact unit-stride rotating indices and single-bit
+update predicates are recognized; negative or wrapping index ranges use
+the original loop.  The fast path preserves zero-trip and presence tests
+and only writes words whose final values change.  This option requires
+@option{-O3} and is disabled by default.
 
 @opindex floop-unroll-and-jam
 @item -floop-unroll-and-jam
