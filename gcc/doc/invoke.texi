@@ -13725,6 +13725,39 @@ This pass only operates on local scalar variables and is enabled by default
 at @option{-O1} and higher, except for @option{-Og}.
 It requires that @option{-ftree-ccp} is enabled.
 
+@item -ftree-constant-byte-range-cursor
+@opindex ftree-constant-byte-range-cursor
+Refine byte-load ranges at constant displacements from @code{strchr} results
+within proven complete immutable byte arrays.  Enumerate all possible matching
+positions conservatively and merge all pointer PHI inputs.  Unsupported
+arithmetic falls back to the whole-object alphabet only when
+@option{-ftree-constant-byte-range} is also enabled.  This option is disabled by
+default and does not infer trip counts or introduce speculative loads.
+Wrapping-pointer arithmetic and targets allowing accessible null pointers are
+excluded from this refinement.  Analysis work is bounded per function.
+
+This option can also be enabled independently of
+@option{-ftree-constant-byte-range}.  Both are disabled when neither option
+is requested.  Search semantics are currently modeled only for @code{strchr};
+unrecognized calls are conservatively rejected.
+
+@item -ftree-constant-byte-range
+@opindex ftree-constant-byte-range
+Infer possible byte values for loads through cursors derived from complete
+immutable byte arrays.  The analysis follows bounded pointer definition
+graphs, including all incoming loop PHI edges, and feeds existing value
+range propagation.  Searches for characters absent from a proven
+nul-terminated constant array may also be eliminated.  Unknown or mutable
+pointer sources are excluded.  The analysis can also follow @code{strchr}
+results when @option{-fdelete-null-pointer-checks} is enabled.  It runs after
+early jump threading and again after dominator and copy propagation cleanup
+so that newly exposed cursors can contribute ranges.  This option is disabled by
+default and has no effect with @option{-fwrapv-pointer}.
+
+Enabling this option also enables @option{-ftree-constant-byte-range-cursor}
+unless explicitly disabled with @option{-fno-tree-constant-byte-range-cursor}.
+The explicit cursor setting takes precedence regardless of option order.
+
 @opindex ftree-ccp
 @item -ftree-ccp
 Perform sparse conditional constant propagation (CCP) on trees.  This
