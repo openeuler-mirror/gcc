@@ -2083,6 +2083,33 @@ replacement_available_p (tree x, gimple *at)
   return false;
 }
 
+/* A loop-external replacement may feed a join through one normal direct
+   edge.  Do not search paths or translate exceptional edges.  */
+static edge
+replacement_join_edge (gimple *at)
+{
+  basic_block bb = gimple_bb (at);
+  if (bb->loop_father->num || !single_succ_p (bb))
+    return nullptr;
+  edge e = single_succ_edge (bb);
+  if (e->flags & (EDGE_ABNORMAL | EDGE_EH | EDGE_IRREDUCIBLE_LOOP))
+    return nullptr;
+  return e;
+}
+
+static bool
+replacement_join_p (tree old, gimple *at)
+{
+  edge e = replacement_join_edge (at);
+  if (!e || param_simultaneous_prefetches < 1)
+    return false;
+  for (gphi_iterator pi = gsi_start_phis (e->dest); !gsi_end_p (pi);
+       gsi_next (&pi))
+    if (gimple_phi_arg_def (pi.phi (), e->dest_idx) == old)
+      return true;
+  return false;
+}
+
 /* Construct hint-only arithmetic with defined unsigned wraparound.  In
    particular, clamp speculative shift counts instead of introducing UB on
    paths where the original shift might not execute.  */
@@ -2100,6 +2127,19 @@ replacement_address_expr (tree x, tree old, tree next, gimple *at,
   if (depth == 0 || TREE_CODE (x) != SSA_NAME || cost >= 8)
     return NULL_TREE;
   gimple *def = SSA_NAME_DEF_STMT (x);
+  if (gimple_code (def) == GIMPLE_PHI)
+    {
+      edge e = replacement_join_edge (at);
+      tree type = TREE_TYPE (x);
+      if (!e || e->dest != gimple_bb (def)
+	  || !INTEGRAL_TYPE_P (type) || !TYPE_UNSIGNED (type)
+	  || TYPE_PRECISION (type) > TYPE_PRECISION (size_type_node))
+	return NULL_TREE;
+      ++cost;
+      return replacement_address_expr (
+	gimple_phi_arg_def (as_a<gphi *> (def), e->dest_idx), old, next,
+	at, depth - 1, cost, depends);
+    }
   if (!is_gimple_assign (def) || gimple_vuse (def)
       || gimple_has_volatile_ops (def))
     return NULL_TREE;
@@ -2207,7 +2247,7 @@ prefetch_replacement_indices ()
   auto_vec<gimple *> loads;
   basic_block bb;
   FOR_EACH_BB_FN (bb, cfun)
-    if (bb->loop_father->num)
+    if (bb->loop_father->num || single_succ_p (bb))
       for (gimple_stmt_iterator si = gsi_start_bb (bb); !gsi_end_p (si);
 	   gsi_next (&si))
 	{
@@ -2254,12 +2294,16 @@ prefetch_replacement_indices ()
 	}
       if (!store)
 	continue;
+      bool edge_path = !gimple_bb (store)->loop_father->num;
+      if (edge_path && !replacement_join_p (gimple_assign_lhs (load), store))
+	continue;
       unsigned budget = 32;
       auto_vec<tree> seen;
       if (!replacement_independent_p (gimple_assign_rhs1 (store),
 				     gimple_assign_lhs (load), budget, seen))
 	continue;
       auto_vec<tree> addresses;
+      auto_vec<unsigned char> exact_writes;
       FOR_EACH_BB_FN (bb, cfun)
 	{
 	  if (bb->loop_father != gimple_bb (store)->loop_father)
@@ -2287,12 +2331,30 @@ prefetch_replacement_indices ()
 	      if (!expr || !depends || cost > 8)
 		continue;
 	      bool duplicate = false;
-	      for (tree a : addresses)
-		if (operand_equal_p (a, expr, 0))
-		  duplicate = true;
+	      for (unsigned i = 0; i < addresses.length (); ++i)
+		if (operand_equal_p (addresses[i], expr, 0))
+		  {
+		    exact_writes[i] |= gimple_store_p (use);
+		    duplicate = true;
+		  }
 	      if (!duplicate)
-		addresses.safe_push (expr);
+		{
+		  addresses.safe_push (expr);
+		  exact_writes.safe_push (gimple_store_p (use));
+		}
 	    }
+	}
+      /* Bound each new entry to one exact read hint.  Prefer a store-derived
+	 address, while preserving the original loop selection and budget.  */
+      if (edge_path && addresses.length () > 1)
+	{
+	  for (unsigned i = 1; i < addresses.length (); ++i)
+	    if (exact_writes[i])
+	      {
+		addresses[0] = addresses[i];
+		break;
+	      }
+	  addresses.truncate (1);
 	}
       if (addresses.is_empty () || addresses.length () > 2
 	  || emitted + addresses.length () > 8)
@@ -2319,6 +2381,9 @@ prefetch_replacement_indices ()
 	  gsi_insert_before (&pos, call, GSI_SAME_STMT);
 	  ++emitted;
 	}
+      if (dump_file && edge_path)
+	fprintf (dump_file, "Replacement-edge prefetch: bb %d, %u exact.\n",
+		 gimple_bb (store)->index, addresses.length ());
       if (dump_file)
 	fprintf (dump_file, "Replacement-index prefetch: loop %d, %u hints.\n",
 		 gimple_bb (store)->loop_father->num, addresses.length ());

@@ -14176,12 +14176,25 @@ It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
 
 @item -ftree-replacement-index-prefetch
 @opindex ftree-replacement-index-prefetch
-Use a new unsigned index written over a previously loaded index in a loop
-to prefetch indirect addresses derived from that old index.  The address
-computation must contain only a small number of pure operations and values
-already available at the replacement.  No additional data loads are issued.
+Use a new unsigned index written over a previously loaded index to prefetch
+indirect addresses derived from that old index.  In addition to replacements
+in loops, handle loop-external replacements that feed a PHI through one
+direct normal edge.  Translate only that edge's incoming unsigned scalar
+when constructing a hint; do not change the PHI or copy memory loads.
+The enclosing loop-pass gate is unchanged, so wholly loopless functions
+are not handled.
+
+The address computation must contain only a small number of pure unsigned
+operations and values already available at the replacement.  No additional
+data loads are issued and demand accesses keep their original order.
+Each new direct-edge entry selects at most one address, preferring the
+base address of a store reference.  Reconstructed hints need not retain
+component offsets within an aggregate object.  This extension emits at
+most eight hints per function, and its direct-edge path is disabled when
+@option{--param=simultaneous-prefetches=0} is used.
 This transformation adds nonfaulting read hints on targets with prefetch
-support and is disabled by default.
+support and is disabled by default.  It does not add region-start,
+second-cache-line or write-intent hints.
 
 @opindex fprefetch-loop-arrays
 @item -fprefetch-loop-arrays
