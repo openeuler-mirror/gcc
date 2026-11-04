@@ -2083,6 +2083,49 @@ replacement_available_p (tree x, gimple *at)
   return false;
 }
 
+/* Availability alone does not make an address subexpression reusable: it
+   may still contain OLD.  Unlike the replacement-value walk below, inspect
+   the SSA uses of memory addresses as well.  A load through OLD cannot be
+   reused as though it had loaded through NEXT.  Unknown definitions and
+   an exhausted proof budget conservatively require reconstruction.  */
+static bool
+replacement_address_independent_p (tree x, tree old, unsigned &budget,
+				   auto_vec<tree> &seen)
+{
+  if (x == old)
+    return false;
+  if (is_gimple_min_invariant (x))
+    return true;
+  if (TREE_CODE (x) != SSA_NAME)
+    return false;
+  if (SSA_NAME_IS_DEFAULT_DEF (x))
+    return true;
+  for (tree y : seen)
+    if (x == y)
+      return true;
+  if (budget == 0)
+    return false;
+  --budget;
+  seen.safe_push (x);
+  gimple *def = SSA_NAME_DEF_STMT (x);
+  if (gimple_code (def) == GIMPLE_PHI)
+    {
+      for (unsigned i = 0; i < gimple_phi_num_args (def); ++i)
+	if (!replacement_address_independent_p (gimple_phi_arg_def (def, i),
+					       old, budget, seen))
+	  return false;
+      return true;
+    }
+  if (!is_gimple_assign (def) || gimple_has_volatile_ops (def))
+    return false;
+  ssa_op_iter iter;
+  tree op;
+  FOR_EACH_SSA_TREE_OPERAND (op, def, iter, SSA_OP_USE)
+    if (!replacement_address_independent_p (op, old, budget, seen))
+      return false;
+  return true;
+}
+
 /* A loop-external replacement may feed a join through one normal direct
    edge.  Do not search paths or translate exceptional edges.  */
 static edge
@@ -2123,7 +2166,12 @@ replacement_address_expr (tree x, tree old, tree next, gimple *at,
       return next;
     }
   if (replacement_available_p (x, at))
-    return x;
+    {
+      unsigned budget = 32;
+      auto_vec<tree> seen;
+      if (replacement_address_independent_p (x, old, budget, seen))
+	return x;
+    }
   if (depth == 0 || TREE_CODE (x) != SSA_NAME || cost >= 8)
     return NULL_TREE;
   gimple *def = SSA_NAME_DEF_STMT (x);
@@ -2239,6 +2287,132 @@ replacement_independent_p (tree x, tree old, unsigned &budget,
   return true;
 }
 
+/* Find a nearby replacement of the same queue entry.  Stop at the first
+   memory definition, or at a statement outside the supported window.  */
+static gimple *
+replacement_store (gimple *load)
+{
+  gimple_stmt_iterator si = gsi_for_stmt (load);
+  for (unsigned n = 0; n < 8; ++n)
+    {
+      gsi_next (&si);
+      if (gsi_end_p (si))
+	break;
+      gimple *s = gsi_stmt (si);
+      if (is_gimple_debug (s))
+	continue;
+      if (!is_gimple_assign (s) || gimple_has_volatile_ops (s))
+	break;
+      if (gimple_vdef (s))
+	{
+	  if (gimple_assign_single_p (s)
+	      && operand_equal_p (gimple_assign_lhs (s),
+				  gimple_assign_rhs1 (load), 0)
+	      && gimple_vuse (s) == gimple_vuse (load)
+	      && TREE_CODE (gimple_assign_rhs1 (s)) == SSA_NAME
+	      && types_compatible_p (TREE_TYPE (gimple_assign_lhs (load)),
+				     TREE_TYPE (gimple_assign_rhs1 (s))))
+	    return s;
+	  break;
+	}
+    }
+  return nullptr;
+}
+
+/* Collect distinct addresses whose OLD index can be replaced at STORE.
+   The direct-edge path selects one hint, preferring a store address.  */
+static void
+collect_replacement_addresses (gimple *load, gimple *store, bool edge_path,
+			       auto_vec<tree> &addresses)
+{
+  auto_vec<unsigned char> exact_writes;
+  basic_block bb;
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      if (bb->loop_father != gimple_bb (store)->loop_father)
+	continue;
+      for (gimple_stmt_iterator ui = gsi_start_bb (bb); !gsi_end_p (ui);
+	   gsi_next (&ui))
+	{
+	  gimple *use = gsi_stmt (ui);
+	  if (!is_gimple_assign (use) || gimple_has_volatile_ops (use))
+	    continue;
+	  tree ref = gimple_assign_load_p (use) ? gimple_assign_rhs1 (use)
+		     : gimple_store_p (use) ? gimple_assign_lhs (use)
+		     : NULL_TREE;
+	  if (!ref)
+	    continue;
+	  ref = get_base_address (ref);
+	  if (TREE_CODE (ref) != MEM_REF
+	      || !integer_zerop (TREE_OPERAND (ref, 1)))
+	    continue;
+	  unsigned cost = 0;
+	  bool depends = false;
+	  tree expr = replacement_address_expr (TREE_OPERAND (ref, 0),
+	      gimple_assign_lhs (load), gimple_assign_rhs1 (store), store,
+	      8, cost, depends);
+	  if (!expr || !depends || cost > 8)
+	    continue;
+	  bool duplicate = false;
+	  for (unsigned i = 0; i < addresses.length (); ++i)
+	    if (operand_equal_p (addresses[i], expr, 0))
+	      {
+		exact_writes[i] |= gimple_store_p (use);
+		duplicate = true;
+	      }
+	  if (!duplicate)
+	    {
+	      addresses.safe_push (expr);
+	      exact_writes.safe_push (gimple_store_p (use));
+	    }
+	}
+    }
+  if (edge_path && addresses.length () > 1)
+    {
+      for (unsigned i = 1; i < addresses.length (); ++i)
+	if (exact_writes[i])
+	  {
+	    addresses[0] = addresses[i];
+	    break;
+	  }
+      addresses.truncate (1);
+    }
+}
+
+/* Emit the selected read hints immediately before the replacement.  */
+static void
+emit_replacement_prefetches (gimple *store, const auto_vec<tree> &addresses,
+			    bool edge_path)
+{
+  if (!builtin_decl_explicit_p (BUILT_IN_PREFETCH))
+    {
+      tree ftype = build_function_type_list (void_type_node,
+					    const_ptr_type_node, NULL_TREE);
+      tree fn = add_builtin_function ("__builtin_prefetch", ftype,
+		    BUILT_IN_PREFETCH, BUILT_IN_NORMAL, NULL, NULL_TREE);
+      DECL_IS_NOVOPS (fn) = true;
+      set_builtin_decl (BUILT_IN_PREFETCH, fn, false);
+    }
+  for (tree addr : addresses)
+    {
+      gimple_stmt_iterator pos = gsi_for_stmt (store);
+      addr = force_gimple_operand_gsi (&pos,
+		fold_convert (const_ptr_type_node, addr), true, NULL_TREE,
+		true, GSI_SAME_STMT);
+      gcall *call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
+		     3, addr, integer_zero_node,
+		     build_int_cst (integer_type_node, 3));
+      gimple_set_location (call, gimple_location (store));
+      gsi_insert_before (&pos, call, GSI_SAME_STMT);
+    }
+  if (dump_file && edge_path)
+    fprintf (dump_file, "Replacement-edge prefetch: bb %d, %u exact.\n",
+	     gimple_bb (store)->index, addresses.length ());
+  if (dump_file)
+    fprintf (dump_file, "Replacement-index prefetch: loop %d, %u hints.\n",
+	     gimple_bb (store)->loop_father->num, addresses.length ());
+}
+
 static unsigned
 prefetch_replacement_indices ()
 {
@@ -2267,31 +2441,7 @@ prefetch_replacement_indices ()
     {
       if (emitted >= 8)
 	break;
-      gimple *store = NULL;
-      gimple_stmt_iterator si = gsi_for_stmt (load);
-      for (unsigned n = 0; n < 8; ++n)
-	{
-	  gsi_next (&si);
-	  if (gsi_end_p (si))
-	    break;
-	  gimple *s = gsi_stmt (si);
-	  if (is_gimple_debug (s))
-	    continue;
-	  if (!is_gimple_assign (s) || gimple_has_volatile_ops (s))
-	    break;
-	  if (gimple_vdef (s))
-	    {
-	      if (gimple_assign_single_p (s)
-		  && operand_equal_p (gimple_assign_lhs (s),
-				      gimple_assign_rhs1 (load), 0)
-		  && gimple_vuse (s) == gimple_vuse (load)
-		  && TREE_CODE (gimple_assign_rhs1 (s)) == SSA_NAME
-		  && types_compatible_p (TREE_TYPE (gimple_assign_lhs (load)),
-					 TREE_TYPE (gimple_assign_rhs1 (s))))
-		store = s;
-	      break;
-	    }
-	}
+      gimple *store = replacement_store (load);
       if (!store)
 	continue;
       bool edge_path = !gimple_bb (store)->loop_father->num;
@@ -2303,90 +2453,12 @@ prefetch_replacement_indices ()
 				     gimple_assign_lhs (load), budget, seen))
 	continue;
       auto_vec<tree> addresses;
-      auto_vec<unsigned char> exact_writes;
-      FOR_EACH_BB_FN (bb, cfun)
-	{
-	  if (bb->loop_father != gimple_bb (store)->loop_father)
-	    continue;
-	  for (gimple_stmt_iterator ui = gsi_start_bb (bb); !gsi_end_p (ui);
-	       gsi_next (&ui))
-	    {
-	      gimple *use = gsi_stmt (ui);
-	      if (!is_gimple_assign (use) || gimple_has_volatile_ops (use))
-		continue;
-	      tree ref = gimple_assign_load_p (use) ? gimple_assign_rhs1 (use)
-			 : gimple_store_p (use) ? gimple_assign_lhs (use)
-			 : NULL_TREE;
-	      if (!ref)
-		continue;
-	      ref = get_base_address (ref);
-	      if (TREE_CODE (ref) != MEM_REF
-		  || !integer_zerop (TREE_OPERAND (ref, 1)))
-		continue;
-	      unsigned cost = 0;
-	      bool depends = false;
-	      tree expr = replacement_address_expr (TREE_OPERAND (ref, 0),
-		  gimple_assign_lhs (load), gimple_assign_rhs1 (store), store,
-		  8, cost, depends);
-	      if (!expr || !depends || cost > 8)
-		continue;
-	      bool duplicate = false;
-	      for (unsigned i = 0; i < addresses.length (); ++i)
-		if (operand_equal_p (addresses[i], expr, 0))
-		  {
-		    exact_writes[i] |= gimple_store_p (use);
-		    duplicate = true;
-		  }
-	      if (!duplicate)
-		{
-		  addresses.safe_push (expr);
-		  exact_writes.safe_push (gimple_store_p (use));
-		}
-	    }
-	}
-      /* Bound each new entry to one exact read hint.  Prefer a store-derived
-	 address, while preserving the original loop selection and budget.  */
-      if (edge_path && addresses.length () > 1)
-	{
-	  for (unsigned i = 1; i < addresses.length (); ++i)
-	    if (exact_writes[i])
-	      {
-		addresses[0] = addresses[i];
-		break;
-	      }
-	  addresses.truncate (1);
-	}
+      collect_replacement_addresses (load, store, edge_path, addresses);
       if (addresses.is_empty () || addresses.length () > 2
 	  || emitted + addresses.length () > 8)
 	continue;
-      if (!builtin_decl_explicit_p (BUILT_IN_PREFETCH))
-	{
-	  tree ftype = build_function_type_list (void_type_node,
-						const_ptr_type_node, NULL_TREE);
-	  tree fn = add_builtin_function ("__builtin_prefetch", ftype,
-			BUILT_IN_PREFETCH, BUILT_IN_NORMAL, NULL, NULL_TREE);
-	  DECL_IS_NOVOPS (fn) = true;
-	  set_builtin_decl (BUILT_IN_PREFETCH, fn, false);
-	}
-      for (tree addr : addresses)
-	{
-	  gimple_stmt_iterator pos = gsi_for_stmt (store);
-	  addr = force_gimple_operand_gsi (&pos,
-		    fold_convert (const_ptr_type_node, addr), true, NULL_TREE,
-		    true, GSI_SAME_STMT);
-	  gcall *call = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
-			 3, addr, integer_zero_node,
-			 build_int_cst (integer_type_node, 3));
-	  gimple_set_location (call, gimple_location (store));
-	  gsi_insert_before (&pos, call, GSI_SAME_STMT);
-	  ++emitted;
-	}
-      if (dump_file && edge_path)
-	fprintf (dump_file, "Replacement-edge prefetch: bb %d, %u exact.\n",
-		 gimple_bb (store)->index, addresses.length ());
-      if (dump_file)
-	fprintf (dump_file, "Replacement-index prefetch: loop %d, %u hints.\n",
-		 gimple_bb (store)->loop_father->num, addresses.length ());
+      emit_replacement_prefetches (store, addresses, edge_path);
+      emitted += addresses.length ();
     }
   return emitted ? TODO_update_ssa : 0;
 }
