@@ -2067,6 +2067,22 @@ Force perform ipa inline specified target(object or lib) when march options are
 incompatible between functions.  If there are multiple target files, use commas
 (,) to separate them and without spaces.
 
+finline-memcmp
+Common Var(flag_inline_memcmp) Init(0) Optimization
+Enable the small equality and prefix memory comparison optimizations.
+
+finline-memcmp-small-equality
+Common Var(flag_inline_small_memcmp_equality) Init(0) Optimization EnabledBy(finline-memcmp)
+Inline bounded dynamic memory comparisons when only equality is required.
+
+finline-memcmp-prefix
+Common Var(flag_inline_memcmp_prefix) Optimization Init(0) EnabledBy(finline-memcmp)
+Guard dynamic memcmp calls with ordering-preserving prefix comparisons.
+
+finline-small-memcmp-equality
+Common Alias(finline-memcmp-small-equality)
+Deprecated spelling of -finline-memcmp-small-equality.
+
 finline-stringops
 Common RejectNegative Enum(ilsop_fn) Var(flag_inline_stringops, ILSOP_ALL) Enum(ilsop_fn) Init(ILSOP_NONE) Optimization Undocumented
 

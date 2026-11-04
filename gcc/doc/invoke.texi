@@ -573,7 +573,9 @@ Objective-C and Objective-C++ Dialects}.
 -fif-conversion2  -findirect-inlining
 -finline-stringops[=@var{fn}]
 -finline-functions  -finline-functions-called-once  -finline-limit=@var{n}
--finline-small-functions -fipa-modref -fipa-cp  -fipa-cp-clone
+-finline-small-functions
+-finline-memcmp -finline-memcmp-small-equality -finline-memcmp-prefix
+-fipa-modref -fipa-cp  -fipa-cp-clone
 -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm}
@@ -12665,6 +12667,44 @@ their @code{_FORTIFY_SOURCE} counterparts into faster alternatives.
 
 Enabled at levels @option{-O2}, @option{-O3}.
 
+@item -finline-memcmp
+@opindex finline-memcmp
+Enable @option{-finline-memcmp-small-equality} and
+@option{-finline-memcmp-prefix} unless either is explicitly set.
+This grouping option is disabled by default.  Explicit child settings take
+precedence regardless of their position relative to the grouping option;
+repeated explicit settings of the same child use the last setting.
+Both child options can also be enabled independently.  In particular,
+@option{-finline-memcmp-prefix} alone does not enable the small equality path.
+The compatibility spelling @option{-finline-small-memcmp-equality} selects
+only @option{-finline-memcmp-small-equality}, not this grouping option.
+
+@item -finline-memcmp-prefix
+@opindex finline-memcmp-prefix
+For dynamic-length @code{memcmp} calls, by default compare up to four unsigned
+bytes, checking the length before each load.  The first differing byte determines
+the required result sign.  An equal prefix is skipped in the remaining
+comparison, which may use the bounded short comparison when
+@option{-finline-memcmp-small-equality} applies.  Arguments are
+evaluated once, and no byte outside the requested extent is loaded.  Constant
+lengths, sanitized functions, non-call exceptions, and size-optimized functions
+retain the existing expansion.  This
+option is disabled by default and currently applies to 64-bit generic-address
+space targets with 8-bit bytes.  The parameters @code{memcmp-prefix-bytes}
+and @code{memcmp-prefix-skip-equal} control the prefix length and whether the
+fallback skips bytes already proven equal.
+
+@item -finline-memcmp-small-equality
+@opindex finline-memcmp-small-equality
+For speed-optimized functions on 64-bit targets with fast unaligned integer
+loads, expand dynamic memory comparisons of up to 16 bytes inline when the
+result is used only for equality.  Longer comparisons retain a library call.
+The generated loads stay within the specified length and a zero length
+does not access memory.  Constant-length comparisons use the usual target
+expansion.  This option is disabled by default.  The diagnostic parameter
+@code{small-memcmp-equality-outline} can instead select an explicitly linked
+external equality helper.
+
 @opindex finline-stringops
 @item -finline-stringops[=@var{fn}]
 Expand memory and string operations (for now, only @code{memset})
@@ -16982,6 +17022,26 @@ Maximum number of basic blocks before VRP uses a sparse bitmap cache.
 
 @item vrp-switch-limit
 Maximum number of outgoing edges in a switch before VRP will not process it.
+
+@item memcmp-prefix-bytes
+Maximum number of bytes checked by @option{-finline-memcmp-prefix} before
+falling back.  The range is 0 through 16 and the default is 4.  Zero disables
+the prefix expansion.  A larger value may increase code size.
+
+@item memcmp-prefix-skip-equal
+When set to 1, pass only the suffix following the proven equal prefix to
+the remaining comparison.  The default is 1.  Set this parameter to 0 to
+preserve the full fallback.
+This parameter has no effect when prefix expansion is disabled.
+
+@item small-memcmp-equality-outline
+Select the equality implementation used by
+@option{-finline-memcmp-small-equality}.  The default, 0, uses inline bounded
+loads.  Diagnostic modes 1 and 2 call
+@code{__gcc_trial_memcmpeq_bounded} and @code{__gcc_trial_memcmpeq_loop},
+respectively.  These modes require an explicitly linked non-LTO helper
+object; they are not an installed runtime ABI.  Helper sources and validation
+instructions are in @file{contrib/memcmp-equality-trial}.
 
 @item vrp-vector-threshold
 Maximum number of basic blocks for VRP to use a basic cache vector.
