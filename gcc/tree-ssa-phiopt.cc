@@ -379,7 +379,7 @@ split_word_bitcount_replacement (basic_block cond_bb, basic_block bb1,
 
   bool nonzero_p = tree_expr_nonzero_p (add_full);
 
-  gcond *cond = as_a <gcond *> (last_stmt (cond_bb));
+  gcond *cond = as_a <gcond *> (*gsi_last_bb (cond_bb));
   if ((gimple_cond_code (cond) != EQ_EXPR
        && gimple_cond_code (cond) != NE_EXPR)
       || !integer_zerop (gimple_cond_rhs (cond)))
