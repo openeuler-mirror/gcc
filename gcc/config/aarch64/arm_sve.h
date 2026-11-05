@@ -26,11 +26,9 @@
 #define _ARM_SVE_H_
 
 #include <stdint.h>
+#include <arm_private_fp8.h>
+#include <arm_private_neon_types.h>
 #include <arm_bf16.h>
-
-typedef __fp16 float16_t;
-typedef float float32_t;
-typedef double float64_t;
 
 /* NOTE: This implementation of arm_sve.h is intentionally short.  It does
    not define the SVE types and intrinsic functions directly in C and C++

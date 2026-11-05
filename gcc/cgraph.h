@@ -1097,10 +1097,16 @@ struct GTY((tag ("SYMTAB_FUNCTION"))) cgraph_node : public symtab_node
      present.  */
   bool get_untransformed_body ();
 
-  /* Prepare function body.  When doing LTO, read cgraph_node's body from disk 
+  /* Prepare function body.  When doing LTO, read cgraph_node's body from disk
      if it is not already present.  When some IPA transformations are scheduled,
      apply them.  */
   bool get_body ();
+
+  /* Prepare function body.  When doing LTO, read cgraph_node's body from disk
+     if it is not already present.  When some IPA transformations are scheduled,
+     apply them.
+     Flag is used to control only skipping or enabling cspgo.  */
+  bool ipa_transform_for_cspgo (bool);
 
   void materialize_clone (void);
 
@@ -1669,6 +1675,11 @@ public:
   int param_index;
   /* ECF flags determined from the caller.  */
   int ecf_flags;
+  /* Vector of potential call targets determined by analysis.  gcc-14 gengtype
+     does not support a va_gc_atomic vec of GTY pointers inside a GTY struct
+     (ambiguous gt_pch_nx); use a plain GC-traversed vec, which is the gcc-14
+     idiom for a GC vector of cgraph_node pointers.  */
+  vec<cgraph_node *, va_gc> *targets;
 
   /* Number of speculative call targets, it's less than GCOV_TOPN_VALUES.  */
   unsigned num_speculative_call_targets : 16;

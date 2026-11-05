@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp-details" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-details" } */
 
 int foo (int i);
 int bar (int j)
@@ -10,4 +10,4 @@ int bar (int j)
     return j;
 }
 
-/* { dg-final { scan-tree-dump "\\\[5, \\+INF" "evrp" } } */
+/* { dg-final { scan-tree-dump "\\\[5, \\+INF" "evrp1" } } */

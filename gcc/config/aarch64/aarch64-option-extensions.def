@@ -165,11 +165,11 @@ AARCH64_FMV_FEATURE("rpres", RPRES, ())
 
 AARCH64_OPT_FMV_EXTENSION("sve", SVE, (SIMD, F16), (), (), "sve")
 
-AARCH64_OPT_EXTENSION("f32mm", F32MM, (SVE), (), (), "f32mm")
+AARCH64_OPT_EXTENSION("f32mm", F32MM, (SVE), (), (), "svef32mm")
 
 AARCH64_FMV_FEATURE("f32mm", SVE_F32MM, (F32MM))
 
-AARCH64_OPT_EXTENSION("f64mm", F64MM, (SVE), (), (), "f64mm")
+AARCH64_OPT_EXTENSION("f64mm", F64MM, (SVE), (), (), "svef64mm")
 
 AARCH64_FMV_FEATURE("f64mm", SVE_F64MM, (F64MM))
 
@@ -192,6 +192,8 @@ AARCH64_OPT_EXTENSION("sve2-sm4", SVE2_SM4, (SVE2, SM4), (), (), "svesm4")
 
 AARCH64_FMV_FEATURE("sve2-sm4", SVE_SM4, (SVE2_SM4))
 
+AARCH64_OPT_EXTENSION("sve2p1", SVE2p1, (SVE2), (), (), "sve2p1")
+
 AARCH64_OPT_FMV_EXTENSION("sme", SME, (BF16, SVE2), (), (), "sme")
 
 AARCH64_OPT_EXTENSION("memtag", MEMTAG, (), (), (), "")
@@ -210,19 +212,21 @@ AARCH64_OPT_EXTENSION("pauth", PAUTH, (), (), (), "paca pacg")
 
 AARCH64_OPT_EXTENSION("ls64", LS64, (), (), (), "")
 
-AARCH64_OPT_EXTENSION("sme-f64f64", SME_F64F64, (SME), (), (), "")
+AARCH64_OPT_EXTENSION("sme-f64f64", SME_F64F64, (SME), (), (), "smef64f64")
 
 AARCH64_FMV_FEATURE("sme-f64f64", SME_F64, (SME_F64F64))
 
-AARCH64_OPT_EXTENSION("sme-i16i64", SME_I16I64, (SME), (), (), "")
+AARCH64_OPT_EXTENSION("sme-i16i64", SME_I16I64, (SME), (), (), "smei16i64")
 
 AARCH64_FMV_FEATURE("sme-i16i64", SME_I64, (SME_I16I64))
 
 AARCH64_OPT_FMV_EXTENSION("sme2", SME2, (SME), (), (), "sme2")
 
-AARCH64_OPT_EXTENSION("mops", MOPS, (), (), (), "")
+AARCH64_OPT_EXTENSION("mops", MOPS, (), (), (), "mops")
 
 AARCH64_OPT_EXTENSION("cssc", CSSC, (), (), (), "cssc")
+
+AARCH64_OPT_EXTENSION("cmpbr", CMPBR, (), (), (), "cmpbr")
 
 AARCH64_OPT_EXTENSION("lse128", LSE128, (LSE), (), (), "lse128")
 
@@ -231,6 +235,38 @@ AARCH64_OPT_EXTENSION("d128", D128, (LSE128), (), (), "d128")
 AARCH64_OPT_EXTENSION("the", THE, (), (), (), "the")
 
 AARCH64_OPT_EXTENSION("gcs", GCS, (), (), (), "gcs")
+
+AARCH64_OPT_EXTENSION("fp8", FP8, (SIMD), (), (), "f8cvt")
+
+AARCH64_OPT_EXTENSION("fp8fma", FP8FMA, (FP8), (), (), "f8fma")
+
+AARCH64_OPT_EXTENSION("ssve-fp8fma", SSVE_FP8FMA, (SME2, FP8), (), (), "smesf8fma")
+
+AARCH64_OPT_EXTENSION("faminmax", FAMINMAX, (SIMD), (), (), "faminmax")
+
+AARCH64_OPT_EXTENSION("fp8dot4", FP8DOT4, (FP8), (), (), "f8dp4")
+
+AARCH64_OPT_EXTENSION("ssve-fp8dot4", SSVE_FP8DOT4, (SME2, FP8), (), (), "smesf8dp4")
+
+AARCH64_OPT_EXTENSION("fp8dot2", FP8DOT2, (FP8), (), (), "f8dp2")
+
+AARCH64_OPT_EXTENSION("ssve-fp8dot2", SSVE_FP8DOT2, (SME2, FP8), (), (), "smesf8dp2")
+
+AARCH64_OPT_EXTENSION("fprcvt", FPRCVT, (FP), (), (), "fprcvt")
+
+AARCH64_OPT_EXTENSION("lsui", LSUI, (), (), (), "")
+
+AARCH64_OPT_EXTENSION("lut", LUT, (SIMD), (), (), "lut")
+
+AARCH64_OPT_EXTENSION("cpa", CPA, (), (), (), "")
+
+AARCH64_OPT_EXTENSION("f8f32mm", F8F32MM, (SIMD, FP8), (), (), "f8mm8")
+
+AARCH64_OPT_EXTENSION("f8f16mm", F8F16MM, (SIMD, FP8), (), (), "f8mm4")
+
+AARCH64_OPT_EXTENSION("sve-f16f32mm", SVE_F16F32MM, (SVE), (), (), "svef16mm")
+
+AARCH64_OPT_EXTENSION("tlbid", TLBID, (), (), (), "")
 
 #undef AARCH64_OPT_FMV_EXTENSION
 #undef AARCH64_OPT_EXTENSION

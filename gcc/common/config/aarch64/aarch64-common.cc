@@ -44,6 +44,8 @@
 #undef	TARGET_OPTION_OPTIMIZATION_TABLE
 #define TARGET_OPTION_OPTIMIZATION_TABLE aarch_option_optimization_table
 
+#define INVALID_IMP ((unsigned) -1)
+
 /* Set default optimization options.  */
 static const struct default_options aarch_option_optimization_table[] =
   {
@@ -66,15 +68,91 @@ static const struct default_options aarch_option_optimization_table[] =
     { OPT_LEVELS_NONE, 0, NULL, 0 }
   };
 
-/* Set OPTS->x_aarch64_asm_isa_flags to FLAGS and update
-   OPTS->x_aarch64_isa_flags accordingly.  */
+/* Set OPTS->x_aarch64_asm_isa_flags_<0..n> to FLAGS and update
+   OPTS->x_aarch64_isa_flags_<0..n> accordingly.  */
 void
 aarch64_set_asm_isa_flags (gcc_options *opts, aarch64_feature_flags flags)
 {
-  opts->x_aarch64_asm_isa_flags = flags;
-  opts->x_aarch64_isa_flags = flags;
+  opts->x_aarch64_asm_isa_flags_0 = flags.val[0];
+  opts->x_aarch64_asm_isa_flags_1 = flags.val[1];
+
   if (opts->x_target_flags & MASK_GENERAL_REGS_ONLY)
-    opts->x_aarch64_isa_flags &= ~feature_deps::get_flags_off (AARCH64_FL_FP);
+    flags &= ~feature_deps::get_flags_off (AARCH64_FL_FP);
+
+  opts->x_aarch64_isa_flags_0 = flags.val[0];
+  opts->x_aarch64_isa_flags_1 = flags.val[1];
+}
+
+/* CPU vendor id.  */
+static unsigned vendor_id = INVALID_IMP;
+
+/* The part number of the CPU.  */
+static unsigned part_id = INVALID_IMP;
+
+/* Return the hex integer that is after ':' for the FIELD.
+   Return -1 if there was problem parsing the integer.  */
+static unsigned
+parse_cpuinfo (char *field)
+{
+  if (field == NULL)
+    return INVALID_IMP;
+  const char *rest = strchr (field, ':');
+
+  if (rest == NULL)
+    return INVALID_IMP;
+
+  char *after;
+  unsigned fint = strtol (rest + 1, &after, 16);
+  if (after == rest + 1)
+    return INVALID_IMP;
+  return fint;
+}
+
+/* Read CPU vendor_id and part_id.  */
+
+static void
+read_cpuinfo ()
+{
+  FILE *fp = fopen ("/proc/cpuinfo", "r");
+  if (fp == NULL)
+    return;
+
+  /* Read 1024-byte data from /proc/cpuinfo.  */
+  char cpuinfo[1024];
+  size_t len = fread (cpuinfo, sizeof (char), sizeof (cpuinfo) - 1, fp);
+  cpuinfo[len] = '\0';
+
+  char *vendor = strstr(cpuinfo, "CPU implementer");
+  vendor_id = parse_cpuinfo(vendor);
+
+  char *part = strstr(cpuinfo, "CPU part");
+  part_id = parse_cpuinfo(part);
+
+  fclose(fp);
+}
+
+/* Reset the tsv110 option. After checking the platform information,
+   this function can reset the more appropriate options.
+   TODO: Currently, this function is not applicable to the cross
+   compilation scenario.  */
+
+static void
+reset_tsv110_option ()
+{
+  /* Read CPU Information.  */
+  if (vendor_id == INVALID_IMP)
+    read_cpuinfo ();
+
+  if (vendor_id == 0x48 && part_id == 0xd01)
+    {
+      /* Outline-atomics is enabled by default and
+	aarch64_flag_outline_atomics defaults to 2. Therefore, the current
+	modification affects only the default scenario. When the option
+	moutline-atomics is added, the value of aarch64_flag_outline_atomics is 1,
+	that is, aarch64_flag_outline_atomics is not reset to 0.  */
+      if (aarch64_flag_outline_atomics == 2)
+	aarch64_flag_outline_atomics = 0;
+    }
 }
 
 /* Implement TARGET_HANDLE_OPTION.
@@ -95,6 +173,9 @@ aarch64_handle_option (struct gcc_options *opts,
   const char *arg = decoded->arg;
   int val = decoded->value;
 
+  /* Reset the tsv110 options.  */
+  reset_tsv110_option ();
+
   switch (code)
     {
     case OPT_march_:
@@ -111,7 +192,7 @@ aarch64_handle_option (struct gcc_options *opts,
 
     case OPT_mgeneral_regs_only:
       opts->x_target_flags |= MASK_GENERAL_REGS_ONLY;
-      aarch64_set_asm_isa_flags (opts, opts->x_aarch64_asm_isa_flags);
+      aarch64_set_asm_isa_flags (opts, aarch64_get_asm_isa_flags (opts));
       return true;
 
     case OPT_mfix_cortex_a53_835769:

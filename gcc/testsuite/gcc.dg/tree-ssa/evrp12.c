@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 extern void link_error ();
 
@@ -18,4 +18,4 @@ f3 (unsigned int s)
     }
 }
 
-/* { dg-final { scan-tree-dump-not "link_error" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "link_error" "evrp1" } } */

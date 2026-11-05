@@ -752,20 +752,25 @@ public:
   rtx
   expand (function_expander &e) const override
   {
-    /* In the optab, the multiplication operands come before the accumulator
-       operand.  The optab is keyed off the multiplication mode.  */
-    e.rotate_inputs_left (0, 3);
     insn_code icode;
-    if (e.type_suffix_ids[1] == NUM_TYPE_SUFFIXES)
-      icode = e.direct_optab_handler_for_sign (sdot_prod_optab,
-					       udot_prod_optab,
-					       0, GET_MODE (e.args[0]));
+    if (e.fpm_mode == aarch64_sve::FPM_set)
+      icode = code_for_aarch64_sve_dot (e.result_mode ());
     else
-      icode = (e.type_suffix (0).float_p
-	       ? CODE_FOR_aarch64_sve_fdotvnx4sfvnx8hf
-	       : e.type_suffix (0).unsigned_p
-	       ? CODE_FOR_aarch64_sve_udotvnx4sivnx8hi
-	       : CODE_FOR_aarch64_sve_sdotvnx4sivnx8hi);
+      {
+	/* In the optab, the multiplication operands come before the accumulator
+	   operand.  The optab is keyed off the multiplication mode.  */
+	e.rotate_inputs_left (0, 3);
+	if (e.type_suffix_ids[1] == NUM_TYPE_SUFFIXES)
+	  icode = e.direct_optab_handler_for_sign (sdot_prod_optab,
+						   udot_prod_optab,
+						   0, GET_MODE (e.args[0]));
+	else
+	  icode = (e.type_suffix (0).float_p
+		   ? CODE_FOR_aarch64_sve_fdotvnx4sfvnx8hf
+		   : e.type_suffix (0).unsigned_p
+		   ? CODE_FOR_aarch64_sve_udotvnx4sivnx8hi
+		   : CODE_FOR_aarch64_sve_sdotvnx4sivnx8hi);
+      }
     return e.use_unpred_insn (icode);
   }
 };
@@ -778,17 +783,24 @@ public:
   rtx
   expand (function_expander &e) const override
   {
+    insn_code icode;
     machine_mode mode0 = GET_MODE (e.args[0]);
     machine_mode mode1 = GET_MODE (e.args[1]);
-    /* Use the same ordering as the dot_prod_optab, with the
-       accumulator last.  */
-    e.rotate_inputs_left (0, 4);
-    int unspec = unspec_for (e);
-    insn_code icode;
-    if (unspec == UNSPEC_FDOT)
-      icode = CODE_FOR_aarch64_fdot_prod_lanevnx4sfvnx8hf;
+    if (e.fpm_mode == aarch64_sve::FPM_set)
+      {
+	icode = code_for_aarch64_sve_dot_lane (mode0);
+      }
     else
-      icode = code_for_aarch64_dot_prod_lane (unspec, mode0, mode1);
+      {
+	/* Use the same ordering as the dot_prod_optab, with the
+	   accumulator last.  */
+	e.rotate_inputs_left (0, 4);
+	int unspec = unspec_for (e);
+	if (unspec == UNSPEC_FDOT)
+	  icode = CODE_FOR_aarch64_fdot_prod_lanevnx4sfvnx8hf;
+	else
+	  icode = code_for_aarch64_dot_prod_lane (unspec, mode0, mode1);
+      }
     return e.use_exact_insn (icode);
   }
 };
@@ -874,7 +886,8 @@ public:
       return e.use_exact_insn (code_for_aarch64_sve_dup_lane (mode));
 
     /* Treat svdup_lane as if it were svtbl_n.  */
-    return e.use_exact_insn (code_for_aarch64_sve_tbl (e.vector_mode (0)));
+    return e.use_exact_insn (code_for_aarch64_sve (UNSPEC_TBL,
+						   e.vector_mode (0)));
   }
 };
 
@@ -896,7 +909,7 @@ private:
     tree lhs_type = TREE_TYPE (lhs);
     tree elt_type = TREE_TYPE (lhs_type);
     scalar_mode elt_mode = SCALAR_TYPE_MODE (elt_type);
-    machine_mode vq_mode = aarch64_vq_mode (elt_mode).require ();
+    machine_mode vq_mode = aarch64_v128_mode (elt_mode).require ();
     tree vq_type = build_vector_type_for_mode (elt_type, vq_mode);
 
     unsigned nargs = gimple_call_num_args (f.call);
@@ -967,7 +980,7 @@ public:
 
     /* Get the 128-bit Advanced SIMD vector for this data size.  */
     scalar_mode element_mode = GET_MODE_INNER (mode);
-    machine_mode vq_mode = aarch64_vq_mode (element_mode).require ();
+    machine_mode vq_mode = aarch64_v128_mode (element_mode).require ();
     gcc_assert (known_eq (elements_per_vq, GET_MODE_NUNITS (vq_mode)));
 
     /* Put the arguments into a 128-bit Advanced SIMD vector.  We want
@@ -1536,7 +1549,7 @@ public:
   machine_mode
   memory_vector_mode (const function_instance &fi) const override
   {
-    return aarch64_vq_mode (GET_MODE_INNER (fi.vector_mode (0))).require ();
+    return aarch64_v128_mode (GET_MODE_INNER (fi.vector_mode (0))).require ();
   }
 
   rtx
@@ -1570,7 +1583,7 @@ public:
 	tree eltype = TREE_TYPE (lhs_type);
 
 	scalar_mode elmode = GET_MODE_INNER (TYPE_MODE (lhs_type));
-	machine_mode vq_mode = aarch64_vq_mode (elmode).require ();
+	machine_mode vq_mode = aarch64_v128_mode (elmode).require ();
 	tree vectype = build_vector_type_for_mode (eltype, vq_mode);
 
 	tree elt_ptr_type
@@ -1937,7 +1950,14 @@ public:
 	  icode = code_for_aarch64_sve_add (UNSPEC_SMATMUL, e.vector_mode (0));
       }
     else
-      icode = code_for_aarch64_sve (UNSPEC_FMMLA, e.vector_mode (0));
+      {
+	if (e.type_suffix_ids[1] == NUM_TYPE_SUFFIXES)
+	  icode = code_for_aarch64_sve (UNSPEC_FMMLA, e.vector_mode (0));
+	else
+	  icode = code_for_aarch64_sve2 (UNSPEC_FMMLA,
+					e.vector_mode (0),
+					e.vector_mode (1));
+      }
     return e.use_exact_insn (icode);
   }
 };
@@ -2705,16 +2725,6 @@ public:
   }
 };
 
-class svtbl_impl : public permute
-{
-public:
-  rtx
-  expand (function_expander &e) const override
-  {
-    return e.use_exact_insn (code_for_aarch64_sve_tbl (e.vector_mode (0)));
-  }
-};
-
 /* Implements svtrn1 and svtrn2.  */
 class svtrn_impl : public binary_permute
 {
@@ -3060,7 +3070,7 @@ FUNCTION (svdiv, rtx_code_function, (DIV, UDIV, UNSPEC_COND_FDIV))
 FUNCTION (svdivr, rtx_code_function_rotated, (DIV, UDIV, UNSPEC_COND_FDIV))
 FUNCTION (svdot, svdot_impl,)
 FUNCTION (svdot_lane, svdotprod_lane_impl, (UNSPEC_SDOT, UNSPEC_UDOT,
-					    UNSPEC_FDOT))
+					    UNSPEC_FDOT, UNSPEC_DOT_LANE_FP8))
 FUNCTION (svdup, svdup_impl,)
 FUNCTION (svdup_lane, svdup_lane_impl,)
 FUNCTION (svdupq, svdupq_impl,)
@@ -3240,7 +3250,8 @@ FUNCTION (svsub, svsub_impl,)
 FUNCTION (svsubr, rtx_code_function_rotated, (MINUS, MINUS, UNSPEC_COND_FSUB))
 FUNCTION (svsudot, svusdot_impl, (true))
 FUNCTION (svsudot_lane, svdotprod_lane_impl, (UNSPEC_SUDOT, -1, -1))
-FUNCTION (svtbl, svtbl_impl,)
+FUNCTION (svtbl, quiet<unspec_based_uncond_function>, (UNSPEC_TBL, UNSPEC_TBL,
+						       UNSPEC_TBL))
 FUNCTION (svtmad, CODE_FOR_MODE0 (aarch64_sve_tmad),)
 FUNCTION (svtrn1, svtrn_impl, (0))
 FUNCTION (svtrn1q, unspec_based_function, (UNSPEC_TRN1Q, UNSPEC_TRN1Q,

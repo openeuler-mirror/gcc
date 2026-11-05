@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp" }
+// { dg-options "-O2 -fdump-tree-evrp1" }
 
 int num;
 
@@ -9,4 +9,4 @@ void func(float x)
     num = __builtin_signbit (x);
 }
 
-// { dg-final { scan-tree-dump-times "num = 0;" 1 "evrp" } }
+// { dg-final { scan-tree-dump-times "num = 0;" 1 "evrp1" } }

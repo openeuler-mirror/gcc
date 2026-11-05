@@ -1845,10 +1845,8 @@ get_ma (rtx ma)
 enum tail_policy
 get_prefer_tail_policy ()
 {
-  /* TODO: By default, we choose to use TAIL_ANY which allows
-     compiler pick up either agnostic or undisturbed. Maybe we
-     will have a compile option like -mprefer=agnostic to set
-     this value???.  */
+  if (riscv_prefer_agnostic_p ())
+    return TAIL_AGNOSTIC;
   return TAIL_ANY;
 }
 
@@ -1856,10 +1854,8 @@ get_prefer_tail_policy ()
 enum mask_policy
 get_prefer_mask_policy ()
 {
-  /* TODO: By default, we choose to use MASK_ANY which allows
-     compiler pick up either agnostic or undisturbed. Maybe we
-     will have a compile option like -mprefer=agnostic to set
-     this value???.  */
+  if (riscv_prefer_agnostic_p ())
+    return MASK_AGNOSTIC;
   return MASK_ANY;
 }
 
@@ -3878,6 +3874,58 @@ expand_load_store (rtx *ops, bool is_load)
     }
 }
 
+/* Expand MASK_LEN_STRIDED_LOAD.  */
+void
+expand_strided_load (machine_mode mode, rtx *ops)
+{
+  rtx v_reg = ops[0];
+  rtx base = ops[1];
+  rtx stride = ops[2];
+  rtx mask = ops[3];
+  rtx len = ops[4];
+  poly_int64 len_val;
+
+  insn_code icode = code_for_pred_strided_load (mode);
+  rtx emit_ops[] = {v_reg, mask, gen_rtx_MEM (mode, base), stride};
+
+  if (poly_int_rtx_p (len, &len_val)
+      && known_eq (len_val, GET_MODE_NUNITS (mode)))
+    emit_vlmax_insn (icode, BINARY_OP_TAMA, emit_ops);
+  else
+    {
+      len = satisfies_constraint_K (len) ? len : force_reg (Pmode, len);
+      emit_nonvlmax_insn (icode, BINARY_OP_TAMA, emit_ops, len);
+    }
+}
+
+/* Expand MASK_LEN_STRIDED_STORE.  */
+void
+expand_strided_store (machine_mode mode, rtx *ops)
+{
+  rtx v_reg = ops[2];
+  rtx base = ops[0];
+  rtx stride = ops[1];
+  rtx mask = ops[3];
+  rtx len = ops[4];
+  poly_int64 len_val;
+  rtx vl_type;
+
+  if (poly_int_rtx_p (len, &len_val)
+      && known_eq (len_val, GET_MODE_NUNITS (mode)))
+    {
+      len = gen_reg_rtx (Pmode);
+      emit_vlmax_vsetvl (mode, len);
+      vl_type = get_avl_type_rtx (VLMAX);
+    }
+  else
+    {
+      len = satisfies_constraint_K (len) ? len : force_reg (Pmode, len);
+      vl_type = get_avl_type_rtx (NONVLMAX);
+    }
+
+  emit_insn (gen_pred_strided_store (mode, gen_rtx_MEM (mode, base),
+				     mask, stride, v_reg, len, vl_type));
+}
 
 /* Return true if the operation is the floating-point operation need FRM.  */
 static bool

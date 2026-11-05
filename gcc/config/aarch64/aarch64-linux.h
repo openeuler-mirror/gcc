@@ -49,8 +49,55 @@
 
 #define LINK_SPEC LINUX_TARGET_LINK_SPEC AARCH64_ERRATA_LINK_SPEC
 
+/* -fsimdmath vectorizes math calls into _ZGV* variants implemented by
+   libmathlib (the packaged Arm optimized-routines).  Close that contract
+   at link time: inject the library after the user's objects, with the
+   policy selected by OPENEULER_GCC_SIMDMATH_LINK (see simdmath-link
+   in gcc.cc).  */
+#undef  LIB_SPEC
+#define LIB_SPEC \
+  "%{fsimdmath:%:simdmath-link()} " GNU_USER_TARGET_LIB_SPEC
+
+/* crtfastmath.o sets FZ and DZ in the FPCR before main runs, so denormals
+   are flushed for the whole program - a value change no amount of careful
+   code generation survives.  Precedence, highest first:
+
+     -mno-daz-ftz        never link it.  This and -mdaz-ftz are two
+			 spellings of one option, so between the two of them
+			 the last on the command line wins; what is meant here
+			 is that a -mno-daz-ftz still in force outranks every
+			 other entry below
+     -shared             never, for a shared object
+     -mdaz-ftz           link it, whatever model follows.  It exists so
+			 that flush-to-zero can be asked for without the
+			 aggressive floating-point optimizations it is
+			 otherwise bundled with, which is exactly this
+			 combination; Intel's -fp-model treats an explicit
+			 -ftz the same way
+     precise|except|strict   do not link it - a program that asked for IEEE
+			 semantics must not have FTZ arrive implicitly, say
+			 through a -funsafe-math-optimizations that a
+			 project's CFLAGS carried in
+     the rest           link it
+
+   Deliberately confined to this file.  -ffp-model= is a common option and
+   the same reasoning holds for every target that links crtfastmath.o, but
+   openEuler ships and tests AArch64; a spec that cannot be exercised is a
+   spec that will be wrong, and twice already an attempt to cover the other
+   targets shipped an asymmetry that only a cross driver found.  The
+   consequence is stated in invoke.texi: elsewhere the model does not reach
+   the startup file, so -funsafe-math-optimizations -ffp-model=strict still
+   flushes denormals there.  -mdaz-ftz is AArch64-only here, as the
+   feature has been since it was written; x86 spells the same thing the
+   same way, which is where the name comes from.  */
+#define AARCH64_KEEP_DENORMALS_SPEC(CRTFASTMATH) \
+  "%{!ffp-model=precise:%{!ffp-model=except:%{!ffp-model=strict:" \
+  CRTFASTMATH "}}}"
+
 #define GNU_USER_TARGET_MATHFILE_SPEC \
-  "%{Ofast|ffast-math|funsafe-math-optimizations:%{!shared:crtfastmath.o%s}}"
+  "%{!shared:%{!mno-daz-ftz:%{mdaz-ftz:crtfastmath.o%s;\
+     Ofast|ffast-math|funsafe-math-optimizations|ffp-model=fast:" \
+     AARCH64_KEEP_DENORMALS_SPEC ("crtfastmath.o%s") "}}}"
 
 #undef ENDFILE_SPEC
 #define ENDFILE_SPEC   \

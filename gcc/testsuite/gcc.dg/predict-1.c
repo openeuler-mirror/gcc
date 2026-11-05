@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-profile_estimate --disable-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-profile_estimate --disable-tree-evrp1" } */
 
 extern int global;
 

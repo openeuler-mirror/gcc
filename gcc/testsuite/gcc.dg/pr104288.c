@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp -fdelete-null-pointer-checks" } */
+/* { dg-options "-O2 -fdump-tree-evrp1 -fdelete-null-pointer-checks" } */
 /* { dg-skip-if "" { keeps_null_pointer_checks } } */
 
 void keep(int result) __attribute__((noipa));
@@ -19,5 +19,5 @@ void bar (void *p)
     __builtin_abort ();
 }
 
-/* { dg-final { scan-tree-dump-not "abort" "evrp" } } */
-/* { dg-final { scan-tree-dump-times  "== 0B;" 1 "evrp" } } */
+/* { dg-final { scan-tree-dump-not "abort" "evrp1" } } */
+/* { dg-final { scan-tree-dump-times  "== 0B;" 1 "evrp1" } } */

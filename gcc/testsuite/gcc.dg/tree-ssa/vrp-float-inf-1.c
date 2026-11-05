@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp-details" }
+// { dg-options "-O2 -fdump-tree-evrp1-details" }
 
 void foo ();
 void bar (double);
@@ -12,4 +12,4 @@ void funky(double f, double g)
     bar (f);
 }
 
-// { dg-final { scan-tree-dump-not " Inf,  Inf" "evrp" } }
+// { dg-final { scan-tree-dump-not " Inf,  Inf" "evrp1" } }

@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdisable-tree-fre1 -fdump-tree-evrp" }
+// { dg-options "-O2 -fdisable-tree-fre1 -fdump-tree-evrp1" }
 
 void link_error ();
 void func ();
@@ -19,5 +19,5 @@ void foo2 (float a, float b)
       func ();
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" } }
-// { dg-final { scan-tree-dump-times "if \\(a_2\\(D\\) != b_3\\(D\\)" 1 "evrp" } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" } }
+// { dg-final { scan-tree-dump-times "if \\(a_2\\(D\\) != b_3\\(D\\)" 1 "evrp1" } }

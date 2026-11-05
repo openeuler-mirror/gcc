@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp -fno-thread-jumps" }
+// { dg-options "-O2 -fdump-tree-evrp1 -fno-thread-jumps" }
 
 #include <math.h>
 
@@ -40,4 +40,4 @@ stool (double x)
     link_error ();
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" { target { { *-*-linux* } && { glibc } } xfail s390*-*-* } } } xfail: PR114678
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" { target { { *-*-linux* } && { glibc } } xfail s390*-*-* } } } xfail: PR114678

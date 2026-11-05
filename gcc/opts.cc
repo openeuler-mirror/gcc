@@ -330,12 +330,16 @@ static const char undocumented_msg[] = N_("This option lacks documentation.");
 static const char use_diagnosed_msg[] = N_("Uses of this option are diagnosed.");
 
 typedef char *char_p; /* For DEF_VEC_P.  */
+static void set_simdmath_flags (struct gcc_options *opts,
+				struct gcc_options *opts_set, int set);
 
 static void set_debug_level (uint32_t dinfo, int extended,
 			     const char *arg, struct gcc_options *opts,
 			     struct gcc_options *opts_set,
 			     location_t loc);
 static void set_fast_math_flags (struct gcc_options *opts, int set);
+static void set_fp_model_flags (struct gcc_options *opts,
+				struct gcc_options *opts_set, int set);
 static void decode_d_option (const char *arg, struct gcc_options *opts,
 			     location_t loc, diagnostic_context *dc);
 static void set_unsafe_math_optimizations_flags (struct gcc_options *opts,
@@ -1338,6 +1342,14 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
   if (opts->x_flag_vtable_verify && opts->x_flag_lto)
     sorry ("vtable verification is not supported with LTO");
 
+  /* Currently -fauto-bolt is not supported for LTO.    */
+  if (opts->x_flag_auto_bolt && opts->x_flag_lto)
+    sorry ("%<-fauto-bolt%> is not supported with LTO");
+
+  /* Currently -fbolt-use is not supported for LTO.  */
+  if (opts->x_flag_bolt_use && opts->x_flag_lto)
+    sorry ("-fbolt-use is not supported with LTO");
+
   /* Control IPA optimizations based on different -flive-patching level.  */
   if (opts->x_flag_live_patching)
     control_options_for_live_patching (opts, opts_set,
@@ -1350,6 +1362,58 @@ finish_options (struct gcc_options *opts, struct gcc_options *opts_set,
       = (opts->x_flag_unroll_loops
          || opts->x_flag_peel_loops
          || opts->x_optimize >= 3);
+  
+  if (opts->x_flag_auto_bolt)
+    {
+      /* Record the function section to facilitate the feedback
+	 data storage.  */
+      if (!opts->x_flag_function_sections)
+        {
+	  inform (loc,
+	          "%<-fauto-bolt%> should work with %<-ffunction-sections%>,"
+		  " enabling %<-ffunction-sections%>");
+	  opts->x_flag_function_sections = true;
+	}
+
+      /* Cancel the internal alignment of the function.  The binary
+	 optimizer bolt will cancel the internal alignment optimization
+	 of the function, so the alignment is meaningless at this time,
+	 and if not, it will bring trouble to the calculation of the
+	 offset address of the instruction.  */
+      if (opts->x_flag_align_jumps)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should not work with %<-falign-jumps%>,"
+		  " disabling %<-falign-jumps%>");
+	  opts->x_flag_align_jumps = false;
+	}
+
+      if (opts->x_flag_align_labels)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should not work with %<-falign-labels%>,"
+		  " disabling %<-falign-labels%>");
+	          opts->x_flag_align_labels = false;
+	}
+
+      if (opts->x_flag_align_loops)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should not work with %<-falign-loops%>,"
+		  " disabling %<-falign-loops%>");
+	  opts->x_flag_align_loops = false;
+	}
+
+      /* When parsing instructions in RTL phase, we need to know
+	 the call information of instructions to avoid being optimized.  */
+      if (!opts->x_flag_ipa_ra)
+        {
+	  inform (loc,
+		  "%<-fauto-bolt%> should work with %<-fipa-ra%>,"
+		  " enabling %<-fipa-ra%>");
+	  opts->x_flag_ipa_ra = true;
+	}
+    }
 
   /* With -fcx-limited-range, we do cheap and quick complex arithmetic.  */
   if (opts->x_flag_cx_limited_range)
@@ -2087,6 +2151,73 @@ enable_fdo_optimizations (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, flag_tree_loop_distribution, value);
 }
 
+/* Enable cfgo-related flags.  */
+
+static void
+enable_cfgo_optimizations (struct gcc_options *opts,
+			   struct gcc_options *opts_set,
+			   int value)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_modulo_sched, value);
+  /* Do not enable -fselective-scheduling here.  It is documented as
+     experimental upstream, and together with profile instrumentation it was
+     measured to generate wrong code on aarch64: a whole statement is silently
+     eliminated, with no crash and no diagnostic.  Neither option alone is
+     enough - instrumentation without it, and it without instrumentation, both
+     behave correctly - so enabling it from this function is what turns a
+     profile collection run into a miscompile.  Both -fcfgo-profile-generate
+     and -fcfgo-profile-use reach here.  Users who still want the option can
+     pass -fselective-scheduling explicitly; SET_OPTION_IF_UNSET honours it.  */
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_rename_registers, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_partial_training, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_alignment_propagation, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_localize_array, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_array_dse, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_gnu89_inline, value);
+  /* flag_convert_minmax: -fconvert-minmax was not carried to gcc-14.  It
+     was measured to have no effect here (upstream already produces the
+     same code), so the maxmin group was left out and the flag does not
+     exist in this tree.  */
+  /* flag_tree_slp_transpose_vectorize: feature withdrawn from gcc-14.  */
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_prefetch, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_ic, value);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_find_with_sve, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_finite_loops, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_omit_frame_pointer, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_sized_deallocation, 0);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_loop_elim, value);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_if_conversion_gimple, value);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_auto, 331);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_inline_unit_growth, 60);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_recursive_depth_auto,
+		       7);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_recursive, 3227);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_recursive_auto,
+		       2571);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_early_inlining_insns, 256);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_early_inliner_max_iterations, 1);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_max_inline_insns_single, 2742);
+
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_function_insns, 9055);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_function_growth, 701);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_large_unit_insns, 94216);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_eval_threshold, 864);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_loop_hint_bonus, 440);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_max_recursive_depth, 29);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_min_recursive_probability,
+		       4);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_recursive_freq_factor, 18);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_recursion_penalty, 64);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_single_call_penalty, 43);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_unit_growth, 96);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_large_unit_insns, 47631);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_value_list_size, 12);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_ipa_cp_profile_count_base, 54);
+}
+
 /* -f{,no-}sanitize{,-recover}= suboptions.  */
 const struct sanitizer_opts_s sanitizer_opts[] =
 {
@@ -2685,6 +2816,129 @@ check_force_inline_targets_string (const char *arg, location_t loc)
     }
 }
 
+/* -fsimdmath substitutes a vector variant for a scalar math call, which is
+   allowed only where the two are interchangeable.  Two things rule that
+   out: errno, which a vector variant cannot set per lane, and
+   rounding-math, whose mode it does not follow.  Both are legitimate
+   requests, so the option is left doing part of its job or none of it -
+   and used to do so in silence.  Report it.
+
+   Called from each front end's post_options rather than from
+   finish_options: this is a statement about the command line, and
+   finish_options runs again for every optimize attribute and every
+   #pragma GCC optimize in the file.  Doing it there made a transient
+   pragma region latch the report, warned twice over an LTO link, and
+   fired on assembler input, which cannot vectorize anything.  */
+
+/* The Fortran counterpart, and it says the opposite thing.  gfortran
+   reaches the vector variants through !GCC$ builtin (...) attributes simd
+   in simdmath_f.h, which puts the attribute on the builtin declaration
+   itself; neither -fmath-errno nor -frounding-math gates that, so the
+   calls are emitted whatever the floating-point model asks for - measured
+   on every model, including strict.  Telling a Fortran user that nothing
+   was vectorized would be false in the direction that reassures, so tell
+   them what actually happens instead.  Whether the models ought to reach
+   that path is a separate question about shipped behaviour.  */
+
+void
+maybe_warn_simdmath_unconstrained (struct gcc_options *opts,
+				   struct gcc_options *opts_set,
+				   location_t loc)
+{
+  if (!opts->x_flag_simdmath || !opts_set->x_flag_simdmath)
+    return;
+
+  const char *model = NULL;
+  switch ((enum fp_model) opts->x_flag_fp_model)
+    {
+    case FP_MODEL_PRECISE: model = "-ffp-model=precise"; break;
+    case FP_MODEL_EXCEPT:  model = "-ffp-model=except"; break;
+    case FP_MODEL_STRICT:  model = "-ffp-model=strict"; break;
+    default: break;
+    }
+
+  if (opts->x_flag_rounding_math)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> vectorizes math calls here regardless "
+		      "of %qs", model ? model : "-frounding-math"))
+	{
+	  inform (loc, "the %<!GCC$ builtin%> declarations it pre-includes "
+		       "attach the vector attribute directly, which "
+		       "%<-frounding-math%> does not gate");
+	  inform (loc, "a vector variant does not follow the rounding mode, "
+		       "so results may differ from the scalar calls");
+	}
+    }
+  /* Deliberately no errno branch here.  gfc_init_options fixes
+     flag_errno_math off and marks it front-end set, Fortran intrinsics do
+     not set errno, and no measurement showed an explicit -fmath-errno
+     changing anything gfortran generates - so -fsimdmath is not taking
+     away something the user was getting.  Only the rounding mode is a
+     demonstrable divergence from what a model asks for.  */
+}
+
+void
+maybe_warn_simdmath_ineffective (struct gcc_options *opts,
+				 struct gcc_options *opts_set, location_t loc)
+{
+  if (!opts->x_flag_simdmath || !opts_set->x_flag_simdmath)
+    return;
+
+  const char *model = NULL;
+  switch ((enum fp_model) opts->x_flag_fp_model)
+    {
+    case FP_MODEL_PRECISE: model = "-ffp-model=precise"; break;
+    case FP_MODEL_EXCEPT:  model = "-ffp-model=except"; break;
+    case FP_MODEL_STRICT:  model = "-ffp-model=strict"; break;
+    default: break;
+    }
+
+  /* The notes only go out if the warning did: -w inhibits warnings and
+     not notes, so an unconditional inform leaves them orphaned.  */
+  /* -fopenmp honours omp declare simd on its own, so -fno-openmp-simd
+     only makes the directives dormant when it is the sole switch that
+     would have acted on them.  Reporting otherwise was wrong twice over:
+     the vector calls are emitted, and under -Werror the false report
+     failed the build.  */
+  if (!opts->x_flag_openmp_simd && !opts->x_flag_openmp)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> has no effect while "
+		      "%<-fno-openmp-simd%> is in effect"))
+	inform (loc, "the declarations it pre-includes are %<omp declare simd%> "
+		     "directives, which that option leaves dormant");
+    }
+  else if (opts->x_flag_rounding_math)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> has no effect while "
+		      "%<-frounding-math%> is in effect"))
+	{
+	  if (model)
+	    inform (loc, "%qs turns on %<-frounding-math%>", model);
+	  inform (loc, "a vector variant does not follow the rounding mode, "
+		       "so no math call is vectorized");
+	}
+    }
+  else if (opts->x_flag_errno_math)
+    {
+      if (warning_at (loc, OPT_Wsimdmath,
+		      "%<-fsimdmath%> has no effect on the math functions "
+		      "that set %<errno%> while %<-fmath-errno%> is in "
+		      "effect"))
+	{
+	  if (model)
+	    inform (loc, "%qs keeps %<errno%>", model);
+	  inform (loc,
+		  "%qs, %qs, %qs, %qs, %qs, %qs and %qs are not vectorized; "
+		  "%qs, %qs, %qs and %qs still are",
+		  "exp", "expf", "log", "logf", "pow", "powf", "exp2f",
+		  "sin", "sinf", "cos", "cosf");
+	}
+    }
+}
+
 /* Handle target- and language-independent options.  Return zero to
    generate an "unknown option" message.  Only options that need
    extra handling need to be listed here; if you simply want
@@ -3026,12 +3280,36 @@ common_handle_option (struct gcc_options *opts,
       dc->m_source_printing.min_margin_width = value;
       break;
 
+    case OPT_fsimdmath:
+      set_simdmath_flags (opts, opts_set, value);
+      break;
+
     case OPT_fdump_:
       /* Deferred.  */
       break;
 
     case OPT_ffast_math:
       set_fast_math_flags (opts, value);
+      break;
+
+    case OPT_ffp_model_:
+      set_fp_model_flags (opts, opts_set, value);
+      break;
+
+      /* The removed spellings are diagnosed once, in driver_handle_option.
+	 The error does not belong here as well - these are Common Driver,
+	 and handle_option runs every handler whose mask matches, so both
+	 would fire in the same driver process and the user would see it
+	 twice.  But a case is still needed: the default arm below asserts
+	 that anything reaching it has a flag variable, and an anchor kept
+	 only to be diagnosed by name deliberately has none, so leaving them
+	 out turned `cc1 -fftz' into
+	   internal compiler error: in common_handle_option
+	 rather than a clean rejection.  The driver normally errors before
+	 cc1 is reached, which is why this stayed hidden.  */
+    case OPT_fp_model_:
+    case OPT_fftz:
+    case OPT_fmerge_mull:
       break;
 
     case OPT_funsafe_math_optimizations:
@@ -3104,6 +3382,33 @@ common_handle_option (struct gcc_options *opts,
       /* Deferred.  */
       break;
 
+    case OPT_fcfgo_profile_use_:
+      opts->x_profile_data_prefix = xstrdup (arg);
+      opts->x_flag_profile_use = true;
+      /* Only the form with "=" implies the option is on; it carries
+	 RejectNegative, so no -fno- variant reaches here.  The bare form
+	 must use the value the driver passed, which is 0 for
+	 -fno-cfgo-profile-use.  Setting it in the shared case below would
+	 make the negative form turn the whole set on.  */
+      value = true;
+      /* No break here - do -fcfgo-profile-use processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_profile_use:
+      enable_cfgo_optimizations (opts, opts_set, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_use, value);
+      /* Enable the plain -fprofile-use optimizations too.  Falling through
+	 to OPT_fprofile_use_ instead would run xstrdup on a null argument
+	 for the form without "=".  */
+      enable_fdo_optimizations (opts, opts_set, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_reorder_functions,
+			   value);
+      /* Indirect call profiling should do all useful transformations
+	 speculative devirtualization does.  */
+      if (opts->x_flag_value_profile_transformations)
+	SET_OPTION_IF_UNSET (opts, opts_set, flag_devirtualize_speculatively,
+			     false);
+      break;
+
     case OPT_fprofile_use_:
       opts->x_profile_data_prefix = xstrdup (arg);
       opts->x_flag_profile_use = true;
@@ -3121,6 +3426,15 @@ common_handle_option (struct gcc_options *opts,
 			     false);
       break;
 
+    case OPT_fcfgo_csprofile_use_:
+      opts->x_csprofile_data_prefix = xstrdup (arg);
+      value = true;
+      /* No break here - do -fcfgo-csprofile-use processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_csprofile_use:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_use, value);
+      break;
+
     case OPT_fauto_profile_:
       opts->x_auto_profile_file = xstrdup (arg);
       opts->x_flag_auto_profile = true;
@@ -3129,7 +3443,55 @@ common_handle_option (struct gcc_options *opts,
       /* FALLTHRU */
     case OPT_fauto_profile:
       enable_fdo_optimizations (opts, opts_set, value);
-      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_correction, value);
+	  /* 2 is special and means flag_profile_correction trun on by
+	     -fauto-profile.  */
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_correction,
+			   (value ? 2 : 0));
+      break;
+
+    case OPT_fipa_struct_reorg_:
+      /* No break here - do -fipa-struct-reorg processing.  */
+      /* FALLTHRU.  */
+    case OPT_fipa_struct_reorg:
+      opts->x_flag_ipa_struct_reorg = value;
+      if (value && !opts->x_struct_layout_optimize_level)
+	{
+	  /* Using the -fipa-struct-reorg option is equivalent to using
+	     -fipa-struct-reorg=1.  */
+	  opts->x_struct_layout_optimize_level = 1;
+	}
+      break;
+
+    case OPT_foeaware_policy_:
+      opts->x_oeaware_optimize_policy = value;
+      /* No break here - do -foeaware processing.  */
+      /* FALLTHRU.  */
+    case OPT_foeaware_policy:
+      opts->x_flag_oeaware = value;
+      break;
+
+    case OPT_fipa_reorder_fields:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_struct_reorg, value);
+      break;
+
+    case OPT_fcfgo_profile_generate_:
+      opts->x_profile_data_prefix = xstrdup (arg);
+      /* See the note on OPT_fcfgo_profile_use_ above: the value belongs
+	 here, not in the shared case, or -fno-cfgo-profile-generate would
+	 instrument the whole translation unit.  */
+      value = true;
+      /* No break here - do -fcfgo-profile-generate processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_profile_generate:
+      enable_cfgo_optimizations (opts, opts_set, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_cfgo_profile_generate, value);
+      /* Enable the plain -fprofile-generate options too.  Falling through
+	 to OPT_fprofile_generate_ instead would run xstrdup on a null
+	 argument for the form without "=".  */
+      SET_OPTION_IF_UNSET (opts, opts_set, profile_arc_flag, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_values, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_inline_functions, value);
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_bit_cp, value);
       break;
 
     case OPT_fprofile_generate_:
@@ -3142,6 +3504,15 @@ common_handle_option (struct gcc_options *opts,
       SET_OPTION_IF_UNSET (opts, opts_set, flag_profile_values, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_inline_functions, value);
       SET_OPTION_IF_UNSET (opts, opts_set, flag_ipa_bit_cp, value);
+      break;
+
+    case OPT_fcfgo_csprofile_generate_:
+      opts->x_csprofile_data_prefix = xstrdup (arg);
+      value = true;
+      /* No break here - do -fcfgo-csprofile-generate processing.  */
+      /* FALLTHRU */
+    case OPT_fcfgo_csprofile_generate:
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_csprofile_generate, value);
       break;
 
     case OPT_fprofile_info_section:
@@ -3387,6 +3758,52 @@ common_handle_option (struct gcc_options *opts,
 				&opts->x_flag_align_functions,
 				&opts->x_str_align_functions);
       break;
+    
+    case OPT_fchrec_mul_fold_strict_overflow:
+      /* The folding this used to gate is built into GCC 14 (see the
+	 common.opt comment); reject the positive form with the
+	 explanation, accept the negative form silently.  */
+      if (value)
+	error_at (loc,
+		  "%<-fchrec-mul-fold-strict-overflow%> is not needed on"
+		  " GCC 14: the strict-overflow CHREC multiplication"
+		  " folding it enabled is built in and always active");
+      break;
+
+    case OPT_falias_analysis_expand_ssa:
+      /* The disambiguation this used to gate is built into GCC 14
+	 (see the common.opt comment); reject the positive form with
+	 the explanation, accept the negative form silently.  */
+      if (value)
+	error_at (loc,
+		  "%<-falias-analysis-expand-ssa%> is not needed on GCC 14:"
+		  " the non-loop alias disambiguation it enabled is built"
+		  " in and always active");
+      break;
+
+    case OPT_fauto_bolt_:
+      opts->x_flag_auto_bolt = true;
+      /* FALLTHRU */
+    case OPT_fauto_bolt:
+      if (opts->x_flag_bolt_use)
+        error_at (loc,
+		  "-fauto-bolt conflicts with -fbolt-use.");
+      break;
+
+    case OPT_fbolt_use_:
+    case OPT_fbolt_use:
+      if (opts->x_flag_auto_bolt)
+        error_at (loc,
+		  "-fauto-bolt conflicts with -fbolt-use.");
+    break;
+
+    case OPT_fbolt_target_:
+      /* Deferred.  */
+      break;
+
+    case OPT_fbolt_option_:
+      /* Defferred */  
+      break;
 
     case OPT_ftabstop_:
       /* It is documented that we silently ignore silly values.  */
@@ -3412,6 +3829,37 @@ common_handle_option (struct gcc_options *opts,
   common_handle_option_auto (opts, opts_set, decoded, lang_mask, kind,
                              loc, handlers, dc);
   return true;
+}
+
+/* The following routines are used to set -fno-math-errno and -fopenmp-simd
+   to enable vector mathlib.  -fno-simdmath only clears the feature flag
+   itself; the implied flags are ordinary order-sensitive side effects and
+   are deliberately not restored (decided 2026-08: no extra semantics on
+   the negative form).  */
+static void
+set_simdmath_flags (struct gcc_options *opts, struct gcc_options *opts_set,
+		    int set)
+{
+  if (set)
+    {
+      /* Vectorizing a math call means giving up errno for it, but not
+	 behind the user's back: every floating-point model except
+	 `fast' promises errno, and an explicit -fmath-errno says so
+	 outright.  Either way -fsimdmath leaves it alone, and the
+	 functions that do not set errno - sin and cos - still
+	 vectorize.  */
+      if (opts->x_flag_fp_model == FP_MODEL_NORMAL
+	  || opts->x_flag_fp_model == FP_MODEL_FAST)
+	SET_OPTION_IF_UNSET (opts, opts_set, flag_errno_math, 0);
+      /* Likewise for the other half of the coupling.  This one has the
+	 wider reach of the two: -fopenmp-simd also activates any `omp
+	 simd' directives already in the source, so a user who wrote
+	 -fno-openmp-simd to keep them dormant must not have them turned
+	 back on by an option they gave for an unrelated reason.  A plain
+	 assignment here honoured -fsimdmath -fno-openmp-simd and ignored
+	 -fno-openmp-simd -fsimdmath, which is no rule at all.  */
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_openmp_simd, 1);
+    }
 }
 
 /* Used to set the level of strict aliasing warnings in OPTS,
@@ -3455,6 +3903,139 @@ set_fast_math_flags (struct gcc_options *opts, int set)
 	opts->x_flag_rounding_math = 0;
       if (!opts->frontend_set_flag_cx_limited_range)
 	opts->x_flag_cx_limited_range = 1;
+    }
+}
+
+/* Undo the two parts of -ffast-math that set_fast_math_flags cannot.
+   Both are set under `if (set)' there, so passing 0 leaves them
+   standing: -ffast-math -ffp-model=strict kept complex division
+   unranged, and __GCC_IEC_559_COMPLEX stayed 0, in a model that promises
+   value-safe arithmetic.  Only the models call this - -fno-fast-math is
+   left exactly as upstream has it, since changing that would alter
+   every target's behaviour for an option this work does not own.
+
+   The two halves arbitrate differently, deliberately.  Complex range
+   reduction is part of what the model decides, so the model wins over an
+   -fcx-limited-range given before it; fp-model-28.c pins that.  Excess
+   precision is not: -fexcess-precision=16 asks for a rounding step after
+   every _Float16 operation, which is a value-safety request in its own
+   right, and taking it away in the name of value safety is backwards.
+   That half was written with frontend_set_flag_excess_precision, which
+   no front end ever sets and which is not what a command-line option
+   sets either, so the test was always true and the option was discarded
+   outright - measured on AArch64 as fcvt going from six to four and
+   __FLT_EVAL_METHOD__ from 16 to 0.  SET_OPTION_IF_UNSET draws the line
+   in the right place: set_fast_math_flags assigns to opts->x_ directly
+   and never touches opts_set, so a genuine residue is still undone,
+   while anything the user asked for by name survives.  */
+static void
+undo_residual_fast_math_flags (struct gcc_options *opts,
+			       struct gcc_options *opts_set)
+{
+  if (!opts->frontend_set_flag_cx_limited_range)
+    opts->x_flag_cx_limited_range = 0;
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_excess_precision,
+		       EXCESS_PRECISION_DEFAULT);
+}
+
+/* Optimizations that move floating-point computations across control
+   flow can make an exception happen on a path that would not have
+   executed it.  The models that preserve exception semantics turn them
+   off; an explicit request on the command line still wins.
+
+   The last of the three does not reach the transformation, and the
+   documentation says so.  pass_predcom's gate runs the pass whenever
+   loop vectorization is on and the option was not given explicitly -
+   and SET_OPTION_IF_UNSET, by design, leaves opts_set alone, so that
+   escape hatch stays open.  Measured at -O2 and -O3: the pcom dump is
+   produced either way and its contents do not change.  Marking the
+   option as explicitly set would close it, at the price of turning a
+   documented-inert flag into a real optimization loss for every user of
+   the model, on a pass that reuses loads across iterations rather than
+   moving computations across control flow.  Left as it is, deliberately;
+   an explicit -fno-predictive-commoning is the way to reach it.  */
+static void
+set_fp_spurious_exception_flags (struct gcc_options *opts,
+				 struct gcc_options *opts_set)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_expensive_optimizations, 0);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_code_hoisting, 0);
+  SET_OPTION_IF_UNSET (opts, opts_set, flag_predictive_commoning, 0);
+}
+
+/* Handle -ffp-model= options.  */
+static void
+set_fp_model_flags (struct gcc_options *opts, struct gcc_options *opts_set,
+		    int set)
+{
+  enum fp_model model = (enum fp_model) set;
+  switch (model)
+    {
+      case FP_MODEL_FAST:
+	/* Equivalent to open ffast-math.  */
+	set_fast_math_flags (opts, 1);
+	break;
+
+      case FP_MODEL_PRECISE:
+	/* Equivalent to close ffast-math.  */
+	set_fast_math_flags (opts, 0);
+	undo_residual_fast_math_flags (opts, opts_set);
+	/* Turn on -frounding-math -fsignaling-nans.  */
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_EXCEPT:
+	/* The driver cancels -ffast-math outright for this model (see
+	   handle_fp_model_driver), so the spellings that make up
+	   -ffast-math have to be undone here for the same reason: a
+	   project whose CFLAGS already carry -funsafe-math-optimizations
+	   or -ffinite-math-only, and that appends a model to get IEEE
+	   behaviour, must actually get it.  -ffinite-math-only is the
+	   sharpest case - it says NaN and Inf do not occur, which is the
+	   very premise `except' exists to deny.  */
+	set_fast_math_flags (opts, 0);
+	undo_residual_fast_math_flags (opts, opts_set);
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	set_fp_spurious_exception_flags (opts, opts_set);
+	/* Also turn on ffpe-trap in fortran.  */
+	break;
+
+      case FP_MODEL_STRICT:
+	/* Turn on both precise and except.  Without the cancellation
+	   `strict' was the weakest of the three models rather than the
+	   strongest: -ffinite-math-only survived it while `precise'
+	   cleared it, so -ffp-model=strict folded __builtin_isnan to 0.  */
+	set_fast_math_flags (opts, 0);
+	undo_residual_fast_math_flags (opts, opts_set);
+	if (!opts->frontend_set_flag_signaling_nans)
+	  opts->x_flag_signaling_nans = 1;
+	if (!opts->frontend_set_flag_rounding_math)
+	  opts->x_flag_rounding_math = 1;
+	if (!opts->frontend_set_flag_errno_math)
+	  opts->x_flag_errno_math = 1;
+	if (!opts->frontend_set_flag_trapping_math)
+	  opts->x_flag_trapping_math = 1;
+	opts->x_flag_fp_int_builtin_inexact = 1;
+	set_fp_spurious_exception_flags (opts, opts_set);
+	opts->x_flag_fp_contract_mode = FP_CONTRACT_OFF;
+	break;
+
+      case FP_MODEL_NORMAL:
+	/* Do nothing.  */
+	break;
+
+      default:
+	gcc_unreachable ();
     }
 }
 

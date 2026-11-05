@@ -5229,6 +5229,7 @@ expand_POPCOUNT (internal_fn fn, gcall *stmt)
   bool nonzero_arg = integer_zerop (gimple_call_arg (stmt, 1));
   tree type = TREE_TYPE (arg);
   machine_mode mode = TYPE_MODE (type);
+  machine_mode lhsmode = TYPE_MODE (TREE_TYPE (lhs));
   do_pending_stack_adjust ();
   start_sequence ();
   expand_unary_optab_fn (fn, stmt, popcount_optab);
@@ -5236,7 +5237,7 @@ expand_POPCOUNT (internal_fn fn, gcall *stmt)
   end_sequence ();
   start_sequence ();
   rtx plhs = expand_normal (lhs);
-  rtx pcmp = emit_store_flag (NULL_RTX, EQ, plhs, const1_rtx, mode, 0, 0);
+  rtx pcmp = emit_store_flag (NULL_RTX, EQ, plhs, const1_rtx, lhsmode, 0, 0);
   if (pcmp == NULL_RTX)
     {
     fail:
@@ -5249,11 +5250,11 @@ expand_POPCOUNT (internal_fn fn, gcall *stmt)
   start_sequence ();
   rtx op0 = expand_normal (arg);
   rtx argm1 = expand_simple_binop (mode, PLUS, op0, constm1_rtx, NULL_RTX,
-				   1, OPTAB_DIRECT);
+				   1, OPTAB_WIDEN);
   if (argm1 == NULL_RTX)
     goto fail;
   rtx argxorargm1 = expand_simple_binop (mode, nonzero_arg ? AND : XOR, op0,
-					 argm1, NULL_RTX, 1, OPTAB_DIRECT);
+					 argm1, NULL_RTX, 1, OPTAB_WIDEN);
   if (argxorargm1 == NULL_RTX)
     goto fail;
   rtx cmp;
@@ -5268,6 +5269,11 @@ expand_POPCOUNT (internal_fn fn, gcall *stmt)
   unsigned popcount_cost = (seq_cost (popcount_insns, speed_p)
 			    + seq_cost (popcount_cmp_insns, speed_p));
   unsigned cmp_cost = seq_cost (cmp_insns, speed_p);
+
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf(dump_file, "popcount == 1: popcount cost: %u; cmp cost: %u\n",
+	    popcount_cost, cmp_cost);
+
   if (popcount_cost <= cmp_cost)
     emit_insn (popcount_insns);
   else

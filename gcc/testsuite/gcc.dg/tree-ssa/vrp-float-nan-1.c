@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -ffinite-math-only -fdump-tree-evrp" }
+// { dg-options "-O2 -ffinite-math-only -fdump-tree-evrp1" }
 
 void bar(float);
 
@@ -15,4 +15,4 @@ void funk(int cond)
   bar(x);
 }
 
-// { dg-final { scan-tree-dump-times "bar \\(1.24" 1 "evrp" } }
+// { dg-final { scan-tree-dump-times "bar \\(1.24" 1 "evrp1" } }

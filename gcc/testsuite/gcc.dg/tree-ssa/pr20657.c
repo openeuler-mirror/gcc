@@ -3,7 +3,7 @@
    statement, which was needed to eliminate the second "if" statement.  */
 
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-tree-dominator-opts -fno-tree-fre -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fno-tree-dominator-opts -fno-tree-fre -fdump-tree-evrp1" } */
 
 int
 foo (int a)
@@ -14,4 +14,4 @@ foo (int a)
   return 0;
 }
 
-/* { dg-final { scan-tree-dump-times "if" 1 "evrp"} } */
+/* { dg-final { scan-tree-dump-times "if" 1 "evrp1"} } */

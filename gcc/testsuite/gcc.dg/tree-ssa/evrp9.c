@@ -1,6 +1,6 @@
 /* PR tree-optimization/49039 */
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 extern void bar (void);
 
@@ -24,7 +24,7 @@ foo (unsigned int x, unsigned int y)
     bar ();
 }
 
-/* { dg-final { scan-tree-dump-times "Folding predicate minv_.* == 5 to 0" 1 "evrp" } } */
-/* { dg-final { scan-tree-dump-times "Folding predicate minv_.* == 6 to 0" 1 "evrp" } } */
-/* { dg-final { scan-tree-dump-times "Folding predicate maxv_.* == 5 to 0" 1 "evrp" } } */
-/* { dg-final { scan-tree-dump-times "Folding predicate maxv_.* == 6 to 0" 1 "evrp" } } */
+/* { dg-final { scan-tree-dump-times "Folding predicate minv_.* == 5 to 0" 1 "evrp1" } } */
+/* { dg-final { scan-tree-dump-times "Folding predicate minv_.* == 6 to 0" 1 "evrp1" } } */
+/* { dg-final { scan-tree-dump-times "Folding predicate maxv_.* == 5 to 0" 1 "evrp1" } } */
+/* { dg-final { scan-tree-dump-times "Folding predicate maxv_.* == 6 to 0" 1 "evrp1" } } */

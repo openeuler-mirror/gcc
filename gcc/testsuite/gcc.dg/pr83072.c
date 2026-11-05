@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp -fno-tree-ccp -fno-tree-forwprop -fno-tree-fre" } */
+/* { dg-options "-O2 -fdump-tree-evrp1 -fno-tree-ccp -fno-tree-forwprop -fno-tree-fre" } */
 
 void kill (void);
 
@@ -11,4 +11,4 @@ int f(int c){
   return c;
 }
 
-/* { dg-final { scan-tree-dump-not "kill" "evrp" } }  */
+/* { dg-final { scan-tree-dump-not "kill" "evrp1" } }  */

@@ -660,7 +660,8 @@
 
 (define_insn_reservation "hip12_neon_insert" 2
   (and (eq_attr "tune" "hip12")
-       (eq_attr "type" "neon_ins,neon_ins_q"))
+       (eq_attr "type" "neon_ins,neon_ins_q,\
+                 neon_permute,neon_permute_q"))
   "hip12_v0123")
 
 (define_insn_reservation "hip12_neon_move" 2

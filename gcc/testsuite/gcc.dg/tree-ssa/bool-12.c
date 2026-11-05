@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O1 -fdump-tree-optimized -fdump-tree-original -fdump-tree-phiopt1 -fdump-tree-forwprop2" } */
+/* { dg-options "-O1 -fdump-tree-optimized -fdump-tree-original -fdump-tree-phiopt1 -fdump-tree-forwprop4" } */
 #define bool _Bool
 int maxbool(bool ab, bool bb)
 {
@@ -34,9 +34,9 @@ int minbool(bool ab, bool bb)
 /* { dg-final { scan-tree-dump-times "if " 0 "phiopt1" } } */
 
 /* Forwprop2 (after ccp) will convert it into &\| */
-/* { dg-final { scan-tree-dump-times "MAX_EXPR" 0 "forwprop2" } } */
-/* { dg-final { scan-tree-dump-times "MIN_EXPR" 0 "forwprop2" } } */
-/* { dg-final { scan-tree-dump-times "if " 0 "forwprop2" } } */
+/* { dg-final { scan-tree-dump-times "MAX_EXPR" 0 "forwprop4" } } */
+/* { dg-final { scan-tree-dump-times "MIN_EXPR" 0 "forwprop4" } } */
+/* { dg-final { scan-tree-dump-times "if " 0 "forwprop4" } } */
 
 /* By optimize there should be no min/max nor if  */
 /* { dg-final { scan-tree-dump-times "MAX_EXPR" 0 "optimized" } } */

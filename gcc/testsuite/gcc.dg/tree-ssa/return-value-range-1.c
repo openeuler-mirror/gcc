@@ -1,5 +1,5 @@
 /* { dg-do link } */
-/* { dg-options "-O2 -fdump-tree-evrp-details" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-details" } */
 __attribute__ ((__noinline__))
 int a(signed char c)
 {
@@ -19,4 +19,4 @@ main(int argc, char **argv)
 	test(argc);
 	return 0;
 }
-/* { dg-final { scan-tree-dump-times "Recording return range" 2 "evrp"} } */
+/* { dg-final { scan-tree-dump-times "Recording return range" 2 "evrp1"} } */

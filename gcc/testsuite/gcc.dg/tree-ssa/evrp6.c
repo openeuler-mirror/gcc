@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp-details -fdump-tree-mergephi1" } */
+/* { dg-options "-O2 -fdump-tree-evrp1-details -fdump-tree-mergephi1" } */
 
 extern void abort (void);
 
@@ -18,5 +18,5 @@ foo (int k, int j)
 
   return j;
 }
-/* { dg-final { scan-tree-dump "\\\[11, \\+INF" "evrp" } } */
+/* { dg-final { scan-tree-dump "\\\[11, \\+INF" "evrp1" } } */
 /* { dg-final { scan-tree-dump-not "abort" "mergephi1" } } */

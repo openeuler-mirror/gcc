@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdisable-tree-evrp -fdump-tree-thread-details-blocks-stats -fdump-tree-threadfull1-blocks-stats -fdump-tree-threadfull2-blocks-stats" } */
+/* { dg-options "-O2 -fdisable-tree-evrp1 -fdump-tree-thread-details-blocks-stats -fdump-tree-threadfull1-blocks-stats -fdump-tree-threadfull2-blocks-stats" } */
 typedef enum STATES {
 	START=0,
 	INVALID,

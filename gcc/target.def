@@ -2453,6 +2453,20 @@ If @var{code} is out of range the function should return\n\
 @code{error_mark_node}.",
  tree, (unsigned code, bool initialize_p), NULL)
 
+/* Initialize (if INITIALIZE_P is true) and return the real code of
+   target-specific built-in function.
+   Return NULL if that is not possible.  Return error_mark_node if CODE
+   is outside of the range of valid crc32 codes.  */
+DEFHOOK
+(get_crc_builtin_code,
+ "Define this hook to get crc32 builtin code.  It should be a function that\n\
+returns the crc32 builtin function code @var{code}.\n\
+If there is no such builtin and it cannot be initialized at this time\n\
+if @var{initialize_p} is true the function should return @code{NULL_TREE}.\n\
+If @var{code} is out of range the function should return\n\
+@code{error_mark_node}.",
+ unsigned , (unsigned code, bool initialize_p), NULL)
+
 /* Expand a target-specific builtin.  */
 DEFHOOK
 (expand_builtin,
@@ -2690,6 +2704,47 @@ DEFHOOK
 @code{(enum function_class)}@var{fcode} has a fast implementation.",
  bool, (int fcode),
  default_libc_has_fast_function)
+
+DEFHOOK
+(get_v16qi_mode,
+ "This function get the 16 byte elements vector mode if target supports this.",
+ machine_mode, (),
+ NULL)
+
+DEFHOOK
+(gen_rev32v16qi,
+ "This function generate the byte reverse instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src),
+ NULL)
+
+DEFHOOK
+(gen_aesev16qi,
+ "This function generate the AES encryption instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src1, rtx src2),
+ NULL)
+
+DEFHOOK
+(gen_aesdv16qi,
+ "This function generate the AES decryption instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src1, rtx src2),
+ NULL)
+
+DEFHOOK
+(gen_aesmcv16qi,
+ "This function generate the AES mix columns instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src),
+ NULL)
+
+DEFHOOK
+(gen_aesimcv16qi,
+ "This function generate the AES inversed mix columns instruction\n\
+ of 16 byte elements vector if target supports this.",
+ rtx, (rtx dest, rtx src),
+ NULL)
 
 DEFHOOK
 (fortify_source_default_level,

@@ -112,8 +112,8 @@ extern struct cgraph_node* find_func_by_profile_id (int func_id);
 
 /* In profile.cc.  */
 extern void init_branch_prob (void);
-extern void branch_prob (bool);
-extern void read_thunk_profile (struct cgraph_node *);
+extern void branch_prob (bool, bool);
+extern void read_thunk_profile (struct cgraph_node *, bool);
 extern void end_branch_prob (void);
 
 #endif	/* GCC_VALUE_PROF_H */

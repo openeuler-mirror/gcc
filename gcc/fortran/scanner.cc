@@ -2773,6 +2773,21 @@ gfc_new_file (void)
   if (flag_pre_include != NULL)
     load_file (flag_pre_include, NULL, false);
 
+  if (flag_simdmath)
+    {
+      /* Like the glibc math-vector pre-include, the simdmath header is
+	 optional: skip it silently when not installed (testsuite runs,
+	 --disable-libgomp builds).  Declarations may then be supplied
+	 explicitly via !GCC$ builtin directives.  */
+      FILE *simdmath_input
+	= gfc_open_included_file ("simdmath_f.h", false, false);
+      if (simdmath_input)
+	{
+	  fclose (simdmath_input);
+	  load_file ("simdmath_f.h", NULL, false);
+	}
+    }
+
   if (gfc_cpp_enabled ())
     {
       gfc_cpp_preprocess (gfc_source_file);

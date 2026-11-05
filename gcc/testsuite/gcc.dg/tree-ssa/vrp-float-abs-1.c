@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fno-thread-jumps -fdump-tree-evrp" }
+// { dg-options "-O2 -fno-thread-jumps -fdump-tree-evrp1" }
 
 void link_error ();
 
@@ -14,4 +14,4 @@ foo (double x, double y)
     }
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" { xfail s390*-*-* } } } xfail: PR114678
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" { xfail s390*-*-* } } } xfail: PR114678

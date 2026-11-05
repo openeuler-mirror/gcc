@@ -518,7 +518,7 @@
 })
 
 (define_predicate "aarch64_rcpc_memory_operand"
-  (if_then_else (match_test "AARCH64_ISA_RCPC8_4")
+  (if_then_else (match_test "TARGET_RCPC2")
     (match_operand 0 "aarch64_9bit_offset_memory_operand")
     (match_operand 0 "aarch64_sync_memory_operand")))
 
@@ -1069,3 +1069,13 @@
   (and (match_code "const_int")
        (match_test "IN_RANGE (INTVAL (op),  -4096, 4080)
 		    && !(INTVAL (op) & 0xf)")))
+
+(define_predicate "aarch64_reg_Uc0_operand"
+  (ior (match_operand 0 "register_operand")
+       (and (match_code "const_int")
+	    (match_test "satisfies_constraint_Uc0 (op)"))))
+
+(define_predicate "aarch64_reg_Uc1_operand"
+  (ior (match_operand 0 "register_operand")
+       (and (match_code "const_int")
+	    (match_test "satisfies_constraint_Uc1 (op)"))))

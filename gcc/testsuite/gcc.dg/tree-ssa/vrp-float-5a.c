@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fno-thread-jumps -fdisable-tree-fre1 -fdump-tree-evrp" }
+// { dg-options "-O2 -fno-thread-jumps -fdisable-tree-fre1 -fdump-tree-evrp1" }
 
 void link_error ();
 
@@ -13,4 +13,4 @@ foo (float x)
     }
 }
 
-// { dg-final { scan-tree-dump-not "link_error" "evrp" } }
+// { dg-final { scan-tree-dump-not "link_error" "evrp1" } }
