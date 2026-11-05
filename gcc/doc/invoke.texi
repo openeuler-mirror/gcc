@@ -624,7 +624,9 @@ Objective-C and Objective-C++ Dialects}.
 -fstdarg-opt  -fstore-merging  -fstrict-aliasing -fipa-strict-aliasing
 -fthread-jumps  -ftracer  -ftree-bit-ccp
 -ftree-builtin-call-dce  -ftree-ccp  -ftree-ch
--ftree-coalesce-vars  -ftree-copy-prop  -ftree-dce  -ftree-dominator-opts
+-ftree-coalesce-vars  -ftree-constant-byte-range
+-ftree-constant-byte-range-cursor  -ftree-copy-prop  -ftree-dce
+-ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
@@ -13725,24 +13727,14 @@ This pass only operates on local scalar variables and is enabled by default
 at @option{-O1} and higher, except for @option{-Og}.
 It requires that @option{-ftree-ccp} is enabled.
 
-@item -ftree-constant-byte-range-cursor
-@opindex ftree-constant-byte-range-cursor
-Refine byte-load ranges at constant displacements from @code{strchr} results
-within proven complete immutable byte arrays.  Enumerate all possible matching
-positions conservatively and merge all pointer PHI inputs.  Unsupported
-arithmetic falls back to the whole-object alphabet only when
-@option{-ftree-constant-byte-range} is also enabled.  This option is disabled by
-default and does not infer trip counts or introduce speculative loads.
-Wrapping-pointer arithmetic and targets allowing accessible null pointers are
-excluded from this refinement.  Analysis work is bounded per function.
+@opindex ftree-ccp
+@item -ftree-ccp
+Perform sparse conditional constant propagation (CCP) on trees.  This
+pass only operates on local scalar variables and is enabled by default
+at @option{-O1} and higher.
 
-This option can also be enabled independently of
-@option{-ftree-constant-byte-range}.  Both are disabled when neither option
-is requested.  Search semantics are currently modeled only for @code{strchr};
-unrecognized calls are conservatively rejected.
-
-@item -ftree-constant-byte-range
 @opindex ftree-constant-byte-range
+@item -ftree-constant-byte-range
 Infer possible byte values for loads through cursors derived from complete
 immutable byte arrays.  The analysis follows bounded pointer definition
 graphs, including all incoming loop PHI edges, and feeds existing value
@@ -13758,11 +13750,24 @@ Enabling this option also enables @option{-ftree-constant-byte-range-cursor}
 unless explicitly disabled with @option{-fno-tree-constant-byte-range-cursor}.
 The explicit cursor setting takes precedence regardless of option order.
 
-@opindex ftree-ccp
-@item -ftree-ccp
-Perform sparse conditional constant propagation (CCP) on trees.  This
-pass only operates on local scalar variables and is enabled by default
-at @option{-O1} and higher.
+@opindex ftree-constant-byte-range-cursor
+@item -ftree-constant-byte-range-cursor
+Refine byte-load ranges at constant displacements from @code{strchr} results
+within proven complete immutable byte arrays.  Enumerate all possible matching
+positions conservatively and merge all pointer PHI inputs.  Unsupported
+arithmetic falls back to the whole-object alphabet only when
+@option{-ftree-constant-byte-range} is also enabled.  This option is disabled by
+default and does not infer trip counts or introduce speculative loads.
+Wrapping-pointer arithmetic and targets allowing accessible null pointers are
+excluded from this refinement.  Analysis work is bounded per function.
+
+This option can also be enabled independently of
+@option{-ftree-constant-byte-range}.  Both are disabled when neither option
+is requested.  Search semantics are currently modeled only for @code{strchr};
+unrecognized calls are conservatively rejected.
+
+@option{-ftree-constant-byte-cursor-range} is a compatibility spelling of
+@option{-ftree-constant-byte-range-cursor}.
 
 @opindex fssa-backprop
 @item -fssa-backprop

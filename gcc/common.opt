@@ -3314,12 +3314,12 @@ Common Var(flag_tree_constant_byte_range) Init(0) Optimization
 Propagate byte value ranges from complete immutable arrays through pointer cursors.
 
 ftree-constant-byte-range-cursor
-Common Var(flag_tree_constant_byte_cursor_range) Optimization Init(0) EnabledBy(ftree-constant-byte-range)
+Common Var(flag_tree_constant_byte_range_cursor) Optimization Init(0) EnabledBy(ftree-constant-byte-range)
 Refine byte values at fixed displacements from constant-character searches.
 
 ftree-constant-byte-cursor-range
 Common Alias(ftree-constant-byte-range-cursor)
-Deprecated spelling of -ftree-constant-byte-range-cursor.
+Compatibility spelling of -ftree-constant-byte-range-cursor.
 
 ftree-bit-ccp
 Common Var(flag_tree_bit_ccp) Optimization

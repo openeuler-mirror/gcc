@@ -1,6 +1,6 @@
 /* { dg-do run } */
-/* { dg-options "-O2 -ftree-constant-byte-range -fdump-tree-constbyterange-details" } */
-/* { dg-final { scan-tree-dump "Constant byte object excludes search character" "constbyterange1" } } */
+/* { dg-options "-O2 -fdelete-null-pointer-checks -ftree-constant-byte-range -fdump-tree-constbyterange-details" } */
+/* { dg-final { scan-tree-dump "Constant byte object excludes search character" "constbyterange1" { target { ! keeps_null_pointer_checks } } } } */
 __attribute__((noipa)) int scan (unsigned n)
 {
   const char *p = "abc|xyz|pq";

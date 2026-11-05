@@ -124,6 +124,9 @@ constant_byte_object (tree pointer, unsigned &budget)
 	  if (VAR_P (object) && TREE_READONLY (object)
 	      && !TREE_THIS_VOLATILE (object))
 	    init = ctor_for_folding (object);
+	  /* Require the complete array and its foldable STRING_CST initializer.
+	     Partial initialization or inferred contents cannot justify enumerating
+	     every byte of this very initializer in the cursor proof.  */
 	  if (!init || TREE_CODE (init) != STRING_CST
 	      || TREE_CODE (TREE_TYPE (object)) != ARRAY_TYPE
 	      || !INTEGRAL_TYPE_P (TREE_TYPE (TREE_TYPE (object)))
@@ -335,7 +338,7 @@ constant_byte_range (function *fn)
 	    const unsigned char *bytes
 	      = (const unsigned char *) TREE_STRING_POINTER (object);
 	    bool refined = false;
-	    if (flag_tree_constant_byte_cursor_range)
+	    if (flag_tree_constant_byte_range_cursor)
 	      {
 		HOST_WIDE_INT displacement = 0;
 		bool known_displacement = true;
@@ -401,7 +404,7 @@ constant_byte_range (function *fn)
 
 const pass_data pass_data_constant_byte_range =
 {
-  GIMPLE_PASS, "constbyterange", OPTGROUP_NONE, TV_TREE_VRP,
+  GIMPLE_PASS, "constbyterange", OPTGROUP_NONE, TV_TREE_CONSTANT_BYTE_RANGE,
   PROP_cfg | PROP_ssa, 0, 0, 0, 0
 };
 
@@ -413,7 +416,7 @@ public:
   opt_pass *clone () final override
   { return new pass_constant_byte_range (m_ctxt); }
   bool gate (function *) final override
-  { return (flag_tree_constant_byte_range || flag_tree_constant_byte_cursor_range)
+  { return (flag_tree_constant_byte_range || flag_tree_constant_byte_range_cursor)
 	   && !flag_wrapv_pointer
 	   && BITS_PER_UNIT == 8; }
   unsigned execute (function *fn) final override
