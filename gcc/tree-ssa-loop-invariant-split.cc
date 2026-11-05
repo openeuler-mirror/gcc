@@ -78,8 +78,9 @@ along with GCC; see the file COPYING3.  If not see
    before that chunk in the original execution.  Chunk zero uses the original
    initializer; subsequent chunks read the previous chunk's unconditional
    store.  Carry addresses are nonwrapping affine functions with disjoint
-   storage for distinct I, and distinct memory references involving a write
-   must be independent.  Thus no intervening outer iteration can overwrite a
+   storage for distinct I.  Distinct memory references involving a write must
+   be independent, except for a matching read used only to initialize that
+   carry's accumulator.  Thus no intervening outer iteration can overwrite a
    carry or change an input.  Inner iterations retain their original order.
 
    Outer scalar recurrences must be affine and independent of the inner loop.
@@ -421,10 +422,36 @@ collect_candidate_loads (class loop *outer, class loop *inner,
   return found;
 }
 
+/* Return true if OTHER reads WRITE's carry reference solely to initialize
+   the corresponding accumulator.  Later chunks replace that PHI argument
+   with a carry load.  Any additional use would still need the original
+   initial value, rather than the partial result stored by an earlier chunk.  */
+static bool
+carry_init_read_p (const split_plan *plan, data_reference_p write,
+		   data_reference_p other)
+{
+  if (!DR_IS_READ (other) || !is_gimple_assign (DR_STMT (other)))
+    return false;
+
+  tree lhs = gimple_assign_lhs (DR_STMT (other));
+  if (TREE_CODE (lhs) != SSA_NAME || !has_single_use (lhs))
+    return false;
+
+  edge entry = loop_preheader_edge (plan->inner);
+  for (const carry_info &carry : plan->carries)
+    if (DR_STMT (write) == carry.store
+	&& PHI_ARG_DEF_FROM_EDGE (carry.phi, entry) == lhs
+	&& operand_equal_p (DR_REF (other), carry.store_ref, 0))
+      return true;
+
+  return false;
+}
+
 /* The carry address check below proves absence of cross-iteration self
    dependences.  Check every distinct pair involving a write, including pairs
-   of different carry stores.  Do not build read-read relations or retain a
-   quadratic-sized DDR graph just to discard it afterwards.  */
+   of different carry stores, except for a carry's own initializer read.  Do
+   not build read-read relations or retain a quadratic-sized DDR graph just
+   to discard it afterwards.  */
 static bool
 safe_data_dependences_p (class loop *outer, const vec<loop_p> &loop_nest,
 			 const vec<data_reference_p> &datarefs,
@@ -451,6 +478,8 @@ safe_data_dependences_p (class loop *outer, const vec<loop_p> &loop_nest,
       {
 	/* Each write-write pair is checked only once.  */
 	if (i == j || (DR_IS_WRITE (datarefs[j]) && j < i))
+	  continue;
+	if (carry_init_read_p (plan, datarefs[i], datarefs[j]))
 	  continue;
 
 	ddr_p ddr = initialize_data_dependence_relation (datarefs[i],
