@@ -99,6 +99,30 @@ struct phiprop_d
   tree vuse;
 };
 
+/* Bound the additional analysis across all PHIs and loads in a function.
+   Charge reference construction, every nondebug statement visited (including
+   those without a VDEF), and every alias query.  A per-load limit would still
+   allow quadratic repeated scans of a large block.  */
+struct phiprop_work_budget
+{
+  unsigned remaining;
+  bool exhausted;
+
+  bool consume ()
+  {
+    if (remaining)
+      {
+	--remaining;
+	return true;
+      }
+    if (!exhausted && dump_file && (dump_flags & TDF_DETAILS))
+      fprintf (dump_file,
+	       "PHI load propagation: disjoint-store work budget exhausted.\n");
+    exhausted = true;
+    return false;
+  }
+};
+
 /* Verify if the value recorded for NAME in PHIVN is still valid at
    the start of basic block BB.  */
 
@@ -268,9 +292,11 @@ chk_uses (tree, tree *idx, void *data)
    without path speculation.  */
 static bool
 phiprop_disjoint_local_stores_p (basic_block bb, gphi *phi,
-				gimple *load, tree *entry_vuse)
+				gimple *load, tree *entry_vuse,
+				phiprop_work_budget &budget)
 {
-  if (!flag_tree_phiprop_disjoint_stores || gimple_bb (load) != bb
+  if (!flag_tree_phiprop_disjoint_stores || budget.exhausted
+      || gimple_bb (load) != bb
       || !is_gimple_reg_type (TREE_TYPE (gimple_assign_lhs (load))))
     return false;
 
@@ -278,6 +304,8 @@ phiprop_disjoint_local_stores_p (basic_block bb, gphi *phi,
   auto_vec<tree> refs;
   for (unsigned i = 0; i < gimple_phi_num_args (phi); ++i)
     {
+      if (!budget.consume ())
+	return false;
       tree arg = gimple_phi_arg_def (phi, i);
       /* The usual PHI propagation checks have already checked copies.
 	 Keep this extension limited to explicit automatic objects.  */
@@ -296,15 +324,17 @@ phiprop_disjoint_local_stores_p (basic_block bb, gphi *phi,
   tree vuse = gimple_vuse (load);
   bool crossed_store = false;
   gimple_stmt_iterator si = gsi_for_stmt (load);
-  for (gsi_prev (&si); !gsi_end_p (si); gsi_prev (&si))
+  for (gsi_prev_nondebug (&si); !gsi_end_p (si); gsi_prev_nondebug (&si))
     {
+      if (!budget.consume ())
+	return false;
       gimple *stmt = gsi_stmt (si);
       if (!gimple_vdef (stmt))
 	continue;
       if (gimple_vdef (stmt) != vuse || !gimple_vuse (stmt))
 	return false;
       for (tree ref : refs)
-	if (stmt_may_clobber_ref_p (stmt, ref))
+	if (!budget.consume () || stmt_may_clobber_ref_p (stmt, ref))
 	  return false;
       vuse = gimple_vuse (stmt);
       crossed_store = true;
@@ -329,7 +359,6 @@ phiprop_disjoint_local_stores_p (basic_block bb, gphi *phi,
   return true;
 }
 
-
 /* Propagate between the phi node arguments of PHI in BB and phi result
    users.  For now this matches
         # p_2 = PHI <&x, &y>
@@ -346,7 +375,7 @@ phiprop_disjoint_local_stores_p (basic_block bb, gphi *phi,
 
 static bool
 propagate_with_phi (basic_block bb, gphi *phi, struct phiprop_d *phivn,
-		    size_t n)
+		    size_t n, phiprop_work_budget &budget)
 {
   tree ptr = PHI_RESULT (phi);
   gimple *use_stmt;
@@ -451,7 +480,7 @@ propagate_with_phi (basic_block bb, gphi *phi, struct phiprop_d *phivn,
 				      bb, gimple_bb (def_stmt)))))
 	{
 	  if (!phiprop_disjoint_local_stores_p (bb, phi, use_stmt,
-					       &insertion_vuse))
+					       &insertion_vuse, budget))
 	    goto next;
 	}
 
@@ -518,7 +547,8 @@ propagate_with_phi (basic_block bb, gphi *phi, struct phiprop_d *phivn,
 	 is the first load transformation.  */
       else if (!phi_inserted)
 	{
-	  if (dump_file && insertion_vuse != vuse)
+	  if (dump_file && (dump_flags & TDF_DETAILS)
+	      && insertion_vuse != vuse)
 	    fprintf (dump_file,
 		     "PHI load propagation: crossed proven-disjoint local stores.\n");
 	  res = phiprop_insert_phi (bb, phi, use_stmt, phivn, n,
@@ -594,6 +624,8 @@ pass_phiprop::execute (function *fun)
   gphi_iterator gsi;
   unsigned i;
   size_t n;
+  phiprop_work_budget budget = { param_phiprop_disjoint_stores_max_work,
+				false };
 
   calculate_dominance_info (CDI_DOMINATORS);
 
@@ -611,7 +643,7 @@ pass_phiprop::execute (function *fun)
       if (bb_has_abnormal_pred (bb))
 	continue;
       for (gsi = gsi_start_phis (bb); !gsi_end_p (gsi); gsi_next (&gsi))
-	did_something |= propagate_with_phi (bb, gsi.phi (), phivn, n);
+	did_something |= propagate_with_phi (bb, gsi.phi (), phivn, n, budget);
     }
 
   if (did_something)
