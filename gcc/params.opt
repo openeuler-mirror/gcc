@@ -1265,7 +1265,7 @@ Common Joined UInteger Var(param_ipa_cold_immutable_growth_budget) Init(1024) In
 Independent estimated instruction budget for statically cold immutable clones.
 
 -param=ipa-value-specialization-peel-growth-budget=
-Common Joined UInteger Var(param_ipa_value_specialization_peel_growth_budget) Init(131072) IntegerRange(0, 2147483647) Param Optimization
+Common Joined UInteger Var(param_ipa_value_specialization_peel_growth_budget) Init(524288) IntegerRange(0, 2147483647) Param Optimization
 Minimum cumulative estimated growth allowance for IPA readonly loop peeling in one function. Zero disables this route.
 
 -param=ipa-value-specialization-peel-growth-percent=

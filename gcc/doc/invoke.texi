@@ -16744,7 +16744,7 @@ route.  The default is 1024.  Zero disables additional cold admissions.
 @item ipa-value-specialization-peel-growth-budget
 Fixed floor for the cumulative estimated growth allowance from readonly
 loop peeling in one GIMPLE function when
-@option{-fipa-value-specialization} is enabled.  The default is 131072.
+@option{-fipa-value-specialization} is enabled.  The default is 524288.
 The effective allowance is the greater of this floor and the allowance
 computed by @option{ipa-value-specialization-peel-growth-percent}.
 Each successful duplication is charged for all
