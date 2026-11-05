@@ -1264,6 +1264,14 @@ Maximum extra estimated IPA clone instructions for immutable values in static lo
 Common Joined UInteger Var(param_ipa_cold_immutable_growth_budget) Init(1024) IntegerRange(0, 65536) Param Optimization
 Independent estimated instruction budget for statically cold immutable clones.
 
+-param=ipa-value-specialization-peel-growth-budget=
+Common Joined UInteger Var(param_ipa_value_specialization_peel_growth_budget) Init(131072) IntegerRange(0, 2147483647) Param Optimization
+Minimum cumulative estimated growth allowance for IPA readonly loop peeling in one function. Zero disables this route.
+
+-param=ipa-value-specialization-peel-growth-percent=
+Common Joined UInteger Var(param_ipa_value_specialization_peel_growth_percent) Init(800) IntegerRange(0, 10000) Param Optimization
+Additional copied cost allowance as a percentage of the function cost before its first IPA readonly peel. Zero uses only the fixed allowance.
+
 -param=ipa-immutable-clone-growth-budget=
 Common Joined Alias(-param=ipa-value-specialization-clone-growth-budget=)
 Compatibility spelling of --param=ipa-value-specialization-clone-growth-budget=.

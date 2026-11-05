@@ -16741,6 +16741,30 @@ reserve.  The default is 131072.  Zero disables extra loop-reserve admissions.
 Maximum extra estimated clone instructions admitted by the cold immutable
 route.  The default is 1024.  Zero disables additional cold admissions.
 
+@item ipa-value-specialization-peel-growth-budget
+Fixed floor for the cumulative estimated growth allowance from readonly
+loop peeling in one GIMPLE function when
+@option{-fipa-value-specialization} is enabled.  The default is 131072.
+The effective allowance is the greater of this floor and the allowance
+computed by @option{ipa-value-specialization-peel-growth-percent}.
+Each successful duplication is charged for all
+copied blocks, PHIs and non-debug statements, including previously peeled
+inner loops, without credit for possible later simplification.  The
+consumed budget is retained across loops and subsequent peeling passes on
+the same function.  Zero disables this additional readonly peeling route;
+ordinary loop peeling keeps its existing limits.  This budget is separate
+from the IPA clone admission budgets.
+
+@item ipa-value-specialization-peel-growth-percent
+Additional copied cost allowance as a percentage of the complete function
+cost before its first extra readonly peel.  The default is 800.  The
+effective allowance is computed once, is capped at @code{INT_MAX}, and is
+not increased by later expansion.  Zero uses only the fixed floor.
+Setting @option{ipa-value-specialization-peel-growth-budget} to zero
+disables this route regardless of the percentage.  These are estimated
+copy costs, not a bound on final machine-code size or on growth caused by
+other optimizations.
+
 @item ipa-cp-eval-threshold
 IPA-CP calculates its own score of cloning profitability heuristics
 and performs those cloning opportunities with scores that exceed
