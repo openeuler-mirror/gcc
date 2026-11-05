@@ -2671,7 +2671,10 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
       zero_val = input_bits - 1 - zero_val;
     }
 
-  int nargs = fn == IFN_CTZ ? 2 : 1;
+  /* A one-argument IFN leaves the result at zero undefined to range
+     analysis, even when the target instruction defines it.  Describe
+     that value explicitly so later passes keep the normalization.  */
+  int nargs = 2;
   /* If the input value can't be zero, don't special case ctz/clz (0).  */
   if (tree_expr_nonzero_p (res_ops[0]))
     {
@@ -2680,6 +2683,8 @@ simplify_count_zeroes (gimple_stmt_iterator *gsi)
       ctz_val = 0;
       nargs = 1;
     }
+  else if (!zero_ok)
+    return false;
 
   gimple_seq seq = NULL;
   gimple *g;

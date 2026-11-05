@@ -265,22 +265,28 @@ match_split_word_bitcount_arm (tree arg, basic_block bb, bool add_p,
     return false;
 
   unsigned int nargs = gimple_call_num_args (call);
-  if ((*ifn == IFN_CLZ && nargs != 1)
-      || (*ifn == IFN_CTZ && nargs != 1 && nargs != 2))
+  if (nargs != 1 && nargs != 2)
     return false;
-  if (*ifn == IFN_CTZ && nargs == 2)
+  *half = gimple_call_arg (call, 0);
+  tree half_type = TREE_TYPE (*half);
+  if (!INTEGRAL_TYPE_P (half_type)
+      || !TYPE_UNSIGNED (half_type)
+      || TYPE_PRECISION (half_type) != 32)
+    return false;
+  if (nargs == 2)
     {
       tree at_zero = gimple_call_arg (call, 1);
       int target_zero = 0;
+      scalar_int_mode mode = SCALAR_INT_TYPE_MODE (half_type);
+      int defined = *ifn == IFN_CTZ
+	? CTZ_DEFINED_VALUE_AT_ZERO (mode, target_zero)
+	: CLZ_DEFINED_VALUE_AT_ZERO (mode, target_zero);
       if (!tree_fits_shwi_p (at_zero)
-	  || CTZ_DEFINED_VALUE_AT_ZERO
-	       (SCALAR_INT_TYPE_MODE (TREE_TYPE (gimple_call_arg (call, 0))),
-		target_zero) != 2
+	  || defined != 2
 	  || tree_to_shwi (at_zero) != target_zero)
 	return false;
     }
 
-  *half = gimple_call_arg (call, 0);
   if ((*ifn == IFN_CTZ && clz_select_p)
       || (*ifn == IFN_CLZ && ctz_mask_p)
       || (add_p && *ifn == IFN_CTZ && !ctz_mask_p)
@@ -410,8 +416,24 @@ split_word_bitcount_replacement (basic_block cond_bb, basic_block bb1,
 	  != ((add_edge->flags & EDGE_TRUE_VALUE) != 0)))
     return false;
 
+  int full_zero_value = 0;
+  if (!nonzero_p)
+    {
+      scalar_int_mode mode = SCALAR_INT_TYPE_MODE (TREE_TYPE (add_full));
+      int defined = add_ifn == IFN_CTZ
+	? CTZ_DEFINED_VALUE_AT_ZERO (mode, full_zero_value)
+	: CLZ_DEFINED_VALUE_AT_ZERO (mode, full_zero_value);
+      if (defined != 2)
+	return false;
+    }
+
   gimple_stmt_iterator gsi = gsi_last_bb (cond_bb);
-  gcall *call = gimple_build_call_internal (add_ifn, 1, add_full);
+  /* Keep the defined target zero value visible to GIMPLE optimizers.  */
+  gcall *call
+    = gimple_build_call_internal (add_ifn, nonzero_p ? 1 : 2, add_full,
+				  nonzero_p ? NULL_TREE
+				  : build_int_cst (integer_type_node,
+						   full_zero_value));
   gimple_set_location (call, gimple_location (cond));
   tree call_lhs = make_ssa_name (integer_type_node);
   gimple_call_set_lhs (call, call_lhs);
@@ -433,9 +455,12 @@ split_word_bitcount_replacement (basic_block cond_bb, basic_block bb1,
 	    zero_value += half_zero_value & 31;
 	}
       tree zero_result = build_int_cst (integer_type_node, zero_value);
-      tree zero_cond = fold_build2_loc (gimple_location (cond), EQ_EXPR,
-					boolean_type_node, add_full,
-					build_zero_cst (TREE_TYPE (add_full)));
+      tree zero_cond = make_ssa_name (boolean_type_node);
+      gassign *compare
+	= gimple_build_assign (zero_cond, EQ_EXPR, add_full,
+			       build_zero_cst (TREE_TYPE (add_full)));
+      gimple_set_location (compare, gimple_location (cond));
+      gsi_insert_before (&gsi, compare, GSI_SAME_STMT);
       result = make_ssa_name (integer_type_node);
       gassign *select = gimple_build_assign (result, COND_EXPR, zero_cond,
 					     zero_result, call_lhs);

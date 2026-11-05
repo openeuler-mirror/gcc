@@ -1,5 +1,5 @@
 /* { dg-do run { target { aarch64*-*-* || { x86_64-*-* && { ! ia32 } } } } } */
-/* { dg-options "-O2 -fno-tree-cselim -fdebruijn-clz -fdump-tree-optimized" } */
+/* { dg-options "-O2 -fchecking=2 -fno-tree-cselim -fdebruijn-clz -fdump-tree-optimized" } */
 /* { dg-additional-options "-mbmi -mlzcnt" { target { x86_64-*-* && { ! ia32 } } } } */
 /* { dg-require-effective-target ctzll } */
 /* { dg-require-effective-target clzll } */
@@ -139,3 +139,8 @@ main (void)
 /* { dg-final { scan-tree-dump-times {= \.CTZ} 2 "optimized" } } */
 /* { dg-final { scan-tree-dump-times {= \.CLZ} 2 "optimized" } } */
 /* { dg-final { scan-tree-dump-times {& 31} 1 "optimized" } } */
+/* Check that the full-width operation is in each intended function.  */
+/* { dg-final { scan-tree-dump {;; Function ctz64 \([^\x7d]*= \.CTZ \(val_} "optimized" } } */
+/* { dg-final { scan-tree-dump {;; Function clz64 \([^\x7d]*= \.CLZ \(val_} "optimized" } } */
+/* { dg-final { scan-tree-dump {;; Function ctz64_bare \([^\x7d]*__builtin_ctz \(} "optimized" } } */
+/* { dg-final { scan-tree-dump {;; Function clz64_bare \([^\x7d]*__builtin_clz \(} "optimized" } } */

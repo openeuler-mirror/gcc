@@ -1342,6 +1342,10 @@ fdbg-cnt=
 Common RejectNegative Joined Var(common_deferred_options) Defer
 -fdbg-cnt=<counter>[:<lower_limit1>-]<upper_limit1>[:<lower_limit2>-<upper_limit2>:...][,<counter>:...]	Set the debug counter limit.
 
+fdebruijn-clz
+Common Var(flag_debruijn_clz) Init(0) Optimization
+Recognize DeBruijn table and split-word count-zero idioms while preserving zero.
+
 fdebug-prefix-map=
 Common Joined RejectNegative Var(common_deferred_options) Defer
 -fdebug-prefix-map=<old>=<new>	Map one directory name to another in debug information.
@@ -1371,10 +1375,6 @@ Delete dead instructions that may throw exceptions.
 fdelete-null-pointer-checks
 Common Var(flag_delete_null_pointer_checks) Init(-1) Optimization
 Delete useless null pointer checks.
-
-fdebruijn-clz
-Common Var(flag_debruijn_clz) Init(0) Optimization
-Recognize DeBruijn table and split-word count-zero idioms while preserving zero.
 
 fdevirtualize-at-ltrans
 Common Var(flag_ltrans_devirtualize)

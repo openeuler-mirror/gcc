@@ -1,6 +1,7 @@
 /* PR tree-optimization/122569 */
 /* { dg-do compile } */
 /* { dg-options "-fdebruijn-clz -O2 -fdump-tree-forwprop1-details" } */
+/* { dg-additional-options "-mbmi" { target { x86_64-*-* && { ! ia32 } } } } */
 
 /* Test that the forwprop DeBruijn CTZ matcher recognizes the 64-bit
    (x & -x) * magic >> 58 + table-lookup idiom used in Stockfish-style
@@ -27,4 +28,6 @@ stockfish_lsb (uint64_t b)
   return magictable[((b & -b) * magic) >> 58];
 }
 
-/* { dg-final { scan-tree-dump "__builtin_ctz|\\.CTZ" "forwprop1" { target { ctzll && { lp64 || llp64 } } } } } */
+/* The scan needs a zero result defined during GIMPLE, which the general
+   ctzll effective target does not require.  Other targets still compile.  */
+/* { dg-final { scan-tree-dump "__builtin_ctz|\\.CTZ" "forwprop1" { target { { ctzll && { lp64 || llp64 } } && { aarch64*-*-* || { x86_64-*-* && { ! ia32 } } } } } } } */

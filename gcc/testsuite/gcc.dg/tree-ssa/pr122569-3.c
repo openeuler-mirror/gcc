@@ -1,6 +1,7 @@
 /* PR tree-optimization/122569 */
 /* { dg-do compile } */
 /* { dg-options "-fdebruijn-clz -O2 -fdump-tree-forwprop1-details" } */
+/* { dg-additional-options "-mlzcnt" { target { x86_64-*-* && { ! ia32 } } } } */
 
 /* Test that the forwprop DeBruijn CLZ matcher recognizes the variant
    idiom that isolates the MSB as a power of two via (s - (s >> 1))
@@ -35,4 +36,6 @@ get_msb_index (unsigned long *result, uint64_t value)
 			     * (uint64_t) 0x07EDD5E59A4E28C2ULL) >> 58];
 }
 
-/* { dg-final { scan-tree-dump "__builtin_clz|\\.CLZ" "forwprop1" { target { clzll && { lp64 || llp64 } } } } } */
+/* The scan needs a zero result defined during GIMPLE, which the general
+   clzll effective target does not require.  Other targets still compile.  */
+/* { dg-final { scan-tree-dump "__builtin_clz|\\.CLZ" "forwprop1" { target { { clzll && { lp64 || llp64 } } && { aarch64*-*-* || { x86_64-*-* && { ! ia32 } } } } } } } */
