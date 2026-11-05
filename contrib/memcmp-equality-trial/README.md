@@ -4,11 +4,15 @@ The standalone harness requires native AArch64 GNU/Linux.  Its native CPU
 flags, guard pages, linker wrapping and disassembly assertions are not a
 portable cross-target validation suite.
 
-Both compiler switches are opt-in; neither is enabled by optimization levels.
+The grouping switch and both children are opt-in; optimization levels enable
+none of them.  `-finline-memcmp` enables both children unless a child is
+explicitly set.  Explicit child settings take precedence regardless of order;
+repeated settings of one child use the last value.  The compatibility spelling
+`-finline-small-memcmp-equality` selects only the small equality child.
 Use these options at compilation and at the LTO link:
 
 ```
--O3 -finline-small-memcmp-equality -finline-memcmp-prefix
+-O3 -finline-memcmp-small-equality -finline-memcmp-prefix
 ```
 
 This selects inline bounded equality (M1) and a four-byte ordered prefix
@@ -19,9 +23,14 @@ with proven-equal bytes skipped in the fallback (M2). Defaults are
 To specify these defaults explicitly:
 
 ```
--O3 -finline-small-memcmp-equality -finline-memcmp-prefix \
+-O3 -finline-memcmp-small-equality -finline-memcmp-prefix \
   --param=memcmp-prefix-bytes=4 --param=memcmp-prefix-skip-equal=1
 ```
+
+Sanitizers and non-call exceptions disable both new expansion paths.  If a
+required RTL operation is unavailable, partial candidate RTL is discarded and
+the original operands are reused for a library call without evaluating their
+expressions again.
 
 The prefix length accepts 0 through 16; 0 disables prefix expansion. Each
 load is dominated by a length check. Suffix adjustment occurs only after
@@ -40,7 +49,7 @@ These diagnostic modes require explicitly linking this helper object:
 ```sh
 gcc -O3 -fno-lto -fno-tree-loop-distribute-patterns \
   -c contrib/memcmp-equality-trial/helpers.c -o memcmp-helpers.o
-g++ -O3 -flto -finline-small-memcmp-equality \
+g++ -O3 -flto -finline-memcmp-small-equality \
   --param=small-memcmp-equality-outline=1 program.cc memcmp-helpers.o -o program
 ```
 
@@ -63,5 +72,26 @@ python3 contrib/memcmp-equality-trial/check.py \
 Use a compatible runtime library search path if required by the compiler.
 The harness needs GNU binutils (`objdump`, linker `--wrap`) and mmap/mprotect;
 the validation configuration used AArch64 GNU/Linux. Results are written only
-after all 71 checks and their assembly assertions succeed. This does not
+after all configured checks and their assembly assertions succeed. This does not
 replace a full GCC DejaGNU regression run or cross-target validation.
+
+## Option-family mechanism checks
+
+The `memcmp-family-mechanism-*` DejaGNU tests inspect RTL expansion markers,
+so a successful library fallback cannot masquerade as an enabled feature.
+They cover defaults, group and child controls, explicit overrides in either
+order, and the compatibility alias.  Positive M1 checks require supported
+64-bit unaligned-access targets.  Outline compile tests assert the deliberately
+external helper symbol; the standalone harness separately checks real linkage
+with the supplied non-LTO object, including LTO callers.
+
+The optional option-state and code-equivalence checker can be run with:
+
+```sh
+python3 contrib/test-inline-memcmp-options.py /path/to/built/gcc
+```
+
+It fixes the diagnostic locale to C and checks all three parameter defaults;
+it does not claim any parameter aliases.  An optional second compiler compares
+ordinary code against a baseline.  These tools supplement, rather than replace,
+GCC DejaGNU and bootstrap testing.

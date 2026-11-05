@@ -4823,6 +4823,104 @@ small_memcmp_load (scalar_int_mode mode, rtx address)
   return value;
 }
 
+/* Emit the original library comparison using operands that have already
+   been evaluated.  In particular, do not re-expand EXP after a failed trial.  */
+
+static rtx
+expand_memcmp_stabilized_call (tree exp, rtx target, rtx ptr1, rtx ptr2,
+			       rtx count)
+{
+  tree call = build_call_nofold_loc
+    (EXPR_LOCATION (exp), builtin_decl_explicit (BUILT_IN_MEMCMP), 3,
+     make_tree (TREE_TYPE (CALL_EXPR_ARG (exp, 0)), ptr1),
+     make_tree (TREE_TYPE (CALL_EXPR_ARG (exp, 1)), ptr2),
+     make_tree (sizetype, count));
+  copy_warning (call, exp);
+  return expand_call (call, target, false);
+}
+
+/* Emit a bounded comparison into the caller's temporary sequence.
+   Return NULL_RTX if an operation is unavailable; the caller then discards
+   the entire sequence, including any already emitted labels and loads.  */
+
+static rtx
+emit_small_memcmp_equality (tree exp, rtx target, rtx ptr1, rtx ptr2,
+			    rtx count)
+{
+  machine_mode result_mode = TYPE_MODE (TREE_TYPE (exp));
+  rtx_code_label *done = gen_label_rtx ();
+  rtx_code_label *fallback = gen_label_rtx ();
+  rtx_code_label *arms[3] = { gen_label_rtx (), gen_label_rtx (),
+			    gen_label_rtx () };
+  scalar_int_mode modes[3] = { DImode, SImode, HImode };
+  const unsigned widths[3] = { 8, 4, 2 };
+
+  emit_cmp_and_jump_insns (count, GEN_INT (16), GTU, NULL_RTX,
+			   Pmode, true, fallback);
+  for (unsigned i = 0; i != 3; ++i)
+    emit_cmp_and_jump_insns (count, GEN_INT (widths[i]), GEU, NULL_RTX,
+			     Pmode, true, arms[i]);
+  emit_move_insn (target, CONST0_RTX (result_mode));
+  emit_cmp_and_jump_insns (count, CONST0_RTX (Pmode), EQ, NULL_RTX,
+			   Pmode, true, done);
+  rtx a = small_memcmp_load (QImode, ptr1);
+  rtx b = small_memcmp_load (QImode, ptr2);
+  rtx flag = emit_store_flag_force (target, NE, a, b, QImode, true, 1);
+  if (flag != target)
+    emit_move_insn (target, flag);
+  emit_jump (done);
+
+  for (unsigned i = 0; i != 3; ++i)
+    {
+      emit_label (arms[i]);
+      scalar_int_mode mode = modes[i];
+      rtx offset = expand_simple_binop (Pmode, MINUS, count,
+				       GEN_INT (widths[i]), NULL_RTX,
+				       true, OPTAB_DIRECT);
+      if (!offset)
+	return NULL_RTX;
+      rtx end1 = expand_simple_binop (Pmode, PLUS, ptr1, offset, NULL_RTX,
+				     true, OPTAB_DIRECT);
+      if (!end1)
+	return NULL_RTX;
+      rtx end2 = expand_simple_binop (Pmode, PLUS, ptr2, offset, NULL_RTX,
+				     true, OPTAB_DIRECT);
+      if (!end2)
+	return NULL_RTX;
+      a = small_memcmp_load (mode, ptr1);
+      b = small_memcmp_load (mode, ptr2);
+      rtx first = expand_simple_binop (mode, XOR, a, b, NULL_RTX,
+				      true, OPTAB_LIB_WIDEN);
+      if (!first)
+	return NULL_RTX;
+      a = small_memcmp_load (mode, end1);
+      b = small_memcmp_load (mode, end2);
+      rtx last = expand_simple_binop (mode, XOR, a, b, NULL_RTX,
+				     true, OPTAB_LIB_WIDEN);
+      if (!last)
+	return NULL_RTX;
+      rtx diff = expand_simple_binop (mode, IOR, first, last, NULL_RTX,
+				     true, OPTAB_LIB_WIDEN);
+      if (!diff)
+	return NULL_RTX;
+      flag = emit_store_flag_force (target, NE, diff, CONST0_RTX (mode), mode,
+				     true, 1);
+      if (flag != target)
+	emit_move_insn (target, flag);
+      emit_jump (done);
+    }
+
+  emit_label (fallback);
+  rtx value = expand_memcmp_stabilized_call (exp, target, ptr1, ptr2, count);
+  if (value != target)
+    emit_move_insn (target, value);
+  emit_label (done);
+  if (dump_file)
+    fprintf (dump_file, "Expanded bounded dynamic equality comparison "
+		       "(16 bytes).\n");
+  return target;
+}
+
 /* Expand a dynamic, equality-only byte comparison using bounded loads for
    lengths up to sixteen.  In a W-byte arm, W <= LEN <= 2*W, so the intervals
    [0,W) and [LEN-W,LEN) cover every byte and neither extends outside the
@@ -4830,7 +4928,9 @@ small_memcmp_load (scalar_int_mode mode, rtx address)
    All arguments are stabilized before branching, including the libcall arm.
 
    This is intentionally a speed heuristic rather than an unconditional
-   replacement for the target's constant-length comparison machinery.  */
+   replacement for the target's constant-length comparison machinery.
+   Sanitized functions and non-call exceptions retain the existing expansion.
+   Callers must use the returned value, which need not be TARGET.  */
 
 static rtx
 expand_small_memcmp_equality (tree exp, rtx target)
@@ -4839,6 +4939,7 @@ expand_small_memcmp_equality (tree exp, rtx target)
   tree arg2 = CALL_EXPR_ARG (exp, 1);
   tree len = CALL_EXPR_ARG (exp, 2);
   if (!flag_inline_small_memcmp_equality
+      || flag_sanitize || flag_non_call_exceptions
       || DECL_FUNCTION_CODE (get_callee_fndecl (exp)) != BUILT_IN_MEMCMP_EQ
       || !optimize_function_for_speed_p (cfun)
       || TREE_CODE (len) == INTEGER_CST
@@ -4852,7 +4953,7 @@ expand_small_memcmp_equality (tree exp, rtx target)
     return NULL_RTX;
 
   /* Diagnostic out-of-line candidates.  The experiment supplies a separate
-     non-LTO object; these names are not a installed runtime ABI.  */
+     non-LTO object; these names are not an installed runtime ABI.  */
   if (param_small_memcmp_equality_outline)
     {
       const char *name = param_small_memcmp_equality_outline == 1
@@ -4883,75 +4984,97 @@ expand_small_memcmp_equality (tree exp, rtx target)
   if (!target || !REG_P (target) || GET_MODE (target) != result_mode)
     target = gen_reg_rtx (result_mode);
 
-  rtx_code_label *done = gen_label_rtx ();
-  rtx_code_label *fallback = gen_label_rtx ();
-  rtx_code_label *arms[3] = { gen_label_rtx (), gen_label_rtx (),
-			    gen_label_rtx () };
-  scalar_int_mode modes[3] = { DImode, SImode, HImode };
-  const unsigned widths[3] = { 8, 4, 2 };
-
-  emit_cmp_and_jump_insns (count, GEN_INT (16), GTU, NULL_RTX,
-			   Pmode, true, fallback);
-  for (unsigned i = 0; i != 3; ++i)
-    emit_cmp_and_jump_insns (count, GEN_INT (widths[i]), GEU, NULL_RTX,
-			     Pmode, true, arms[i]);
-  emit_move_insn (target, CONST0_RTX (result_mode));
-  emit_cmp_and_jump_insns (count, CONST0_RTX (Pmode), EQ, NULL_RTX,
-			   Pmode, true, done);
-  rtx a = small_memcmp_load (QImode, ptr1);
-  rtx b = small_memcmp_load (QImode, ptr2);
-  rtx flag = emit_store_flag_force (target, NE, a, b, QImode, true, 1);
-  if (flag != target)
-    emit_move_insn (target, flag);
-  emit_jump (done);
-
-  for (unsigned i = 0; i != 3; ++i)
+  /* Argument evaluation stays outside the trial sequence.  A failed
+     expansion must not leave partial control flow or evaluate arguments twice.
+     Flush deferred stack pops before speculative emission so that discarding
+     its insns cannot discard a pop whose global state has already changed.  */
+  do_pending_stack_adjust ();
+  start_sequence ();
+  rtx value = emit_small_memcmp_equality (exp, target, ptr1, ptr2, count);
+  rtx_insn *insns = get_insns ();
+  end_sequence ();
+  if (value)
     {
-      emit_label (arms[i]);
-      scalar_int_mode mode = modes[i];
-      rtx offset = expand_simple_binop (Pmode, MINUS, count,
-				       GEN_INT (widths[i]), NULL_RTX,
-				       true, OPTAB_DIRECT);
-      rtx end1 = expand_simple_binop (Pmode, PLUS, ptr1, offset, NULL_RTX,
-				     true, OPTAB_DIRECT);
-      rtx end2 = expand_simple_binop (Pmode, PLUS, ptr2, offset, NULL_RTX,
-				     true, OPTAB_DIRECT);
-      a = small_memcmp_load (mode, ptr1);
-      b = small_memcmp_load (mode, ptr2);
-      rtx first = expand_simple_binop (mode, XOR, a, b, NULL_RTX,
-				      true, OPTAB_LIB_WIDEN);
-      a = small_memcmp_load (mode, end1);
-      b = small_memcmp_load (mode, end2);
-      rtx last = expand_simple_binop (mode, XOR, a, b, NULL_RTX,
-				     true, OPTAB_LIB_WIDEN);
-      rtx diff = expand_simple_binop (mode, IOR, first, last, NULL_RTX,
-				     true, OPTAB_LIB_WIDEN);
-      flag = emit_store_flag_force (target, NE, diff, CONST0_RTX (mode), mode,
-				     true, 1);
-      if (flag != target)
-	emit_move_insn (target, flag);
-      emit_jump (done);
+      emit_insn (insns);
+      return value;
     }
 
-  emit_label (fallback);
-  tree call = build_call_nofold_loc
-    (EXPR_LOCATION (exp), builtin_decl_explicit (BUILT_IN_MEMCMP), 3,
+  if (dump_file)
+    fprintf (dump_file, "Small equality expansion unavailable; "
+		       "using stabilized memcmp call.\n");
+  return expand_memcmp_stabilized_call (exp, target, ptr1, ptr2, count);
+}
+
+/* Emit a prefix comparison into the caller's temporary sequence.
+   PTR1, PTR2 and COUNT are local copies: failure after constructing a suffix
+   must still let the caller use the original stabilized operands.  */
+
+static rtx
+emit_memcmp_prefix (tree exp, rtx target, bool result_eq, rtx ptr1, rtx ptr2,
+		    rtx count)
+{
+  tree arg1 = CALL_EXPR_ARG (exp, 0);
+  tree arg2 = CALL_EXPR_ARG (exp, 1);
+  built_in_function code = DECL_FUNCTION_CODE (get_callee_fndecl (exp));
+  machine_mode mode = TYPE_MODE (TREE_TYPE (exp));
+  rtx_code_label *done = gen_label_rtx ();
+  emit_move_insn (target, CONST0_RTX (mode));
+  emit_cmp_and_jump_insns (count, CONST0_RTX (Pmode), EQ, NULL_RTX,
+			  Pmode, true, done);
+  for (unsigned i = 0; i < (unsigned) param_memcmp_prefix_bytes; ++i)
+    {
+      /* The zero test or preceding length test dominates both loads.  */
+      rtx a = convert_to_mode (mode, small_memcmp_load
+	(QImode, plus_constant (Pmode, ptr1, i)), true);
+      rtx b = convert_to_mode (mode, small_memcmp_load
+	(QImode, plus_constant (Pmode, ptr2, i)), true);
+      rtx difference = expand_simple_binop (mode, MINUS, a, b, target,
+					   false, OPTAB_DIRECT);
+      if (!difference)
+	return NULL_RTX;
+      if (difference != target)
+	emit_move_insn (target, difference);
+      emit_cmp_and_jump_insns (target, CONST0_RTX (mode), NE, NULL_RTX,
+			      mode, false, done);
+      emit_cmp_and_jump_insns (count, GEN_INT (i + 1), EQ, NULL_RTX,
+			      Pmode, true, done);
+    }
+
+  if (param_memcmp_prefix_skip_equal)
+    {
+      /* Here LEN > K and [0,K) is equal.  Only [K,LEN) remains.  */
+      ptr1 = copy_addr_to_reg (plus_constant
+	(Pmode, ptr1, param_memcmp_prefix_bytes));
+      ptr2 = copy_addr_to_reg (plus_constant
+	(Pmode, ptr2, param_memcmp_prefix_bytes));
+      count = expand_simple_binop (Pmode, MINUS, count,
+	GEN_INT (param_memcmp_prefix_bytes), NULL_RTX, true, OPTAB_DIRECT);
+      if (!count)
+	return NULL_RTX;
+    }
+
+  tree stabilized = build_call_nofold_loc
+    (EXPR_LOCATION (exp), builtin_decl_explicit (code), 3,
      make_tree (TREE_TYPE (arg1), ptr1),
      make_tree (TREE_TYPE (arg2), ptr2), make_tree (sizetype, count));
-  copy_warning (call, exp);
-  rtx value = expand_call (call, target, false);
+  copy_warning (stabilized, exp);
+  rtx value = result_eq ? expand_small_memcmp_equality (stabilized, target)
+			: NULL_RTX;
+  if (!value)
+    value = expand_memcmp_stabilized_call (exp, target, ptr1, ptr2, count);
   if (value != target)
     emit_move_insn (target, value);
   emit_label (done);
   if (dump_file)
-    fprintf (dump_file, "Expanded bounded dynamic equality comparison (16 bytes).\n");
+    fprintf (dump_file, "Expanded ordered first-byte memcmp guard.\n");
   return target;
 }
-
 
 /* The first unequal unsigned byte determines memcmp's ordering.  Keep all
    arguments stable and guard zero length before any load.  On equal prefixes
    retain the existing short equality expansion or the original library call.
+   MEMCMP_EQ consumers require only zero versus nonzero, so a mismatch need
+   not be normalized to one, just as in the library fallback.
    No application data or expected mismatch distribution is encoded here.  */
 static rtx
 expand_memcmp_prefix (tree exp, rtx target, bool result_eq)
@@ -4980,60 +5103,26 @@ expand_memcmp_prefix (tree exp, rtx target, bool result_eq)
   machine_mode mode = TYPE_MODE (TREE_TYPE (exp));
   if (!target || !REG_P (target) || GET_MODE (target) != mode)
     target = gen_reg_rtx (mode);
-  rtx_code_label *done = gen_label_rtx ();
-  emit_move_insn (target, CONST0_RTX (mode));
-  emit_cmp_and_jump_insns (count, CONST0_RTX (Pmode), EQ, NULL_RTX,
-			  Pmode, true, done);
-  for (unsigned i = 0; i < (unsigned) param_memcmp_prefix_bytes; ++i)
+
+  /* Argument evaluation stays outside the trial sequence.  A failed
+     expansion must not leave partial control flow or evaluate arguments twice.
+     Flush deferred stack pops before speculative emission so that discarding
+     its insns cannot discard a pop whose global state has already changed.  */
+  do_pending_stack_adjust ();
+  start_sequence ();
+  rtx value = emit_memcmp_prefix (exp, target, result_eq, ptr1, ptr2, count);
+  rtx_insn *insns = get_insns ();
+  end_sequence ();
+  if (value)
     {
-      /* The zero test or preceding length test dominates both loads.  */
-      rtx a = convert_to_mode (mode, small_memcmp_load
-	(QImode, plus_constant (Pmode, ptr1, i)), true);
-      rtx b = convert_to_mode (mode, small_memcmp_load
-	(QImode, plus_constant (Pmode, ptr2, i)), true);
-      rtx difference = expand_simple_binop (mode, MINUS, a, b, target,
-					   false, OPTAB_DIRECT);
-      if (difference != target)
-	emit_move_insn (target, difference);
-      emit_cmp_and_jump_insns (target, CONST0_RTX (mode), NE, NULL_RTX,
-			      mode, false, done);
-      emit_cmp_and_jump_insns (count, GEN_INT (i + 1), EQ, NULL_RTX,
-			      Pmode, true, done);
+      emit_insn (insns);
+      return value;
     }
 
-  if (param_memcmp_prefix_skip_equal)
-    {
-      /* Here LEN > K and [0,K) is equal.  Only [K,LEN) remains.  */
-      ptr1 = copy_addr_to_reg (plus_constant
-	(Pmode, ptr1, param_memcmp_prefix_bytes));
-      ptr2 = copy_addr_to_reg (plus_constant
-	(Pmode, ptr2, param_memcmp_prefix_bytes));
-      count = expand_simple_binop (Pmode, MINUS, count,
-	GEN_INT (param_memcmp_prefix_bytes), NULL_RTX, true, OPTAB_DIRECT);
-    }
-
-  tree stabilized = build_call_nofold_loc
-    (EXPR_LOCATION (exp), builtin_decl_explicit (code), 3,
-     make_tree (TREE_TYPE (arg1), ptr1),
-     make_tree (TREE_TYPE (arg2), ptr2), make_tree (sizetype, count));
-  copy_warning (stabilized, exp);
-  rtx value = result_eq ? expand_small_memcmp_equality (stabilized, target)
-			: NULL_RTX;
-  if (!value)
-    {
-      tree call = build_call_nofold_loc
-	(EXPR_LOCATION (exp), builtin_decl_explicit (BUILT_IN_MEMCMP), 3,
-	 make_tree (TREE_TYPE (arg1), ptr1),
-	 make_tree (TREE_TYPE (arg2), ptr2), make_tree (sizetype, count));
-      copy_warning (call, exp);
-      value = expand_call (call, target, false);
-    }
-  if (value != target)
-    emit_move_insn (target, value);
-  emit_label (done);
   if (dump_file)
-    fprintf (dump_file, "Expanded ordered first-byte memcmp guard.\n");
-  return target;
+    fprintf (dump_file, "Prefix expansion unavailable; "
+		       "using stabilized memcmp call.\n");
+  return expand_memcmp_stabilized_call (exp, target, ptr1, ptr2, count);
 }
 
 

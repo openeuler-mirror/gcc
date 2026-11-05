@@ -1,5 +1,7 @@
-/* { dg-do run { target *-*-linux* } } */
-/* { dg-options "-O2 -finline-memcmp-small-equality" } */
+/* { dg-do run { target { aarch64*-*-linux* x86_64-*-linux* } } } */
+/* { dg-require-effective-target lp64 } */
+/* { dg-require-effective-target non_strict_align } */
+/* { dg-options "-O2 -finline-memcmp-small-equality -fdump-rtl-expand" } */
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stddef.h>
@@ -39,3 +41,4 @@ int main (void)
   munmap (b, 2 * page);
   return 0;
 }
+/* { dg-final { scan-rtl-dump "Expanded bounded dynamic equality comparison" "expand" } } */

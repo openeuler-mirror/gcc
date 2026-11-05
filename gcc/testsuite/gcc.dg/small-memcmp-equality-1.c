@@ -1,5 +1,7 @@
-/* { dg-do run } */
-/* { dg-options "-O2 -finline-memcmp-small-equality" } */
+/* { dg-do run { target { aarch64*-*-* x86_64-*-* } } } */
+/* { dg-require-effective-target lp64 } */
+/* { dg-require-effective-target non_strict_align } */
+/* { dg-options "-O2 -finline-memcmp-small-equality -fdump-rtl-expand" } */
 #include <stddef.h>
 
 __attribute__((noipa)) int equal (const void *a, const void *b, size_t n)
@@ -43,3 +45,4 @@ int main (void)
     __builtin_abort ();
   return 0;
 }
+/* { dg-final { scan-rtl-dump "Expanded bounded dynamic equality comparison" "expand" } } */

@@ -573,8 +573,8 @@ Objective-C and Objective-C++ Dialects}.
 -fif-conversion2  -findirect-inlining
 -finline-stringops[=@var{fn}]
 -finline-functions  -finline-functions-called-once  -finline-limit=@var{n}
--finline-small-functions
 -finline-memcmp -finline-memcmp-small-equality -finline-memcmp-prefix
+-finline-small-functions
 -fipa-modref -fipa-cp  -fipa-cp-clone
 -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
@@ -12701,6 +12701,7 @@ loads, expand dynamic memory comparisons of up to 16 bytes inline when the
 result is used only for equality.  Longer comparisons retain a library call.
 The generated loads stay within the specified length and a zero length
 does not access memory.  Constant-length comparisons use the usual target
+expansion.  Sanitized functions and non-call exceptions retain the existing
 expansion.  This option is disabled by default.  The diagnostic parameter
 @code{small-memcmp-equality-outline} can instead select an explicitly linked
 external equality helper.
@@ -17017,12 +17018,6 @@ this parameter.  The default value of this parameter is 50.
 @item vect-induction-float
 Enable loop vectorization of floating point inductions.
 
-@item vrp-sparse-threshold
-Maximum number of basic blocks before VRP uses a sparse bitmap cache.
-
-@item vrp-switch-limit
-Maximum number of outgoing edges in a switch before VRP will not process it.
-
 @item memcmp-prefix-bytes
 Maximum number of bytes checked by @option{-finline-memcmp-prefix} before
 falling back.  The range is 0 through 16 and the default is 4.  Zero disables
@@ -17040,8 +17035,15 @@ Select the equality implementation used by
 loads.  Diagnostic modes 1 and 2 call
 @code{__gcc_trial_memcmpeq_bounded} and @code{__gcc_trial_memcmpeq_loop},
 respectively.  These modes require an explicitly linked non-LTO helper
-object; they are not an installed runtime ABI.  Helper sources and validation
+object; they are not an installed runtime ABI.  Mode 0 and the grouping
+option alone have no such external-helper dependency.  Helper sources and validation
 instructions are in @file{contrib/memcmp-equality-trial}.
+
+@item vrp-sparse-threshold
+Maximum number of basic blocks before VRP uses a sparse bitmap cache.
+
+@item vrp-switch-limit
+Maximum number of outgoing edges in a switch before VRP will not process it.
 
 @item vrp-vector-threshold
 Maximum number of basic blocks for VRP to use a basic cache vector.
