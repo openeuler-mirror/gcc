@@ -1235,10 +1235,6 @@ fcombine-stack-adjustments
 Common Var(flag_combine_stack_adjustments) Optimization
 Looks for opportunities to reduce stack adjustments and stack references.
 
-fcomponent-type-flow
-Common Var(flag_component_type_flow) Optimization
-Optimize repeated C++ dynamic casts and speculative devirtualization using type-flow information.
-
 fcommon
 Common Var(flag_no_common,0) Init(1)
 Put uninitialized globals in the common section.
@@ -1258,6 +1254,10 @@ Run only the second compilation of -fcompare-debug.
 fcompare-elim
 Common Var(flag_compare_elim_after_reload) Optimization
 Perform comparison elimination after register allocation has finished.
+
+fcomponent-type-flow
+Common Var(flag_component_type_flow) Optimization
+Optimize repeated C++ dynamic casts and speculative devirtualization using type-flow information.
 
 fconserve-stack
 Common Var(flag_conserve_stack) Optimization

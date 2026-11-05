@@ -3182,9 +3182,11 @@ ipa_get_indirect_edge_target_1 (struct cgraph_edge *ie,
       if (!opt_for_fn (ie->caller->decl, flag_devirtualize_speculatively)
 	  || ie->speculative || !ie->maybe_hot_p ())
 	return NULL;
+      const bool component_type_flow
+	= opt_for_fn (ie->caller->decl, flag_component_type_flow);
       node = try_speculative_devirtualization (ie->indirect_info->otr_type,
 					       ie->indirect_info->otr_token,
-					       context);
+					       context, component_type_flow);
       if (node)
 	{
 	  *speculative = true;

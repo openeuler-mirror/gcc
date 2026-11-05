@@ -13060,7 +13060,8 @@ are enabled independently at different optimization levels.
 @opindex fcomponent-type-flow
 @item -fcomponent-type-flow
 Use C++ type-flow information to optimize repeated run-time type checks.
-At optimization levels @option{-O2} and above, zero-offset pointer
+At optimization levels @option{-O2} and above, including @option{-Os} and
+@option{-Oz}, zero-offset pointer
 @code{dynamic_cast} expressions use a small per-call-site, thread-local
 positive cache.  Only successful results equal to the source address enter
 this cache.  A cache miss, a failed cast, and casts requiring pointer
@@ -13072,6 +13073,10 @@ target shared by a uniquely dominant number of live virtual tables when there
 is more than one otherwise likely target.  GCC emits a target-address guard
 and retains the original indirect call as the fallback, so a less-common
 dynamic type preserves the original behavior.
+
+Live-vtable references are a static profitability estimate, not execution
+counts.  Function-specific optimization settings control whether this
+additional target-selection heuristic is enabled at each caller.
 
 The option is disabled by default at all optimization levels.  Use
 @option{-fcomponent-type-flow} to enable it explicitly.  Without the option,
