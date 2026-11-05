@@ -2,7 +2,8 @@
 /* { dg-do compile } */
 /* { dg-require-effective-target clz } */
 /* { dg-require-effective-target ctz } */
-/* { dg-options "-O3 -fbit-scan-loop-idiom -fdump-tree-optimized" } */
+/* Disable ICF so the multiply and add functions remain separate bodies.  */
+/* { dg-options "-O3 -fbit-scan-loop-idiom -fno-ipa-icf -fdump-tree-optimized" } */
 
 unsigned
 ctz_mul (unsigned value)

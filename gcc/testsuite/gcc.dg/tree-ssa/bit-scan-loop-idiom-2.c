@@ -1,4 +1,6 @@
-/* Verify default-off behavior and signed-division rejection.  */
+/* Verify default-off behavior for the new multiply and add forms.
+   Unsigned division can become a right shift before loop analysis and is
+   tested separately in bit-scan-loop-idiom-div.c.  */
 /* { dg-do compile } */
 /* { dg-options "-O3 -fdump-tree-optimized" } */
 
@@ -22,30 +24,6 @@ ctz_add (unsigned value)
     {
       count--;
       value += value;
-    }
-  return count;
-}
-
-int
-clz_div (unsigned value)
-{
-  int count = 32;
-  while (value != 0)
-    {
-      value /= 2;
-      count--;
-    }
-  return count;
-}
-
-int
-signed_div (int value)
-{
-  int count = 32;
-  while (value != 0)
-    {
-      value /= 2;
-      count--;
     }
   return count;
 }

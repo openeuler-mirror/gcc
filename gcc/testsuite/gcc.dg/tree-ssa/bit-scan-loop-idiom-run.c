@@ -1,12 +1,15 @@
 /* Check defined zero results and bit-position boundaries at run time.  */
 /* { dg-do run } */
-/* { dg-options "-O3 -fbit-scan-loop-idiom" } */
+/* { dg-options "-O3 -fno-tree-ch -fno-tree-vrp -fbit-scan-loop-idiom" } */
 
 unsigned ctz_mul (unsigned) __attribute__((noipa));
 unsigned ctz_add (unsigned) __attribute__((noipa));
 int clz_div (unsigned) __attribute__((noipa));
+unsigned ctz_div_bit (unsigned) __attribute__((noipa));
+unsigned clz_mul_sign (unsigned) __attribute__((noipa));
 
 #include "bit-scan-loop-idiom-1.c"
+#include "bit-scan-loop-idiom-bit.c"
 
 static void
 check (unsigned value)
@@ -22,6 +25,12 @@ check (unsigned value)
   if (ctz_mul (value) != expected_ctz
       || ctz_add (value) != expected_ctz
       || clz_div (value) != expected_clz)
+    __builtin_abort ();
+  unsigned width = sizeof (unsigned) * __CHAR_BIT__;
+  unsigned bit_ctz = value ? __builtin_ctz (value) : width;
+  unsigned bit_clz = value ? __builtin_clz (value) : width;
+  if (ctz_div_bit (value) != bit_ctz
+      || clz_mul_sign (value) != bit_clz)
     __builtin_abort ();
 }
 

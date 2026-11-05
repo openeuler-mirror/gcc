@@ -2288,9 +2288,9 @@ build_cltz_expr (tree src, bool leading, bool define_at_zero)
   return call;
 }
 
-/* Return true when STMT is equivalent to an unsigned left shift by one.
-   The multiplication form is intentionally opt-in so disabling
-   -fbit-scan-loop-idiom preserves GCC 14's loop recognition.  */
+/* Match the original left shift by one, or unsigned multiplication by two.
+   Folding canonicalizes x + x to x * 2.  Multiplication is opt-in to preserve
+   GCC 14's recognition when -fbit-scan-loop-idiom is disabled.  */
 
 static bool
 is_lshift_by_1 (gassign *stmt)
@@ -2418,8 +2418,8 @@ number_of_iterations_cltz (loop_p loop, edge exit,
       modify_before_test = false;
     }
 
-  /* Make sure iv_2_stmt is a logical shift by one stmt:
-     iv_2 = iv_1 {<<|>>} 1  */
+  /* Match a shift by one, or an equivalent unsigned multiplication or
+     division by two when -fbit-scan-loop-idiom is enabled.  */
   if (!is_gimple_assign (iv_2_stmt))
     return false;
   bool left_shift = is_lshift_by_1 (as_a <gassign *> (iv_2_stmt));
@@ -2531,8 +2531,8 @@ number_of_iterations_cltz_complement (loop_p loop, edge exit,
       modify_before_test = false;
     }
 
-  /* Make sure iv_2_stmt is a logical shift by one stmt:
-     iv_2 = iv_1 {>>|<<} 1  */
+  /* Match a shift by one, or an equivalent unsigned multiplication or
+     division by two when -fbit-scan-loop-idiom is enabled.  */
   if (!is_gimple_assign (iv_2_stmt))
     return false;
   bool left_shift = is_lshift_by_1 (as_a <gassign *> (iv_2_stmt));
