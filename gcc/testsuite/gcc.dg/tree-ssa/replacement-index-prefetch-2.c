@@ -1,5 +1,5 @@
 /* { dg-do run { target aarch64*-*-* } } */
-/* { dg-options "-O3 -ftree-replacement-index-prefetch" } */
+/* { dg-options "-fno-prefetch-loop-arrays -O3 -ftree-replacement-index-prefetch" } */
 /* A queue replacement already computes the future indirect index. */
 unsigned long replacement(unsigned *q, unsigned char *table,
 			  const unsigned *future, unsigned n)

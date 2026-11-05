@@ -1,5 +1,5 @@
 /* { dg-do compile { target aarch64*-*-linux* } } */
-/* { dg-options "-O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2 -fdump-tree-aprefetch-details" } */
+/* { dg-options "-fno-prefetch-loop-arrays -O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2 -fdump-tree-aprefetch-details" } */
 #include <stdatomic.h>
 #define ATTR __attribute__((noipa))
 extern void barrier(void);

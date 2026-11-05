@@ -1,5 +1,5 @@
 /* { dg-do run { target aarch64*-*-linux* } } */
-/* { dg-options "-O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2" } */
+/* { dg-options "-fno-prefetch-loop-arrays -O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2" } */
 #include "replacement-index-prefetch-partial.c"
 #include "replacement-index-edge-partial.c"
 #include <stdlib.h>

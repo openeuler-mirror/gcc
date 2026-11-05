@@ -1,5 +1,5 @@
 /* { dg-do compile { target aarch64*-*-* } } */
-/* { dg-options "-O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2 -fdump-tree-aprefetch-details" } */
+/* { dg-options "-fno-prefetch-loop-arrays -O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2 -fdump-tree-aprefetch-details" } */
 
 /* HIGH is available at the replacement store but still depends on OLD.
    Both halves of the hinted address must use NEXT, even if one half was

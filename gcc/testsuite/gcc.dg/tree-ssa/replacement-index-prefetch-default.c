@@ -1,5 +1,5 @@
 /* { dg-do compile { target aarch64*-*-* } } */
-/* { dg-options "-O3 -fno-tree-vectorize" } */
+/* { dg-options "-fno-prefetch-loop-arrays -O3 -fno-tree-vectorize" } */
 
 #include "replacement-index-prefetch-1.c"
 

@@ -1,5 +1,5 @@
 /* { dg-do compile { target aarch64*-*-* } } */
-/* { dg-options "-O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2 -fdump-tree-aprefetch-details" } */
+/* { dg-options "-fno-prefetch-loop-arrays -O3 -fno-tree-vectorize -ftree-replacement-index-prefetch -fchecking=2 -fdump-tree-aprefetch-details" } */
 
 /* An available address part independent of OLD remains reusable.  */
 unsigned long
