@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O3 -march=armv8.2-a+i8mm -fpreserve-vect-idioms" } */
+/* { dg-options "-O3 -march=armv8.2-a+i8mm -fpreserve-vect-idioms -fdump-tree-cunrolli-details" } */
 
 void __attribute__ ((noipa))
 f (int *__restrict output, const signed char *__restrict weights,
@@ -15,3 +15,4 @@ f (int *__restrict output, const signed char *__restrict weights,
 }
 
 /* { dg-final { scan-assembler-times {\tusdot\t} 1 } } */
+/* { dg-final { scan-tree-dump "preserving widened multiply reduction" "cunrolli" } } */
