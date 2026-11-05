@@ -76,36 +76,6 @@ set_dump_file (FILE *new_dump_file)
   dump_context::get ().refresh_dumps_are_enabled ();
 }
 
-scoped_dump_file::scoped_dump_file ()
-  : m_saved_file (dump_file),
-    m_saved_flags (dump_flags)
-{
-  set_dump_file (NULL);
-  dump_flags = TDF_NONE;
-}
-
-scoped_dump_file::scoped_dump_file (FILE *new_dump_file)
-  : m_saved_file (dump_file),
-    m_saved_flags (dump_flags)
-{
-  set_dump_file (new_dump_file);
-}
-
-scoped_dump_file::scoped_dump_file (FILE *new_dump_file,
-				    dump_flags_t new_dump_flags)
-  : m_saved_file (dump_file),
-    m_saved_flags (dump_flags)
-{
-  set_dump_file (new_dump_file);
-  dump_flags = new_dump_flags;
-}
-
-scoped_dump_file::~scoped_dump_file ()
-{
-  set_dump_file (m_saved_file);
-  dump_flags = m_saved_flags;
-}
-
 /* Set "alt_dump_file" to NEW_ALT_DUMP_FILE, refreshing the "dumps_are_enabled"
    global.  */
 

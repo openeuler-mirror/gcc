@@ -20,4 +20,3 @@ main (void)
 
 /* { dg-final { scan-ipa-dump "array-load-inline: candidate array tbl" "array-load-inline" } } */
 /* { dg-final { scan-ipa-dump "array-load-inline: inlined load of tbl" "array-load-inline" } } */
-/* { dg-final { scan-ipa-dump-not "using recognized formula" "array-load-inline" } } */

@@ -34,5 +34,5 @@ main (void)
 
 /* { dg-final { scan-ipa-dump "array-load-inline: candidate array tbl" "array-load-inline" } } */
 /* { dg-final { scan-ipa-dump "array-load-inline: reject tbl: init does not dominate load" "array-load-inline" } } */
-/* { dg-final { scan-ipa-dump-not "array-load-inline: load of tbl is unreachable before initialization" "array-load-inline" } } */
+/* { dg-final { scan-ipa-dump-not "array-load-inline: load of tbl is safe under the initialization guard proof" "array-load-inline" } } */
 /* { dg-final { scan-ipa-dump-not "array-load-inline: inlined load of tbl" "array-load-inline" } } */

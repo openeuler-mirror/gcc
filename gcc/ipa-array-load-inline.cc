@@ -28,6 +28,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-pass.h"
 #include "tree-cfg.h"
 #include "tree-dfa.h"
+#include "ssa.h"
+#include "tree-into-ssa.h"
+#include "tree-eh.h"
 #include "gimplify-me.h"
 #include "fold-const.h"
 #include "cgraph.h"
@@ -40,9 +43,31 @@ along with GCC; see the file COPYING3.  If not see
 #include "dumpfile.h"
 #include "hash-map.h"
 
-extern void release_defs (gimple *);
-
 namespace {
+
+/* Suppress dumps from supporting analyses without changing the pass dump.  */
+class array_dump_saver
+{
+public:
+  array_dump_saver () : saved_file (dump_file), saved_flags (dump_flags)
+  {
+    set_dump_file (nullptr);
+    dump_flags = TDF_NONE;
+  }
+
+  ~array_dump_saver ()
+  {
+    set_dump_file (saved_file);
+    dump_flags = saved_flags;
+  }
+
+  array_dump_saver (const array_dump_saver &) = delete;
+  array_dump_saver &operator= (const array_dump_saver &) = delete;
+
+private:
+  FILE *saved_file;
+  dump_flags_t saved_flags;
+};
 
 /* A candidate has one explicit, nonvolatile store region covering every
    element.  Its value must be a pure expression of the array indices.  For
@@ -113,6 +138,9 @@ public:
   cfun_saver (function_analysis_cache &analyses, cgraph_node *node,
 	      unsigned loop_flags = 0)
   {
+    gcc_checking_assert (node && node->real_symbol_p () && node->definition
+			 && !node->inlined_to
+			 && gimple_has_body_p (node->decl));
     push_cfun (DECL_STRUCT_FUNCTION (node->decl));
     analyses.prepare (loop_flags);
   }
@@ -694,13 +722,33 @@ dump_dominance_failure (array_candidate &cand, dominance_failure &failure,
     }
 }
 
+/* Executing a call does not imply that it returned normally.  When it has
+   a local exception handler, require a normal successor that dominates BB.
+   Do not infer initialization along the exceptional continuation.  */
+static bool
+stmt_completes_before_bb_p (gimple *stmt, basic_block bb)
+{
+  if (!is_gimple_call (stmt) || !stmt_can_throw_internal (cfun, stmt))
+    return true;
+
+  edge e;
+  edge_iterator ei;
+  FOR_EACH_EDGE (e, ei, gimple_bb (stmt)->succs)
+    if (!(e->flags & (EDGE_EH | EDGE_ABNORMAL | EDGE_FAKE))
+	&& e->dest != EXIT_BLOCK_PTR_FOR_FN (cfun)
+	&& single_pred_p (e->dest)
+	&& dominated_by_p (CDI_DOMINATORS, bb, e->dest))
+      return true;
+  return false;
+}
+
 static bool
 stmt_dominated_by_p (gimple *stmt, gimple *dom)
 {
   basic_block bb = gimple_bb (stmt);
   basic_block dom_bb = gimple_bb (dom);
 
-  if (!bb || !dom_bb)
+  if (!bb || !dom_bb || !stmt_completes_before_bb_p (dom, bb))
     return false;
 
   if (bb != dom_bb)
@@ -724,7 +772,7 @@ stmt_executes_before_bb_end_p (gimple *stmt, basic_block bb)
 {
   basic_block stmt_bb = gimple_bb (stmt);
 
-  if (!stmt_bb || !bb)
+  if (!stmt_bb || !bb || !stmt_completes_before_bb_p (stmt, bb))
     return false;
 
   if (stmt_bb != bb)
@@ -741,6 +789,12 @@ stmt_executes_before_bb_end_p (gimple *stmt, basic_block bb)
 static bool
 loop_has_positive_constant_iterations_p (loop_p loop)
 {
+  /* A normal iteration count does not cover an early exceptional exit.  */
+  auto_vec<edge> exits = get_loop_exit_edges (loop);
+  for (edge e : exits)
+    if (e->flags & (EDGE_EH | EDGE_ABNORMAL | EDGE_FAKE))
+      return false;
+
   tree niters = number_of_latch_executions (loop);
   unsigned niter_value;
   return tree_uhwi_p (niters, niter_value) && niter_value > 0;
@@ -865,9 +919,8 @@ static bool
 closed_entry_p (cgraph_node *node)
 {
   return analyzable_node_p (node)
-	 && !node->externally_visible && !DECL_EXTERNAL (node->decl)
-	 && !node->used_from_other_partition && !node->address_taken
-	 && !node->force_output && !node->has_aliases_p ();
+	 && node->only_called_directly_or_aliased_p ()
+	 && !DECL_EXTERNAL (node->decl) && !node->has_aliases_p ();
 }
 
 static void
@@ -1114,7 +1167,7 @@ store_node_initializes_before_return_p (array_candidate &cand,
   if (!analyzable_node_p (store_node))
     return false;
 
-  scoped_dump_file no_dump;
+  array_dump_saver no_dump;
   cfun_saver save (cand.analyses, store_node,
 		  LOOPS_NORMAL | LOOPS_HAVE_RECORDED_EXITS);
   scev_context scev;
@@ -1162,11 +1215,14 @@ static bool
 all_store_nodes_called_before_stmt_p (array_candidate &cand, cgraph_node *caller,
 				      gimple *stmt)
 {
+  if (!analyzable_node_p (caller) || !gimple_has_body_p (caller->decl))
+    return false;
+
   if (bool *cached = cand.initialized_before.get (stmt))
     return *cached;
 
   gcc_assert (cand.stores.length () == 1);
-  scoped_dump_file no_dump;
+  array_dump_saver no_dump;
   array_access &store = *cand.stores[0];
   bool local = store.node == caller;
   cfun_saver save (cand.analyses, caller,
@@ -1179,7 +1235,8 @@ all_store_nodes_called_before_stmt_p (array_candidate &cand, cgraph_node *caller
     for (cgraph_edge *e = caller->callees; e; e = e->next_callee)
       {
 	auto_vec<cgraph_node *, 16> stack;
-	if (e->callee && e->call_stmt && e->binds_to_current_def_p ()
+	if (!e->speculative && e->callee && e->call_stmt
+	    && e->binds_to_current_def_p ()
 	    && stmt_dominated_by_p (stmt, e->call_stmt)
 	    && callee_guarantees_store_node_p (cand, e->callee,
 					       store.node, stack))
@@ -1203,13 +1260,14 @@ node_calls_store_node_before_return_p (array_candidate &cand,
 
   stack.safe_push (node);
 
-  scoped_dump_file no_dump;
+  array_dump_saver no_dump;
   cfun_saver save (cand.analyses, node);
 
   bool found = false;
   for (cgraph_edge *e = node->callees; e; e = e->next_callee)
     {
-      if (!e->callee || !e->call_stmt || !e->binds_to_current_def_p ()
+      if (e->speculative || !e->callee || !e->call_stmt
+	  || !e->binds_to_current_def_p ()
 	  || !stmt_dominates_function_exit_p (e->call_stmt))
 	continue;
 
@@ -1391,8 +1449,18 @@ entry_proof_cache::function_entry_has_initialized_p
   auto_vec<cgraph_node *, 16> component;
   scc_cache.collect_component (node, component);
   for (unsigned i = 0; i < component.length (); ++i)
-    if (!closed_entry_p (component[i]) || stack.contains (component[i]))
-      return false;
+    {
+      if (!closed_entry_p (component[i]))
+	{
+	  entry_proof_tree_node &tree = entry_tree_for_node (node);
+	  tree.set_single_node (node);
+	  tree.set_entry_result (false, "component is not fully visible");
+	  return false;
+	}
+      /* Recursion is a failure of this query, not a cached entry fact.  */
+      if (stack.contains (component[i]))
+	return false;
+    }
 
   entry_proof_tree_node &tree = entry_tree_for_node (node);
   if (tree.entry_status_known)
@@ -1695,8 +1763,11 @@ guarded_load_prover::path_stmt_has_no_target_load_before_init_p
     return true;
 
   cgraph_edge *edge = node->get_edge (stmt);
-  if (!edge || edge->indirect_unknown_callee || !edge->callee
-      || !edge->binds_to_current_def_p ())
+  /* This path proof does not model unwinding into callers or cleanups.
+     A throwing call may expose a table before its initialization completes.  */
+  if (!edge || edge->speculative || edge->indirect_unknown_callee
+      || !edge->callee || !edge->binds_to_current_def_p ()
+      || stmt_could_throw_p (cfun, stmt))
     return false;
 
   if (!function_has_no_target_load_before_init_p
@@ -1770,7 +1841,7 @@ guarded_load_prover::function_has_no_target_load_before_init_p
 
   call_stack.safe_push (node);
 
-  scoped_dump_file no_dump;
+  array_dump_saver no_dump;
   cfun_saver save (cand.analyses, node);
 
   guard_path_states seen;
@@ -1796,7 +1867,7 @@ guarded_load_prover::paths_from_stmt_have_no_target_load_before_init_p
   if (!analyzable_node_p (node))
     return false;
 
-  scoped_dump_file no_dump;
+  array_dump_saver no_dump;
   cfun_saver save (cand.analyses, node);
 
   guard_path_states seen;
@@ -1931,7 +2002,7 @@ guarded_load_prover::bb_guarded_by_false_condition_without_init_p
   if (bool *cached = bb_guard_cache.get (target_bb))
     return *cached;
 
-  scoped_dump_file no_dump;
+  array_dump_saver no_dump;
   cfun_saver save (cand.analyses, node);
 
   auto_vec<edge, 16> guard_edges;
@@ -1976,15 +2047,27 @@ guarded_load_prover::function_entry_safe_without_init_p
   if (bool *cached = function_entry_safe_cache.get (node))
     return *cached;
 
-  if (!closed_entry_p (node) || stack.contains (node))
+  if (!closed_entry_p (node))
+    {
+      function_entry_safe_cache.put (node, false);
+      return false;
+    }
+  if (stack.contains (node))
     return false;
 
   auto_vec<cgraph_node *, 16> component;
   entry_cache.collect_component (node, component);
 
   for (unsigned i = 0; i < component.length (); ++i)
-    if (!closed_entry_p (component[i]) || stack.contains (component[i]))
-      return false;
+    {
+      if (!closed_entry_p (component[i]))
+	{
+	  function_entry_safe_cache.put (node, false);
+	  return false;
+	}
+      if (stack.contains (component[i]))
+	return false;
+    }
 
   unsigned stack_len = stack.length ();
   for (unsigned i = 0; i < component.length (); ++i)
@@ -2541,6 +2624,20 @@ static bool
 validate_formula (array_candidate &cand)
 {
   array_access &store = *cand.stores[0];
+  tree source = store.node->decl;
+  for (array_access *load : cand.loads)
+    {
+      tree target = load->node->decl;
+      if (opt_for_fn (source, flag_wrapv) != opt_for_fn (target, flag_wrapv)
+	  || opt_for_fn (source, flag_trapv) != opt_for_fn (target, flag_trapv)
+	  || (opt_for_fn (source, flag_wrapv_pointer)
+	      != opt_for_fn (target, flag_wrapv_pointer)))
+	{
+	  cand.reject_reason = "incompatible arithmetic semantics";
+	  return false;
+	}
+    }
+
   formula_expander validator (store.indices, store.indices);
   if (!validator.expand (store.rhs))
     {
@@ -2582,7 +2679,7 @@ private:
   void process_candidate (varpool_node *);
 
   function_analysis_cache analyses;
-  bool changed = false;
+  hash_set<function *> modified_functions;
   bool removed_stores = false;
   dominance_failure dom_failure;
   entry_proof_cache entry_cache;
@@ -2669,7 +2766,7 @@ array_load_inliner::collect_accesses_in_node (cgraph_node *node,
 					      array_candidate &cand,
 					      const auto_vec<ipa_ref *, 32> &refs)
 {
-  scoped_dump_file no_dump;
+  array_dump_saver no_dump;
   bool has_store = false;
   for (ipa_ref *ref : refs)
     if (ref->use == IPA_REF_STORE)
@@ -2868,8 +2965,8 @@ array_load_inliner::prove_guarded_loads (array_candidate &cand)
       if (dump_file)
 	{
 	  fprintf (dump_file,
-		   "array-load-inline: load of %s is unreachable before "
-		   "initialization: ", cand.name ());
+		   "array-load-inline: load of %s is safe under the "
+		   "initialization guard proof: ", cand.name ());
 	  print_gimple_stmt (dump_file, load->stmt, 0, TDF_SLIM);
 	}
     }
@@ -2906,7 +3003,7 @@ array_load_inliner::rewrite_load (array_candidate &cand, array_access &load)
   node->remove_stmt_references (stmt);
   gsi_replace (&gsi, new_stmt, true);
   node->record_stmt_references (new_stmt);
-  changed = true;
+  modified_functions.add (cfun);
 }
 
 bool
@@ -2948,7 +3045,7 @@ array_load_inliner::remove_store (array_candidate &cand, array_access *store)
   unlink_stmt_vdef (stmt);
   gsi_remove (&gsi, true);
   release_defs (stmt);
-  changed = true;
+  modified_functions.add (cfun);
   removed_stores = true;
 }
 
@@ -3033,20 +3130,46 @@ array_load_inliner::process_candidate (varpool_node *var)
 unsigned
 array_load_inliner::execute ()
 {
+  /* Avoid materializing all function bodies when no array type qualifies.
+     Once a candidate exists, get_body must still apply pending IPA
+     transformations before we use statement references or call edges.  */
+  bool have_candidate = false;
+  varpool_node *var = nullptr;
+  FOR_EACH_VARIABLE (var)
+    {
+      auto_vec<unsigned> dims;
+      tree elem_type;
+      if (fixed_array_dims_p (TREE_TYPE (var->decl), dims, elem_type))
+	{
+	  have_candidate = true;
+	  break;
+	}
+    }
+  if (!have_candidate)
+    return 0;
+
   {
-    scoped_dump_file no_dump;
+    array_dump_saver no_dump;
     cgraph_node *node = nullptr;
     FOR_EACH_FUNCTION (node)
       if (visible_node_with_body_p (node))
 	node->get_body ();
   }
 
-  varpool_node *var = nullptr;
   FOR_EACH_VARIABLE (var)
     process_candidate (var);
 
-  return changed ? (TODO_update_ssa
-		    | (removed_stores ? TODO_remove_functions : 0)) : 0;
+  /* SIMPLE_IPA per-function TODOs are skipped in LTRANS.  Finish the SSA
+     work here for exactly the functions we changed, in both compilation
+     modes, instead of relying on a later pass to repair virtual operands.  */
+  for (function *fn : modified_functions)
+    {
+      push_cfun (fn);
+      update_ssa (TODO_update_ssa);
+      pop_cfun ();
+    }
+
+  return removed_stores ? TODO_remove_functions : 0;
 }
 
 const pass_data pass_data_ipa_array_load_inline =

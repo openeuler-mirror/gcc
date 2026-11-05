@@ -527,29 +527,6 @@ extern bool dumps_are_enabled;
 
 extern void set_dump_file (FILE *new_dump_file);
 
-/* Temporarily override the global dump stream and flags.
-
-   The default constructor disables pass dumping by clearing dump_file and
-   dump_flags.  The other constructors override dump_file, with the two-argument
-   constructor also overriding dump_flags.  The previous values are restored
-   when the object is destroyed.  */
-
-class scoped_dump_file
-{
-public:
-  scoped_dump_file ();
-  explicit scoped_dump_file (FILE *);
-  scoped_dump_file (FILE *, dump_flags_t);
-  ~scoped_dump_file ();
-
-  scoped_dump_file (const scoped_dump_file &) = delete;
-  scoped_dump_file &operator= (const scoped_dump_file &) = delete;
-
-private:
-  FILE *m_saved_file;
-  dump_flags_t m_saved_flags;
-};
-
 /* Return true if any of the dumps is enabled, false otherwise. */
 inline bool
 dump_enabled_p (void)
