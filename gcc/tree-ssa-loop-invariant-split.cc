@@ -1060,7 +1060,7 @@ apply_split_plan (split_plan *plan)
 	  insert_carry_load (inner, carries[i * num_carries + j]);
     }
 
-  if (dump_file)
+  if (dump_file && !(dump_flags & MSG_OPTIMIZED_LOCATIONS))
     fprintf (dump_file,
 	     "loop invariant split: split inner loop into %u chunks, "
 	     "chunk_iters=%llu, chunk_bytes=%llu\n",
@@ -1145,7 +1145,7 @@ const pass_data pass_data_loop_invariant_split =
   "linvsplit", /* name */
   OPTGROUP_LOOP, /* optinfo_flags */
   TV_LOOP_INVARIANT_SPLIT, /* tv_id */
-  PROP_cfg, /* properties_required */
+  PROP_cfg | PROP_ssa, /* properties_required */
   0, /* properties_provided */
   0, /* properties_destroyed */
   0, /* todo_flags_start */

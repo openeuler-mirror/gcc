@@ -13946,8 +13946,8 @@ operands of conditions that are invariant out of the loop, so that we can use
 just trivial invariantness analysis in loop unswitching.  The pass also includes
 store motion.
 
-@item -ftree-loop-invariant-split
 @opindex ftree-loop-invariant-split
+@item -ftree-loop-invariant-split
 Split selected two-level loop nests into a sequence of equivalent outer-loop
 copies, each covering a consecutive range of the original inner-loop iteration
 space.  The pass looks for read-only data referenced by the inner loop but not
@@ -13956,7 +13956,11 @@ data.  This can expose smaller invariant data blocks to later vectorization,
 unrolling and loop invariant motion passes.
 
 This optimization is conservative and is not enabled by default at any
-optimization level.
+optimization level.  It runs only when loop vectorization is enabled or the
+function contains a loop marked for forced vectorization.  Enabling this
+option does not enable loop vectorization.  Loop vectorization is enabled by
+default at @option{-O2} and @option{-O3}, and can be enabled explicitly with
+@option{-ftree-loop-vectorize}.
 
 @opindex ftree-loop-ivcanon
 @item -ftree-loop-ivcanon
