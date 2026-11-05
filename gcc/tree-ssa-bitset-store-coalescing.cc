@@ -26,9 +26,10 @@
    The fast path interchanges the loops, updates complete words with one
    masked read/modify/write with the diagonal inversion in its desired value.
    It retains presence and change tests to avoid introducing accesses.  Runtime
-   base checks retain the original nest when the writable array shares its
-   base with the mask or row-index array.  Recognition is based solely on
-   CFG, SSA, induction, address and bit-operation properties.  */
+   access-range checks retain the original nest for overlapping writable,
+   mask or row-index storage.  A read-only preflight also protects invariant
+   metadata before inspecting a subsequent input row.  Recognition is based
+   solely on CFG, SSA, induction, address and bit-operation properties.  */
 
 #include "config.h"
 #include "system.h"
@@ -46,6 +47,7 @@
 #include "gimple.h"
 #include "gimplify.h"
 #include "gimple-iterator.h"
+#include "gimplify-me.h"
 #include "cfghooks.h"
 #include "cfgloop.h"
 #include "cfgloopmanip.h"
@@ -60,15 +62,18 @@
 
 namespace {
 
+/* Retain the conservative 16-bit profitability ceiling.  This limits each
+   guarded row footprint to 2048 32-bit words (8192 bytes); larger ranges use
+   the original loop.  It is a policy cap, not a distinct-storage proof.  */
 const unsigned HOST_WIDE_INT MAX_FAST_BITS = 65535;
 
 const pass_data bitset_store_coalescing_pass_data = {
-  GIMPLE_PASS, "bitset_coalesce", OPTGROUP_NONE, TV_NONE,
+  GIMPLE_PASS, "bitset_coalesce", OPTGROUP_LOOP, TV_TREE_BITSET_COALESCE,
   PROP_cfg | PROP_ssa, 0, 0, 0, 0
 };
 
 const pass_data bitset_store_coalescing_prepare_pass_data = {
-  GIMPLE_PASS, "bitset_coalesce_prep", OPTGROUP_NONE, TV_NONE,
+  GIMPLE_PASS, "bitset_coalesce_prep", OPTGROUP_LOOP, TV_TREE_BITSET_PREPARE,
   PROP_cfg | PROP_ssa, 0, 0, 0, 0
 };
 
@@ -96,6 +101,8 @@ struct candidate
   tree rotation_dividend;
   tree bit_mask;
   gassign *info_store;
+  tree info_mem;
+  tree presence_mem;
 };
 
 static bool
@@ -339,7 +346,10 @@ zero_edge (gcond *cond, tree value)
 static tree
 memory_pointer (tree mem)
 {
-  if (TREE_CODE (mem) != MEM_REF)
+  /* The modeled SSA pointer already contains the complete bit address.
+     A nonzero MEM_REF displacement would otherwise be lost both in the
+     access-range guard and in the generated fast path.  */
+  if (TREE_CODE (mem) != MEM_REF || !integer_zerop (TREE_OPERAND (mem, 1)))
     return NULL_TREE;
   return TREE_OPERAND (mem, 0);
 }
@@ -379,6 +389,39 @@ strip_integral_copies (tree value)
 	value = rhs;
       else
 	break;
+    }
+  return value;
+}
+
+/* Unlike the low-bit helper above, address proofs require numeric values to
+   survive every conversion.  NONNEGATIVE is valid for the canonical IV
+   starting at zero and tested against a positive bound.  */
+static tree
+strip_value_preserving_copies (tree value, bool nonnegative = false)
+{
+  for (unsigned depth = 0; value && TREE_CODE (value) == SSA_NAME
+       && depth < 16; ++depth)
+    {
+      gassign *def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (value));
+      if (!def)
+	break;
+      enum tree_code code = gimple_assign_rhs_code (def);
+      tree rhs = gimple_assign_rhs1 (def);
+
+      if ((code != SSA_NAME && !CONVERT_EXPR_CODE_P (code))
+	  || !INTEGRAL_TYPE_P (TREE_TYPE (value))
+	  || !INTEGRAL_TYPE_P (TREE_TYPE (rhs)))
+	break;
+      tree to = TREE_TYPE (value), from = TREE_TYPE (rhs);
+      unsigned to_bits = TYPE_PRECISION (to);
+      unsigned from_bits = TYPE_PRECISION (from);
+      if (to_bits < from_bits
+	  || (TYPE_UNSIGNED (from) && !TYPE_UNSIGNED (to)
+	      && to_bits == from_bits)
+	  || (!TYPE_UNSIGNED (from) && TYPE_UNSIGNED (to)
+	      && !nonnegative))
+	break;
+      value = rhs;
     }
   return value;
 }
@@ -804,11 +847,31 @@ find_candidate (class loop *inner, candidate *out)
       || value_depends_on_p (cand.literal_base, cand.inner_iv.value))
     return reject_candidate (inner, "literal address");
 
+  /* The preflight guard reads this contiguous input before any writes.
+     Arbitrary indexed input requires a different access-range proof.  */
+  tree byte_offset = strip_value_preserving_copies (literal_offset);
+  gassign *byte_product
+    = byte_offset && TREE_CODE (byte_offset) == SSA_NAME
+      ? dyn_cast<gassign *> (SSA_NAME_DEF_STMT (byte_offset)) : NULL;
+  tree literal_index;
+  if (!byte_product
+      || gimple_assign_rhs_code (byte_product) != MULT_EXPR
+      || !TYPE_UNSIGNED (TREE_TYPE (byte_offset))
+      || TYPE_PRECISION (TREE_TYPE (byte_offset))
+	 != TYPE_PRECISION (size_type_node)
+      || !commutative_constant_operand (byte_offset, MULT_EXPR, 4,
+				       &literal_index)
+      || !same_tree_p (strip_value_preserving_copies (literal_index, true),
+		      cand.inner_iv.value))
+    return reject_candidate (inner, "noncontiguous literal input");
+
   if (!canonical_bit_index_p (cand, word_offset))
     return reject_candidate (inner, "canonical rotating bit index");
   if (!no_extra_side_effects_p (cand))
     return reject_candidate (inner, "unmodeled side effects");
 
+  cand.info_mem = info_mem;
+  cand.presence_mem = presence_mem;
   *out = cand;
   return true;
 }
@@ -999,8 +1062,9 @@ clone_for_index (candidate &cand, tree value, tree old_index,
    definitions in the live function.  */
 struct pending_bitset_sequences
 {
-  gimple_seq init = NULL, guard = NULL, outer = NULL;
+  gimple_seq init = NULL, guard = NULL, outer = NULL, scan = NULL;
   tree index = NULL_TREE, rotation = NULL_TREE;
+  tree scan_index = NULL_TREE;
   bool committed = false;
 
   ~pending_bitset_sequences ()
@@ -1008,15 +1072,135 @@ struct pending_bitset_sequences
     if (!committed)
       {
 	gimple_seq_discard (outer);
+	gimple_seq_discard (scan);
 	gimple_seq_discard (guard);
 	gimple_seq_discard (init);
 	if (index)
 	  release_ssa_name (index);
 	if (rotation)
 	  release_ssa_name (rotation);
+	if (scan_index)
+	  release_ssa_name (scan_index);
       }
   }
 };
+
+struct guarded_read
+{
+  tree first;
+  tree last;
+};
+
+/* Every load other than the three modeled data accesses must be a scalar
+   loop-invariant metadata read available on the first inner iteration.
+   Cloning its address without replacing either induction rejects indexed
+   loads and loop-carried PHIs.  Protect these cells before advancing the
+   preflight scan: an original store could otherwise change a future input
+   pointer or bound, making an eager scan introduce invalid accesses.  */
+static bool
+collect_guarded_reads (candidate &cand, clone_context *ctx,
+		       auto_vec<guarded_read, 8> &reads, tree *valid)
+{
+  basic_block body = gimple_bb (SSA_NAME_DEF_STMT (cand.literal));
+  basic_block *bbs = get_loop_body (cand.outer);
+  bool safe = true;
+  for (unsigned i = 0; i < cand.outer->num_nodes && safe; ++i)
+    for (gimple_stmt_iterator gsi = gsi_start_bb (bbs[i]);
+	 !gsi_end_p (gsi); gsi_next (&gsi))
+      {
+	gassign *stmt = dyn_cast<gassign *> (gsi_stmt (gsi));
+	if (!stmt || !gimple_assign_load_p (stmt))
+	  continue;
+	tree mem = gimple_assign_rhs1 (stmt);
+	if (same_tree_p (gimple_assign_lhs (stmt), cand.literal)
+	    || operand_equal_p (mem, cand.info_mem, 0)
+	    || operand_equal_p (mem, cand.presence_mem, 0))
+	  continue;
+	HOST_WIDE_INT bytes = int_size_in_bytes (TREE_TYPE (mem));
+	if ((!INTEGRAL_TYPE_P (TREE_TYPE (mem))
+	     && !POINTER_TYPE_P (TREE_TYPE (mem)))
+	    || bytes <= 0 || TREE_CODE (mem) == BIT_FIELD_REF
+	    || (TREE_CODE (mem) == COMPONENT_REF
+		&& DECL_BIT_FIELD_TYPE (TREE_OPERAND (mem, 1)))
+	    || !dominated_by_p (CDI_DOMINATORS, body, bbs[i]))
+	  {
+	    safe = false;
+	    break;
+	  }
+	tree address = clone_operand (build_fold_addr_expr (mem), ctx);
+	if (!address || ctx->failed)
+	  {
+	    safe = false;
+	    break;
+	  }
+	/* A conversion cannot take &p->field directly in unary GIMPLE.  */
+	gimple_seq address_seq = NULL;
+	address = force_gimple_operand_1 (address, &address_seq, is_gimple_reg,
+					  NULL_TREE);
+	gimple_seq_add_seq (ctx->seq, address_seq);
+	tree first = ssa_assign1 (ctx->seq, size_type_node, NOP_EXPR, address);
+	tree last = ssa_assign2 (ctx->seq, size_type_node, PLUS_EXPR, first,
+				 build_int_cst (size_type_node, bytes));
+	reads.safe_push ({first, last});
+	tree no_wrap = ssa_assign2 (ctx->seq, boolean_type_node, GE_EXPR,
+				   last, first);
+	*valid = bool_and (ctx->seq, *valid, no_wrap);
+      }
+  free (bbs);
+  return safe;
+}
+
+/* Bound a nonnegative-offset window starting at BASE so that it cannot
+   intersect [FIRST, LAST).  A region entirely below BASE imposes no bound;
+   otherwise stop at FIRST.  Reject a BASE inside the forbidden region.
+   Together with nonwrapping endpoints, each row fitting in this window is
+   disjoint without repeating every metadata comparison for every row.  */
+static tree
+access_window (gimple_seq *seq, tree base, tree first, tree last, tree *valid)
+{
+  tree above = ssa_assign2 (seq, boolean_type_node, LE_EXPR, last, base);
+  tree before = ssa_assign2 (seq, boolean_type_node, LE_EXPR, base, first);
+  tree outside = ssa_assign2 (seq, boolean_type_node, BIT_IOR_EXPR,
+			     above, before);
+  *valid = bool_and (seq, *valid, outside);
+  tree distance = ssa_assign2 (seq, size_type_node, MINUS_EXPR, first, base);
+  return ssa_assign3 (seq, size_type_node, COND_EXPR, above,
+		      TYPE_MAX_VALUE (size_type_node), distance);
+}
+
+/* Estimate a useful row alignment from invariant multiplicative factors.
+   This is only a profitability choice: the runtime checks below prove that
+   EVERY actual offset is a multiple of it and that it spans a complete row.
+   Thus neither narrowing conversions nor wrapping arithmetic in the original
+   expression can invalidate the row-disjointness proof.  */
+static tree
+row_alignment (tree value, candidate &cand, clone_context *ctx,
+	       unsigned depth = 0)
+{
+  if (depth > 40)
+    return build_one_cst (size_type_node);
+  value = strip_integral_copies (value);
+  if (!value_depends_on_p (value, cand.literal))
+    {
+      tree factor = clone_value (value, ctx);
+      if (!factor || ctx->failed)
+	return NULL_TREE;
+      return ssa_assign1 (ctx->seq, size_type_node, NOP_EXPR, factor);
+    }
+  if (TREE_CODE (value) == SSA_NAME)
+    if (gassign *def = dyn_cast<gassign *> (SSA_NAME_DEF_STMT (value)))
+      if (gimple_assign_rhs_code (def) == MULT_EXPR)
+	{
+	  tree a = row_alignment (gimple_assign_rhs1 (def), cand, ctx,
+				  depth + 1);
+	  tree b = row_alignment (gimple_assign_rhs2 (def), cand, ctx,
+				  depth + 1);
+	  if (!a || !b)
+	    return NULL_TREE;
+	  return ssa_assign2 (ctx->seq, size_type_node, MULT_EXPR, a, b);
+	}
+  return build_one_cst (size_type_node);
+}
 
 static bool
 transform_candidate (candidate &cand)
@@ -1061,6 +1245,27 @@ transform_candidate (candidate &cand)
   if (!initial_dividend || !initial_rotation || rotation_ctx.failed)
     return false;
 
+  auto_vec<guarded_read, 8> reads;
+  tree metadata_valid = boolean_true_node;
+  if (!collect_guarded_reads (cand, &base_ctx, reads, &metadata_valid))
+    return false;
+  tree row_stride = row_alignment (cand.row_offset, cand, &base_ctx);
+  if (!row_stride || base_ctx.failed)
+    return false;
+
+  tree scan_i = pending.scan_index = make_ssa_name (index_type);
+  tree scan_literal
+    = clone_for_index (cand, cand.literal, cand.inner_iv.value, scan_i,
+		       &pending.scan, cand.literal_base, literal_base);
+  if (!scan_literal)
+    return false;
+  tree scan_offset
+    = clone_for_index (cand, cand.row_offset, cand.inner_iv.value, scan_i,
+		       &pending.scan, cand.literal_base, literal_base,
+		       cand.literal, scan_literal);
+  if (!scan_offset)
+    return false;
+
   tree fast_i = pending.index = make_ssa_name (index_type);
   tree bit_mod = pending.rotation = make_ssa_name (limit_type);
   tree literal
@@ -1083,14 +1288,17 @@ transform_candidate (candidate &cand)
   basic_block limit_guard = new_bb_after (entry->src, father);
   basic_block init = new_bb_after (limit_guard, father);
   basic_block guard = new_bb_after (init, father);
-  basic_block outer_header = new_bb_after (guard, father);
+  basic_block scan_header = new_bb_after (guard, father);
+  basic_block scan_latch = new_bb_after (scan_header, father);
+  basic_block outer_header = new_bb_after (scan_latch, father);
   basic_block word_header = new_bb_after (outer_header, father);
   basic_block word_load = new_bb_after (word_header, father);
   basic_block word_store = new_bb_after (word_load, father);
   basic_block word_latch = new_bb_after (word_store, father);
   basic_block outer_latch = new_bb_after (word_latch, father);
   basic_block finish = new_bb_after (outer_latch, father);
-  redirect_edge_and_branch (entry, limit_guard);
+  edge redirected = redirect_edge_and_branch (entry, limit_guard);
+  gcc_assert (redirected);
 
   tree info_u32 = ssa_assign1 (&guard_seq, u32_ptr, NOP_EXPR, info_base);
   tree presence_u32
@@ -1134,6 +1342,75 @@ transform_candidate (candidate &cand)
   tree fast_ok = bool_and (&guard_seq, info_presence_distinct,
 			  info_literal_distinct);
   fast_ok = bool_and (&guard_seq, fast_ok, bounded);
+  fast_ok = bool_and (&guard_seq, fast_ok, metadata_valid);
+
+  tree count_size = ssa_assign1 (&guard_seq, size_type_node, NOP_EXPR,
+				row_count);
+  tree count_roundtrip = ssa_assign1 (&guard_seq, index_type, NOP_EXPR,
+				     count_size);
+  tree count_fits = ssa_assign2 (&guard_seq, boolean_type_node, EQ_EXPR,
+				 count_roundtrip, row_count);
+  tree literal_bytes = ssa_assign2 (&guard_seq, size_type_node, MULT_EXPR,
+				    count_size,
+				    build_int_cst (size_type_node, 4));
+  tree count_check = ssa_assign2 (&guard_seq, size_type_node, RSHIFT_EXPR,
+				  literal_bytes,
+				  build_int_cst (size_type_node, 2));
+  tree bytes_fit = ssa_assign2 (&guard_seq, boolean_type_node, EQ_EXPR,
+				count_check, count_size);
+  tree literal_end = ssa_assign2 (&guard_seq, size_type_node, PLUS_EXPR,
+				   literal_addr, literal_bytes);
+  tree literal_no_wrap = ssa_assign2 (&guard_seq, boolean_type_node, GE_EXPR,
+				       literal_end, literal_addr);
+  fast_ok = bool_and (&guard_seq, fast_ok, count_fits);
+  fast_ok = bool_and (&guard_seq, fast_ok, bytes_fit);
+  fast_ok = bool_and (&guard_seq, fast_ok, literal_no_wrap);
+
+  tree words_size = ssa_assign1 (&guard_seq, size_type_node, NOP_EXPR, i_last);
+  tree row_words = ssa_assign2 (&guard_seq, size_type_node, PLUS_EXPR,
+				words_size, build_int_cst (size_type_node, 1));
+  tree row_bytes = ssa_assign2 (&guard_seq, size_type_node, MULT_EXPR,
+				row_words, build_int_cst (size_type_node, 4));
+  tree stride_sufficient = ssa_assign2 (&guard_seq, boolean_type_node,
+				      GE_EXPR, row_stride, row_bytes);
+  fast_ok = bool_and (&guard_seq, fast_ok, stride_sufficient);
+
+  /* Every selected row must fit below the other packed-array base.  Since
+     offsets are nonnegative, this separates the complete writable and mask
+     footprints even when literal values select arbitrary rows.  Also bound
+     both end addresses against wrap and the writable window against the
+     complete literal stream and each invariant metadata cell.  */
+  tree low_base = ssa_assign2 (&guard_seq, size_type_node, MIN_EXPR,
+			      info_addr, presence_addr);
+  tree high_base = ssa_assign2 (&guard_seq, size_type_node, MAX_EXPR,
+			       info_addr, presence_addr);
+  tree capacity = ssa_assign2 (&guard_seq, size_type_node, MINUS_EXPR,
+			      high_base, low_base);
+  tree info_room = ssa_assign2 (&guard_seq, size_type_node, MINUS_EXPR,
+			       TYPE_MAX_VALUE (size_type_node), info_addr);
+  tree presence_room = ssa_assign2 (&guard_seq, size_type_node, MINUS_EXPR,
+				   TYPE_MAX_VALUE (size_type_node),
+				   presence_addr);
+  capacity = ssa_assign2 (&guard_seq, size_type_node, MIN_EXPR,
+			capacity, info_room);
+  capacity = ssa_assign2 (&guard_seq, size_type_node, MIN_EXPR,
+			capacity, presence_room);
+  tree literal_room = access_window (&guard_seq, info_addr, literal_addr,
+				    literal_end, &fast_ok);
+  capacity = ssa_assign2 (&guard_seq, size_type_node, MIN_EXPR,
+			capacity, literal_room);
+  for (unsigned i = 0; i < reads.length (); ++i)
+    {
+      tree room = access_window (&guard_seq, info_addr, reads[i].first,
+				 reads[i].last, &fast_ok);
+      capacity = ssa_assign2 (&guard_seq, size_type_node, MIN_EXPR,
+			    capacity, room);
+    }
+  tree row_fits = ssa_assign2 (&guard_seq, boolean_type_node, GE_EXPR,
+			     capacity, row_bytes);
+  fast_ok = bool_and (&guard_seq, fast_ok, row_fits);
+  tree last_offset = ssa_assign2 (&guard_seq, size_type_node, MINUS_EXPR,
+				capacity, row_bytes);
 
   /* A unit-stride addition tree is a permutation only if no intermediate
      wrapping can change its remainder.  The original first-iteration
@@ -1164,6 +1441,38 @@ transform_candidate (candidate &cand)
     (&guard_seq, gimple_build_cond (NE_EXPR, fast_ok, boolean_false_node,
 				    NULL_TREE, NULL_TREE));
   insert_seq (guard, guard_seq);
+
+  /* Read the original contiguous literal stream, but no packed data.  Before
+     advancing, prove that this row cannot change a future literal or any
+     metadata address/bound.  On a failure, resume the untouched original
+     nest immediately rather than speculating further input reads.  */
+  gphi *scan_phi = create_phi_node (scan_i, scan_header);
+  gimple_seq &scan_seq = pending.scan;
+  tree offset = ssa_assign1 (&scan_seq, size_type_node, NOP_EXPR, scan_offset);
+  tree scan_ok = ssa_assign2 (&scan_seq, boolean_type_node, LE_EXPR,
+			     offset, last_offset);
+  /* Different multiples of a stride at least ROW_BYTES apart cannot overlap.
+     Equal offsets remain valid, preserving duplicate-row semantics.  The
+     stride test above also excludes zero before this remainder executes.  */
+  tree remainder = ssa_assign2 (&scan_seq, size_type_node, TRUNC_MOD_EXPR,
+			       offset, row_stride);
+  tree aligned = ssa_assign2 (&scan_seq, boolean_type_node, EQ_EXPR,
+			     remainder, build_zero_cst (size_type_node));
+  scan_ok = bool_and (&scan_seq, scan_ok, aligned);
+  gimple_seq_add_stmt
+    (&scan_seq, gimple_build_cond (NE_EXPR, scan_ok, boolean_false_node,
+				  NULL_TREE, NULL_TREE));
+  insert_seq (scan_header, scan_seq);
+
+  gimple_seq scan_latch_seq = NULL;
+  tree scan_next = ssa_assign2 (&scan_latch_seq, index_type, PLUS_EXPR,
+			       scan_i, build_int_cst (index_type, 1));
+  tree scan_more = ssa_assign2 (&scan_latch_seq, boolean_type_node, LT_EXPR,
+			       scan_next, row_count);
+  gimple_seq_add_stmt
+    (&scan_latch_seq, gimple_build_cond (NE_EXPR, scan_more, boolean_false_node,
+					NULL_TREE, NULL_TREE));
+  insert_seq (scan_latch, scan_latch_seq);
 
   gphi *fast_i_phi = create_phi_node (fast_i, outer_header);
   gphi *bit_mod_phi = create_phi_node (bit_mod, outer_header);
@@ -1309,10 +1618,18 @@ transform_candidate (candidate &cand)
   edge init_fallback = make_edge (init, dispatch, EDGE_FALSE_VALUE);
   init_guard->probability = profile_probability::likely ();
   init_fallback->probability = init_guard->probability.invert ();
-  edge guard_fast = make_edge (guard, outer_header, EDGE_TRUE_VALUE);
+  edge guard_scan = make_edge (guard, scan_header, EDGE_TRUE_VALUE);
   edge guard_fallback = make_edge (guard, dispatch, EDGE_FALSE_VALUE);
-  guard_fast->probability = profile_probability::likely ();
-  guard_fallback->probability = guard_fast->probability.invert ();
+  guard_scan->probability = profile_probability::likely ();
+  guard_fallback->probability = guard_scan->probability.invert ();
+  edge scan_valid = make_edge (scan_header, scan_latch, EDGE_TRUE_VALUE);
+  edge scan_fallback = make_edge (scan_header, dispatch, EDGE_FALSE_VALUE);
+  scan_valid->probability = profile_probability::likely ();
+  scan_fallback->probability = scan_valid->probability.invert ();
+  edge scan_back = make_edge (scan_latch, scan_header, EDGE_TRUE_VALUE);
+  edge guard_fast = make_edge (scan_latch, outer_header, EDGE_FALSE_VALUE);
+  scan_back->probability = profile_probability::likely ();
+  guard_fast->probability = scan_back->probability.invert ();
   edge outer_word = make_edge (outer_header, word_header, EDGE_FALLTHRU);
   outer_word->probability = profile_probability::always ();
   edge load_yes = make_edge (word_header, word_load, EDGE_TRUE_VALUE);
@@ -1344,6 +1661,9 @@ transform_candidate (candidate &cand)
   add_phi_arg (word_phi, build_zero_cst (limit_type), outer_word,
 	       UNKNOWN_LOCATION);
   add_phi_arg (word_phi, word_next, word_back, UNKNOWN_LOCATION);
+  add_phi_arg (scan_phi, build_zero_cst (index_type), guard_scan,
+	       UNKNOWN_LOCATION);
+  add_phi_arg (scan_phi, scan_next, scan_back, UNKNOWN_LOCATION);
 
   if (dump_file)
     fprintf (dump_file,
@@ -1361,7 +1681,10 @@ transform_candidate (candidate &cand)
    predictor cleanup, after IPA has already introduced scalar exit PHIs.
    Remove predictor statements only from the narrow candidate shape and
    request CFG cleanup.  LIM without store motion then exposes the same
-   address and loop-bound form used by the matcher.  */
+   address and loop-bound form used by the matcher.  The available LIM entry
+   operates on the whole function, even if the shaped nest is later rejected.
+   Keep this opt-in preparation tied to the CH option; do not silently run it
+   when the user has disabled header copying.  */
 class pass_bitset_store_coalescing_prepare : public gimple_opt_pass
 {
 public:
@@ -1376,7 +1699,7 @@ public:
 
   bool gate (function *) final override
   {
-    return flag_tree_bitset_store_coalescing && flag_tree_loop_im
+    return flag_tree_bitset_store_coalescing && flag_tree_loop_im && flag_tree_ch
 	   && optimize >= 3;
   }
 
@@ -1445,14 +1768,34 @@ public:
       if (find_candidate (loop, &cand))
 	{
 	  changed = transform_candidate (cand);
-	  break;
+	  if (changed)
+	    break;
+	  reject_candidate (loop, "candidate transform rejected before CFG mutation");
 	}
+    if (changed)
+      {
+	/* New natural loops must be represented before any checking or a
+	   preserved-loop consumer can inspect the updated CFG.  Early passes
+	   usually discard the loop tree in finalize, but PROP_loops does not.  */
+	free_dominance_info (CDI_DOMINATORS);
+	calculate_dominance_info (CDI_DOMINATORS);
+	loops_state_set (LOOPS_NEED_FIXUP);
+	fix_loop_structure (NULL);
+	checking_verify_loop_structure ();
+      }
     loop_optimizer_finalize ();
     if (changed)
       {
 	free_dominance_info (CDI_DOMINATORS);
 	update_ssa (TODO_update_ssa);
 	cleanup_tree_cfg ();
+	if (loops_for_fn (fun))
+	  {
+	    calculate_dominance_info (CDI_DOMINATORS);
+	    loops_state_set (LOOPS_NEED_FIXUP);
+	    fix_loop_structure (NULL);
+	    checking_verify_loop_structure ();
+	  }
 	checking_verify_ssa (true, true);
       }
     /* Detached loads can request virtual SSA renaming even when

@@ -131,7 +131,7 @@ along with GCC; see the file COPYING3.  If not see
       PUSH_INSERT_PASSES_WITHIN (pass_ipa_oacc_kernels)
 	  NEXT_PASS (pass_oacc_kernels);
 	  PUSH_INSERT_PASSES_WITHIN (pass_oacc_kernels)
-	      NEXT_PASS (pass_ch);
+	      NEXT_PASS (pass_ch, /* bitset_prepare_p=*/false);
 	      NEXT_PASS (pass_fre, true /* may_iterate */);
 	      /* We use pass_lim to rewrite in-memory iteration and reduction
 		 variable accesses in loops into local variables accesses.  */
@@ -243,7 +243,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_merge_phi);
       NEXT_PASS (pass_phiopt, false /* early_p */);
       NEXT_PASS (pass_tail_recursion);
-      NEXT_PASS (pass_ch);
+      NEXT_PASS (pass_ch, /* bitset_prepare_p=*/false);
       NEXT_PASS (pass_lower_complex);
       NEXT_PASS (pass_lower_bitint);
       NEXT_PASS (pass_sra);

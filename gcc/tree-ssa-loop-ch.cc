@@ -718,7 +718,12 @@ public:
   /* Initialize and finalize loop structures, copying headers inbetween.  */
   unsigned int execute (function *) final override;
 
-  opt_pass * clone () final override { return new pass_ch (m_ctxt); }
+  opt_pass *clone () final override
+  {
+    pass_ch *copy = new pass_ch (m_ctxt);
+    copy->bitset_prepare_p = bitset_prepare_p;
+    return copy;
+  }
   void set_pass_param (unsigned int n, bool param) final override
   {
     gcc_assert (n == 0);
