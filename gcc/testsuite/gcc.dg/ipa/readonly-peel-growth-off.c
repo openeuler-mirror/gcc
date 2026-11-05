@@ -4,4 +4,4 @@
 #include "readonly-peel-growth-nested.c"
 
 /* { dg-final { scan-tree-dump-not "IPA readonly peeling growth" "cunroll" } } */
-/* { dg-final { scan-tree-dump-not "Peeling IPA readonly-value loop" "cunroll" } } */
+/* { dg-final { scan-tree-dump-not "Considering IPA readonly-value loop" "cunroll" } } */

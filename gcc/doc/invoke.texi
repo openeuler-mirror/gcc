@@ -13620,10 +13620,16 @@ regardless of argument order.  All five mechanisms require this master option
 for execution: enabling a suboption alone does not activate specialization.
 Use consistent options during compilation and LTO linking.
 
-The context marker is retained on proven immutable clones and streamed
-through LTO.  Helper lookup follows at most four actual inline ancestors;
-it does not grant unrelated calls in the enclosing function the same context.
-Immutable object size is a profitability hint, not proof of a loop trip count.
+The clone context marker is retained on proven immutable clones, including
+mandatory inline candidates, and streamed through LTO.  Helper lookup follows
+at most four actual inline ancestors; it does not grant unrelated calls in the
+enclosing function the same context.  A separate caller marker records receipt
+of a specialization candidate, without promising that inlining took place.
+Tree consumers recheck each loop before using that hint.  String initializer
+lengths and other object sizes are profitability hints, not proof of loop trip
+counts or permission to fold volatile or interposable loads.  Helper growth
+limits apply per edge and per resulting root, not to a compilation unit as a
+whole.
 
 @item -fipa-value-specialization-clone-budget
 @opindex fipa-value-specialization-clone-budget

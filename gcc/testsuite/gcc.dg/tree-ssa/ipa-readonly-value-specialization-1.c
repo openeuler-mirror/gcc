@@ -42,4 +42,4 @@ test (int x)
 
 /* IPA-specialized readonly byte streams expose bounded constant states to
    scalar loop transforms.  */
-/* { dg-final { scan-tree-dump-times "Peeling IPA readonly-value loop" 2 "cunroll" } } */
+/* { dg-final { scan-tree-dump "Peeled IPA readonly-value loop" "cunroll" } } */

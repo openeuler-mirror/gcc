@@ -1134,12 +1134,11 @@ readonly_pointer_base_object (tree value, unsigned depth)
   return readonly_pointer_base_object_1 (value, depth, remaining);
 }
 
-/* If LOOP belongs to an IPA constant-propagation clone and a pointer PHI is
-   initialized from a fully known immutable byte array, return a conservative
-   number of iterations to peel.  Peeling exposes a distinct constant offset
-   to CCP in each copy, which is useful for bytecode, delimiter and small
-   table interpreters.  The object-size cap bounds the number of copies;
-   try_peel_loop separately limits their cumulative growth.  */
+/* For an IPA clone or candidate-context caller, use a pointer PHI's visible
+   constant-object initializer to suggest a bounded number of copies.  This
+   is a profitability hint, not proof of an exact trip count or of successful
+   inlining.  Runtime exits and ordinary transformation checks remain in force;
+   try_peel_loop separately limits cumulative copied cost.  */
 
 static unsigned
 ipa_readonly_value_peel_count (class loop *loop)
@@ -1192,9 +1191,9 @@ ipa_readonly_value_peel_count (class loop *loop)
       if (bytes > 1 && bytes <= 64)
 	{
 	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "Peeling IPA readonly-value loop %d for "
-		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states.\n",
-		     loop->num, bytes);
+	    fprintf (dump_file, "Considering IPA readonly-value loop %d for "
+		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states in %s.\n",
+		     loop->num, bytes, node->dump_name ());
 	  return (unsigned) bytes;
 	}
     }
@@ -1324,9 +1323,6 @@ try_peel_loop (class loop *loop,
   unsigned readonly_growth = 0;
   unsigned readonly_limit = 0;
 
-  unsigned readonly_npeel = ipa_readonly_value_peel_count (loop);
-  bool readonly_specialization = readonly_npeel != 0;
-
   if (!flag_peel_loops
       || param_max_peel_times <= 0
       || !peeled_loops)
@@ -1338,6 +1334,9 @@ try_peel_loop (class loop *loop,
         fprintf (dump_file, "Not peeling: loop is already peeled\n");
       return false;
     }
+
+  unsigned readonly_npeel = ipa_readonly_value_peel_count (loop);
+  bool readonly_specialization = readonly_npeel != 0;
 
   /* We don't peel loops that will be unrolled as this can duplicate a
      loop more times than the user requested.  */
@@ -1474,6 +1473,9 @@ try_peel_loop (class loop *loop,
   if (readonly_specialization)
     {
       cfun->ipa_value_specialization_peel_growth += readonly_growth;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Peeled IPA readonly-value loop %d, %i times.\n",
+		 loop->num, (int) npeel);
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "IPA readonly peeling growth: %u units, "
 		 "%u of %u cumulative.\n", readonly_growth,

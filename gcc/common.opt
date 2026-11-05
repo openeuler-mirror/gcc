@@ -4188,20 +4188,20 @@ Specialize calls for immutable constant-object values and expose their states to
 
 fipa-immutable-clone-budget
 Common Alias(fipa-value-specialization-clone-budget)
-Deprecated spelling of -fipa-value-specialization-clone-budget.
+Compatibility spelling of -fipa-value-specialization-clone-budget.
 
 fipa-loop-value-specialization
 Common Alias(fipa-value-specialization-loop)
-Deprecated spelling of -fipa-value-specialization-loop.
+Compatibility spelling of -fipa-value-specialization-loop.
 
 fipa-shared-loop-value-specialization
 Common Alias(fipa-value-specialization-shared-loop)
-Deprecated spelling of -fipa-value-specialization-shared-loop.
+Compatibility spelling of -fipa-value-specialization-shared-loop.
 
 fipa-bounded-cold-immutable-specialization
 Common Alias(fipa-value-specialization-cold)
-Deprecated spelling of -fipa-value-specialization-cold.
+Compatibility spelling of -fipa-value-specialization-cold.
 
 fipa-immutable-helper-expansion
 Common Alias(fipa-value-specialization-helper-expansion)
-Deprecated spelling of -fipa-value-specialization-helper-expansion.
+Compatibility spelling of -fipa-value-specialization-helper-expansion.

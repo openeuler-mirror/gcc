@@ -231,10 +231,10 @@ values_equal_for_ipcp_p (tree x, tree y)
     return operand_equal_p (x, y, 0);
 }
 
-/* Return true when VALUE is the address of an object whose complete contents
-   are available to the compiler and cannot change at run time.  Such values
-   are particularly useful specialization keys: after cloning, scalar passes
-   can fold loads from the object and remove data-driven control flow.  */
+/* Recognize a potentially useful constant-object address from its declaration
+   and initializer.  This is a profitability hint, not permission to fold a
+   volatile or interposable load.  Cloning and subsequent scalar folding must
+   still satisfy their ordinary semantic checks.  */
 
 static bool
 ipcp_readonly_constant_address_p (tree value)
@@ -266,8 +266,10 @@ ipcp_readonly_constant_address_p (ipa_polymorphic_call_context)
   return false;
 }
 
-/* Return the statically known size of the immutable object addressed by
-   VALUE, or zero when it is unknown.  */
+/* Return the visible initializer length for a string, otherwise the known
+   object size, or zero when neither is known.  A partially initialized array
+   can therefore yield fewer bytes than its type size.  This is a profitability
+   hint and does not prove a loop trip count.  */
 
 static unsigned HOST_WIDE_INT
 ipcp_readonly_constant_object_size (tree value)
@@ -385,16 +387,23 @@ ipcp_bounded_cold_immutable_p (cgraph_node *, int, HOST_WIDE_INT,
    IPA-CP threshold.  */
 
 static sreal
-ipcp_value_specialization_time_benefit (tree value, sreal benefit)
+ipcp_value_specialization_time_benefit (cgraph_node *node, tree value,
+					 sreal benefit)
 {
-  if (flag_ipa_value_specialization
+  if (opt_for_fn (node->decl, flag_ipa_value_specialization)
       && ipcp_readonly_constant_address_p (value))
-    return benefit * 5 / 4;
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Adjusting immutable value benefit for %s.\n",
+		 node->dump_name ());
+      return benefit * 5 / 4;
+    }
   return benefit;
 }
 
 static sreal
-ipcp_value_specialization_time_benefit (ipa_polymorphic_call_context,
+ipcp_value_specialization_time_benefit (cgraph_node *,
+					 ipa_polymorphic_call_context,
 					sreal benefit)
 {
   return benefit;
@@ -2229,11 +2238,11 @@ ipcp_lattice<valtype>::add_value (valtype newval, cgraph_edge *cs,
 
   int value_limit = opt_for_fn (cs->callee->decl,
 				param_ipa_cp_value_list_size);
-  /* Ordinary scalar values need a small compile-time bound.  Addresses of
-     immutable constant objects carry substantially more optimization
-     information, so retain a separately bounded set of them.  This is a
-     value-property test and is independent of symbol names or contents.  */
-  if (flag_ipa_value_specialization
+  /* Preserve useful immutable addresses with a larger limit for this entire
+     lattice, including ordinary pointer values arriving later.  There is no
+     separate immutable-entry quota.  The decision depends on value properties,
+     independently of symbol names or literal contents.  */
+  if (opt_for_fn (cs->callee->decl, flag_ipa_value_specialization)
       && (ipcp_readonly_constant_address_p (newval)
 	  || ipcp_values_contain_readonly_constant_address_p (values)))
     value_limit = MAX (value_limit, 4096);
@@ -6232,7 +6241,8 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
       fprintf (dump_file, " (caller_count: %i)\n", caller_count);
       unsigned HOST_WIDE_INT object_size
 	= ipcp_readonly_constant_object_size (val->value);
-      if (flag_ipa_value_specialization && object_size)
+      if (opt_for_fn (node->decl, flag_ipa_value_specialization)
+	  && object_size)
 	{
 	  fprintf (dump_file, "   immutable object size: "
 		   HOST_WIDE_INT_PRINT_UNSIGNED " bytes\n", object_size);
@@ -6240,10 +6250,10 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
     }
 
   sreal local_time_benefit
-    = ipcp_value_specialization_time_benefit (val->value,
+    = ipcp_value_specialization_time_benefit (node, val->value,
 					       val->local_time_benefit);
   sreal prop_time_benefit
-    = ipcp_value_specialization_time_benefit (val->value,
+    = ipcp_value_specialization_time_benefit (node, val->value,
 					       val->prop_time_benefit);
 
   bool readonly_program = ipcp_readonly_program_p (node, index, val);
@@ -6326,24 +6336,32 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
   find_more_contexts_for_caller_subset (node, &known_contexts, callers);
   vec<ipa_argagg_value, va_gc> *aggvals
     = find_aggregate_values_for_callers_subset (node, callers);
+  /* Record candidate context before inlining decisions.  This does not prove
+     that the clone will be inlined; tree consumers recheck their own loops.  */
   if (readonly_program)
     for (unsigned int i = 0; i < callers.length (); ++i)
-      callers[i]->caller->ipa_value_specialized = true;
+      {
+	cgraph_node *caller = callers[i]->caller;
+	caller->ipa_value_specialized = true;
+	if (dump_file && (dump_flags & TDF_DETAILS))
+	  fprintf (dump_file, "Recording immutable value context for %s.\n",
+		   caller->dump_name ());
+      }
   gcc_checking_assert (ipcp_val_agg_replacement_ok_p (aggvals, index,
 						      offset, val->value));
   val->spec_node = create_specialized_node (node, known_csts, known_contexts,
 					    aggvals, callers);
 
-  /* Once normal IPA profitability accepts a bounded immutable program,
-     keeping its clone out of line can hide the folded predicates behind a
-     call boundary.  Make only these proven clones mandatory inline
-     candidates.  */
+  /* Keep the proven immutable context on every byte-program clone, including
+     single-use mandatory-inline candidates.  The context marker records clone
+     provenance; the choice to share a clone or relax its inline limits is a
+     separate profitability policy.  */
   if (readonly_program)
     {
+      val->spec_node->ipa_immutable_program = true;
       if (opt_for_fn (node->decl, flag_ipa_value_specialization)
 	  && (callers.length () >= 2 || loop_program))
 	{
-	  val->spec_node->ipa_immutable_program = true;
 	  if (dump_file)
 	    {
 	      if (loop_program)
@@ -6356,13 +6374,6 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
       else
 	DECL_DISREGARD_INLINE_LIMITS (val->spec_node->decl) = 1;
     }
-
-  /* Keep the immutable context on all proven byte-program clones, including
-     single-use clones that will be mandatory inline candidates.  The marker
-     describes this clone only; it does not mark its enclosing caller.  */
-  if (readonly_program
-      && opt_for_fn (node->decl, flag_ipa_value_specialization))
-    val->spec_node->ipa_immutable_program = true;
 
   if (val->self_recursion_generated_p ())
     self_gen_clones->safe_push (val->spec_node);
