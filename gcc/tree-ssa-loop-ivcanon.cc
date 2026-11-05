@@ -670,10 +670,11 @@ ssa_name_def_stmt_in_loop (class loop *loop, tree name)
   return stmt;
 }
 
-/* Strip widening conversions that are defined inside LOOP from OP.  */
+/* Strip widening and same-precision integer conversions that are defined
+   inside LOOP from OP.  */
 
 static tree
-strip_widening_conversions_in_loop (class loop *loop, tree op)
+strip_integer_conversions_in_loop (class loop *loop, tree op)
 {
   while (TREE_CODE (op) == SSA_NAME)
     {
@@ -687,7 +688,7 @@ strip_widening_conversions_in_loop (class loop *loop, tree op)
       if (!INTEGRAL_TYPE_P (TREE_TYPE (op))
 	  || !INTEGRAL_TYPE_P (TREE_TYPE (rhs))
 	  || (TYPE_PRECISION (TREE_TYPE (rhs))
-	      >= TYPE_PRECISION (TREE_TYPE (op))))
+	      > TYPE_PRECISION (TREE_TYPE (op))))
 	break;
 
       op = rhs;
@@ -704,7 +705,7 @@ static bool
 widened_integer_operand_p (class loop *loop, tree op,
 			   unsigned int to_precision)
 {
-  op = strip_widening_conversions_in_loop (loop, op);
+  op = strip_integer_conversions_in_loop (loop, op);
   if (TREE_CODE (op) != SSA_NAME
       || !INTEGRAL_TYPE_P (TREE_TYPE (op))
       || TYPE_PRECISION (TREE_TYPE (op)) >= to_precision)
@@ -720,7 +721,7 @@ widened_integer_operand_p (class loop *loop, tree op,
 static bool
 widened_integer_mult_p (class loop *loop, tree addend)
 {
-  addend = strip_widening_conversions_in_loop (loop, addend);
+  addend = strip_integer_conversions_in_loop (loop, addend);
 
   gimple *stmt = ssa_name_def_stmt_in_loop (loop, addend);
   if (!stmt
@@ -739,11 +740,30 @@ widened_integer_mult_p (class loop *loop, tree addend)
 					precision));
 }
 
-/* Return true if LOOP has a widened multiply sum reduction that can be a
-   dot-product candidate for the vectorizer.  */
+/* Return true if NAME has a non-debug use inside LOOP other than STMT.
+   Uses outside LOOP can consume the final value of a reduction.  */
 
 static bool
-loop_has_dot_prod_candidate_p (class loop *loop)
+has_other_use_in_loop_p (class loop *loop, tree name, gimple *stmt)
+{
+  imm_use_iterator iter;
+  use_operand_p use_p;
+  FOR_EACH_IMM_USE_FAST (use_p, iter, name)
+    {
+      gimple *use_stmt = USE_STMT (use_p);
+      if (!is_gimple_debug (use_stmt)
+	  && use_stmt != stmt
+	  && flow_bb_inside_loop_p (loop, gimple_bb (use_stmt)))
+	return true;
+    }
+  return false;
+}
+
+/* Return true if LOOP has a widened integer multiply sum reduction.
+   This is a shape heuristic, not a check for target dot-product support.  */
+
+static bool
+loop_has_widened_mult_reduction_p (class loop *loop)
 {
   edge latch = loop_latch_edge (loop);
   if (!latch)
@@ -774,6 +794,14 @@ loop_has_dot_prod_candidate_p (class loop *loop)
       else
 	continue;
 
+      /* Inside LOOP the PHI result must only feed the addition, and the
+	 updated sum must only feed PHI.  Either can supply the final value
+	 outside LOOP, depending on the position of the exit test.  Do not
+	 preserve prefix sums as simple reductions.  */
+      if (has_other_use_in_loop_p (loop, result, stmt)
+	  || has_other_use_in_loop_p (loop, latch_arg, phi))
+	continue;
+
       if (widened_integer_mult_p (loop, addend))
 	return true;
     }
@@ -791,10 +819,17 @@ preserve_vect_idiom_for_vectorizer_p (class loop *loop,
   if (!(flag_tree_loop_vectorize || loop->force_vectorize)
       || loop->inner
       || loop->unroll
-      || n_unroll < 4)
+      || loop->dont_vectorize)
     return false;
 
-  return loop_has_dot_prod_candidate_p (loop);
+  /* Leave very short loops to the usual unrolling heuristics.  This is a
+     minimum unroll-count threshold, not a target vector length.  N_UNROLL
+     counts latch executions (or their upper bound), which need not equal
+     the number of executions of the source-level loop body.  */
+  if (n_unroll < 4)
+    return false;
+
+  return loop_has_widened_mult_reduction_p (loop);
 }
 
 /* Cancel all fully unrolled loops by putting __builtin_unreachable
