@@ -597,7 +597,7 @@ Objective-C and Objective-C++ Dialects}.
 -fno-toplevel-reorder  -fno-trapping-math  -fno-zero-initialized-in-bss
 -fomit-frame-pointer  -foptimize-sibling-calls
 -fpartial-inlining  -fpeel-loops  -fpredictive-commoning
--fprefetch-loop-arrays
+-fprefetch-loop-arrays  -fpreserve-vect-idioms
 -fprofile-correction
 -fprofile-use  -fprofile-use=@var{path} -fprofile-partial-training
 -fprofile-values -fprofile-reorder-functions
@@ -630,7 +630,6 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
 -ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
 -ftree-loop-vectorize
--fpreserve-vect-idioms
 -ftree-parallelize-loops=@var{n}  -ftree-pre  -ftree-partial-pre  -ftree-pta
 -ftree-reassoc  -ftree-scev-cprop  -ftree-sink  -ftree-slsr  -ftree-sra
 -ftree-switch-conversion  -ftree-tail-merge
@@ -13953,12 +13952,23 @@ determining number of iterations requires complicated analysis.  Later
 optimizations then may determine the number easily.  Useful especially
 in connection with unrolling.
 
-@item -fpreserve-vect-idioms
 @opindex fpreserve-vect-idioms
-Preserve loops containing vectorization idioms during early complete loop
-unrolling when they are likely to be handled better by later loop
-vectorization.  This can avoid hiding vectorizer idioms, such as widened
-integer multiply reductions, from the vectorizer.
+@item -fpreserve-vect-idioms
+Preserve selected innermost loops containing widened integer multiply-add
+reductions during early complete unrolling, when complete unrolling would
+increase code size.  Leaving these loops intact can expose opportunities
+for later loop vectorization, including dot-product instructions.
+
+This option is disabled by default and requires loop vectorization to be
+enabled.  It uses a target-independent shape heuristic: it does not require
+target dot-product instructions and does not guarantee vectorization or
+improved performance.  Loops marked with @code{#pragma GCC novector} are
+not preserved by this option.
+
+This option does not inhibit unrolling that does not increase code size,
+override explicit loop-unrolling pragmas, or affect complete unrolling
+after vectorization.  Its main effect is on nested loops at @option{-O3};
+at @option{-O2}, early complete unrolling already avoids code growth.
 
 @opindex ftree-scev-cprop
 @item -ftree-scev-cprop
