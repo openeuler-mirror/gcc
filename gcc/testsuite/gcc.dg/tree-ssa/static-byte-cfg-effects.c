@@ -17,3 +17,5 @@ with_effects (unsigned key)
 }
 
 /* { dg-final { scan-tree-dump-not "RESIDUAL-EMIT" "static-byte-cfg" } } */
+
+/* { dg-final { scan-tree-dump "GUARDPLAN with_effects .*reason=effects-eh-or-unsupported" "static-byte-cfg" } } */

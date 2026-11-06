@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-options "-O2 -ftree-static-byte-cfg -fchecking=2" } */
+/* { dg-options "-O2 -ftree-static-byte-cfg -fchecking=2 -fdump-tree-static-byte-cfg-details" } */
 
 #define DEFINE_SCAN(NAME, ATTR) \
 __attribute__((noipa)) ATTR int NAME (unsigned key) \
@@ -28,3 +28,7 @@ main (void)
       __builtin_abort ();
   return 0;
 }
+
+/* { dg-final { scan-tree-dump "GUARDPLAN specialized guarded=0 .*status=ready" "static-byte-cfg" } } */
+/* { dg-final { scan-tree-dump-times "RESIDUAL-EMIT specialized " 1 "static-byte-cfg" } } */
+/* { dg-final { scan-tree-dump-not "RESIDUAL-EMIT reference " "static-byte-cfg" } } */

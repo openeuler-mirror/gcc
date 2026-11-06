@@ -4160,8 +4160,8 @@ fsve-expand-std-find-threshold
 Common Var(sve_expand_std_find_threshold) Init(8) Optimization
 Minimal length of the array to search
 
-; This comment is to ensure we retain the blank line above.
-
 ftree-static-byte-cfg
 Common Var(flag_tree_static_byte_cfg) Init(0) Optimization
 Specialize bounded CFG states using immutable addresses and byte equality facts derived from GIMPLE.
+
+; This comment is to ensure we retain the blank line above.
