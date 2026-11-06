@@ -32,6 +32,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-eh.h"
 #include "tree-ssa.h"
 #include "tree-dfa.h"
+#include "pointer-query.h"
 #include "value-range.h"
 #include "hash-map.h"
 
@@ -304,6 +305,22 @@ constant_cursor_range (tree pointer, HOST_WIDE_INT displacement, tree object,
 }
 
 
+/* Keep provably invalid loads visible to the later bounds diagnostics.
+   Query the address of the complete reference so MEM_REF displacements and
+   ARRAY_REF indices are included.  access_ref uses wide offsets rather than
+   narrowing or adding them in HOST_WIDE_INT.  Unknown and partly in-bounds
+   ranges do not establish an invalid access.  */
+static bool
+out_of_bounds_byte_ref_p (tree ref, gimple *stmt)
+{
+  access_ref aref;
+  if (!compute_objsize (build_fold_addr_expr (ref), stmt, 1, &aref)
+      || !aref.base0)
+    return false;
+
+  return aref.offrng[1] < 0 || aref.offrng[0] >= aref.sizrng[1];
+}
+
 static unsigned
 constant_byte_range (function *fn)
 {
@@ -333,6 +350,8 @@ constant_byte_range (function *fn)
 		       ? TREE_OPERAND (ref, 0) : build_fold_addr_expr (ref);
 	    tree object = constant_byte_object (ptr, budget);
 	    if (!object)
+	      continue;
+	    if (out_of_bounds_byte_ref_p (ref, stmt))
 	      continue;
 	    int_range_max range;
 	    const unsigned char *bytes
