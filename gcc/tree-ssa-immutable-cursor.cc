@@ -38,7 +38,8 @@
 #include "tree-ssa-alias.h"
 #include "options.h"
 
-namespace {
+namespace
+{
 
 /* These are per-function accounting, reset by the enclosing optional pass.
    Count the full copied cost, before subsequent scalar passes remove any
@@ -67,7 +68,8 @@ public:
   unsigned best_cost = 0;
   unsigned resolving = 0;
 
-  tree valueize (tree op)
+  tree
+  valueize (tree op)
   {
     if (TREE_CODE (op) != SSA_NAME)
       return op;
@@ -88,12 +90,13 @@ public:
     --cursor_analysis_left;
     ++resolving;
     tree value = gimple_fold_stmt_to_constant_1 (def, cursor_valueize,
-					       cursor_valueize);
+						 cursor_valueize);
     --resolving;
     return value && is_gimple_min_invariant (value) ? value : op;
   }
 
-  bool immutable_address_p (tree value)
+  bool
+  immutable_address_p (tree value)
   {
     value = valueize (value);
     if (TREE_CODE (value) != ADDR_EXPR)
@@ -114,19 +117,20 @@ public:
     if (TREE_CODE (base) == STRING_CST)
       return true;
     return TREE_CODE (base) == VAR_DECL && TREE_READONLY (base)
-      && !TREE_THIS_VOLATILE (base) && !DECL_EXTERNAL (base)
-      && !DECL_WEAK (base) && DECL_INITIAL (base)
-      && TREE_CONSTANT (DECL_INITIAL (base))
-      && TREE_TYPE (base) && TYPE_SIZE_UNIT (TREE_TYPE (base))
-      && tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (base)));
+	   && !TREE_THIS_VOLATILE (base) && !DECL_EXTERNAL (base)
+	   && !DECL_WEAK (base) && DECL_INITIAL (base)
+	   && TREE_CONSTANT (DECL_INITIAL (base)) && TREE_TYPE (base)
+	   && TYPE_SIZE_UNIT (TREE_TYPE (base))
+	   && tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (base)));
   }
 
-  bool seed_p (edge entry)
+  bool
+  seed_p (edge entry)
   {
     if (entry->flags & (EDGE_ABNORMAL | EDGE_EH))
       return false;
-    for (gphi_iterator gpi = gsi_start_phis (entry->dest);
-	 !gsi_end_p (gpi); gsi_next (&gpi))
+    for (gphi_iterator gpi = gsi_start_phis (entry->dest); !gsi_end_p (gpi);
+	 gsi_next (&gpi))
       {
 	gphi *phi = gpi.phi ();
 	tree lhs = gimple_phi_result (phi);
@@ -138,10 +142,10 @@ public:
     return false;
   }
 
-  void remember (unsigned score, unsigned cost)
+  void
+  remember (unsigned score, unsigned cost)
   {
-    if (edges.length () < 2 || !score
-	|| score < best_score
+    if (edges.length () < 2 || !score || score < best_score
 	|| score == best_score)
       return;
     best.truncate (0);
@@ -154,8 +158,9 @@ public:
   /* Explore a path, preserving all off-path successors in the generic
      thread copier.  An unknown condition is never replaced by a guessed
      direction.  Only the final, proved condition may be removed.  */
-  void visit (edge entry, unsigned cost, unsigned score,
-	      unsigned uncertain, unsigned depth)
+  void
+  visit (edge entry, unsigned cost, unsigned score, unsigned uncertain,
+	 unsigned depth)
   {
     basic_block bb = entry->dest;
     if (!cursor_analysis_left || depth > 12
@@ -165,8 +170,7 @@ public:
       return;
     /* The generic path copier does not duplicate nested loop regions.
        Retain the best prefix, rather than queuing a path it will reject.  */
-    if (!edges.is_empty ()
-	&& bb->loop_father != edges[0]->dest->loop_father)
+    if (!edges.is_empty () && bb->loop_father != edges[0]->dest->loop_father)
       return;
     for (edge e : edges)
       if (e->dest == bb)
@@ -181,16 +185,16 @@ public:
     const unsigned saved_edges = edges.length ();
     edges.safe_push (entry);
     auto_vec<cursor_value, 8> phis;
-    for (gphi_iterator gpi = gsi_start_phis (bb);
-	 !gsi_end_p (gpi); gsi_next (&gpi))
+    for (gphi_iterator gpi = gsi_start_phis (bb); !gsi_end_p (gpi);
+	 gsi_next (&gpi))
       {
 	gphi *phi = gpi.phi ();
 	tree lhs = gimple_phi_result (phi);
 	if (virtual_operand_p (lhs))
 	  continue;
 	tree value = valueize (PHI_ARG_DEF_FROM_EDGE (phi, entry));
-	phis.safe_push ({ lhs, is_gimple_min_invariant (value)
-			       ? value : NULL_TREE });
+	phis.safe_push (
+	    { lhs, is_gimple_min_invariant (value) ? value : NULL_TREE });
       }
     /* All PHI arguments observe the state before any result is assigned.  */
     for (cursor_value value : phis)
@@ -199,26 +203,32 @@ public:
     gimple *last = NULL;
     tree condition = NULL_TREE;
     bool within_budget = true;
-    for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
-	 !gsi_end_p (gsi); gsi_next (&gsi))
+    for (gimple_stmt_iterator gsi = gsi_start_bb (bb); !gsi_end_p (gsi);
+	 gsi_next (&gsi))
       {
 	gimple *stmt = gsi_stmt (gsi);
 	if (is_gimple_debug (stmt) || gimple_code (stmt) == GIMPLE_LABEL)
 	  continue;
 	if (!cursor_analysis_left)
-	  { within_budget = false; break; }
+	  {
+	    within_budget = false;
+	    break;
+	  }
 	--cursor_analysis_left;
 	cost += estimate_num_insns (stmt, &eni_size_weights);
-	if (cost > (unsigned) param_immutable_cursor_max_path_insns
+	if (cost > (unsigned)param_immutable_cursor_max_path_insns
 	    || cost > cursor_growth_left)
-	  { within_budget = false; break; }
+	  {
+	    within_budget = false;
+	    break;
+	  }
 	last = stmt;
 	tree value = NULL_TREE;
 	if (!gimple_has_volatile_ops (stmt)
 	    && (is_gimple_assign (stmt) || is_gimple_call (stmt)
 		|| gimple_code (stmt) == GIMPLE_COND))
 	  value = gimple_fold_stmt_to_constant_1 (stmt, cursor_valueize,
-						cursor_valueize);
+						  cursor_valueize);
 	else if (gimple_code (stmt) == GIMPLE_SWITCH)
 	  value = valueize (gimple_switch_index (as_a<gswitch *> (stmt)));
 
@@ -228,7 +238,8 @@ public:
 	else if (tree lhs = gimple_get_lhs (stmt))
 	  if (TREE_CODE (lhs) == SSA_NAME)
 	    values.safe_push ({ lhs, value && is_gimple_min_invariant (value)
-				     ? value : NULL_TREE });
+					 ? value
+					 : NULL_TREE });
       }
 
     if (within_budget)
@@ -263,21 +274,29 @@ cursor_valueize (tree op)
   return active_cursor_path->valueize (op);
 }
 
-const pass_data cursor_data = {
-  GIMPLE_PASS, "immutable-cursor", OPTGROUP_LOOP, TV_TREE_SSA_THREAD_JUMPS,
-  PROP_cfg | PROP_ssa, 0, 0, 0, 0
-};
+const pass_data cursor_data = { GIMPLE_PASS,
+				"immutable-cursor",
+				OPTGROUP_LOOP,
+				TV_TREE_SSA_THREAD_JUMPS,
+				PROP_cfg | PROP_ssa,
+				0,
+				0,
+				0,
+				0 };
 
 class pass_immutable_cursor_specialization : public gimple_opt_pass
 {
 public:
   pass_immutable_cursor_specialization (gcc::context *ctxt)
-    : gimple_opt_pass (cursor_data, ctxt) {}
-  bool gate (function *) final override
+      : gimple_opt_pass (cursor_data, ctxt)
+  {
+  }
+
+  bool
+  gate (function *) final override
   {
     if (!flag_tree_immutable_cursor_specialization || !flag_thread_jumps
-	|| optimize < 2
-	|| !param_immutable_cursor_growth_budget)
+	|| optimize < 2 || !param_immutable_cursor_growth_budget)
       return false;
     cursor_analysis_left = 2048;
     cursor_path path;
@@ -290,14 +309,19 @@ public:
 	edge_iterator ei;
 	FOR_EACH_EDGE (e, ei, bb->preds)
 	  if (path.seed_p (e))
-	    { found = true; break; }
+	    {
+	      found = true;
+	      break;
+	    }
 	if (found)
 	  break;
       }
     active_cursor_path = NULL;
     return found;
   }
-  unsigned execute (function *) final override
+
+  unsigned
+  execute (function *) final override
   {
     cursor_growth_left = param_immutable_cursor_growth_budget;
     cursor_analysis_left = 32768;
@@ -306,21 +330,38 @@ public:
   }
 };
 
-const pass_data cursor_thread_data = {
-  GIMPLE_PASS, "cursor-thread", OPTGROUP_LOOP, TV_TREE_SSA_THREAD_JUMPS,
-  PROP_cfg | PROP_ssa, 0, 0, 0, TODO_update_ssa
-};
+const pass_data cursor_thread_data = { GIMPLE_PASS,
+				       "cursor-thread",
+				       OPTGROUP_LOOP,
+				       TV_TREE_SSA_THREAD_JUMPS,
+				       PROP_cfg | PROP_ssa,
+				       0,
+				       0,
+				       0,
+				       TODO_update_ssa };
 
 class pass_immutable_cursor_thread : public gimple_opt_pass
 {
 public:
   pass_immutable_cursor_thread (gcc::context *ctxt)
-    : gimple_opt_pass (cursor_thread_data, ctxt) {}
-  opt_pass *clone () final override
-  { return new pass_immutable_cursor_thread (m_ctxt); }
-  bool gate (function *) final override
-  { return cursor_growth_left && cursor_analysis_left; }
-  unsigned execute (function *fun) final override
+      : gimple_opt_pass (cursor_thread_data, ctxt)
+  {
+  }
+
+  opt_pass *
+  clone () final override
+  {
+    return new pass_immutable_cursor_thread (m_ctxt);
+  }
+
+  bool
+  gate (function *) final override
+  {
+    return cursor_growth_left && cursor_analysis_left;
+  }
+
+  unsigned
+  execute (function *fun) final override
   {
     loop_optimizer_init (LOOPS_HAVE_PREHEADERS | LOOPS_HAVE_SIMPLE_LATCHES);
     back_jt_path_registry registry;
@@ -350,16 +391,18 @@ public:
 	    for (unsigned i = 0; i < path.best.length (); ++i)
 	      registry.push_edge (thread, path.best[i],
 				  i + 1 == path.best.length ()
-				  ? EDGE_NO_COPY_SRC_BLOCK
-				  : EDGE_COPY_SRC_BLOCK);
+				      ? EDGE_NO_COPY_SRC_BLOCK
+				      : EDGE_COPY_SRC_BLOCK);
 	    if (registry.register_jump_thread (thread))
 	      {
 		cursor_growth_left -= path.best_cost;
 		++paths;
 		if (dump_file)
-		  fprintf (dump_file, "Immutable cursor path: %u proved branches, "
-			   "%u copied insns, %u edges.\n", path.best_score,
-			   path.best_cost, path.best.length ());
+		  fprintf (dump_file,
+			   "Immutable cursor path: %u proved branches, "
+			   "%u copied insns, %u edges.\n",
+			   path.best_score, path.best_cost,
+			   path.best.length ());
 	      }
 	    if (!cursor_growth_left || !cursor_analysis_left || paths == 32)
 	      break;
@@ -379,7 +422,13 @@ public:
 
 /* Keep optional scalar pass identities distinct from the ordinary pipeline,
    including when the enclosing option is disabled.  */
-enum cursor_scalar_kind { CURSOR_CCP, CURSOR_FORWPROP, CURSOR_DCE, CURSOR_FRE };
+enum cursor_scalar_kind
+{
+  CURSOR_CCP,
+  CURSOR_FORWPROP,
+  CURSOR_DCE,
+  CURSOR_FRE
+};
 
 static gimple_opt_pass *
 cursor_scalar (gcc::context *ctxt, cursor_scalar_kind kind)
@@ -391,8 +440,10 @@ cursor_scalar (gcc::context *ctxt, cursor_scalar_kind kind)
       pass = make_pass_ccp (ctxt);
       pass->set_pass_param (0, true);
       return pass;
-    case CURSOR_FORWPROP: return make_pass_forwprop (ctxt);
-    case CURSOR_DCE: return make_pass_dce (ctxt);
+    case CURSOR_FORWPROP:
+      return make_pass_forwprop (ctxt);
+    case CURSOR_DCE:
+      return make_pass_dce (ctxt);
     case CURSOR_FRE:
       pass = make_pass_fre (ctxt);
       pass->set_pass_param (0, true);
@@ -405,7 +456,7 @@ static pass_data
 cursor_scalar_data (gimple_opt_pass *inner, cursor_scalar_kind kind)
 {
   static const char *const names[]
-    = { "cursor-ccp", "cursor-forwprop", "cursor-dce", "cursor-fre" };
+      = { "cursor-ccp", "cursor-forwprop", "cursor-dce", "cursor-fre" };
   pass_data data = *inner;
   data.name = names[kind];
   return data;
@@ -415,33 +466,59 @@ class pass_cursor_scalar : public gimple_opt_pass
 {
   gimple_opt_pass *m_inner;
   cursor_scalar_kind m_kind;
+
 public:
   pass_cursor_scalar (gcc::context *ctxt, cursor_scalar_kind kind,
 		      gimple_opt_pass *inner)
-    : gimple_opt_pass (cursor_scalar_data (inner, kind), ctxt),
-      m_inner (inner), m_kind (kind) {}
-  ~pass_cursor_scalar () { delete m_inner; }
-  opt_pass *clone () final override
-  { return new pass_cursor_scalar (m_ctxt, m_kind,
-				  cursor_scalar (m_ctxt, m_kind)); }
-  bool gate (function *fun) final override
-  { return cursor_changed && m_inner->gate (fun); }
-  unsigned execute (function *fun) final override
-  { return m_inner->execute (fun); }
+      : gimple_opt_pass (cursor_scalar_data (inner, kind), ctxt),
+	m_inner (inner), m_kind (kind)
+  {
+  }
+
+  ~pass_cursor_scalar ()
+  {
+    delete m_inner;
+  }
+
+  opt_pass *
+  clone () final override
+  {
+    return new pass_cursor_scalar (m_ctxt, m_kind,
+				   cursor_scalar (m_ctxt, m_kind));
+  }
+
+  bool
+  gate (function *fun) final override
+  {
+    return cursor_changed && m_inner->gate (fun);
+  }
+
+  unsigned
+  execute (function *fun) final override
+  {
+    return m_inner->execute (fun);
+  }
 };
 
 } // anon namespace
 
 gimple_opt_pass *
 make_pass_immutable_cursor_specialization (gcc::context *ctxt)
-{ return new pass_immutable_cursor_specialization (ctxt); }
+{
+  return new pass_immutable_cursor_specialization (ctxt);
+}
+
 gimple_opt_pass *
 make_pass_immutable_cursor_thread (gcc::context *ctxt)
-{ return new pass_immutable_cursor_thread (ctxt); }
+{
+  return new pass_immutable_cursor_thread (ctxt);
+}
 
-#define CURSOR_SCALAR_FACTORY(NAME, KIND) \
-gimple_opt_pass *make_pass_cursor_##NAME (gcc::context *ctxt) \
-{ return new pass_cursor_scalar (ctxt, KIND, cursor_scalar (ctxt, KIND)); }
+#define CURSOR_SCALAR_FACTORY(NAME, KIND)                                      \
+  gimple_opt_pass *make_pass_cursor_##NAME (gcc::context *ctxt)                \
+  {                                                                            \
+    return new pass_cursor_scalar (ctxt, KIND, cursor_scalar (ctxt, KIND));    \
+  }
 CURSOR_SCALAR_FACTORY (ccp, CURSOR_CCP)
 CURSOR_SCALAR_FACTORY (forwprop, CURSOR_FORWPROP)
 CURSOR_SCALAR_FACTORY (dce, CURSOR_DCE)

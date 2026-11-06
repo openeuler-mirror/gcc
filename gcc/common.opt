@@ -4209,7 +4209,7 @@ Deprecated spelling of -fipa-value-specialization-helper-expansion.
 
 ftree-immutable-loop-specialization
 Common Var(flag_tree_immutable_loop_specialization) Optimization Init(0)
-Expose immutable loop states with bounded peeling and interleaved scalar cleanup.
+Expose immutable loop states; loop stages require -fipa-value-specialization.
 
 ftree-immutable-loop-specialization-cursor
 Common Var(flag_tree_immutable_cursor_specialization) Optimization Init(0) EnabledBy(ftree-immutable-loop-specialization)
@@ -4217,4 +4217,4 @@ Specialize bounded control-flow paths for cursors into immutable objects.
 
 ftree-immutable-cursor-specialization
 Common Alias(ftree-immutable-loop-specialization-cursor)
-Deprecated spelling of -ftree-immutable-loop-specialization-cursor.
+Compatibility spelling of -ftree-immutable-loop-specialization-cursor.

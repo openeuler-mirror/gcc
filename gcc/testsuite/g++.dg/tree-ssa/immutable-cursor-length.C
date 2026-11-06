@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-options "-O3 -ftree-immutable-cursor-specialization" } */
+/* { dg-options "-O3 -fchecking=2 -ftree-immutable-cursor-specialization" } */
 #include <string>
 __attribute__((noinline,noipa)) bool equal(const std::string &s)
 { return s=="a"; }

@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-options "-O3 -ftree-immutable-loop-specialization-cursor" } */
+/* { dg-options "-O3 -fchecking=2 -ftree-immutable-loop-specialization-cursor" } */
 /* A mutable stream can change while it is being interpreted.  */
 static char stream[5] = "abcd";
 static volatile unsigned reads;

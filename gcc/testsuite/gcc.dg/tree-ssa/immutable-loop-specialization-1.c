@@ -83,3 +83,4 @@ int main (void)
 }
 
 /* { dg-final { scan-tree-dump "Bounded immutable state peeling" "immutable-unroll1" } } */
+/* { dg-final { scan-tree-dump "Peeled loop" "immutable-unroll1" } } */

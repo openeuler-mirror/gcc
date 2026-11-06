@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-options "-O3 -ftree-immutable-loop-specialization-cursor" } */
+/* { dg-options "-O3 -fchecking=2 -ftree-immutable-loop-specialization-cursor" } */
 static const unsigned char bytes[]={3,0,255,7};
 __attribute__((noinline,noipa)) static unsigned walk(unsigned n)
 {

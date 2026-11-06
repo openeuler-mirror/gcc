@@ -1,5 +1,5 @@
 /* { dg-do run } */
-/* { dg-options "-O3 -ftree-immutable-loop-specialization-cursor" } */
+/* { dg-options "-O3 -fchecking=2 -ftree-immutable-loop-specialization-cursor" } */
 static inline __attribute__((always_inline)) unsigned walk(const char *p)
 {
   unsigned r=0;

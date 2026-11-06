@@ -94,6 +94,8 @@ int main (void)
 	     + reference (SECOND, x, select) + reference (SECOND, x + 1, select))
 	__builtin_abort ();
     }
+  return 0;
 }
 /* { dg-final { scan-tree-dump "Pointer PHI shares one constant-address object" "immutable-unroll1" } } */
 /* { dg-final { scan-tree-dump "Bounded immutable state peeling" "immutable-unroll1" } } */
+/* { dg-final { scan-tree-dump "Peeled loop" "immutable-unroll1" } } */

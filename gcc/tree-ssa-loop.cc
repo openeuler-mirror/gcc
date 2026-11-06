@@ -851,6 +851,11 @@ immutable_stage_data (const gimple_opt_pass *inner, immutable_stage_kind kind)
       "immutable-fre", "immutable-dom" };
   pass_data data = *inner;
   data.name = names[kind];
+  /* These stages finalize their temporary loop state before scalar cleanup,
+     but the regular loop pipeline and its vectorization still follow.  Do
+     not relax the loop-preservation rules of intervening consumers.  */
+  if (kind == IMM_DONE)
+    data.properties_provided &= ~PROP_loop_opts_done;
   return data;
 }
 
