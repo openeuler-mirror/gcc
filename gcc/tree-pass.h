@@ -401,6 +401,7 @@ extern gimple_opt_pass *make_pass_loop_prefetch (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_iv_optimize (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_loop_done (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ch (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_ch_bitset (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ch_vect (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_sccopy (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ccp (gcc::context *ctxt);

@@ -701,11 +701,26 @@ const pass_data pass_data_ch =
   0, /* todo_flags_finish */
 };
 
+/* Keep the preparation instance out of the ordinary ch1/ch2 sequence.  */
+const pass_data pass_data_ch_bitset =
+{
+  GIMPLE_PASS, /* type */
+  "ch_bitset", /* name */
+  OPTGROUP_LOOP, /* optinfo_flags */
+  TV_TREE_CH, /* tv_id */
+  ( PROP_cfg | PROP_ssa ), /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  0, /* todo_flags_finish */
+};
+
 class pass_ch : public ch_base
 {
 public:
-  pass_ch (gcc::context *ctxt)
-    : ch_base (pass_data_ch, ctxt), bitset_prepare_p (false)
+  pass_ch (gcc::context *ctxt, bool bitset_prepare = false)
+    : ch_base (bitset_prepare ? pass_data_ch_bitset : pass_data_ch, ctxt),
+      bitset_prepare_p (bitset_prepare)
   {}
 
   /* opt_pass methods: */
@@ -720,14 +735,7 @@ public:
 
   opt_pass *clone () final override
   {
-    pass_ch *copy = new pass_ch (m_ctxt);
-    copy->bitset_prepare_p = bitset_prepare_p;
-    return copy;
-  }
-  void set_pass_param (unsigned int n, bool param) final override
-  {
-    gcc_assert (n == 0);
-    bitset_prepare_p = param;
+    return new pass_ch (m_ctxt, bitset_prepare_p);
   }
 
 protected:
@@ -735,7 +743,7 @@ protected:
   bool process_loop_p (class loop *loop) final override;
 
 private:
-  bool bitset_prepare_p;
+  const bool bitset_prepare_p;
 }; // class pass_ch
 
 const pass_data pass_data_ch_vect =
@@ -1284,4 +1292,10 @@ gimple_opt_pass *
 make_pass_ch (gcc::context *ctxt)
 {
   return new pass_ch (ctxt);
+}
+
+gimple_opt_pass *
+make_pass_ch_bitset (gcc::context *ctxt)
+{
+  return new pass_ch (ctxt, true);
 }
