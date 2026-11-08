@@ -293,17 +293,20 @@ public:
   }
 
   bool
-  gate (function *) final override
+  gate (function *fun) final override
   {
     if (!flag_tree_immutable_cursor_specialization || !flag_thread_jumps
 	|| optimize < 2 || !param_immutable_cursor_growth_budget)
+      return false;
+    /* Pass listing calls gates with a dummy function that has no CFG.  */
+    if (!fun || !fun->cfg)
       return false;
     cursor_analysis_left = 2048;
     cursor_path path;
     active_cursor_path = &path;
     bool found = false;
     basic_block bb;
-    FOR_EACH_BB_FN (bb, cfun)
+    FOR_EACH_BB_FN (bb, fun)
       {
 	edge e;
 	edge_iterator ei;
