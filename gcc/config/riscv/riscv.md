@@ -113,6 +113,7 @@
   UNSPECV_MRET
   UNSPECV_SRET
   UNSPECV_URET
+  UNSPECV_MNRET
 
   ;; Blockage and synchronization.
   UNSPECV_BLOCKAGE
@@ -3876,6 +3877,13 @@
    (unspec_volatile [(const_int 0)] UNSPECV_URET)]
   ""
   "uret"
+  [(set_attr "type" "ret")])
+
+(define_insn "riscv_mnret"
+  [(return)
+   (unspec_volatile [(const_int 0)] UNSPECV_MNRET)]
+  "TARGET_SMRNMI"
+  "mnret"
   [(set_attr "type" "ret")])
 
 (define_insn "stack_tie<mode>"
