@@ -119,6 +119,7 @@
 #include "print-rtl.h"
 #include "function-abi.h"
 #include "mux-utils.h"
+#include "hash-set.h"
 
 typedef fibonacci_heap <long, basic_block_def> bb_heap_t;
 
@@ -2258,14 +2259,160 @@ vt_canon_true_dep (dataflow_set *set, rtx mloc, rtx maddr, rtx loc)
   return true;
 }
 
-/* Hold parameters for the hashtab traversal function
-   drop_overlapping_mem_locs, see below.  */
+/* Bound new alias-graph exploration across dataflow and emission for one
+   invocation of variable tracking, including its fallback retry.  */
+static unsigned vt_decl_work;
+static unsigned vt_decl_budget_fallbacks;
+
+struct decl_storage_summary
+{
+  hash_map<tree, bool> *own_mems = nullptr;
+  bool complete = false;
+
+  ~decl_storage_summary ()
+  {
+    delete own_mems;
+  }
+};
+
+/* Hold parameters and short-lived storage proofs for the two hashtab
+   traversals in clobber_overlapping_mems.  The first traversal changes
+   only declaration bindings, so its VALUE graph stays unchanged.  Never
+   reuse these summaries after the second traversal removes MEMs.  */
 
 struct overlapping_mems
 {
   dataflow_set *set;
   rtx loc, addr;
+  hash_map<rtx, decl_storage_summary *> *decl_summaries = nullptr;
+  auto_vec<decl_storage_summary *, 4> owned_summaries;
+
+  ~overlapping_mems ()
+  {
+    delete decl_summaries;
+    for (decl_storage_summary *summary : owned_summaries)
+      delete summary;
+  }
 };
+
+/* Only source declarations whose objects may be modified through aliases
+   need to follow memory changes.  Debug temporaries remain snapshots.  */
+static bool
+aliased_source_decl_p (tree decl)
+{
+  return (VAR_P (decl) || TREE_CODE (decl) == PARM_DECL)
+    && may_be_aliased (decl);
+}
+
+static bool
+vt_decl_spend ()
+{
+  if (!vt_decl_work)
+    return false;
+  --vt_decl_work;
+  return true;
+}
+
+/* Collect every reachable own-storage MEM once for this exact root.
+   Do not give a visited child the root's summary: VALUE edges need not
+   be symmetric.  A partial summary can never prove storage disjoint.  */
+static decl_storage_summary *
+decl_value_storage (rtx root, overlapping_mems *coms)
+{
+  if (coms->decl_summaries)
+    if (decl_storage_summary **cached = coms->decl_summaries->get (root))
+      return *cached;
+  if (!vt_decl_spend ())
+    return nullptr;
+
+  decl_storage_summary *summary = new decl_storage_summary;
+  coms->owned_summaries.safe_push (summary);
+  if (!coms->decl_summaries)
+    coms->decl_summaries = new hash_map<rtx, decl_storage_summary *>;
+  coms->decl_summaries->put (root, summary);
+
+  hash_set<rtx> visited;
+  auto_vec<rtx, 16> pending;
+  pending.safe_push (root);
+  while (!pending.is_empty ())
+    {
+      if (!vt_decl_spend ())
+	return summary;
+      rtx val = pending.pop ();
+      if (visited.contains (val))
+	continue;
+      visited.add (val);
+      variable *var = shared_hash_find (coms->set->vars, dv_from_value (val));
+      if (!var || !var->n_var_parts)
+	continue;
+      gcc_assert (var->onepart && var->n_var_parts == 1);
+      for (location_chain *loc = var->var_part[0].loc_chain;
+	   loc; loc = loc->next)
+	{
+	  if (!vt_decl_spend ())
+	    return summary;
+	  if (MEM_P (loc->loc) && MEM_EXPR (loc->loc)
+	      && aliased_source_decl_p (MEM_EXPR (loc->loc))
+	      && int_mem_offset (loc->loc) == 0)
+	    {
+	      tree decl = MEM_EXPR (loc->loc);
+	      if (!summary->own_mems)
+		summary->own_mems = new hash_map<tree, bool>;
+	      bool *overlaps = summary->own_mems->get (decl);
+	      if (!overlaps || !*overlaps)
+		{
+		  bool overlap = vt_canon_true_dep (coms->set, coms->loc,
+						   coms->addr, loc->loc);
+		  summary->own_mems->put (decl, overlap);
+		}
+	    }
+	  else if (GET_CODE (loc->loc) == VALUE)
+	    pending.safe_push (loc->loc);
+	}
+    }
+  summary->complete = true;
+  return summary;
+}
+
+/* Only a complete proof with at least one own-storage MEM, all disjoint
+   from the store, can retain an aliased source declaration.  Exhaustion
+   loses availability without deleting immutable historical VALUEs.  */
+static bool
+decl_value_may_be_clobbered (tree decl, rtx val, overlapping_mems *coms)
+{
+  decl_storage_summary *summary = decl_value_storage (val, coms);
+  if (!summary || !summary->complete)
+    {
+      ++vt_decl_budget_fallbacks;
+      return true;
+    }
+  bool *overlaps = summary->own_mems ? summary->own_mems->get (decl) : nullptr;
+  return !overlaps || *overlaps;
+}
+
+/* An aliased source variable can change when its own storage is written.
+   Detach its binding from historical VALUEs before removing overlapping
+   MEMs.  Other variables can still describe a scalar snapshot taken before
+   the store, using the same immutable VALUE and its proved expression.  */
+static int
+invalidate_overlapping_decl_values (variable **slot, overlapping_mems *coms)
+{
+  variable *var = *slot;
+  if (var->onepart != ONEPART_VDECL || !var->n_var_parts)
+    return 1;
+  tree decl = dv_as_decl (var->dv);
+  if (!aliased_source_decl_p (decl))
+    return 1;
+  for (location_chain *loc = var->var_part[0].loc_chain;
+       loc; loc = loc->next)
+    if (GET_CODE (loc->loc) == VALUE
+	&& decl_value_may_be_clobbered (decl, loc->loc, coms))
+      {
+	clobber_slot_part (coms->set, NULL_RTX, slot, 0, NULL_RTX);
+	return 1;
+      }
+  return 1;
+}
 
 /* Remove all MEMs that overlap with COMS->LOC from the location list
    of a hash table entry for a onepart variable.  COMS->ADDR must be a
@@ -2354,6 +2501,9 @@ clobber_overlapping_mems (dataflow_set *set, rtx loc)
   coms.loc = canon_rtx (loc);
   coms.addr = vt_canonicalize_addr (set, XEXP (loc, 0));
 
+  set->traversed_vars = set->vars;
+  shared_hash_htab (set->vars)
+    ->traverse <overlapping_mems *, invalidate_overlapping_decl_values> (&coms);
   set->traversed_vars = set->vars;
   shared_hash_htab (set->vars)
     ->traverse <overlapping_mems*, drop_overlapping_mem_locs> (&coms);
@@ -4723,6 +4873,19 @@ dataflow_set_preserve_mem_locs (variable **slot, dataflow_set *set)
 
       gcc_assert (var->n_var_parts == 1);
 
+      /* A merge or earlier memory invalidation may have removed the
+	 declaration's own MEM.  A historical VALUE alone cannot describe
+	 an aliased object that this call is allowed to change.  */
+      if (var->onepart == ONEPART_VDECL && aliased_source_decl_p (decl))
+	for (loc = var->var_part[0].loc_chain; loc; loc = loc->next)
+	  if (GET_CODE (loc->loc) == VALUE
+	      && !find_mem_expr_in_1pdv (decl, loc->loc,
+					shared_hash_htab (set->vars)))
+	    {
+	      clobber_slot_part (set, NULL_RTX, slot, 0, NULL_RTX);
+	      return 1;
+	    }
+
       if (shared_var_p (var, set->vars))
 	{
 	  for (loc = var->var_part[0].loc_chain; loc; loc = loc->next)
@@ -6728,6 +6891,589 @@ find_src_set_src (dataflow_set *set, rtx src)
   return set_src;
 }
 
+/* The RTL does not change during location dataflow.  Cache both proved
+   expressions and failed proofs, and bound total proof work per function.
+   Exhaustion affects only optional debug reconstruction.  */
+static hash_map<rtx_insn *, rtx> *vt_merge_expressions;
+static hash_map<edge, rtx> *vt_merge_guards;
+static hash_map<rtx_insn *, unsigned> *vt_merge_insn_sizes;
+static unsigned vt_merge_work;
+
+static bool
+vt_merge_spend (unsigned amount = 1)
+{
+  if (amount > vt_merge_work)
+    return false;
+  vt_merge_work -= amount;
+  return true;
+}
+
+/* Account for pattern, register-note and call-usage traversal before
+   asking the existing RTL modification routines to scan an insn.  */
+static unsigned
+vt_merge_insn_size (rtx_insn *insn)
+{
+  if (unsigned *cached = vt_merge_insn_sizes->get (insn))
+    return *cached;
+  unsigned size = 1;
+  rtx parts[] = { PATTERN (insn), REG_NOTES (insn),
+		  CALL_P (insn) ? CALL_INSN_FUNCTION_USAGE (insn) : NULL_RTX };
+  for (rtx part : parts)
+    if (part)
+      {
+	subrtx_var_iterator::array_type array;
+	FOR_EACH_SUBRTX_VAR (iter, array, part, ALL)
+	  {
+	    if (!vt_merge_spend ())
+	      {
+		vt_merge_insn_sizes->put (insn, 0);
+		return 0;
+	      }
+	    ++size;
+	  }
+      }
+  vt_merge_insn_sizes->put (insn, size);
+  return size;
+}
+
+/* -1 means that the bounded proof cannot inspect this instruction.  */
+static int
+vt_merge_modified (rtx reg, rtx_insn *insn)
+{
+  unsigned size = vt_merge_insn_size (insn);
+  if (!size || !vt_merge_spend (size))
+    return -1;
+  return modified_in_p (reg, insn);
+}
+
+/* A proof-only integer register domain.  Wider, partial, fixed and
+   non-integer registers are deliberately outside this domain.  */
+static bool
+vt_merge_reg_p (rtx x)
+{
+  return REG_P (x) && HARD_REGISTER_P (x) && !fixed_regs[REGNO (x)]
+    && GET_MODE_CLASS (GET_MODE (x)) == MODE_INT
+    && GET_MODE_PRECISION (as_a <scalar_int_mode> (GET_MODE (x)))
+       <= HOST_BITS_PER_WIDE_INT
+    && REG_NREGS (x) == 1;
+}
+
+/* Translate P across a pure copy, without treating a new source as an
+   old destination.  Unmodelled writes, including ABI call clobbers, fail.  */
+static rtx
+vt_merge_copy_back (rtx p, rtx_insn *insn)
+{
+  if (!NONDEBUG_INSN_P (insn))
+    return p;
+  auto_vec<rtx, 2> from, to;
+  subrtx_var_iterator::array_type array;
+  FOR_EACH_SUBRTX_VAR (iter, array, p, NONCONST)
+    {
+      if (!vt_merge_spend ())
+	return NULL_RTX;
+      rtx reg = *iter;
+      if (!REG_P (reg))
+	continue;
+      if (!vt_merge_reg_p (reg))
+	return NULL_RTX;
+      int modified = vt_merge_modified (reg, insn);
+      if (modified < 0)
+	return NULL_RTX;
+      if (!modified)
+	continue;
+      rtx s = single_set (insn);
+      if (CALL_P (insn) || !s || s != PATTERN (insn)
+	  || !vt_merge_reg_p (SET_DEST (s))
+	  || REGNO (SET_DEST (s)) != REGNO (reg)
+	  || GET_MODE_PRECISION (as_a <scalar_int_mode>
+				 (GET_MODE (SET_DEST (s))))
+	     < GET_MODE_PRECISION (as_a <scalar_int_mode> (GET_MODE (reg))))
+	return NULL_RTX;
+      rtx src = SET_SRC (s);
+      if (!CONST_INT_P (src) && !vt_merge_reg_p (src))
+	return NULL_RTX;
+      if (CONST_INT_P (src))
+	src = gen_int_mode (INTVAL (src), GET_MODE (reg));
+      else if (GET_MODE (src) != GET_MODE (reg))
+	{
+	  src = simplify_gen_subreg (GET_MODE (reg), src, GET_MODE (src),
+				    subreg_lowpart_offset (GET_MODE (reg),
+							   GET_MODE (src)));
+	  if (!src || !vt_merge_reg_p (src))
+	    return NULL_RTX;
+	}
+      from.safe_push (reg);
+      to.safe_push (src);
+    }
+  /* A pure single SET can replace only one register in this domain.  */
+  if (from.length () > 1)
+    return NULL_RTX;
+  return from.is_empty () ? p : simplify_replace_rtx (p, from[0], to[0]);
+}
+
+/* Signed integer comparisons have at most two closed intervals.  Use
+   exact endpoints, avoiding overflow at both ends of the mode.  */
+struct vt_merge_interval
+{
+  HOST_WIDE_INT lo, hi;
+};
+
+static unsigned
+vt_merge_intervals (rtx p, vt_merge_interval *out)
+{
+  if (!COMPARISON_P (p) || !vt_merge_reg_p (XEXP (p, 0))
+      || !CONST_INT_P (XEXP (p, 1)))
+    return 0;
+  unsigned bits = GET_MODE_PRECISION (as_a <scalar_int_mode>
+				     (GET_MODE (XEXP (p, 0))));
+  HOST_WIDE_INT lo = sext_hwi (HOST_WIDE_INT_1U << (bits - 1), bits);
+  HOST_WIDE_INT hi = -(lo + 1);
+  HOST_WIDE_INT c = INTVAL (gen_int_mode (INTVAL (XEXP (p, 1)),
+					GET_MODE (XEXP (p, 0))));
+  switch (GET_CODE (p))
+    {
+    case EQ:
+      out[0] = { c, c };
+      return 1;
+    case NE:
+      if (c == lo)
+	{
+	  out[0] = { lo + 1, hi };
+	  return 1;
+	}
+      if (c == hi)
+	{
+	  out[0] = { lo, hi - 1 };
+	  return 1;
+	}
+      out[0] = { lo, c - 1 };
+      out[1] = { c + 1, hi };
+      return 2;
+    case LT:
+      if (c == lo)
+	return 0;
+      out[0] = { lo, c - 1 };
+      return 1;
+    case LE:
+      out[0] = { lo, c };
+      return 1;
+    case GT:
+      if (c == hi)
+	return 0;
+      out[0] = { c + 1, hi };
+      return 1;
+    case GE:
+      out[0] = { c, hi };
+      return 1;
+    default:
+      return 0;
+    }
+}
+
+static bool
+vt_merge_implies (rtx guard, rtx p)
+{
+  if (p == const_true_rtx)
+    return true;
+  if (!guard)
+    return false;
+  if (rtx_equal_p (guard, p))
+    return true;
+  if (!COMPARISON_P (guard) || !COMPARISON_P (p)
+      || !rtx_equal_p (XEXP (guard, 0), XEXP (p, 0)))
+    return false;
+  vt_merge_interval g[2], q[2];
+  unsigned ng = vt_merge_intervals (guard, g);
+  unsigned nq = vt_merge_intervals (p, q);
+  if (!ng || !nq)
+    return false;
+  for (unsigned i = 0; i < ng; ++i)
+    {
+      bool covered = false;
+      for (unsigned j = 0; j < nq; ++j)
+	covered |= q[j].lo <= g[i].lo && g[i].hi <= q[j].hi;
+      if (!covered)
+	return false;
+    }
+  return true;
+}
+
+/* Get the edge fact at the branch itself, not at an earlier comparison.
+   This rejects, for example, a compare followed by restoration of its
+   operand from a stack slot before the conditional jump.  */
+static rtx
+vt_merge_edge_guard_1 (edge e)
+{
+  basic_block bb = e->src;
+  if (bb == ENTRY_BLOCK_PTR_FOR_FN (cfun) || EDGE_COUNT (bb->succs) != 2
+      || (e->flags & (EDGE_ABNORMAL | EDGE_EH | EDGE_FAKE)))
+    return NULL_RTX;
+  rtx_insn *jump = BB_END (bb);
+  /* any_condjump_p also recognizes conditional returns.  This proof
+     only understands branches to labels, including the polarity of
+     the condition returned by get_condition.  */
+  if (!JUMP_P (jump) || !JUMP_LABEL (jump) || !LABEL_P (JUMP_LABEL (jump)))
+    return NULL_RTX;
+  unsigned jump_size = vt_merge_insn_size (jump);
+  if (!jump_size || !vt_merge_spend (jump_size)
+      || !any_condjump_p (jump)
+      || PATTERN (jump) != pc_set (jump))
+    return NULL_RTX;
+  /* canonicalize_condition can scan the block and rescan the interval
+     to check an operand's validity.  Precharge a quadratic upper bound
+     in RTL size; a too-expensive condition is simply not used.  */
+  unsigned size = 1;
+  rtx_insn *insn;
+  FOR_BB_INSNS (bb, insn)
+    {
+      if (!vt_merge_spend ())
+	return NULL_RTX;
+      if (NONDEBUG_INSN_P (insn))
+	{
+	  unsigned n = vt_merge_insn_size (insn);
+	  if (!n || n > 1024 - size)
+	    return NULL_RTX;
+	  size += n;
+	}
+    }
+  if (!vt_merge_spend (size * size))
+    return NULL_RTX;
+  rtx p = get_condition (jump, NULL, 0, 1);
+  if (!p || !COMPARISON_P (p))
+    return NULL_RTX;
+  /* reverse_condition is for integer comparisons.  In particular, do
+     not construct an UNKNOWN rtx for an unordered floating comparison.
+     Check the operand modes and codes before attempting inversion.  */
+  if (!vt_merge_reg_p (XEXP (p, 0)))
+    return NULL_RTX;
+  enum rtx_code code = GET_CODE (p);
+  switch (code)
+    {
+    case EQ: case NE: case LT: case LE: case GT: case GE:
+      break;
+    default:
+      return NULL_RTX;
+    }
+  if (!CONST_INT_P (XEXP (p, 1))
+      && !((code == EQ || code == NE) && vt_merge_reg_p (XEXP (p, 1))
+	   && GET_MODE (XEXP (p, 0)) == GET_MODE (XEXP (p, 1))))
+    return NULL_RTX;
+  if (e->flags & EDGE_FALLTHRU)
+    {
+      enum rtx_code reverse = reverse_condition (code);
+      if (reverse == UNKNOWN)
+	return NULL_RTX;
+      p = gen_rtx_fmt_ee (reverse, VOIDmode, XEXP (p, 0), XEXP (p, 1));
+    }
+  else if (e->dest != BLOCK_FOR_INSN (JUMP_LABEL (jump)))
+    return NULL_RTX;
+  return p;
+}
+
+static rtx
+vt_merge_edge_guard (edge e)
+{
+  if (rtx *cached = vt_merge_guards->get (e))
+    return *cached;
+  rtx guard = vt_merge_edge_guard_1 (e);
+  vt_merge_guards->put (e, guard);
+  return guard;
+}
+
+/* Backward weakest-precondition proof.  An active identical query is an
+   induction hypothesis; all non-cyclic entering paths must still prove
+   it.  No successful subproof is memoized: it might have depended on an
+   active hypothesis whose other predecessor subsequently fails.  */
+class vt_merge_proof
+{
+  struct query
+  {
+    basic_block bb;
+    rtx p;
+  };
+  auto_vec<query, 16> active;
+  unsigned budget = 2048;
+
+  bool block (basic_block bb, rtx p, rtx guard)
+  {
+    if (!budget || !vt_merge_spend ()
+	|| bb == ENTRY_BLOCK_PTR_FOR_FN (cfun))
+      return false;
+    --budget;
+    rtx_insn *insn;
+    FOR_BB_INSNS_REVERSE (bb, insn)
+      {
+	if (!vt_merge_spend ())
+	  return false;
+	if (vt_merge_implies (guard, p))
+	  return true;
+	p = vt_merge_copy_back (p, insn);
+	if (!p)
+	  return false;
+	if (guard)
+	  guard = vt_merge_copy_back (guard, insn);
+      }
+    return vt_merge_implies (guard, p) || entry (bb, p);
+  }
+
+public:
+  bool edge_p (edge e, rtx p)
+  {
+    if (!budget || !vt_merge_spend ()
+	|| (e->flags & (EDGE_ABNORMAL | EDGE_EH | EDGE_FAKE)))
+      return false;
+    rtx g = vt_merge_edge_guard (e);
+    if (vt_merge_implies (g, p))
+      return true;
+    if (g && GET_CODE (g) == EQ && REG_P (XEXP (g, 1)))
+      for (unsigned i = 0; i != 2; ++i)
+	{
+	  rtx q = simplify_replace_rtx (p, XEXP (g, i), XEXP (g, 1 - i));
+	  if (!rtx_equal_p (q, p) && block (e->src, q, NULL_RTX))
+	    return true;
+	}
+    return block (e->src, p, g);
+  }
+
+  bool entry (basic_block bb, rtx p)
+  {
+    if (p == const_true_rtx)
+      return true;
+    if (CONST_INT_P (p) || !budget || active.length () >= 64
+	|| EDGE_COUNT (bb->preds) == 0)
+      return false;
+    for (const query &q : active)
+      if (q.bb == bb && rtx_equal_p (q.p, p))
+	return true;
+    active.safe_push ({ bb, p });
+    edge e;
+    edge_iterator ei;
+    bool ok = true;
+    FOR_EACH_EDGE (e, ei, bb->preds)
+      if (!edge_p (e, p))
+	{
+	  ok = false;
+	  break;
+	}
+    active.pop ();
+    return ok;
+  }
+};
+
+/* Return a constant proven to reach this incoming edge.  Only pure,
+   complete register SETs and transparent single-predecessor blocks are
+   understood; no branch is silently ignored.  */
+static rtx
+vt_merge_edge_constant (edge e, rtx reg)
+{
+  for (unsigned depth = 0; depth != 64; ++depth)
+    {
+      if ((e->flags & (EDGE_ABNORMAL | EDGE_EH | EDGE_FAKE))
+	  || e->src == ENTRY_BLOCK_PTR_FOR_FN (cfun))
+	return NULL_RTX;
+      rtx_insn *insn;
+      FOR_BB_INSNS_REVERSE (e->src, insn)
+	{
+	  if (!vt_merge_spend ())
+	    return NULL_RTX;
+	  int modified = NONDEBUG_INSN_P (insn)
+			 ? vt_merge_modified (reg, insn) : 0;
+	  if (modified < 0)
+	    return NULL_RTX;
+	  if (modified)
+	    {
+	      rtx s = single_set (insn);
+	      if (CALL_P (insn) || !s || s != PATTERN (insn)
+		  || !vt_merge_reg_p (SET_DEST (s))
+		  || REGNO (SET_DEST (s)) != REGNO (reg)
+		  || GET_MODE_PRECISION (as_a <scalar_int_mode>
+					 (GET_MODE (SET_DEST (s))))
+		     < GET_MODE_PRECISION (as_a <scalar_int_mode>
+					   (GET_MODE (reg)))
+		  || !CONST_INT_P (SET_SRC (s)))
+		return NULL_RTX;
+	      return gen_int_mode (INTVAL (SET_SRC (s)), GET_MODE (reg));
+	    }
+	}
+      if (!single_pred_p (e->src))
+	return NULL_RTX;
+      e = single_pred_edge (e->src);
+    }
+  return NULL_RTX;
+}
+
+static bool
+vt_merge_unchanged (basic_block bb, rtx_insn *at, rtx reg)
+{
+  rtx_insn *insn;
+  FOR_BB_INSNS (bb, insn)
+    {
+      if (!vt_merge_spend ())
+	return false;
+      if (insn == at)
+	return true;
+      if (NONDEBUG_INSN_P (insn))
+	if (vt_merge_modified (reg, insn) != 0)
+	  return false;
+    }
+  return false;
+}
+
+/* Reconstruct the value of REG at AT only after proving an expression
+   on every predecessor.  A failed proof changes neither code nor debug
+   bindings.  The expression is subsequently attached to immutable VTA
+   VALUEs, never to a hard-register lifetime extended past a call.  */
+static rtx
+vt_merge_expression (basic_block bb, rtx_insn *at, rtx reg)
+{
+  if (EDGE_COUNT (bb->preds) < 2 || !vt_merge_unchanged (bb, at, reg))
+    return NULL_RTX;
+  auto_vec<rtx, 4> values;
+  rtx a = NULL_RTX, b = NULL_RTX;
+  edge e;
+  edge_iterator ei;
+  FOR_EACH_EDGE (e, ei, bb->preds)
+    {
+      rtx c = vt_merge_edge_constant (e, reg);
+      if (!c)
+	return NULL_RTX;
+      values.safe_push (c);
+      if (!a)
+	a = c;
+      else if (!rtx_equal_p (a, c))
+	{
+	  if (b && !rtx_equal_p (b, c))
+	    return NULL_RTX;
+	  b = c;
+	}
+    }
+  if (!b)
+    return a;
+  basic_block branch;
+  FOR_EACH_BB_FN (branch, cfun)
+    {
+      if (!vt_merge_spend ())
+	return NULL_RTX;
+      if (EDGE_COUNT (branch->succs) != 2)
+	continue;
+      rtx p = vt_merge_edge_guard (EDGE_SUCC (branch, 0));
+      if (!p || !CONST_INT_P (XEXP (p, 1))
+	  || REGNO (XEXP (p, 0)) == REGNO (reg)
+	  || !vt_merge_unchanged (bb, at, XEXP (p, 0)))
+	continue;
+      vt_merge_interval intervals[2];
+      if (!vt_merge_intervals (p, intervals))
+	continue;
+      rtx neg = gen_rtx_fmt_ee (reverse_condition (GET_CODE (p)), VOIDmode,
+			       XEXP (p, 0), XEXP (p, 1));
+      for (unsigned swapped = 0; swapped != 2; ++swapped)
+	{
+	  bool ok = true;
+	  unsigned i = 0;
+	  FOR_EACH_EDGE (e, ei, bb->preds)
+	    {
+	      vt_merge_proof proof;
+	      bool is_a = rtx_equal_p (values[i++], a);
+	      if (!proof.edge_p (e, (is_a != bool (swapped)) ? p : neg))
+		{
+		  ok = false;
+		  break;
+		}
+	    }
+	  if (ok)
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		{
+		  fprintf (dump_file,
+			   "Reconstructed merged debug value at %d: ",
+			   INSN_UID (at));
+		  print_inline_rtx (dump_file, p, 0);
+		  fputc ('\n', dump_file);
+		}
+	      return gen_rtx_IF_THEN_ELSE (GET_MODE (reg), p,
+					  swapped ? b : a, swapped ? a : b);
+	    }
+	}
+    }
+  return NULL_RTX;
+}
+
+/* Obtain the value of a register at this unchanged block-entry point.
+   A permanent entry VALUE provides a stable identity across dataflow
+   iterations even when the individual incoming value numbers differ.  */
+static rtx
+vt_merge_reg_value (dataflow_set *set, basic_block bb, rtx reg)
+{
+  for (attrs *att = set->regs[REGNO (reg)]; att; att = att->next)
+    if (att->offset == 0 && GET_MODE (att->loc) == GET_MODE (reg)
+	&& dv_is_value_p (att->dv))
+      return dv_as_value (att->dv);
+  dataflow_set *perm = VTI (bb)->permp;
+  if (!perm)
+    {
+      if (emit_notes)
+	return NULL_RTX;
+      perm = VTI (bb)->permp = XNEW (dataflow_set);
+      dataflow_set_init (perm);
+    }
+  rtx val = NULL_RTX;
+  for (attrs *att = perm->regs[REGNO (reg)]; att; att = att->next)
+    if (att->offset == 0 && GET_MODE (att->loc) == GET_MODE (reg)
+	&& dv_is_value_p (att->dv))
+      {
+	val = dv_as_value (att->dv);
+	break;
+      }
+  if (!val)
+    {
+      if (emit_notes)
+	return NULL_RTX;
+      /* The cselib table here is only used to allocate an identity,
+	 not as a dataflow state for this program point.  */
+      cselib_invalidate_rtx (reg);
+      cselib_val *v = cselib_lookup (reg, GET_MODE (reg), 1, VOIDmode);
+      cselib_preserve_value (v);
+      cselib_invalidate_rtx (reg);
+      val = v->val_rtx;
+      var_reg_decl_set (perm, reg, VAR_INIT_STATUS_INITIALIZED,
+			dv_from_value (val), 0, NULL_RTX, INSERT);
+    }
+  val_resolve (set, val, reg, NULL);
+  return val;
+}
+
+static void
+vt_merge_debug_value (dataflow_set *set, basic_block bb, rtx_insn *insn,
+		      rtx val, rtx reg)
+{
+  if (!DEBUG_BIND_INSN_P (insn) || !vt_merge_reg_p (reg))
+    return;
+  rtx *cached = vt_merge_expressions->get (insn);
+  rtx expr;
+  if (cached)
+    expr = *cached;
+  else
+    {
+      expr = vt_merge_expression (bb, insn, reg);
+      vt_merge_expressions->put (insn, expr);
+    }
+  if (!expr)
+    return;
+  if (!CONST_INT_P (expr))
+    {
+      rtx pred = XEXP (expr, 0), operand = XEXP (pred, 0);
+      rtx value = vt_merge_reg_value (set, bb, operand);
+      if (!value || value == val)
+	return;
+      pred = simplify_replace_rtx (pred, operand, value);
+      expr = gen_rtx_IF_THEN_ELSE (GET_MODE (reg), pred,
+				  XEXP (expr, 1), XEXP (expr, 2));
+    }
+  set_variable_part (set, expr, dv_from_value (val), 0,
+		     VAR_INIT_STATUS_INITIALIZED, NULL_RTX, INSERT);
+}
+
+
 /* Compute the changes of variable locations in the basic block BB.  */
 
 static bool
@@ -6793,6 +7539,8 @@ compute_bb_dataflow (basic_block bb)
 		{
 		  if (VAL_NEEDS_RESOLUTION (loc))
 		    val_resolve (out, val, PAT_VAR_LOCATION_LOC (vloc), insn);
+		  vt_merge_debug_value (out, bb, insn, val,
+					PAT_VAR_LOCATION_LOC (vloc));
 		  set_variable_part (out, val, dv_from_decl (var), 0,
 				     VAR_INIT_STATUS_INITIALIZED, NULL_RTX,
 				     INSERT);
@@ -9312,6 +10060,8 @@ emit_notes_in_bb (basic_block bb, dataflow_set *set)
 		{
 		  if (VAL_NEEDS_RESOLUTION (loc))
 		    val_resolve (set, val, PAT_VAR_LOCATION_LOC (vloc), insn);
+		  vt_merge_debug_value (set, bb, insn, val,
+					PAT_VAR_LOCATION_LOC (vloc));
 		  set_variable_part (set, val, dv_from_decl (var), 0,
 				     VAR_INIT_STATUS_INITIALIZED, NULL_RTX,
 				     INSERT);
@@ -10062,6 +10812,10 @@ vt_initialize (void)
       scratch_regs = BITMAP_ALLOC (NULL);
       preserved_values.create (256);
       global_get_addr_cache = new hash_map<rtx, rtx>;
+      vt_merge_expressions = new hash_map<rtx_insn *, rtx>;
+      vt_merge_guards = new hash_map<edge, rtx>;
+      vt_merge_insn_sizes = new hash_map<rtx_insn *, unsigned>;
+      vt_merge_work = 1000000;
     }
   else
     {
@@ -10467,6 +11221,12 @@ vt_finalize (void)
     {
       if (global_get_addr_cache)
 	delete global_get_addr_cache;
+      delete vt_merge_expressions;
+      vt_merge_expressions = NULL;
+      delete vt_merge_guards;
+      vt_merge_guards = NULL;
+      delete vt_merge_insn_sizes;
+      vt_merge_insn_sizes = NULL;
       global_get_addr_cache = NULL;
       loc_exp_dep_pool.release ();
       valvar_pool.release ();
@@ -10568,7 +11328,14 @@ variable_tracking_main (void)
   unsigned int ret;
   int save = flag_var_tracking_assignments;
 
+  vt_decl_work = 1000000;
+  vt_decl_budget_fallbacks = 0;
   ret = variable_tracking_main_1 ();
+
+  if (vt_decl_budget_fallbacks && dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file,
+	     "Aliased declaration storage budget fallback queries: %u\n",
+	     vt_decl_budget_fallbacks);
 
   flag_var_tracking_assignments = save;
 
