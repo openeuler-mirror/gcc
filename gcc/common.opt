@@ -3466,6 +3466,10 @@ ftree-reassoc
 Common Var(flag_tree_reassoc) Init(1) Optimization
 Enable reassociation on tree level.
 
+ftree-replacement-index-prefetch
+Common Var(flag_tree_replacement_index_prefetch) Init(0) Optimization
+Prefetch indirect addresses using a replacement index in loops or direct joins.
+
 ftree-salias
 Common Ignore
 Does nothing.  Preserved for backward compatibility.
