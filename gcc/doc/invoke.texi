@@ -13959,16 +13959,19 @@ reductions during early complete unrolling, when complete unrolling would
 increase code size.  Leaving these loops intact can expose opportunities
 for later loop vectorization, including dot-product instructions.
 
-This option is disabled by default and requires loop vectorization to be
-enabled.  It uses a target-independent shape heuristic: it does not require
-target dot-product instructions and does not guarantee vectorization or
-improved performance.  Loops marked with @code{#pragma GCC novector} are
-not preserved by this option.
+This option is disabled by default and requires both loop optimization
+and loop vectorization to be enabled.  It uses a target-independent shape
+heuristic: it does not require target dot-product instructions and does
+not guarantee vectorization or improved performance.  Loops marked with
+@code{#pragma GCC novector} are not preserved by this option.  Additional
+scalar recurrences are conservatively limited to affine inductions and
+simple integer sum, minimum and maximum reductions.
 
 This option does not inhibit unrolling that does not increase code size,
 override explicit loop-unrolling pragmas, or affect complete unrolling
-after vectorization.  Its main effect is on nested loops at @option{-O3};
-at @option{-O2}, early complete unrolling already avoids code growth.
+after vectorization.  It only changes otherwise permitted early unrolling
+of nested loops at @option{-O3} or higher; at @option{-O2}, early complete
+unrolling already avoids code growth.
 
 @opindex ftree-scev-cprop
 @item -ftree-scev-cprop

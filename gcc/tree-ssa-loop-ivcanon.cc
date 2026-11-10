@@ -759,8 +759,51 @@ has_other_use_in_loop_p (class loop *loop, tree name, gimple *stmt)
   return false;
 }
 
-/* Return true if LOOP has a widened integer multiply sum reduction.
-   This is a shape heuristic, not a check for target dot-product support.  */
+/* Return true if PHI is a simple integer sum, minimum or maximum reduction
+   in LOOP.  Set CODE to its operation and OPERAND to its non-reduction
+   operand.  This deliberately excludes more general scalar recurrences.  */
+
+static bool
+simple_integer_reduction_phi_p (class loop *loop, gphi *phi, edge latch,
+				enum tree_code &code, tree &operand)
+{
+  tree result = PHI_RESULT (phi);
+  if (!INTEGRAL_TYPE_P (TREE_TYPE (result)))
+    return false;
+
+  tree latch_arg = PHI_ARG_DEF_FROM_EDGE (phi, latch);
+  gimple *stmt = ssa_name_def_stmt_in_loop (loop, latch_arg);
+  if (!stmt || !is_gimple_assign (stmt))
+    return false;
+
+  code = gimple_assign_rhs_code (stmt);
+  if (code != PLUS_EXPR && code != MIN_EXPR && code != MAX_EXPR)
+    return false;
+
+  tree rhs1 = gimple_assign_rhs1 (stmt);
+  tree rhs2 = gimple_assign_rhs2 (stmt);
+  if (rhs1 == result)
+    operand = rhs2;
+  else if (rhs2 == result)
+    operand = rhs1;
+  else
+    return false;
+
+  if (operand == result)
+    return false;
+
+  /* Inside LOOP the PHI result must only feed the operation, and the
+     updated value must only feed PHI.  Either can supply the final value
+     outside LOOP, depending on the position of the exit test.  Do not
+     preserve prefix sums as simple reductions.  */
+  return (!has_other_use_in_loop_p (loop, result, stmt)
+	  && !has_other_use_in_loop_p (loop, latch_arg, phi));
+}
+
+/* Return true if LOOP has a widened integer multiply sum reduction and
+   all its other scalar recurrences are affine inductions or simple integer
+   reductions.  This conservative shape heuristic does not recognize every
+   recurrence supported by the vectorizer, or check target support.  */
 
 static bool
 loop_has_widened_mult_reduction_p (class loop *loop)
@@ -769,44 +812,29 @@ loop_has_widened_mult_reduction_p (class loop *loop)
   if (!latch)
     return false;
 
+  bool found = false;
   for (gphi_iterator psi = gsi_start_phis (loop->header);
        !gsi_end_p (psi); gsi_next (&psi))
     {
       gphi *phi = psi.phi ();
       tree result = PHI_RESULT (phi);
-      if (!INTEGRAL_TYPE_P (TREE_TYPE (result)))
+      if (virtual_operand_p (result))
 	continue;
 
-      tree latch_arg = PHI_ARG_DEF_FROM_EDGE (phi, latch);
-      gimple *stmt = ssa_name_def_stmt_in_loop (loop, latch_arg);
-      if (!stmt
-	  || !is_gimple_assign (stmt)
-	  || gimple_assign_rhs_code (stmt) != PLUS_EXPR)
+      affine_iv iv;
+      if (simple_iv (loop, loop, result, &iv, true))
 	continue;
 
-      tree rhs1 = gimple_assign_rhs1 (stmt);
-      tree rhs2 = gimple_assign_rhs2 (stmt);
-      tree addend = NULL_TREE;
-      if (rhs1 == result)
-	addend = rhs2;
-      else if (rhs2 == result)
-	addend = rhs1;
-      else
-	continue;
+      enum tree_code code;
+      tree operand;
+      if (!simple_integer_reduction_phi_p (loop, phi, latch, code, operand))
+	return false;
 
-      /* Inside LOOP the PHI result must only feed the addition, and the
-	 updated sum must only feed PHI.  Either can supply the final value
-	 outside LOOP, depending on the position of the exit test.  Do not
-	 preserve prefix sums as simple reductions.  */
-      if (has_other_use_in_loop_p (loop, result, stmt)
-	  || has_other_use_in_loop_p (loop, latch_arg, phi))
-	continue;
-
-      if (widened_integer_mult_p (loop, addend))
-	return true;
+      if (code == PLUS_EXPR && widened_integer_mult_p (loop, operand))
+	found = true;
     }
 
-  return false;
+  return found;
 }
 
 /* Return true if early complete unrolling should leave LOOP for vectorizer
@@ -816,7 +844,8 @@ static bool
 preserve_vect_idiom_for_vectorizer_p (class loop *loop,
 				      unsigned HOST_WIDE_INT n_unroll)
 {
-  if (!(flag_tree_loop_vectorize || loop->force_vectorize)
+  if (!flag_tree_loop_optimize
+      || !(flag_tree_loop_vectorize || loop->force_vectorize)
       || loop->inner
       || loop->unroll
       || loop->dont_vectorize)
@@ -1038,15 +1067,6 @@ try_unroll_loop_completely (class loop *loop,
 
 	  if (!code_would_grow)
 	    ;
-	  else if (preserve_vect_idioms
-		   && preserve_vect_idiom_for_vectorizer_p (loop, n_unroll))
-	    {
-	      if (dump_file && (dump_flags & TDF_DETAILS))
-		fprintf (dump_file, "Not unrolling loop %d: "
-			 "preserving widened multiply reduction for "
-			 "vectorization.\n", loop->num);
-	      return false;
-	    }
 	  /* We unroll only inner loops, because we do not consider it
 	     profitable otheriwse.  We still can cancel loopback edge
 	     of not rolling loop; this is always a good idea.  */
@@ -1120,6 +1140,16 @@ try_unroll_loop_completely (class loop *loop,
 			 "number of insns in the unrolled sequence reaches "
 			 "--param max-completely-peeled-insns limit.\n",
 			 loop->num);
+	      return false;
+	    }
+	  /* Preserve an idiom only when it would otherwise be unrolled.  */
+	  else if (preserve_vect_idioms
+		   && preserve_vect_idiom_for_vectorizer_p (loop, n_unroll))
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		fprintf (dump_file, "Not unrolling loop %d: "
+			 "preserving widened multiply reduction for "
+			 "vectorization.\n", loop->num);
 	      return false;
 	    }
 	}
