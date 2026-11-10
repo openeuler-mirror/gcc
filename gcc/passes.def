@@ -307,6 +307,7 @@ along with GCC; see the file COPYING3.  If not see
 	 to discover/remove loops before running the gate function
 	 of pass_tree_loop.  */
       NEXT_PASS (pass_fix_loops);
+      NEXT_PASS (pass_static_byte_cfg);
       NEXT_PASS (pass_tree_loop);
       PUSH_INSERT_PASSES_WITHIN (pass_tree_loop)
           /* Before loop_init we rewrite no longer addressed locals into SSA

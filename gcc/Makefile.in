@@ -1744,6 +1744,7 @@ OBJS = \
 	tree-ssa-coalesce.o \
 	tree-ssa-constant-byte-range.o \
 	tree-ssa-copy.o \
+	tree-ssa-static-byte-cfg.o \
 	tree-ssa-dce.o \
 	tree-ssa-dom.o \
 	tree-ssa-dse.o \
