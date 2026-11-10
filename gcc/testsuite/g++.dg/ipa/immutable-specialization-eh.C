@@ -3,7 +3,7 @@
 static volatile unsigned visits;
 static unsigned step (const unsigned char *&p, unsigned x)
 {
-  ++visits;
+  visits = visits + 1;
   unsigned op = *p++;
   if (op == 255) throw x;
   return x + op;

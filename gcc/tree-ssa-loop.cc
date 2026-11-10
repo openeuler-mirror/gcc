@@ -771,7 +771,8 @@ public:
 
   bool gate (function *fun) final override
   {
-    if (!flag_tree_immutable_loop_specialization
+    if (!flag_tree_loop_optimize
+	|| !flag_tree_immutable_loop_specialization
 	|| !flag_ipa_value_specialization)
       return false;
     cgraph_node *node = cgraph_node::get (fun->decl);
@@ -782,7 +783,9 @@ public:
     FOR_EACH_BB_FN (bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
 	   !gsi_end_p (gsi); gsi_next (&gsi))
-	if (++count > 8192)
+	if (!is_gimple_debug (gsi_stmt (gsi))
+	    && gimple_code (gsi_stmt (gsi)) != GIMPLE_LABEL
+	    && ++count > 8192)
 	  return false;
     return true;
   }

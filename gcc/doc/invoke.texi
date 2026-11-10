@@ -13696,12 +13696,13 @@ complete-unroll invocation.  This allowance applies to the additional immutable
 peeling heuristic, not to ordinary unrolling and peeling, which retain their
 existing limits.  The copy cap applies separately to each invocation; a later
 invocation may peel a residual loop again.  Functions with more than 8192
-GIMPLE statements at entry
+nondebug, non-label GIMPLE statements at entry
 are skipped; this is an entry-size check, not a resulting code-size limit.
 Normal loop bounds and residual control flow are
 preserved.  The regular later loop pipeline still runs.
 
-The two loop stages require @option{-fipa-value-specialization}; this option
+The two loop stages require @option{-ftree-loop-optimize} and
+@option{-fipa-value-specialization}; this option
 does not enable that IPA option automatically.  Loop specialization is disabled
 by default.  Enabling the tree option also enables
 @option{-ftree-immutable-loop-specialization-cursor} unless that option was
