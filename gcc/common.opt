@@ -2227,6 +2227,10 @@ fipa-reorder-fields
 Common Var(flag_ipa_reorder_fields) Init(0) Optimization
 Perform structure fields reorder optimizations.
 
+fipa-array-load-inline
+Common Var(flag_ipa_array_load_inline) Init(0) Optimization
+Replace recognized fixed array loads with inline computations at -O3 and above.
+
 fipa-struct-reorg
 Common Var(flag_ipa_struct_reorg) Init(0) Optimization
 Perform structure layout optimizations.

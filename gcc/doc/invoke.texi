@@ -574,7 +574,7 @@ Objective-C and Objective-C++ Dialects}.
 -finline-stringops[=@var{fn}]
 -finline-functions  -finline-functions-called-once  -finline-limit=@var{n}
 -finline-small-functions -fipa-modref -fipa-cp  -fipa-cp-clone
--fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
+-fipa-array-load-inline  -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm}
 -flive-patching=@var{level}
@@ -13566,6 +13566,22 @@ Enabled by default at @option{-O1} and higher.
 @item -fipa-stack-alignment
 Reduce stack alignment on call sites if possible.
 Enabled by default.
+
+@opindex fipa-array-load-inline
+@item -fipa-array-load-inline
+Replace loads from fixed-size lookup tables with computations of their
+initialization formulas in terms of the array indices.  The optimization
+requires explicit references, complete initialization, compatible arithmetic
+semantics, and proof that each load is initialized or protected by a suitable
+guard.  Initialization stores are removed when all references permit it.
+
+This option is disabled by default, including at @option{-O3}.  Explicitly
+enabling it requires @option{-O3} or a higher optimization level; it has no
+effect at lower levels.  It can also run during LTO, subject to the visibility
+of the references and function bodies in the current partition.  Escaping
+arrays and guards, including guards accessed through atomic operations, are
+not supported.  A thread-local table cannot use a non-thread-local guard to
+prove that initialization has completed in the current thread.
 
 @opindex fipa-pta
 @item -fipa-pta

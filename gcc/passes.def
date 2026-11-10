@@ -202,6 +202,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_rebuild_cgraph_edges);
   POP_INSERT_PASSES ()
   NEXT_PASS (pass_ipa_array_dse);
+  NEXT_PASS (pass_ipa_array_load_inline);
   NEXT_PASS (pass_ipa_pta);
   /* FIXME: this should be a normal IP pass.  */
   NEXT_PASS (pass_ipa_struct_reorg);

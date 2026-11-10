@@ -551,6 +551,7 @@ extern ipa_opt_pass_d *make_pass_ipa_reference (gcc::context *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_pure_const (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_prefetch (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_struct_reorg (gcc::context *ctxt);
+extern simple_ipa_opt_pass *make_pass_ipa_array_load_inline (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_pta (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_tm (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_target_clone (gcc::context *ctxt);
