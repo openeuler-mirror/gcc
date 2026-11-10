@@ -34,6 +34,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-dfa.h"
 #include "pointer-query.h"
 #include "value-range.h"
+#include "gimple-range.h"
 #include "hash-map.h"
 
 namespace {
@@ -305,16 +306,50 @@ constant_cursor_range (tree pointer, HOST_WIDE_INT displacement, tree object,
 }
 
 
+/* The object-size offset API can represent only one interval.  Keep the
+   complete statement-local index range for ARRAY_REF, including two tails
+   that are individually invalid but whose convex hull crosses the object.  */
+static bool
+out_of_bounds_array_index_p (tree ref, gimple *stmt, range_query *query)
+{
+  if (TREE_CODE (ref) != ARRAY_REF)
+    return false;
+  tree index = TREE_OPERAND (ref, 1);
+  tree type = TREE_TYPE (index);
+  tree array_type = TREE_TYPE (TREE_OPERAND (ref, 0));
+  if (!INTEGRAL_TYPE_P (type) || TREE_CODE (array_type) != ARRAY_TYPE
+      || !TYPE_DOMAIN (array_type))
+    return false;
+  tree low = TYPE_MIN_VALUE (TYPE_DOMAIN (array_type));
+  tree high = TYPE_MAX_VALUE (TYPE_DOMAIN (array_type));
+  tree type_low = TYPE_MIN_VALUE (type), type_high = TYPE_MAX_VALUE (type);
+  if (!low || !high || !type_low || !type_high
+      || TREE_CODE (low) != INTEGER_CST || TREE_CODE (high) != INTEGER_CST
+      || TREE_CODE (type_low) != INTEGER_CST
+      || TREE_CODE (type_high) != INTEGER_CST)
+    return false;
+  if (tree_int_cst_lt (high, type_low) || tree_int_cst_lt (type_high, low))
+    return true;
+  low = tree_int_cst_lt (low, type_low) ? type_low : fold_convert (type, low);
+  high = tree_int_cst_lt (type_high, high) ? type_high : fold_convert (type, high);
+  int_range_max indices;
+  if (!query->range_of_expr (indices, index, stmt))
+    return false;
+  int_range_max valid (type, wi::to_wide (low), wi::to_wide (high));
+  indices.intersect (valid);
+  return indices.undefined_p ();
+}
+
 /* Keep provably invalid loads visible to the later bounds diagnostics.
    Query the address of the complete reference so MEM_REF displacements and
    ARRAY_REF indices are included.  access_ref uses wide offsets rather than
    narrowing or adding them in HOST_WIDE_INT.  Unknown and partly in-bounds
    ranges do not establish an invalid access.  */
 static bool
-out_of_bounds_byte_ref_p (tree ref, gimple *stmt)
+out_of_bounds_byte_ref_p (tree address, gimple *stmt, range_query *query)
 {
   access_ref aref;
-  if (!compute_objsize (build_fold_addr_expr (ref), stmt, 1, &aref)
+  if (!compute_objsize (address, stmt, 1, &aref, query)
       || !aref.base0)
     return false;
 
@@ -324,6 +359,7 @@ out_of_bounds_byte_ref_p (tree ref, gimple *stmt)
 static unsigned
 constant_byte_range (function *fn)
 {
+  gimple_ranger *ranger = enable_ranger (fn);
   unsigned budget = 65536;
   unsigned cursor_budget = 65536;
   bool changed = false;
@@ -351,7 +387,9 @@ constant_byte_range (function *fn)
 	    tree object = constant_byte_object (ptr, budget);
 	    if (!object)
 	      continue;
-	    if (out_of_bounds_byte_ref_p (ref, stmt))
+	    if (out_of_bounds_array_index_p (ref, stmt, ranger)
+		|| out_of_bounds_byte_ref_p (build_fold_addr_expr (ref), stmt,
+					     ranger))
 	      continue;
 	    int_range_max range;
 	    const unsigned char *bytes
@@ -404,6 +442,8 @@ constant_byte_range (function *fn)
 	    tree lhs = gimple_call_lhs (stmt);
 	    if (!lhs)
 	      continue;
+	    if (out_of_bounds_byte_ref_p (search.input, stmt, ranger))
+	      continue;
 	    tree object = constant_byte_object (search.input, budget);
 	    if (!object)
 	      continue;
@@ -418,6 +458,7 @@ constant_byte_range (function *fn)
 	      fprintf (dump_file, "Constant byte object excludes search character.\n");
 	  }
       }
+  disable_ranger (fn);
   return changed ? TODO_update_ssa | TODO_cleanup_cfg : 0;
 }
 
