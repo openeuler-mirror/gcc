@@ -361,6 +361,11 @@ split_word_bitcount_replacement (basic_block cond_bb, basic_block bb1,
   if (!phi)
     return false;
 
+  /* replace_uses_by cannot replace a real abnormal-PHI operand with a
+     fresh SSA name.  Reject before inserting any statements.  */
+  if (SSA_NAME_OCCURS_IN_ABNORMAL_PHI (gimple_phi_result (phi)))
+    return false;
+
   tree arg1 = gimple_phi_arg_def (phi, join1->dest_idx);
   tree arg2 = gimple_phi_arg_def (phi, join2->dest_idx);
   basic_block add_bb = bb1;
@@ -393,6 +398,7 @@ split_word_bitcount_replacement (basic_block cond_bb, basic_block bb1,
       || !match_split_word_half (plain_half, !add_is_high,
 				 &plain_full, &plain_precast)
       || add_full != plain_full
+      || SSA_NAME_OCCURS_IN_ABNORMAL_PHI (add_full)
       || !direct_internal_fn_supported_p (add_ifn, TREE_TYPE (add_full),
 					  OPTIMIZE_FOR_BOTH))
     return false;
