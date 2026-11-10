@@ -2,18 +2,17 @@
 /* { dg-options "-march=opteron-sse3 -Ofast --param l1-cache-line-size=3 -Wdisabled-optimization" } */
 /* { dg-require-effective-target indirect_jumps } */
 
-#include <setjmp.h>
-
 extern void abort (void);
 
-jmp_buf buf;
+/* The GCC builtins require five pointer-sized slots, not a libc jmp_buf.  */
+__INTPTR_TYPE__ buf[5];
 
 void raise0(void)
 {
   __builtin_longjmp (buf, 1);
 }
 
-int execute(int cmd) /* { dg-warning "'l1-cache-size' parameter is not a power of two 3" } */
+int execute(int cmd) /* { dg-warning "'l1-cache-line-size' parameter is not a power of two 3" } */
 {
   int last = 0;
 

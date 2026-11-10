@@ -2376,12 +2376,10 @@ replacement_store (gimple *load)
   gimple_stmt_iterator si = gsi_for_stmt (load);
   for (unsigned n = 0; n < 8; ++n)
     {
-      gsi_next (&si);
+      gsi_next_nondebug (&si);
       if (gsi_end_p (si))
 	break;
       gimple *s = gsi_stmt (si);
-      if (is_gimple_debug (s))
-	continue;
       if (!is_gimple_assign (s) || gimple_has_volatile_ops (s))
 	break;
       if (gimple_vdef (s))
