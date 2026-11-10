@@ -527,6 +527,32 @@ single_use_stmt_outside_loop (tree value, class loop *loop)
   return the_use;
 }
 
+/* Find an SSA operand of a reference whose definition is inside LOOP.
+   Declarations describe the referenced object or field, rather than a value
+   that must be loaded to compute its address.  */
+static tree
+ssa_defined_in_loop_r (tree *tp, int *walk_subtrees, void *data)
+{
+  if (TREE_CODE (*tp) == SSA_NAME)
+    {
+      *walk_subtrees = 0;
+      basic_block bb = gimple_bb (SSA_NAME_DEF_STMT (*tp));
+      if (bb && flow_bb_inside_loop_p ((class loop *) data, bb))
+	return *tp;
+    }
+  else if (DECL_P (*tp) || TYPE_P (*tp))
+    *walk_subtrees = 0;
+  return NULL_TREE;
+}
+
+/* Test address invariance without treating VAR_DECL and FIELD_DECL operands
+   of ARRAY_REF and COMPONENT_REF as varying values.  */
+static bool
+ref_invariant_in_loop_p (class loop *loop, tree ref)
+{
+  return !walk_tree_without_duplicates (&ref, ssa_defined_in_loop_r, loop);
+}
+
 static bool
 find_carry_store_for_phi (class loop *outer, class loop *inner,
 			  gphi *phi, carry_info *carry)
@@ -548,8 +574,8 @@ find_carry_store_for_phi (class loop *outer, class loop *inner,
     {
       tree ref = gimple_assign_lhs (assign);
       if (!may_be_nonaddressable_p (ref)
-	  && expr_invariant_in_loop_p (inner, ref)
-	  && !expr_invariant_in_loop_p (outer, ref))
+	  && ref_invariant_in_loop_p (inner, ref)
+	  && !ref_invariant_in_loop_p (outer, ref))
 	{
 	  basic_block bb = gimple_bb (assign);
 	  if (!flow_bb_inside_loop_p (outer, bb)
