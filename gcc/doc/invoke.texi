@@ -628,7 +628,8 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
--ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
+-ftree-loop-invariant-split  -ftree-loop-ivcanon  -ftree-loop-linear
+-ftree-loop-optimize
 -ftree-loop-vectorize
 -ftree-parallelize-loops=@var{n}  -ftree-pre  -ftree-partial-pre  -ftree-pta
 -ftree-reassoc  -ftree-scev-cprop  -ftree-sink  -ftree-slsr  -ftree-sra
@@ -13945,6 +13946,22 @@ operands of conditions that are invariant out of the loop, so that we can use
 just trivial invariantness analysis in loop unswitching.  The pass also includes
 store motion.
 
+@opindex ftree-loop-invariant-split
+@item -ftree-loop-invariant-split
+Split selected two-level loop nests into a sequence of equivalent outer-loop
+copies, each covering a consecutive range of the original inner-loop iteration
+space.  The pass looks for read-only data referenced by the inner loop but not
+by the outer-loop induction variable, and limits each copy to a chunk of that
+data.  This can expose smaller invariant data blocks to later vectorization,
+unrolling and loop invariant motion passes.
+
+This optimization is conservative and is not enabled by default at any
+optimization level.  It runs only when loop vectorization is enabled or the
+function contains a loop marked for forced vectorization.  Enabling this
+option does not enable loop vectorization.  Loop vectorization is enabled by
+default at @option{-O2} and @option{-O3}, and can be enabled explicitly with
+@option{-ftree-loop-vectorize}.
+
 @opindex ftree-loop-ivcanon
 @item -ftree-loop-ivcanon
 Create a canonical counter for number of iterations in loops for which
@@ -16551,6 +16568,25 @@ Loop invariant motion can be very expensive, both in compilation time and
 in amount of needed compile-time memory, with very large loops.  Loops
 with more basic blocks than this parameter won't have loop invariant
 motion optimization performed on them.
+
+@item loop-invariant-split-chunk-bytes
+Maximum number of bytes of outer-invariant inner-loop loads to include in each
+chunk created by @option{-ftree-loop-invariant-split}.  A value of zero lets
+the compiler choose a target-dependent budget.
+
+@item loop-invariant-split-max-copies
+Maximum number of loop nest copies that
+@option{-ftree-loop-invariant-split} may create for one split.
+
+@item loop-invariant-split-reserved-vregs
+Number of vector registers reserved for the computation itself when
+@option{-ftree-loop-invariant-split} chooses an automatic chunk budget.  A
+value of zero lets the compiler reserve a target-dependent default.
+
+@item loop-invariant-split-vector-regs
+Number of vector registers available to @option{-ftree-loop-invariant-split}
+when choosing an automatic chunk budget.  A value of zero lets the compiler
+infer the value from the target.
 
 @item loop-max-datarefs-for-datadeps
 Building data dependencies is expensive for very large loops.  This
