@@ -560,8 +560,9 @@ Objective-C and Objective-C++ Dialects}.
 -fcompare-elim  -fcprop-registers  -fcrossjumping
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules
 -fcx-limited-range
--fdata-sections  -fdce  -fdelayed-branch
--fdelete-null-pointer-checks  -fdevirtualize  -fdevirtualize-speculatively
+-fdata-sections  -fdce  -fdebruijn-clz  -fdelayed-branch
+-fdelete-null-pointer-checks
+-fdevirtualize  -fdevirtualize-speculatively
 -fdevirtualize-at-ltrans  -fdse
 -fearly-inlining  -fipa-sra  -fexpensive-optimizations  -ffat-lto-objects
 -ffast-math  -ffinite-math-only  -ffloat-store  -fexcess-precision=@var{style}
@@ -13091,6 +13092,30 @@ base and complete variants are changed to be thunks that call a common
 implementation.
 
 Enabled by @option{-Os}.
+
+@opindex fdebruijn-clz
+@item -fdebruijn-clz
+Recognize DeBruijn table-based count-leading-zero idioms for unsigned
+32-bit and 64-bit inputs, and enable the backported extensions to
+table-based count-trailing-zero recognition, including fallback handling
+for zero inputs.  The transformations preserve the original table result
+for zero.  The variant that isolates the most significant bit with
+@code{s - (s >> 1)} after an OR cascade is recognized for 64-bit inputs.
+
+Also recognize 64-bit count-leading-zero and count-trailing-zero
+operations implemented by selecting between operations on their
+32-bit halves, and replace them with the corresponding 64-bit
+target operation.  The transformation preserves the split-word
+implementation's result for zero inputs and requires target support
+for the corresponding 64-bit operation.
+
+This option is disabled by default at all optimization levels.  Enabling
+it only affects transformations when the relevant forward-propagation
+and PHI optimization passes are enabled.
+If an input may be zero, the transformations also require a defined
+target result for the corresponding count-zero operation.
+Without this option, or with @option{-fno-debruijn-clz}, GCC retains
+its original count-trailing-zero table recognition and zero handling.
 
 @opindex fdelete-null-pointer-checks
 @item -fdelete-null-pointer-checks

@@ -2436,6 +2436,317 @@ simplify_count_trailing_zeroes (gimple_stmt_iterator *gsi)
 }
 
 
+/* Check whether an array contains a valid table according to VALIDATE_FN.  */
+template<typename ValidateFn>
+static bool
+check_table_array (tree ctor, HOST_WIDE_INT &zero_val, unsigned bits,
+		   ValidateFn validate_fn)
+{
+  tree elt, idx;
+  unsigned HOST_WIDE_INT i;
+  unsigned matched = 0;
+
+  zero_val = 0;
+
+  FOR_EACH_CONSTRUCTOR_ELT (CONSTRUCTOR_ELTS (ctor), i, idx, elt)
+    {
+      if (TREE_CODE (idx) != INTEGER_CST || TREE_CODE (elt) != INTEGER_CST)
+	return false;
+      if (!tree_fits_shwi_p (idx) || !tree_fits_shwi_p (elt))
+	return false;
+
+      unsigned HOST_WIDE_INT index = tree_to_shwi (idx);
+      HOST_WIDE_INT val = tree_to_shwi (elt);
+
+      if (index > bits * 2)
+	return false;
+
+      if (index == 0)
+	{
+	  zero_val = val;
+	  matched++;
+	}
+
+      if (val >= 0 && val < bits && validate_fn (val, index))
+	matched++;
+
+      if (matched > bits)
+	return true;
+    }
+
+  return false;
+}
+
+/* Check whether a string contains a valid table according to VALIDATE_FN.  */
+template<typename ValidateFn>
+static bool
+check_table_string (tree string, HOST_WIDE_INT &zero_val, unsigned bits,
+		    ValidateFn validate_fn)
+{
+  unsigned HOST_WIDE_INT len = TREE_STRING_LENGTH (string);
+  unsigned matched = 0;
+  const unsigned char *p = (const unsigned char *) TREE_STRING_POINTER (string);
+
+  if (len < bits || len > bits * 2)
+    return false;
+
+  zero_val = p[0];
+
+  for (unsigned i = 0; i < len; i++)
+    if (p[i] < bits && validate_fn (p[i], i))
+      matched++;
+
+  return matched == bits;
+}
+
+/* Check whether CTOR contains a valid table according to VALIDATE_FN.  */
+template<typename ValidateFn>
+static bool
+check_table (tree ctor, tree type, HOST_WIDE_INT &zero_val, unsigned bits,
+	     ValidateFn validate_fn)
+{
+  if (TREE_CODE (ctor) == CONSTRUCTOR)
+    return check_table_array (ctor, zero_val, bits, validate_fn);
+  else if (TREE_CODE (ctor) == STRING_CST
+	   && TYPE_PRECISION (type) == CHAR_TYPE_SIZE)
+    return check_table_string (ctor, zero_val, bits, validate_fn);
+  return false;
+}
+
+/* Match.pd functions to match the CLZ expressions.  */
+extern bool gimple_clz_table_index (tree, tree *, tree (*)(tree));
+extern bool gimple_clz_msb_iso_table_index (tree, tree *, tree (*)(tree));
+
+/* Recognize count leading and trailing zeroes idioms.
+   The canonical CTZ form is array[((x & -x) * C) >> SHIFT] where C is a
+   magic constant which when multiplied by a power of 2 creates a unique
+   value in the top 5 or 6 bits.  This is then indexed into a table which
+   maps it to the number of trailing zeroes.  */
+static bool
+simplify_count_zeroes (gimple_stmt_iterator *gsi)
+{
+  /* Keep the original CTZ transformation, including its zero handling
+     and validation rules, when the backported optimizations are off.  */
+  if (!flag_debruijn_clz)
+    return simplify_count_trailing_zeroes (gsi);
+
+  gimple *stmt = gsi_stmt (*gsi);
+  tree array_ref = gimple_assign_rhs1 (stmt);
+  tree res_ops[3];
+
+  gcc_checking_assert (TREE_CODE (array_ref) == ARRAY_REF);
+
+  internal_fn fn = IFN_LAST;
+  /* When true, the matched idiom is a CLZ using DeBruijn CTZ on the
+     isolated MSB -- see clz_msb_iso_table_index in match.pd.  The
+     table stores MSB positions and must satisfy the direct CTZ
+     DeBruijn property, so we validate it with the CTZ checkfn even
+     though we emit IFN_CLZ code.  */
+  bool clz_via_ctz = false;
+  /* For CTZ we recognize ((x & -x) * C) >> SHIFT where the array data
+     represents the number of trailing zeroes.  */
+  if (gimple_ctz_table_index (TREE_OPERAND (array_ref, 1), &res_ops[0], NULL))
+    fn = IFN_CTZ;
+  /* For CLZ we recognize an MSB OR-cascade followed by (x * C) >> SHIFT,
+     where the array data represents the position of the leading bit.  */
+  else if (gimple_clz_table_index (TREE_OPERAND (array_ref, 1), &res_ops[0],
+				   NULL))
+    fn = IFN_CLZ;
+  /* Variant CLZ idiom: after the OR-cascade sets all bits from 0 to
+     the original MSB, (value - (value >> 1)) isolates the MSB as a
+     power of two (2^k), and the subsequent DeBruijn multiply-and-shift
+     is a CTZ-style lookup on 2^k.  The table stores MSB positions
+     directly.  */
+  else if (gimple_clz_msb_iso_table_index (TREE_OPERAND (array_ref, 1),
+					   &res_ops[0], NULL))
+    {
+      fn = IFN_CLZ;
+      clz_via_ctz = true;
+    }
+  else
+    return false;
+
+  HOST_WIDE_INT zero_val;
+  tree type = TREE_TYPE (array_ref);
+  tree array = TREE_OPERAND (array_ref, 0);
+  tree input_type = TREE_TYPE (res_ops[0]);
+  unsigned input_bits = tree_to_shwi (TYPE_SIZE (input_type));
+
+  /* Check the array element type is integral and not wider than 64 bits,
+     and the input is an unsigned 32-bit or 64-bit type.  The table values
+     are bit positions in [0, input_bits - 1], so any integer element type
+     with at least 6 bits of precision suffices; the cap is just to keep
+     the transformation simple.  */
+  if (!INTEGRAL_TYPE_P (type) || TYPE_PRECISION (type) > 64
+      || !TYPE_UNSIGNED (input_type))
+    return false;
+  if (input_bits != 32 && input_bits != 64)
+    return false;
+
+  if (!direct_internal_fn_supported_p (fn, input_type, OPTIMIZE_FOR_BOTH))
+    return false;
+
+  /* Check the lower bound of the array is zero.  */
+  tree low = array_ref_low_bound (array_ref);
+  if (!low || !integer_zerop (low))
+    return false;
+
+  /* Check the shift extracts the top 5..7 bits.  */
+  unsigned shiftval = tree_to_shwi (res_ops[2]);
+  if (shiftval < input_bits - 7 || shiftval > input_bits - 5)
+    return false;
+
+  tree ctor = ctor_for_folding (array);
+  if (!ctor)
+    return false;
+
+  unsigned HOST_WIDE_INT mulval = tree_to_uhwi (res_ops[1]);
+  /* CTZ and the MSB-isolation CLZ variant both use the direct CTZ
+     DeBruijn check (table[(magic << data) >> shift] == data).  */
+  if (fn == IFN_CTZ || clz_via_ctz)
+    {
+      auto checkfn = [&](unsigned data, unsigned i) -> bool
+	{
+	  unsigned HOST_WIDE_INT mask
+	    = ((HOST_WIDE_INT_1U << (input_bits - shiftval)) - 1) << shiftval;
+	  return (((mulval << data) & mask) >> shiftval) == i;
+	};
+      if (!check_table (ctor, type, zero_val, input_bits, checkfn))
+	return false;
+    }
+  else
+    {
+      auto checkfn = [&](unsigned data, unsigned i) -> bool
+	{
+	  unsigned HOST_WIDE_INT mask
+	    = ((HOST_WIDE_INT_1U << (input_bits - shiftval)) - 1) << shiftval;
+	  /* The OR-cascade produces a value with all bits from 0 to the
+	     original MSB set.  Compute (1 << (data + 1)) - 1 to simulate
+	     that value.  When data + 1 equals HOST_BITS_PER_WIDE_INT
+	     (i.e. data is the MSB position of a 64-bit input) the shift
+	     is undefined behavior, so handle that case explicitly using
+	     all-ones.  Without this, any well-formed 64-bit DeBruijn CLZ
+	     table is rejected because its entry for the all-ones input
+	     correctly maps to the MSB (e.g. table[...] == 63).
+	     PR tree-optimization/122569.  */
+	  unsigned HOST_WIDE_INT all_bits_below
+	    = (data + 1 == HOST_BITS_PER_WIDE_INT)
+	      ? HOST_WIDE_INT_M1U
+	      : ((HOST_WIDE_INT_1U << (data + 1)) - 1);
+	  return (((all_bits_below * mulval) & mask) >> shiftval) == i;
+	};
+      if (!check_table (ctor, type, zero_val, input_bits, checkfn))
+	return false;
+    }
+
+  /* The count and its zero fallback are built in integer_type_node, even
+     when the table elements are wider.  Keep the lookup if its zero value
+     or the CLZ bias would be truncated.  Use an extra bit to check the bias
+     without overflowing HOST_WIDE_INT.  */
+  wide_int table_zero = wi::shwi (zero_val, HOST_BITS_PER_WIDE_INT + 1);
+  if (!wi::fits_to_tree_p (table_zero, integer_type_node))
+    return false;
+  if (fn == IFN_CLZ)
+    {
+      wide_int bias = wi::sub (wi::shwi (input_bits - 1,
+				       HOST_BITS_PER_WIDE_INT + 1), table_zero);
+      if (!wi::fits_shwi_p (bias)
+	  || !wi::fits_to_tree_p (bias, integer_type_node))
+	return false;
+    }
+
+  HOST_WIDE_INT ctz_val = -1;
+  bool zero_ok;
+  if (fn == IFN_CTZ)
+    {
+      ctz_val = 0;
+      zero_ok = CTZ_DEFINED_VALUE_AT_ZERO (SCALAR_INT_TYPE_MODE (input_type),
+					   ctz_val) == 2;
+    }
+  else
+    {
+      ctz_val = 32;
+      zero_ok = CLZ_DEFINED_VALUE_AT_ZERO (SCALAR_INT_TYPE_MODE (input_type),
+					   ctz_val) == 2;
+      zero_val = input_bits - 1 - zero_val;
+    }
+
+  /* A one-argument IFN leaves the result at zero undefined to range
+     analysis, even when the target instruction defines it.  Describe
+     that value explicitly so later passes keep the normalization.  */
+  int nargs = 2;
+  /* If the input value can't be zero, don't special case ctz/clz (0).  */
+  if (tree_expr_nonzero_p (res_ops[0]))
+    {
+      zero_ok = true;
+      zero_val = 0;
+      ctz_val = 0;
+      nargs = 1;
+    }
+  else if (!zero_ok)
+    return false;
+
+  gimple_seq seq = NULL;
+  gimple *g;
+  gcall *call
+    = gimple_build_call_internal (fn, nargs, res_ops[0],
+				  nargs == 1 ? NULL_TREE
+				  : build_int_cst (integer_type_node, ctz_val));
+  gimple_set_location (call, gimple_location (stmt));
+  gimple_set_lhs (call, make_ssa_name (integer_type_node));
+  gimple_seq_add_stmt (&seq, call);
+
+  tree prev_lhs = gimple_call_lhs (call);
+
+  if (zero_ok && zero_val == ctz_val)
+    ;
+  /* Emit ctz (x) & 31 if ctz (0) is 32 but we need to return 0.  */
+  else if (zero_ok && zero_val == 0 && ctz_val == input_bits)
+    {
+      g = gimple_build_assign (make_ssa_name (integer_type_node),
+			       BIT_AND_EXPR, prev_lhs,
+			       build_int_cst (integer_type_node,
+					      input_bits - 1));
+      gimple_set_location (g, gimple_location (stmt));
+      gimple_seq_add_stmt (&seq, g);
+      prev_lhs = gimple_assign_lhs (g);
+    }
+  /* As fallback emit a conditional move.  */
+  else
+    {
+      g = gimple_build_assign (make_ssa_name (boolean_type_node), EQ_EXPR,
+			       res_ops[0], build_zero_cst (input_type));
+      gimple_set_location (g, gimple_location (stmt));
+      gimple_seq_add_stmt (&seq, g);
+      tree cond = gimple_assign_lhs (g);
+      g = gimple_build_assign (make_ssa_name (integer_type_node),
+			       COND_EXPR, cond,
+			       build_int_cst (integer_type_node, zero_val),
+			       prev_lhs);
+      gimple_set_location (g, gimple_location (stmt));
+      gimple_seq_add_stmt (&seq, g);
+      prev_lhs = gimple_assign_lhs (g);
+    }
+
+  if (fn == IFN_CLZ)
+    {
+      g = gimple_build_assign (make_ssa_name (integer_type_node),
+			       MINUS_EXPR,
+			       build_int_cst (integer_type_node,
+					      input_bits - 1),
+			       prev_lhs);
+      gimple_set_location (g, gimple_location (stmt));
+      gimple_seq_add_stmt (&seq, g);
+      prev_lhs = gimple_assign_lhs (g);
+    }
+
+  g = gimple_build_assign (gimple_assign_lhs (stmt), NOP_EXPR, prev_lhs);
+  gimple_seq_add_stmt (&seq, g);
+  gsi_replace_with_seq (gsi, seq, true);
+  return true;
+}
+
+
 /* Combine an element access with a shuffle.  Returns true if there were
    any changes made, else it returns false.  */
  
@@ -4016,7 +4327,7 @@ pass_forwprop::execute (function *fun)
 			     && TREE_CODE (TREE_TYPE (rhs1)) == VECTOR_TYPE)
 		      changed = simplify_vector_constructor (&gsi);
 		    else if (code == ARRAY_REF)
-		      changed = simplify_count_trailing_zeroes (&gsi);
+		      changed = simplify_count_zeroes (&gsi);
 		    break;
 		  }
 
