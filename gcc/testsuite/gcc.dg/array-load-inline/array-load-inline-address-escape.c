@@ -24,5 +24,5 @@ main (void)
   return f (1) != 2;
 }
 
-/* { dg-final { scan-ipa-dump "array-load-inline: reject tbl: unknown call side effects or address escapes" "array-load-inline" } } */
+/* { dg-final { scan-ipa-dump "array-load-inline: reject tbl: address escapes" "array-load-inline" } } */
 /* { dg-final { scan-ipa-dump-not "array-load-inline: inlined load of tbl" "array-load-inline" } } */

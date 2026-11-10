@@ -1485,8 +1485,14 @@ zero_initialized_decl_p (tree decl)
   if (!decl || !VAR_P (decl) || DECL_EXTERNAL (decl))
     return false;
 
-  tree init = DECL_INITIAL (decl);
-  return !init || init == error_mark_node || initializer_zerop (init);
+  varpool_node *var = varpool_node::get (decl);
+  if (!var)
+    return false;
+
+  /* LTO can defer reading a nonzero initializer.  An unavailable value is
+     not proof of zero initialization; a missing initializer still is.  */
+  tree init = var->get_constructor ();
+  return init != error_mark_node && (!init || initializer_zerop (init));
 }
 
 static bool
@@ -1573,6 +1579,12 @@ guarded_load_prover::guard_decl_candidate_p (tree guard_decl,
 {
   if (!guard_decl || guard_decl == cand.decl
       || !zero_initialized_decl_p (guard_decl))
+    return false;
+
+  /* A shared guard can be set by a thread that initialized only its own
+     instance of a thread-local table.  */
+  if (DECL_THREAD_LOCAL_P (cand.decl)
+      && !DECL_THREAD_LOCAL_P (guard_decl))
     return false;
 
   varpool_node *guard_var = varpool_node::get (guard_decl);
@@ -2810,7 +2822,9 @@ array_load_inliner::collect_accesses (array_candidate &cand)
   ipa_ref *ref = nullptr;
   for (unsigned i = 0; cand.var->iterate_referring (i, ref); ++i)
     {
-      if (!ref->stmt || ref->use == IPA_REF_ALIAS)
+      /* Address references include PHI arguments and operands that are not
+	 ordinary loads or stores.  Their indirect accesses are not tracked.  */
+      if (!ref->stmt || ref->use == IPA_REF_ALIAS || ref->use == IPA_REF_ADDR)
 	{
 	  cand.reject_reason = "address escapes";
 	  return false;

@@ -13578,7 +13578,8 @@ enabling it requires @option{-O3} or a higher optimization level; it has no
 effect at lower levels.  It can also run during LTO, subject to the visibility
 of the references and function bodies in the current partition.  Escaping
 arrays and guards, including guards accessed through atomic operations, are
-not supported.
+not supported.  A thread-local table cannot use a non-thread-local guard to
+prove that initialization has completed in the current thread.
 
 @opindex fipa-pta
 @item -fipa-pta
