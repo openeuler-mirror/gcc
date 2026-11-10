@@ -1400,7 +1400,8 @@ get_memory_rtx (tree exp, tree len)
   set_mem_alias_set (mem, 0);
   return mem;
 }
-
+
+
 /* Built-in functions to perform an untyped call and return.  */
 
 /* Wrapper that implicitly applies a delta when getting or setting the
@@ -4939,6 +4940,8 @@ expand_small_memcmp_equality (tree exp, rtx target)
   tree arg2 = CALL_EXPR_ARG (exp, 1);
   tree len = CALL_EXPR_ARG (exp, 2);
   if (!flag_inline_small_memcmp_equality
+      /* Optional libcall fallbacks must not override forced inlining.  */
+      || (flag_inline_stringops & ILSOP_MEMCMP)
       || flag_sanitize || flag_non_call_exceptions
       || DECL_FUNCTION_CODE (get_callee_fndecl (exp)) != BUILT_IN_MEMCMP_EQ
       || !optimize_function_for_speed_p (cfun)
@@ -5084,6 +5087,8 @@ expand_memcmp_prefix (tree exp, rtx target, bool result_eq)
   tree len = CALL_EXPR_ARG (exp, 2);
   built_in_function code = DECL_FUNCTION_CODE (get_callee_fndecl (exp));
   if (!flag_inline_memcmp_prefix
+      /* Optional libcall fallbacks must not override forced inlining.  */
+      || (flag_inline_stringops & ILSOP_MEMCMP)
       || param_memcmp_prefix_bytes == 0
       || flag_sanitize || flag_non_call_exceptions
       || (code != BUILT_IN_MEMCMP && code != BUILT_IN_MEMCMP_EQ)
@@ -5142,13 +5147,6 @@ expand_builtin_memcmp (tree exp, rtx target, bool result_eq)
   tree arg1 = CALL_EXPR_ARG (exp, 0);
   tree arg2 = CALL_EXPR_ARG (exp, 1);
   tree len = CALL_EXPR_ARG (exp, 2);
-
-  if (rtx prefix = expand_memcmp_prefix (exp, target, result_eq))
-    return prefix;
-
-  if (result_eq)
-    if (rtx small = expand_small_memcmp_equality (exp, target))
-      return small;
 
   /* Due to the performance benefit, always inline the calls first
      when result_eq is false.  */
@@ -5227,6 +5225,29 @@ expand_builtin_memcmp (tree exp, rtx target, bool result_eq)
       return convert_to_mode (mode, result, 0);
     }
 
+  /* First let the ordinary by-pieces, target cmpmem and forced-inline
+     machinery try the actual operands.  A target may declare a pattern and
+     still decline this call, so pattern availability alone is insufficient.
+     Reuse the already expanded addresses and length in optional fallbacks.  */
+  if (TREE_CODE (len) != INTEGER_CST
+      && !(flag_inline_stringops & ILSOP_MEMCMP)
+      && (flag_inline_memcmp_prefix || flag_inline_small_memcmp_equality))
+    {
+      /* A valid target address can contain symbolic offsets, which cannot
+	 be rebuilt as pointer PLUS_EXPRs by make_tree.  Stabilize the already
+	 evaluated addresses in registers before constructing the fallback.  */
+      tree stabilized = build_call_nofold_loc
+	(loc, get_callee_fndecl (exp), 3,
+	 make_tree (TREE_TYPE (arg1), copy_addr_to_reg (XEXP (arg1_rtx, 0))),
+	 make_tree (TREE_TYPE (arg2), copy_addr_to_reg (XEXP (arg2_rtx, 0))),
+	 make_tree (sizetype, len_rtx));
+      copy_warning (stabilized, exp);
+      if (rtx prefix = expand_memcmp_prefix (stabilized, target, result_eq))
+	return prefix;
+      if (result_eq)
+	if (rtx small = expand_small_memcmp_equality (stabilized, target))
+	  return small;
+    }
   return NULL_RTX;
 }
 
@@ -6707,7 +6728,8 @@ expand_builtin_fork_or_exec (tree fn, tree exp, rtx target, int ignore)
  }
 
 
-
+
+
 /* Reconstitute a mode for a __sync intrinsic operation.  Since the type of
    the pointer in these functions is void*, the tree optimizers may remove
    casts.  The mode computed in expand_builtin isn't reliable either, due
@@ -7745,7 +7767,8 @@ expand_builtin_set_thread_pointer (tree exp)
   error ("%<__builtin_set_thread_pointer%> is not supported on this target");
 }
 
-
+
+
 /* Emit code to restore the current value of stack.  */
 
 static void

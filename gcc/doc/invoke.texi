@@ -12676,6 +12676,9 @@ precedence regardless of their position relative to the grouping option;
 repeated explicit settings of the same child use the last setting.
 Both child options can also be enabled independently.  In particular,
 @option{-finline-memcmp-prefix} alone does not enable the small equality path.
+Existing target comparison expansion and @option{-finline-stringops=memcmp}
+take precedence.  The optional paths are tried only when the ordinary
+expansion declines the call.
 The compatibility spelling @option{-finline-small-memcmp-equality} selects
 only @option{-finline-memcmp-small-equality}, not this grouping option.
 
