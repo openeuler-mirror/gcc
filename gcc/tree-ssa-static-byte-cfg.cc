@@ -355,6 +355,8 @@ public:
 	     gsi_next (&g))
 	  {
 	    gimple *s = gsi_stmt (g);
+	    if (is_gimple_debug (s))
+	      continue;
 	    ssa_op_iter it;
 	    tree op;
 	    FOR_EACH_SSA_TREE_OPERAND (op, s, it, SSA_OP_USE)
@@ -1050,9 +1052,9 @@ struct Pass : gimple_opt_pass
   }
 
   bool
-  gate (function *) override
+  gate (function *fun) override
   {
-    return enabled && optimize >= 2 && !cfun->can_throw_non_call_exceptions
+    return enabled && optimize >= 2 && optimize_function_for_speed_p (fun) && !cfun->can_throw_non_call_exceptions
 	   && !flag_non_call_exceptions;
   }
 
@@ -1071,6 +1073,19 @@ struct Pass : gimple_opt_pass
 		   n_basic_blocks_for_fn (cfun));
 	return 0;
       }
+    /* Partial header duplication invalidates loop objects.  Until there
+       is a complete original/residual-loop mapping, preserve source loop
+       directives by leaving annotated functions untouched.  */
+    if (loops_for_fn (cfun))
+      for (auto loop : loops_list (cfun, LI_FROM_INNERMOST))
+	if (loop->unroll || loop->dont_vectorize || loop->force_vectorize
+	    || loop->safelen || loop->simduid)
+	  {
+	    if (dump_file && (dump_flags & TDF_DETAILS))
+	      fprintf (dump_file, "RESIDUAL-REJECT %s annotated-loop\n",
+		       IDENTIFIER_POINTER (DECL_ASSEMBLER_NAME (cfun->decl)));
+	    return 0;
+	  }
     std::vector<std::pair<tree, tree> > candidates = { { nullptr, nullptr } };
     basic_block bb;
     FOR_EACH_BB_FN (bb, cfun)

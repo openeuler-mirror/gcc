@@ -13743,8 +13743,12 @@ enabled by default at @option{-O1} and higher.
 Specialize bounded CFG states using immutable addresses and byte equality
 facts derived from GIMPLE.  Dynamic operations are retained, and parameter
 hypotheses use runtime guards with the original CFG as fallback.
-The pass runs at @option{-O2} and higher when explicitly enabled, subject
-to side-effect, exception and bounded-growth checks.  Functions that may
+The pass runs in speed-optimized functions at @option{-O2} and higher when
+explicitly enabled, subject to side-effect, exception and bounded-growth
+checks.  Size-optimized and cold functions are skipped.  Functions with
+explicit loop unrolling or vectorization annotations are also skipped so
+that partial CFG duplication cannot discard those annotations.
+Functions that may
 throw non-call exceptions, including those compiled with
 @option{-fnon-call-exceptions}, are skipped.  It is disabled by default.
 
