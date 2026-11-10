@@ -249,6 +249,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_fre, true /* may_iterate */);
       NEXT_PASS (pass_merge_phi);
       NEXT_PASS (pass_thread_jumps_full, /*first=*/true);
+      NEXT_PASS (pass_constant_byte_range);
       NEXT_PASS (pass_vrp, false /* final_p*/);
       NEXT_PASS (pass_dse);
       NEXT_PASS (pass_dce);
@@ -278,6 +279,7 @@ along with GCC; see the file COPYING3.  If not see
 	 Clean them up.  Failure to do so well can lead to false
 	 positives from warnings for erroneous code.  */
       NEXT_PASS (pass_copy_prop);
+      NEXT_PASS (pass_constant_byte_range);
       /* Identify paths that should never be executed in a conforming
 	 program and isolate those paths.  */
       NEXT_PASS (pass_isolate_erroneous_paths);
