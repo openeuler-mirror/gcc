@@ -13748,6 +13748,10 @@ The relaxation is limited to loads in the PHI block and preserves the
 memory state on each incoming edge.  It is disabled by default.
 The cumulative analysis cost is bounded by
 @option{--param=phiprop-disjoint-stores-max-work=}.
+Unlike the single-store relaxation in later GCC versions, this extension
+can cross multiple proven-disjoint memory definitions in the same block.
+It uses the normal alias oracle and requires compatible automatic scalar
+objects; it does not authorize otherwise invalid type-punning accesses.
 
 @opindex fssa-phiopt
 @item -fssa-phiopt
