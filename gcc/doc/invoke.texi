@@ -13123,6 +13123,11 @@ This extends the shift-based loop idioms recognized by GCC 14.  It is disabled
 by default at every optimization level; @option{-fno-bit-scan-loop-idiom}
 therefore preserves the original recognition policy.
 
+The arithmetic idioms are based on the recognition available in GCC 15.
+This GCC 14 backport makes those additional forms opt-in and restricts
+the multiplication form to unsigned types, leaving signed overflow and
+trapping semantics outside this extension.
+
 @opindex fdevirtualize
 @item -fdevirtualize
 Attempt to convert calls to virtual functions to direct calls.  This

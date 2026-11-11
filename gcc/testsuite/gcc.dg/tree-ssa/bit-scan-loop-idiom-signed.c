@@ -1,4 +1,5 @@
-/* Signed division truncates towards zero; it is not a logical right shift.  */
+/* PR tree-optimization/114760, adapted from pr114760-2.c.
+   Signed division truncates towards zero; it is not a logical right shift.  */
 /* { dg-do compile } */
 /* { dg-options "-O3 -fbit-scan-loop-idiom -fdump-tree-optimized" } */
 

@@ -1,4 +1,5 @@
-/* Verify opt-in recognition of multiply/add/divide bit-scan loops.  */
+/* PR tree-optimization/114760, adapted from pr114760-1.c.
+   Verify opt-in recognition of multiply/add/divide bit-scan loops.  */
 /* { dg-do compile } */
 /* { dg-require-effective-target clz } */
 /* { dg-require-effective-target ctz } */
