@@ -13889,7 +13889,12 @@ rejects unsafe or wrapping address ranges before any packed store.
 Only exact unit-stride rotating indices and single-bit
 update predicates are recognized; negative or wrapping index ranges use
 the original loop.  The fast path preserves zero-trip and presence tests
-and only writes words whose final values change.  This option requires
+and only writes words whose final values change.  Candidates must have a single
+inner loop and single exits, and at most 16 blocks in each loop.  This is
+a structural work bound, not an exact block-count requirement.  Unsupported
+scalar live-outs, additional store guards, insufficient alignment and
+incompatible alias types prevent the transformation.  External debug
+bindings are reset when their definitions are removed.  This option requires
 @option{-O3} and is disabled by default.
 
 Preparation uses a restricted header-copying pass and may repeat

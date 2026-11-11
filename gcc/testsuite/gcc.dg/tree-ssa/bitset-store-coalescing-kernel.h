@@ -56,8 +56,14 @@ BITSET_NAME (struct bitset_context *ctx, int rotation,
 	    continue;
 	  int old_value = (int) ((values[local_bit >> 5] >> shift) & 1U);
 	  int desired = BITSET_DESIRED;
+#ifdef BITSET_CONTINUE
+          if (desired == old_value)
+            continue;
+          values[local_bit >> 5] ^= BITSET_FLIP;
+#else
 	  if (desired != old_value)
 	    values[local_bit >> 5] ^= BITSET_FLIP;
+#endif
 	}
     }
 }
@@ -69,3 +75,5 @@ BITSET_NAME (struct bitset_context *ctx, int rotation,
 #undef BITSET_ROWS
 #undef BITSET_EXTRA
 #undef BITSET_ATTRIBUTES
+
+#undef BITSET_CONTINUE

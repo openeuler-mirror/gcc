@@ -30,6 +30,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-cfg.h"
 #include "tree-into-ssa.h"
 #include "cfgloop.h"
+#include "tree-ssa-loop.h"
 #include "tree-inline.h"
 #include "tree-ssa-threadedge.h"
 #include "tree-ssa-sccvn.h"
@@ -1251,11 +1252,7 @@ pass_ch::process_loop_p (class loop *loop)
   if (!bitset_prepare_p)
     return true;
 
-  class loop *inner = loop->inner;
-  return loop_depth (loop) == 1
-	 && inner && !inner->next
-	 && loop->num_nodes == 8
-	 && inner->num_nodes == 5;
+  return bitset_store_coalescing_candidate_p (loop);
 }
 
 /* Apply header-copying to loops where we might enable vectorization.  */

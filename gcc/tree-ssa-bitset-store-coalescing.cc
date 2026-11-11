@@ -59,6 +59,21 @@
 #include "ssa.h"
 #include "tree-phinodes.h"
 #include "tree-into-ssa.h"
+#include "builtins.h"
+#include "alias.h"
+#include "predict.h"
+#include "gimple-predict.h"
+
+/* A cheap shared structural screen.  Detailed matching must still prove
+   every operation; block count is only a work bound, never an idiom key.  */
+bool
+bitset_store_coalescing_candidate_p (class loop *outer)
+{
+  class loop *inner = outer->inner;
+  return loop_depth (outer) == 1 && inner && !inner->next && !inner->inner
+	 && outer->num_nodes <= 16 && inner->num_nodes <= 16
+	 && single_exit (outer) && single_exit (inner);
+}
 
 namespace {
 
@@ -84,6 +99,7 @@ struct canonical_iv
   tree next;
   tree bound;
   edge exit;
+  bool tests_next;
 };
 
 struct candidate
@@ -103,6 +119,8 @@ struct candidate
   gassign *info_store;
   tree info_mem;
   tree presence_mem;
+  gcond *presence_cond;
+  gcond *desired_cond;
 };
 
 static bool
@@ -266,11 +284,42 @@ find_canonical_iv (class loop *loop, canonical_iv *out)
       if (!bound || value_depends_on_p (bound, value))
 	continue;
 
+      /* The old IV is a trip count only at a top test.  A bottom test of
+	 it executes one additional body.  A test of NEXT is accepted only
+	 after the body, with the increment dominating that exit.  */
+      bool tests_old = same_tree_p (lhs, value) || same_tree_p (rhs, value);
+      if (tests_old)
+	{
+	  if (exit->src != loop->header)
+	    continue;
+	  bool pure_header = true;
+	  for (gimple_stmt_iterator si = gsi_start_bb (loop->header);
+	       !gsi_end_p (si); gsi_next (&si))
+	    {
+	      gimple *stmt = gsi_stmt (si);
+	      if (stmt == cond || is_gimple_debug (stmt)
+		  || gimple_code (stmt) == GIMPLE_LABEL
+		  || gimple_code (stmt) == GIMPLE_PREDICT)
+		continue;
+	      if (!is_gimple_assign (stmt) || gimple_vdef (stmt)
+		  || gimple_has_volatile_ops (stmt))
+		pure_header = false;
+	    }
+	  if (!pure_header)
+	    continue;
+	}
+      else if (exit->src == loop->header
+	       || !dominated_by_p (CDI_DOMINATORS, loop->latch, exit->src)
+	       || !dominated_by_p (CDI_DOMINATORS, exit->src,
+				   gimple_bb (inc)))
+	continue;
+
       out->phi = phi;
       out->value = value;
       out->next = next;
       out->bound = bound;
       out->exit = exit;
+      out->tests_next = !tests_old;
       return true;
     }
   return false;
@@ -556,6 +605,14 @@ no_extra_side_effects_p (candidate &cand)
 	gimple *stmt = gsi_stmt (gsi);
 	if (is_gimple_debug (stmt) || gimple_code (stmt) == GIMPLE_PREDICT)
 	  continue;
+	if (gimple_code (stmt) == GIMPLE_COND
+	    && stmt != *gsi_last_bb (cand.outer_iv.exit->src)
+	    && stmt != *gsi_last_bb (cand.inner_iv.exit->src)
+	    && stmt != cand.presence_cond && stmt != cand.desired_cond)
+	  {
+	    safe = false;
+	    break;
+	  }
 	if (gimple_has_volatile_ops (stmt)
 	    || (stmt != cand.info_store
 		&& (gimple_vdef (stmt) || gimple_has_side_effects (stmt)))
@@ -594,6 +651,50 @@ only_virtual_exit_phis_p (basic_block bb)
   return true;
 }
 
+/* This early pass does not require LCSSA.  A scalar may escape the loop
+   directly even when its exit has no scalar PHI.  Do not add a bypass unless
+   all nondebug scalar uses remain within the original nest.  */
+static bool
+scalar_live_out_p (class loop *loop, auto_vec<gimple *> *debug_uses = nullptr)
+{
+  basic_block *body = get_loop_body (loop);
+  bool escapes = false;
+  for (unsigned i = 0; i < loop->num_nodes && !escapes; ++i)
+    {
+      auto_vec<tree> names;
+      for (gphi_iterator pi = gsi_start_phis (body[i]); !gsi_end_p (pi);
+	   gsi_next (&pi))
+	names.safe_push (gimple_phi_result (pi.phi ()));
+      for (gimple_stmt_iterator si = gsi_start_bb (body[i]); !gsi_end_p (si);
+	   gsi_next (&si))
+	{
+	  ssa_op_iter it;
+	  tree name;
+	  FOR_EACH_SSA_TREE_OPERAND (name, gsi_stmt (si), it, SSA_OP_DEF)
+	    names.safe_push (name);
+	}
+      for (tree name : names)
+	{
+	  if (virtual_operand_p (name))
+	    continue;
+	  imm_use_iterator it;
+	  use_operand_p use;
+	  FOR_EACH_IMM_USE_FAST (use, it, name)
+	    {
+	      gimple *stmt = USE_STMT (use);
+	      if (debug_uses && gimple_debug_bind_p (stmt)
+		  && !flow_bb_inside_loop_p (loop, gimple_bb (stmt)))
+		debug_uses->safe_push (stmt);
+	      if (!is_gimple_debug (stmt)
+		  && !flow_bb_inside_loop_p (loop, gimple_bb (stmt)))
+		escapes = true;
+	    }
+	}
+    }
+  free (body);
+  return escapes;
+}
+
 static bool
 find_candidate (class loop *inner, candidate *out)
 {
@@ -601,14 +702,8 @@ find_candidate (class loop *inner, candidate *out)
   if (!outer || loop_depth (outer) != 1
       || outer->inner != inner || inner->next)
     return false;
-  /* Keep the opt-in matcher cheap in very large LTO units.  The canonical
-     update diamond has five inner-loop blocks; with its rotation setup and
-     outer latch, the enclosing loop has eight blocks before jump threading
-     and nine afterwards.  Later tests remain fully structural, but there is
-     no reason to run recursive SSA dependency walks for a different CFG.  */
-  if (inner->num_nodes != 5
-      || (outer->num_nodes != 8 && outer->num_nodes != 9))
-    return false;
+  if (!bitset_store_coalescing_candidate_p (outer))
+    return reject_candidate (inner, "unsupported loop structure or work bound");
   if (!can_duplicate_loop_p (outer))
     return reject_candidate (inner, "loop duplication safety");
 
@@ -632,6 +727,8 @@ find_candidate (class loop *inner, candidate *out)
 	  && flow_bb_inside_loop_p
 	       (outer, gimple_bb (SSA_NAME_DEF_STMT (cand.outer_iv.bound)))))
     return reject_candidate (inner, "induction types");
+  if (scalar_live_out_p (outer))
+    return reject_candidate (inner, "scalar live-out");
   if (!only_virtual_exit_phis_p (cand.outer_iv.exit->dest))
     return reject_candidate (inner, "exit phi");
 
@@ -770,9 +867,13 @@ find_candidate (class loop *inner, candidate *out)
       if (!cond)
 	continue;
       if (edge zero = zero_edge (cond, masked_presence))
-	presence_controls_store
-	  |= dominated_by_p (CDI_DOMINATORS, gimple_bb (cand.info_store),
-			    zero->dest);
+	if (single_pred_p (zero->dest)
+	    && dominated_by_p (CDI_DOMINATORS, gimple_bb (cand.info_store),
+			       zero->dest))
+	  {
+	    presence_controls_store = true;
+	    cand.presence_cond = cond;
+	  }
 
       tree a = gimple_cond_lhs (cond);
       tree b = gimple_cond_rhs (cond);
@@ -785,10 +886,13 @@ find_candidate (class loop *inner, candidate *out)
 	continue;
       bool unequal_is_true = gimple_cond_code (cond) == NE_EXPR;
       edge store_edge = true_or_false_edge (gimple_bb (cond), unequal_is_true);
-      if (store_edge)
-	desired_controls_store
-	  |= dominated_by_p (CDI_DOMINATORS, gimple_bb (cand.info_store),
-			    store_edge->dest);
+      if (store_edge && single_pred_p (store_edge->dest)
+	  && dominated_by_p (CDI_DOMINATORS, gimple_bb (cand.info_store),
+			     store_edge->dest))
+	{
+	  desired_controls_store = true;
+	  cand.desired_cond = cond;
+	}
     }
   free (bbs);
 
@@ -796,11 +900,33 @@ find_candidate (class loop *inner, candidate *out)
       || !presence_controls_store || !desired_controls_store)
     return reject_candidate (inner, "bit update diamond");
 
+  /* A NEXT comparison must follow the modeled iteration, not an early
+     break before its payload.  Scalar SSA dominance of the increment alone
+     does not prove that a row or an inner traversal has executed.  */
+  if ((cand.inner_iv.tests_next
+       && !dominated_by_p (CDI_DOMINATORS, cand.inner_iv.exit->src,
+			   gimple_bb (SSA_NAME_DEF_STMT (cand.literal))))
+      || (cand.outer_iv.tests_next
+	  && !dominated_by_p (CDI_DOMINATORS, cand.outer_iv.exit->src,
+			      inner->header)))
+    return reject_candidate (inner, "iteration payload does not precede exit");
+
   if (!INTEGRAL_TYPE_P (TREE_TYPE (info_mem))
       || TYPE_PRECISION (TREE_TYPE (info_mem)) != 32
       || !INTEGRAL_TYPE_P (TREE_TYPE (presence_mem))
       || TYPE_PRECISION (TREE_TYPE (presence_mem)) != 32)
     return reject_candidate (inner, "packed word type");
+  /* The generated references use unsigned int.  Do not silently strengthen
+     an underaligned or may_alias access from the original program.  */
+  if (reverse_storage_order_for_component_p (info_mem)
+      || reverse_storage_order_for_component_p (presence_mem)
+      || get_object_alignment (info_mem) < TYPE_ALIGN (unsigned_type_node)
+      || get_object_alignment (presence_mem) < TYPE_ALIGN (unsigned_type_node)
+      || TYPE_ALIGN (TREE_TYPE (info_mem)) < TYPE_ALIGN (unsigned_type_node)
+      || TYPE_ALIGN (TREE_TYPE (presence_mem)) < TYPE_ALIGN (unsigned_type_node)
+      || get_alias_set (info_mem) != get_alias_set (unsigned_type_node)
+      || get_alias_set (presence_mem) != get_alias_set (unsigned_type_node))
+    return reject_candidate (inner, "packed word alignment or alias type");
 
   tree info_ptr = memory_pointer (info_mem);
   tree presence_ptr = memory_pointer (presence_mem);
@@ -1671,6 +1797,16 @@ transform_candidate (candidate &cand)
 	     "for loops %d/%d (max bits %llu)\n",
 	     function_name (cfun), cand.outer->num, cand.inner->num,
 	     (unsigned long long) MAX_FAST_BITS);
+  /* Real live-outs were rejected, but debug-only uses must not constrain
+     code generation.  Their fallback definitions no longer dominate them.  */
+  auto_vec<gimple *> debug_uses;
+  bool live_out = scalar_live_out_p (cand.outer, &debug_uses);
+  gcc_assert (!live_out);
+  for (gimple *stmt : debug_uses)
+    {
+      gimple_debug_bind_reset_value (stmt);
+      update_stmt (stmt);
+    }
   mark_virtual_operands_for_renaming (cfun);
   return true;
 }
@@ -1711,23 +1847,16 @@ public:
     for (auto inner : loops_list (fun, LI_FROM_INNERMOST))
       {
 	class loop *outer = loop_outer (inner);
-	if (!outer || loop_depth (outer) != 1
-	    || outer->inner != inner || inner->next
-	    || (outer->num_nodes != 8 && outer->num_nodes != 9)
-	    || (inner->num_nodes != 5 && inner->num_nodes != 6))
+	if (!outer || !bitset_store_coalescing_candidate_p (outer))
 	  continue;
-
-	if (inner->num_nodes == 5)
-	  {
-	    need_lim = true;
-	    continue;
-	  }
+	need_lim = true;
 
 	basic_block *body = get_loop_body (inner);
 	for (unsigned int i = 0; i < inner->num_nodes; ++i)
 	  for (gimple_stmt_iterator gsi = gsi_start_bb (body[i]);
 	       !gsi_end_p (gsi);)
-	    if (gimple_code (gsi_stmt (gsi)) == GIMPLE_PREDICT)
+	    if (gimple_code (gsi_stmt (gsi)) == GIMPLE_PREDICT
+	&& gimple_predict_predictor (gsi_stmt (gsi)) == PRED_CONTINUE)
 	      {
 		gsi_remove (&gsi, true);
 		removed_predict = true;
