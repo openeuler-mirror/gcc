@@ -433,6 +433,22 @@ The minimum stride ratio for loop interchange to be profitable.
 Common Joined UInteger Var(param_loop_invariant_max_bbs_in_loop) Init(10000) Param Optimization
 Max basic blocks number in loop for loop invariant motion.
 
+-param=loop-invariant-split-chunk-bytes=
+Common Joined UInteger Var(param_loop_invariant_split_chunk_bytes) Init(0) Param Optimization
+Maximum bytes of outer-invariant inner-loop loads per split chunk, or zero to choose automatically.
+
+-param=loop-invariant-split-max-copies=
+Common Joined UInteger Var(param_loop_invariant_split_max_copies) Init(8) Param Optimization
+Maximum number of loop nest copies created by loop invariant split.
+
+-param=loop-invariant-split-reserved-vregs=
+Common Joined UInteger Var(param_loop_invariant_split_reserved_vregs) Init(0) Param Optimization
+Number of vector registers reserved for computation by loop invariant split, or zero to choose automatically.
+
+-param=loop-invariant-split-vector-regs=
+Common Joined UInteger Var(param_loop_invariant_split_vector_regs) Init(0) Param Optimization
+Number of vector registers available to loop invariant split, or zero to infer from the target.
+
 -param=loop-max-datarefs-for-datadeps=
 Common Joined UInteger Var(param_loop_max_datarefs_for_datadeps) Init(1000) Param Optimization
 Maximum number of datarefs in loop for building loop data dependencies.

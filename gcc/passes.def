@@ -202,6 +202,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_rebuild_cgraph_edges);
   POP_INSERT_PASSES ()
   NEXT_PASS (pass_ipa_array_dse);
+  NEXT_PASS (pass_ipa_array_load_inline);
   NEXT_PASS (pass_ipa_pta);
   /* FIXME: this should be a normal IP pass.  */
   NEXT_PASS (pass_ipa_struct_reorg);
@@ -248,6 +249,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_fre, true /* may_iterate */);
       NEXT_PASS (pass_merge_phi);
       NEXT_PASS (pass_thread_jumps_full, /*first=*/true);
+      NEXT_PASS (pass_constant_byte_range);
       NEXT_PASS (pass_vrp, false /* final_p*/);
       NEXT_PASS (pass_dse);
       NEXT_PASS (pass_dce);
@@ -277,6 +279,7 @@ along with GCC; see the file COPYING3.  If not see
 	 Clean them up.  Failure to do so well can lead to false
 	 positives from warnings for erroneous code.  */
       NEXT_PASS (pass_copy_prop);
+      NEXT_PASS (pass_constant_byte_range);
       /* Identify paths that should never be executed in a conforming
 	 program and isolate those paths.  */
       NEXT_PASS (pass_isolate_erroneous_paths);
@@ -304,6 +307,7 @@ along with GCC; see the file COPYING3.  If not see
 	 to discover/remove loops before running the gate function
 	 of pass_tree_loop.  */
       NEXT_PASS (pass_fix_loops);
+      NEXT_PASS (pass_static_byte_cfg);
       NEXT_PASS (pass_tree_loop);
       PUSH_INSERT_PASSES_WITHIN (pass_tree_loop)
           /* Before loop_init we rewrite no longer addressed locals into SSA
@@ -312,6 +316,7 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_tree_unswitch);
 	  NEXT_PASS (pass_loop_split);
 	  NEXT_PASS (pass_scev_cprop);
+	  NEXT_PASS (pass_loop_invariant_split);
 	  NEXT_PASS (pass_loop_versioning);
 	  NEXT_PASS (pass_loop_jam);
 	  /* All unswitching, final value replacement and splitting can expose

@@ -237,6 +237,7 @@ static const riscv_implied_info_t riscv_implied_info[] =
   {"smaia", "ssaia"},
   {"smstateen", "ssstateen"},
   {"smepmp", "zicsr"},
+  {"smrnmi", "zicsr"},
   {"ssaia", "zicsr"},
   {"sscofpmf", "zicsr"},
   {"sscounterenw", "zicsr"},
@@ -442,6 +443,7 @@ static const struct riscv_ext_version riscv_ext_version_table[] =
 
   {"smaia",     ISA_SPEC_CLASS_NONE, 1, 0},
   {"smepmp",    ISA_SPEC_CLASS_NONE, 1, 0},
+  {"smrnmi",    ISA_SPEC_CLASS_NONE, 1, 0},
   {"smstateen", ISA_SPEC_CLASS_NONE, 1, 0},
 
   {"ssaia",     ISA_SPEC_CLASS_NONE, 1, 0},
@@ -1952,6 +1954,8 @@ static const riscv_ext_flag_table_t riscv_ext_flag_table[] =
   RISCV_EXT_FLAG_ENTRY ("xtheadvector",  x_target_flags, MASK_VECTOR),
 
   RISCV_EXT_FLAG_ENTRY ("xventanacondops", x_riscv_xventana_subext, MASK_XVENTANACONDOPS),
+
+  RISCV_EXT_FLAG_ENTRY ("smrnmi", x_riscv_sm_subext, MASK_SMRNMI),
 
   {NULL, NULL, NULL, 0}
 };

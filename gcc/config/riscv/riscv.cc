@@ -158,7 +158,7 @@ struct GTY(())  riscv_frame_info {
 };
 
 enum riscv_privilege_levels {
-  UNKNOWN_MODE, USER_MODE, SUPERVISOR_MODE, MACHINE_MODE
+  UNKNOWN_MODE, USER_MODE, SUPERVISOR_MODE, MACHINE_MODE, RNMI_MODE
 };
 
 struct GTY(()) mode_switching_info {
@@ -5965,13 +5965,18 @@ riscv_handle_type_attribute (tree *node ATTRIBUTE_UNUSED, tree name, tree args,
 
 	  string = TREE_STRING_POINTER (cst);
 	  if (strcmp (string, "user") && strcmp (string, "supervisor")
-	      && strcmp (string, "machine"))
+	      && strcmp (string, "machine") && strcmp (string, "rnmi"))
 	    {
 	      warning (OPT_Wattributes,
 		       "argument to %qE attribute is not %<\"user\"%>, %<\"supervisor\"%>, "
-		       "or %<\"machine\"%>", name);
+		       "%<\"machine\"%>, or %<\"rnmi\"%>", name);
 	      *no_add_attrs = true;
 	    }
+	  /* The availability of the Smrnmi extension is checked in
+	     riscv_set_current_function, where the function's own target
+	     options (from a target attribute or a pragma) are in effect.
+	     Checking TARGET_SMRNMI here would only look at the command-line
+	     options and could reject a valid function.  */
 	}
     }
 
@@ -8377,6 +8382,17 @@ riscv_expand_epilogue (int style)
 	emit_jump_insn (gen_riscv_mret ());
       else if (mode == SUPERVISOR_MODE)
 	emit_jump_insn (gen_riscv_sret ());
+      else if (mode == RNMI_MODE)
+	{
+	  /* A mismatch between the interrupt attribute and the function's
+	     ISA is diagnosed in riscv_set_current_function.  Avoid emitting
+	     an instruction that is not available in the current ISA, which
+	     would trigger an "unrecognizable insn" error later.  */
+	  if (TARGET_SMRNMI)
+	    emit_jump_insn (gen_riscv_mnret ());
+	  else
+	    emit_jump_insn (gen_riscv_mret ());
+	}
       else
 	emit_jump_insn (gen_riscv_uret ());
     }
@@ -10175,12 +10191,29 @@ riscv_get_interrupt_type (tree decl)
 	return USER_MODE;
       else if (!strcmp (string, "supervisor"))
 	return SUPERVISOR_MODE;
+      else if (!strcmp (string, "rnmi"))
+	return RNMI_MODE;
       else /* Must be "machine".  */
 	return MACHINE_MODE;
     }
   else
     /* Interrupt attributes are machine mode by default.  */
     return MACHINE_MODE;
+}
+
+/* Return true if the target options for DECL enable the Smrnmi extension.  */
+
+static bool
+riscv_function_has_smrnmi_p (tree decl)
+{
+  tree target = DECL_FUNCTION_SPECIFIC_TARGET (decl);
+
+  if (!target)
+    target = target_option_default_node;
+
+  struct cl_target_option *opts = TREE_TARGET_OPTION (target);
+
+  return (opts->x_riscv_sm_subext & MASK_SMRNMI) != 0;
 }
 
 /* Implement `TARGET_SET_CURRENT_FUNCTION'.  Unpack the codegen decisions
@@ -10221,6 +10254,10 @@ riscv_set_current_function (tree decl)
 	    error ("%qs function cannot have arguments", "interrupt");
 
 	  cfun->machine->interrupt_mode = riscv_get_interrupt_type (decl);
+
+	  if (cfun->machine->interrupt_mode == RNMI_MODE
+	      && !riscv_function_has_smrnmi_p (decl))
+	    error ("attribute %<rnmi%> requires the Smrnmi ISA extension");
 
 	  gcc_assert (cfun->machine->interrupt_mode != UNKNOWN_MODE);
 	}
