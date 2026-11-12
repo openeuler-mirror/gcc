@@ -13123,6 +13123,15 @@ this cache.  A cache miss, a failed cast, and casts requiring pointer
 adjustment continue to use the complete ABI run-time check.  Constant
 evaluation uses the original cast without accessing the cache.
 
+The cache does not track the lifetime of loaded modules.  It assumes that a
+cached vtable address is not reused for a different dynamic type while a
+thread retains the cache.  Unloading and reloading modules containing
+polymorphic types can violate this assumption and cause a cached cast to
+return an incorrect nonnull result.  Such module unloading and reloading,
+and run-time generated or recycled vtables, are not supported by this
+cache.  The ABI check on a cache miss does not protect against stale cache
+hits.
+
 During speculative devirtualization, this option also permits GCC to select a
 target shared by a uniquely dominant number of live virtual tables when there
 is more than one otherwise likely target.  GCC emits a target-address guard
@@ -13132,6 +13141,10 @@ dynamic type preserves the original behavior.
 Live-vtable references are a static profitability estimate, not execution
 counts.  Function-specific optimization settings control whether this
 additional target-selection heuristic is enabled at each caller.
+
+The cache and the additional speculative-devirtualization heuristic reduce
+different costs of C++ polymorphism and are controlled by this single
+option.  Neither mechanism depends on results produced by the other.
 
 The option is disabled by default at all optimization levels.  Use
 @option{-fcomponent-type-flow} to enable it explicitly.  Without the option,
