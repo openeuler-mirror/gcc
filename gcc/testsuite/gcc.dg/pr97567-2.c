@@ -1,5 +1,5 @@
 /* { dg-do compile} */
-/* { dg-options "-O2 -fdump-tree-evrp -fdisable-tree-ethread" } */
+/* { dg-options "-O2 -fdump-tree-evrp1 -fdisable-tree-ethread" } */
 
 char a[2];
 
@@ -21,4 +21,4 @@ void gg (void)
      foo ();
 }
 
-/* { dg-final { scan-tree-dump-not "foo" "evrp" } }  */
+/* { dg-final { scan-tree-dump-not "foo" "evrp1" } }  */

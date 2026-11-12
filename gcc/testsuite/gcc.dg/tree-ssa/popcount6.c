@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp" }
+// { dg-options "-O2 -fdump-tree-evrp1" }
 
 int g(int n)
 {
@@ -9,4 +9,4 @@ int g(int n)
   return __builtin_popcount(n);
 }
 
-// { dg-final { scan-tree-dump "return 1;" "evrp" } }
+// { dg-final { scan-tree-dump "return 1;" "evrp1" } }

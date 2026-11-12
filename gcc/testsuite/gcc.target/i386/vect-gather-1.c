@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-Ofast -msse2 -fdump-tree-vect-details -fdump-tree-forwprop4" } */
+/* { dg-options "-Ofast -msse2 -fdump-tree-vect-details -fdump-tree-forwprop6" } */
 
 #ifndef INDEXTYPE
 #define INDEXTYPE int
@@ -17,4 +17,4 @@ double vmul(INDEXTYPE *rowstart, INDEXTYPE *rowend,
    even with plain SSE2.  */
 /* { dg-final { scan-tree-dump "loop vectorized" "vect" } } */
 /* The index vector loads and promotions should be scalar after forwprop.  */
-/* { dg-final { scan-tree-dump-not "vec_unpack" "forwprop4" } } */
+/* { dg-final { scan-tree-dump-not "vec_unpack" "forwprop6" } } */

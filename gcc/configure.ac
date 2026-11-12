@@ -1385,7 +1385,7 @@ AC_CHECK_HEADERS(ext/hash_map)
 ZW_CREATE_DEPDIR
 AC_CONFIG_COMMANDS([gccdepdir],[
   ${CONFIG_SHELL-/bin/sh} $ac_aux_dir/mkinstalldirs build/$DEPDIR
-  for lang in $subdirs c-family common analyzer text-art rtl-ssa
+  for lang in $subdirs c-family common analyzer text-art rtl-ssa ipa-struct-reorg
   do
       ${CONFIG_SHELL-/bin/sh} $ac_aux_dir/mkinstalldirs $lang/$DEPDIR
   done], [subdirs="$subdirs" ac_aux_dir=$ac_aux_dir DEPDIR=$DEPDIR])
@@ -2621,6 +2621,10 @@ case $use_collect2 in
     esac
     ;;
 esac
+
+AC_DEFINE_UNQUOTED(BOLTPLUGINSONAME,"${host_bolt_plugin_soname}",
+[Define to the name of the BOLT plugin DSO that must be
+  passed to the linker's -plugin=LIB option.])
 
 AC_DEFINE_UNQUOTED(LTOPLUGINSONAME,"${host_lto_plugin_soname}",
 [Define to the name of the LTO plugin DSO that must be

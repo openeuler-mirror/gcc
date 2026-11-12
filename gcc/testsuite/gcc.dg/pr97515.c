@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-ccp2" } */
+/* { dg-options "-O2 -fdump-tree-ccp3" } */
 
 int
 e7 (int gg)
@@ -24,4 +24,4 @@ e7 (int gg)
  * revisit statements to try folding again based on changed inputs.
  * Until then, make sure its gone by ccp2.  */
  
-/* { dg-final { scan-tree-dump-times "goto" 1 "ccp2" } } */
+/* { dg-final { scan-tree-dump-times "goto" 1 "ccp3" } } */

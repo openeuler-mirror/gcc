@@ -8608,6 +8608,46 @@ get_elf_initfini_array_priority_section (int priority,
   return sec;
 }
 
+/* Create .GCC4OE_oeAware section with optimization policy value.
+   Only emitted for main function's translation unit.  The 4-byte
+   value is stored in target-endian format (little-endian here).
+   SECTION_STRINGS allows merging identical policy values.  */
+
+void
+create_oeaware_section ()
+{
+  /* To prevent inserting repeated segments and data, we only perform
+     the insertion in the file where the GLOBAL main
+     function is located.  */
+  if (!cfun || TREE_CODE (cfun->decl) != FUNCTION_DECL
+      || !DECL_NAME (cfun->decl) || !MAIN_NAME_P (DECL_NAME (cfun->decl))
+      || (DECL_CONTEXT (cfun->decl) != NULL_TREE &&
+	  TREE_CODE (DECL_CONTEXT (cfun->decl)) != TRANSLATION_UNIT_DECL))
+    return;
+
+  const char *sect_name = ".GCC4OE_oeAware";
+
+  /* If section already exists, just skip.  */
+  section **slot
+    = section_htab->find_slot_with_hash (sect_name,
+					 htab_hash_string (sect_name),
+					 INSERT);
+  if (!slot || *slot != NULL)
+    return;
+
+  section *oe_section = get_section (sect_name, SECTION_STRINGS, NULL, false);
+  switch_to_section (oe_section);
+
+  gcc_assert (oeaware_optimize_policy <= UINT8_MAX);
+  uint32_t value = oeaware_optimize_policy;
+  uint8_t *bytes = (uint8_t *)&value;
+
+  fprintf (asm_out_file, "\t.byte 0x%02x, 0x%02x, 0x%02x, 0x%02x\n",
+	  bytes[0], bytes[1], bytes[2], bytes[3]);
+
+  return;
+}
+
 /* Use .init_array section for constructors. */
 
 void

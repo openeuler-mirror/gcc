@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-ipa-vrp -fno-tree-ccp -fdisable-tree-evrp -fno-thread-jumps -fdump-ipa-cp-details" } */
+/* { dg-options "-O2 -fno-ipa-vrp -fno-tree-ccp -fdisable-tree-evrp1 -fno-thread-jumps -fdump-ipa-cp-details" } */
 
 #include "pure-const-3.h"
 

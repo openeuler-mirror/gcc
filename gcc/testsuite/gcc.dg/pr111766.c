@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 int
 foo3n(int c, int bb)
@@ -10,4 +10,4 @@ foo3n(int c, int bb)
   return bb;
 }
 
-/* { dg-final { scan-tree-dump-not "trap" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "trap" "evrp1" } } */

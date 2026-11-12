@@ -158,7 +158,7 @@ struct GTY(())  riscv_frame_info {
 };
 
 enum riscv_privilege_levels {
-  UNKNOWN_MODE, USER_MODE, SUPERVISOR_MODE, MACHINE_MODE
+  UNKNOWN_MODE, USER_MODE, SUPERVISOR_MODE, MACHINE_MODE, RNMI_MODE
 };
 
 struct GTY(()) mode_switching_info {
@@ -291,6 +291,7 @@ struct riscv_tune_param
   bool use_divmod_expansion;
   unsigned int fusible_ops;
   const struct cpu_vector_cost *vec_costs;
+  bool prefer_agnostic;
 };
 
 
@@ -435,6 +436,7 @@ static const struct riscv_tune_param rocket_tune_info = {
   false,					/* use_divmod_expansion */
   RISCV_FUSE_NOTHING,                           /* fusible_ops */
   NULL,						/* vector cost */
+  false,					/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for Sifive 7 Series.  */
@@ -453,6 +455,7 @@ static const struct riscv_tune_param sifive_7_tune_info = {
   false,					/* use_divmod_expansion */
   RISCV_FUSE_NOTHING,                           /* fusible_ops */
   NULL,						/* vector cost */
+  false,					/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for Sifive p400 Series.  */
@@ -471,6 +474,7 @@ static const struct riscv_tune_param sifive_p400_tune_info = {
   false,					/* use_divmod_expansion */
   RISCV_FUSE_LUI_ADDI | RISCV_FUSE_AUIPC_ADDI,  /* fusible_ops */
   &generic_vector_cost,				/* vector cost */
+  true,						/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for Sifive p600 Series.  */
@@ -489,6 +493,7 @@ static const struct riscv_tune_param sifive_p600_tune_info = {
   false,					/* use_divmod_expansion */
   RISCV_FUSE_LUI_ADDI | RISCV_FUSE_AUIPC_ADDI,  /* fusible_ops */
   &generic_vector_cost,				/* vector cost */
+  true,						/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for T-HEAD c906.  */
@@ -507,6 +512,7 @@ static const struct riscv_tune_param thead_c906_tune_info = {
   false,	/* use_divmod_expansion */
   RISCV_FUSE_NOTHING,                           /* fusible_ops */
   NULL,						/* vector cost */
+  false,					/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for T-HEAD c930.  */
@@ -525,6 +531,7 @@ const struct riscv_tune_param xt_c930_tune_info = {
   true,				 		/* use_divmod_expansion */
   RISCV_FUSE_NOTHING, 				/* fusible_ops */
   &generic_vector_cost,				/* vector cost */
+  false,					/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for xiangshan nanhu.  */
@@ -543,6 +550,7 @@ static const struct riscv_tune_param xiangshan_nanhu_tune_info = {
   false,					/* use_divmod_expansion */
   RISCV_FUSE_ZEXTW | RISCV_FUSE_ZEXTH,          /* fusible_ops */
   NULL,						/* vector cost */
+  true,						/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for a generic ooo profile.  */
@@ -561,6 +569,7 @@ static const struct riscv_tune_param generic_ooo_tune_info = {
   false,					/* use_divmod_expansion */
   RISCV_FUSE_NOTHING,                           /* fusible_ops */
   &generic_vector_cost,				/* vector cost */
+  true,						/* prefer-agnostic.  */
 };
 
 /* Costs to use when optimizing for size.  */
@@ -579,6 +588,7 @@ static const struct riscv_tune_param optimize_size_tune_info = {
   false,					/* use_divmod_expansion */
   RISCV_FUSE_NOTHING,                           /* fusible_ops */
   NULL,						/* vector cost */
+  false,					/* prefer-agnostic.  */
 };
 
 static bool riscv_avoid_shrink_wrapping_separate ();
@@ -5955,13 +5965,18 @@ riscv_handle_type_attribute (tree *node ATTRIBUTE_UNUSED, tree name, tree args,
 
 	  string = TREE_STRING_POINTER (cst);
 	  if (strcmp (string, "user") && strcmp (string, "supervisor")
-	      && strcmp (string, "machine"))
+	      && strcmp (string, "machine") && strcmp (string, "rnmi"))
 	    {
 	      warning (OPT_Wattributes,
 		       "argument to %qE attribute is not %<\"user\"%>, %<\"supervisor\"%>, "
-		       "or %<\"machine\"%>", name);
+		       "%<\"machine\"%>, or %<\"rnmi\"%>", name);
 	      *no_add_attrs = true;
 	    }
+	  /* The availability of the Smrnmi extension is checked in
+	     riscv_set_current_function, where the function's own target
+	     options (from a target attribute or a pragma) are in effect.
+	     Checking TARGET_SMRNMI here would only look at the command-line
+	     options and could reject a valid function.  */
 	}
     }
 
@@ -8367,6 +8382,17 @@ riscv_expand_epilogue (int style)
 	emit_jump_insn (gen_riscv_mret ());
       else if (mode == SUPERVISOR_MODE)
 	emit_jump_insn (gen_riscv_sret ());
+      else if (mode == RNMI_MODE)
+	{
+	  /* A mismatch between the interrupt attribute and the function's
+	     ISA is diagnosed in riscv_set_current_function.  Avoid emitting
+	     an instruction that is not available in the current ISA, which
+	     would trigger an "unrecognizable insn" error later.  */
+	  if (TARGET_SMRNMI)
+	    emit_jump_insn (gen_riscv_mnret ());
+	  else
+	    emit_jump_insn (gen_riscv_mret ());
+	}
       else
 	emit_jump_insn (gen_riscv_uret ());
     }
@@ -10165,12 +10191,29 @@ riscv_get_interrupt_type (tree decl)
 	return USER_MODE;
       else if (!strcmp (string, "supervisor"))
 	return SUPERVISOR_MODE;
+      else if (!strcmp (string, "rnmi"))
+	return RNMI_MODE;
       else /* Must be "machine".  */
 	return MACHINE_MODE;
     }
   else
     /* Interrupt attributes are machine mode by default.  */
     return MACHINE_MODE;
+}
+
+/* Return true if the target options for DECL enable the Smrnmi extension.  */
+
+static bool
+riscv_function_has_smrnmi_p (tree decl)
+{
+  tree target = DECL_FUNCTION_SPECIFIC_TARGET (decl);
+
+  if (!target)
+    target = target_option_default_node;
+
+  struct cl_target_option *opts = TREE_TARGET_OPTION (target);
+
+  return (opts->x_riscv_sm_subext & MASK_SMRNMI) != 0;
 }
 
 /* Implement `TARGET_SET_CURRENT_FUNCTION'.  Unpack the codegen decisions
@@ -10211,6 +10254,10 @@ riscv_set_current_function (tree decl)
 	    error ("%qs function cannot have arguments", "interrupt");
 
 	  cfun->machine->interrupt_mode = riscv_get_interrupt_type (decl);
+
+	  if (cfun->machine->interrupt_mode == RNMI_MODE
+	      && !riscv_function_has_smrnmi_p (decl))
+	    error ("attribute %<rnmi%> requires the Smrnmi ISA extension");
 
 	  gcc_assert (cfun->machine->interrupt_mode != UNKNOWN_MODE);
 	}
@@ -10938,6 +10985,15 @@ riscv_lshift_subword (machine_mode mode, rtx value, rtx shift,
 						  gen_lowpart (QImode, shift)));
 }
 
+/* Return TRUE if we should use the tail agnostic and mask agnostic policies for
+   vector code, false otherwise.  */
+
+bool
+riscv_prefer_agnostic_p ()
+{
+  return tune_param->prefer_agnostic;
+}
+
 /* Return TRUE if we should use the divmod expander, FALSE otherwise.  This
    allows the behavior to be tuned for specific implementations as well as
    when optimizing for size.  */
@@ -11426,7 +11482,13 @@ riscv_builtin_vectorization_cost (enum vect_cost_for_stmt type_of_cost,
       return fp ? common_costs->fp_stmt_cost : common_costs->int_stmt_cost;
 
     case vec_construct:
-      return estimated_poly_value (TYPE_VECTOR_SUBPARTS (vectype));
+    {
+	  /* TODO: This is too pessimistic in case we can splat.  */
+	  int regmove_cost = fp ? costs->regmove->FR2VR
+	    : costs->regmove->GR2VR;
+	  return (regmove_cost + common_costs->scalar_to_vec_cost)
+	    * estimated_poly_value (TYPE_VECTOR_SUBPARTS (vectype));
+	}
 
     default:
       gcc_unreachable ();

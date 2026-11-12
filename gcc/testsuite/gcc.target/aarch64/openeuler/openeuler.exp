@@ -1,0 +1,21 @@
+# GCC testsuite driver for openEuler-specific AArch64 feature tests.
+#
+# Run only this suite with:
+#   make check-gcc RUNTESTFLAGS="openeuler.exp"
+
+# Exit immediately if this isn't an AArch64 target.
+if ![istarget aarch64*-*-*] then {
+  return
+}
+
+# Load support procs.
+load_lib gcc-dg.exp
+
+# Initialize `dg'.
+dg-init
+
+# Main loop.
+dg-runtest [lsort [glob -nocomplain $srcdir/$subdir/*.\[cCS\]]] "" ""
+
+# All done.
+dg-finish

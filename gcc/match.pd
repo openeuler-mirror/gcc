@@ -5529,6 +5529,29 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
       && INTEGRAL_TYPE_P (TREE_TYPE (@0)))
   (cond @1 (convert @2) (convert @3))))
 
+#if GIMPLE
+/* Try to match
+     _4 = (int) _3;      NOP_EXPR (SSA_NAME @2)
+     _5 = _4 ^ c_10;     BIT_XOR_EXPR (SSA_NAME@1, SSA_NAME)
+     _6 = _5 & 255;      BIT_AND_EXPR (SSA_NAME, INTEGER_CST@3)
+*/
+(match (crc_match_index @1 @2 @3)
+   (bit_and (bit_xor (nop SSA_NAME@2) SSA_NAME@1) INTEGER_CST@3)
+   (if (INTEGRAL_TYPE_P (type) && tree_to_uhwi(@3) == 255))
+)
+#endif
+
+#if GIMPLE
+/* Try to match
+     _8 = c_12 >> 8;      RSHIFT_EXPR (SSA_NAME @1, INTEGER_CST @2)
+     c_19 = _7 ^ _8;      BIT_XOR_EXPR (SSA_NAME@3, SSA_NAME)
+*/
+(match (crc_match_res @1 @2 @3)
+   (bit_xor SSA_NAME@3  (rshift SSA_NAME@1 INTEGER_CST@2))
+   (if (INTEGRAL_TYPE_P (type) && tree_to_uhwi(@2) == 8))
+)
+#endif
+
 /* Simplification moved from fold_cond_expr_with_comparison.  It may also
    be extended.  */
 /* This pattern implements two kinds simplification:
@@ -5838,6 +5861,31 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
   /* bool0 ? bool1 : 1 -> (bool0^1) | bool1 */
   (if (integer_onep (@2))
    (bit_ior (bit_xor (convert @0) @2) @1))
+ )
+)
+
+(if (flag_if_conversion_gimple)
+ (for simple_op (plus minus bit_ior bit_xor)
+  (simplify
+   (cond @0 (simple_op @1 INTEGER_CST@2) @1)
+   (switch
+    /* a = cond ? a + 1 : a -> a = a + ((int) cond) */
+    (if (integer_onep (@2))
+     (simple_op @1 (convert (convert:boolean_type_node @0))))
+    /* a = cond ? a + powerof2cst : a ->
+       a = a + ((int) cond) << log2 (powerof2cst) */
+    (if (INTEGRAL_TYPE_P (type) && integer_pow2p (@2))
+     (with
+      {
+	tree shift = build_int_cst (integer_type_node, tree_log2 (@2));
+      }
+      (simple_op @1 (lshift (convert (convert:boolean_type_node @0))
+			    { shift; })
+      )
+     )
+    )
+   )
+  )
  )
 )
 #endif
@@ -10190,13 +10238,81 @@ and,
 	  (vec_perm @2 @5 { op0; })))))))))))
 
 
-/* Match count trailing zeroes for simplify_count_trailing_zeroes in fwprop.
+/* Match count trailing zeroes for simplify_count_zeroes in forwprop.
    The canonical form is array[((x & -x) * C) >> SHIFT] where C is a magic
    constant which when multiplied by a power of 2 contains a unique value
    in the top 5 or 6 bits.  This is then indexed into a table which maps it
    to the number of trailing zeroes.  */
 (match (ctz_table_index @1 @2 @3)
   (rshift (mult (bit_and:c (negate @1) @1) INTEGER_CST@2) INTEGER_CST@3))
+
+/* Helpers for clz_table_index and its variants: match the 5- or
+   6-stage MSB OR-cascade that drives a DeBruijn CLZ lookup.  Given a
+   value @1, the cascade sets every bit from 0 to the MSB of @1,
+   producing 2^(k+1) - 1 where k is the MSB position.  */
+(match (msb_or_cascade_32 @1)
+  (bit_ior (rshift
+    (bit_ior@d (rshift
+      (bit_ior@c (rshift
+	(bit_ior@b (rshift
+	  (bit_ior@a (rshift @1 INTEGER_CST@c1) @1)
+	  INTEGER_CST@c2) @a)
+	INTEGER_CST@c4) @b)
+      INTEGER_CST@c8) @c)
+    INTEGER_CST@c16) @d)
+  (if (INTEGRAL_TYPE_P (type)
+       && TYPE_UNSIGNED (type)
+       && TYPE_PRECISION (type) == 32
+       && compare_tree_int (@c1, 1) == 0
+       && compare_tree_int (@c2, 2) == 0
+       && compare_tree_int (@c4, 4) == 0
+       && compare_tree_int (@c8, 8) == 0
+       && compare_tree_int (@c16, 16) == 0)))
+
+(match (msb_or_cascade_64 @1)
+  (bit_ior (rshift
+    (bit_ior@e (rshift
+      (bit_ior@d (rshift
+	(bit_ior@c (rshift
+	  (bit_ior@b (rshift
+	    (bit_ior@a (rshift @1 INTEGER_CST@c1) @1)
+	    INTEGER_CST@c2) @a)
+	  INTEGER_CST@c4) @b)
+	INTEGER_CST@c8) @c)
+      INTEGER_CST@c16) @d)
+    INTEGER_CST@c32) @e)
+  (if (INTEGRAL_TYPE_P (type)
+       && TYPE_UNSIGNED (type)
+       && TYPE_PRECISION (type) == 64
+       && compare_tree_int (@c1, 1) == 0
+       && compare_tree_int (@c2, 2) == 0
+       && compare_tree_int (@c4, 4) == 0
+       && compare_tree_int (@c8, 8) == 0
+       && compare_tree_int (@c16, 16) == 0
+       && compare_tree_int (@c32, 32) == 0)))
+
+/* Match count leading zeros for simplify_count_zeroes in forwprop.
+   One canonical form is 31 - array[idx] where IDX is computed from X
+   by first setting all bits from the topmost set bits down via a
+   series of shifts and ors to X' and then computing (X' * C) >> SHIFT.  */
+(match (clz_table_index @1 @2 @3)
+  (rshift (mult (msb_or_cascade_32 @1) INTEGER_CST@2) INTEGER_CST@3))
+(match (clz_table_index @1 @2 @3)
+  (rshift (mult (msb_or_cascade_64 @1) INTEGER_CST@2) INTEGER_CST@3))
+
+/* Match count leading zeros for simplify_count_zeroes in forwprop,
+   variant that isolates the MSB as a power of two via (s - (s >> 1))
+   after the OR-cascade.  For s = 2^(k+1) - 1 (the cascade output),
+   (s - (s >> 1)) equals 2^k, so the subsequent DeBruijn
+   multiply-and-shift is a CTZ-style lookup on the isolated MSB.  The
+   table has to satisfy the direct CTZ DeBruijn property (validated by
+   the CTZ checkfn in simplify_count_zeroes).
+   PR tree-optimization/122569.  */
+(match (clz_msb_iso_table_index @1 @2 @3)
+  (rshift (mult
+   (minus (msb_or_cascade_64@f @1) (rshift @f INTEGER_CST@sub1))
+   INTEGER_CST@2) INTEGER_CST@3)
+  (if (compare_tree_int (@sub1, 1) == 0)))
 
 (match (cond_expr_convert_p @0 @2 @3 @6)
  (cond (simple_comparison@6 @0 @1) (convert@4 @2) (convert@5 @3))

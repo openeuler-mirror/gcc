@@ -1,6 +1,6 @@
 /* PR tree-optimization/111967 */
 /* { dg-do compile } */
-/* { dg-options "-O2 -fno-tree-forwprop -fdump-tree-evrp-all" } */
+/* { dg-options "-O2 -fno-tree-forwprop -fdump-tree-evrp1-all" } */
 
 void bar (char *);
 int a;

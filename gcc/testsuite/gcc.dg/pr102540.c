@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O3 -fdump-tree-evrp" } */
+/* { dg-options "-O3 -fdump-tree-evrp1" } */
 
 
 void kill();
@@ -15,5 +15,5 @@ int test1 () {
     a = 0;
 }
 
-/* { dg-final { scan-tree-dump-not "kill" "evrp" } }  */
+/* { dg-final { scan-tree-dump-not "kill" "evrp1" } }  */
 

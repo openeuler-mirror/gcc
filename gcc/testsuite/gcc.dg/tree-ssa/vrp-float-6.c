@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdisable-tree-ethread -fdump-tree-evrp" }
+// { dg-options "-O2 -fdisable-tree-ethread -fdump-tree-evrp1" }
 
 void bar ();
 
@@ -17,4 +17,4 @@ foo (double x, double y)
 	}
 }
 
-// { dg-final { scan-tree-dump-times "Folding predicate x_.* <= y_.* to 1" 1 "evrp" } }
+// { dg-final { scan-tree-dump-times "Folding predicate x_.* <= y_.* to 1" 1 "evrp1" } }

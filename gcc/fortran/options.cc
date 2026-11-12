@@ -254,6 +254,12 @@ form_from_filename (const char *filename)
   return f_form;
 }
 
+static void gfc_handle_fpe_option (const char *arg, bool trap);
+
+/* Whether the command line asked for a trap or summary set of its own, in
+   which case the floating-point model leaves it alone.  */
+static bool fpe_trap_set_by_user = false;
+static bool fpe_summary_set_by_user = false;
 
 /* Finalize commandline options.  */
 
@@ -276,6 +282,12 @@ gfc_post_options (const char **pfilename)
   SET_OPTION_IF_UNSET (&global_options, &global_options_set,
 		       cpp_warn_missing_include_dirs, 1);
   gfc_check_include_dirs (verbose_missing_dir_warn);
+
+  /* Fortran gets a report of its own, because what happens here is the
+     opposite of what happens in C: the calls are emitted whatever the
+     floating-point model says.  See maybe_warn_simdmath_unconstrained.  */
+  maybe_warn_simdmath_unconstrained (&global_options, &global_options_set,
+				     UNKNOWN_LOCATION);
 
   SET_OPTION_IF_UNSET (&global_options, &global_options_set,
 		       flag_free_line_length,
@@ -300,6 +312,18 @@ gfc_post_options (const char **pfilename)
 
   if (flag_protect_parens == -1)
     flag_protect_parens = !optimize_fast;
+
+  /* The exception-preserving models report every exception and trap on
+     the ones that indicate a real problem.  Underflow is deliberately
+     not trapped: it is a routine outcome in denormal-heavy code, and
+     trapping it would abort programs that are computing correctly.  */
+  if (flag_fp_model == FP_MODEL_EXCEPT || flag_fp_model == FP_MODEL_STRICT)
+    {
+      if (!fpe_summary_set_by_user)
+	gfc_handle_fpe_option ("all", false);
+      if (!fpe_trap_set_by_user)
+	gfc_handle_fpe_option ("invalid,zero,overflow", true);
+    }
 
   /* -Ofast sets implies -fstack-arrays unless an explicit size is set for
      stack arrays.  */
@@ -764,10 +788,12 @@ gfc_handle_option (size_t scode, const char *arg, HOST_WIDE_INT value,
       break;
 
     case OPT_ffpe_trap_:
+      fpe_trap_set_by_user = true;
       gfc_handle_fpe_option (arg, true);
       break;
 
     case OPT_ffpe_summary_:
+      fpe_summary_set_by_user = true;
       gfc_handle_fpe_option (arg, false);
       break;
 

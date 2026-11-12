@@ -37,9 +37,10 @@ def main():
     format = args.format
 
     if filename == '-':
-        check_GNU_style_file(sys.stdin, format)
+        return check_GNU_style_file(sys.stdin, format)
     else:
         with open(filename, newline='\n') as diff_file:
-            check_GNU_style_file(diff_file, format)
+            return check_GNU_style_file(diff_file, format)
 
-main()
+if __name__ == '__main__':
+    sys.exit(main())

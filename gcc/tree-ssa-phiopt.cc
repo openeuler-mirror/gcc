@@ -56,6 +56,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-ssa-dce.h"
 #include "tree-ssa-loop-niter.h"
 
+/* LoopElim: forward declaration (definition below; used earlier in the file).  */
+static bool do_phiopt_pattern (basic_block, basic_block, basic_block);
+
 /* Return the singleton PHI in the SEQ of PHIs for edges E0 and E1. */
 
 static gphi *
@@ -91,6 +94,408 @@ single_non_singleton_phi_for_edges (gimple_seq seq, edge e0, edge e1)
       phi = p;
     }
   return phi;
+}
+
+/* Return the number of non-debug statements in BB.  */
+
+static unsigned int
+nondebug_stmt_count (basic_block bb)
+{
+  unsigned int count = 0;
+  for (gimple_stmt_iterator gsi = gsi_start_nondebug_after_labels_bb (bb);
+	 !gsi_end_p (gsi); gsi_next_nondebug (&gsi))
+    if (gimple_code (gsi_stmt (gsi)) != GIMPLE_PREDICT)
+      ++count;
+  return count;
+}
+
+/* Match COND as a comparison of a value against zero.  Return the value in
+   ARG and whether COND is true for zero in ZERO_ON_TRUE.  COUNT accounts for
+   a separate comparison statement in BB, if present.  */
+
+static bool
+match_zero_comparison (tree cond, basic_block bb, tree *arg,
+		       bool *zero_on_true, unsigned int *count)
+{
+  enum tree_code code;
+  tree lhs;
+  tree rhs;
+
+  if (TREE_CODE (cond) == SSA_NAME)
+    {
+      gimple *stmt = SSA_NAME_DEF_STMT (cond);
+      if (!is_gimple_assign (stmt) || gimple_bb (stmt) != bb)
+	return false;
+      code = gimple_assign_rhs_code (stmt);
+      if (code != EQ_EXPR && code != NE_EXPR)
+	return false;
+      lhs = gimple_assign_rhs1 (stmt);
+      rhs = gimple_assign_rhs2 (stmt);
+      ++*count;
+    }
+  else
+    {
+      code = TREE_CODE (cond);
+      if (code != EQ_EXPR && code != NE_EXPR)
+	return false;
+      lhs = TREE_OPERAND (cond, 0);
+      rhs = TREE_OPERAND (cond, 1);
+    }
+
+  if (integer_zerop (lhs))
+    std::swap (lhs, rhs);
+  if (!integer_zerop (rhs))
+    return false;
+
+  *arg = lhs;
+  *zero_on_true = code == EQ_EXPR;
+  return true;
+}
+
+/* Match one arm of a split-word count-zero idiom.  ARG is either
+   (unsigned) C[LT]Z (HALF) or that value plus 32.  Require the matched
+   operations to be all the non-debug statements in BB.  */
+
+static bool
+match_split_word_bitcount_arm (tree arg, basic_block bb, bool add_p,
+			       internal_fn *ifn, tree *half)
+{
+  unsigned int count = 0;
+  tree value = arg;
+  bool ctz_mask_p = false;
+  bool clz_select_p = false;
+  tree guarded_half = NULL_TREE;
+
+  if (add_p)
+    {
+      if (TREE_CODE (value) != SSA_NAME)
+	return false;
+      gimple *stmt = SSA_NAME_DEF_STMT (value);
+      if (!is_gimple_assign (stmt)
+	  || gimple_bb (stmt) != bb
+	  || gimple_assign_rhs_code (stmt) != PLUS_EXPR)
+	return false;
+      tree rhs1 = gimple_assign_rhs1 (stmt);
+      tree rhs2 = gimple_assign_rhs2 (stmt);
+      if (TREE_CODE (rhs1) == INTEGER_CST && wi::to_wide (rhs1) == 32)
+	value = rhs2;
+      else if (TREE_CODE (rhs2) == INTEGER_CST && wi::to_wide (rhs2) == 32)
+	value = rhs1;
+      else
+	return false;
+      ++count;
+    }
+
+  while (TREE_CODE (value) == SSA_NAME)
+    {
+      gimple *stmt = SSA_NAME_DEF_STMT (value);
+      if (gimple_bb (stmt) != bb || !is_gimple_assign (stmt))
+	break;
+      if (!gimple_assign_cast_p (stmt)
+	  && gimple_assign_rhs_code (stmt) != SSA_NAME)
+	break;
+      if (gimple_assign_cast_p (stmt))
+	{
+	  tree type = TREE_TYPE (value);
+	  /* A normalized count for a 32-bit half is in [0, 31].  The
+	     plain arm is proved nonzero by the caller.  Only skip integer
+	     conversions that preserve that entire range; a signed five-bit
+	     destination, for example, changes counts 16 through 31.  */
+	  if (!CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (stmt))
+	      || !INTEGRAL_TYPE_P (type)
+	      || !INTEGRAL_TYPE_P (TREE_TYPE (gimple_assign_rhs1 (stmt)))
+	      || !int_fits_type_p (build_int_cst (integer_type_node, 0), type)
+	      || !int_fits_type_p (build_int_cst (integer_type_node, 31), type))
+	    return false;
+	}
+      value = gimple_assign_rhs1 (stmt);
+      ++count;
+    }
+
+  if (TREE_CODE (value) == SSA_NAME)
+    {
+      gimple *stmt = SSA_NAME_DEF_STMT (value);
+      if (gimple_bb (stmt) == bb && is_gimple_assign (stmt)
+	  && gimple_assign_rhs_code (stmt) == BIT_AND_EXPR)
+	{
+	  tree rhs1 = gimple_assign_rhs1 (stmt);
+	  tree rhs2 = gimple_assign_rhs2 (stmt);
+	  if (TREE_CODE (rhs1) == INTEGER_CST && wi::to_wide (rhs1) == 31)
+	    value = rhs2;
+	  else if (TREE_CODE (rhs2) == INTEGER_CST
+		   && wi::to_wide (rhs2) == 31)
+	    value = rhs1;
+	  else
+	    return false;
+	  ctz_mask_p = true;
+	  ++count;
+	}
+      else if (gimple_bb (stmt) == bb && is_gimple_assign (stmt)
+	       && gimple_assign_rhs_code (stmt) == COND_EXPR)
+	{
+	  tree cond_arg;
+	  bool zero_on_true;
+	  if (!match_zero_comparison (gimple_assign_rhs1 (stmt), bb, &cond_arg,
+				      &zero_on_true, &count))
+	    return false;
+	  tree zero_value = zero_on_true ? gimple_assign_rhs2 (stmt)
+					: gimple_assign_rhs3 (stmt);
+	  tree nonzero_value = zero_on_true ? gimple_assign_rhs3 (stmt)
+					   : gimple_assign_rhs2 (stmt);
+	  if (TREE_CODE (zero_value) != INTEGER_CST
+	      || wi::to_wide (zero_value) != 31)
+	    return false;
+	  value = nonzero_value;
+	  guarded_half = cond_arg;
+	  clz_select_p = true;
+	  ++count;
+	}
+    }
+
+  if (TREE_CODE (value) != SSA_NAME)
+    return false;
+  gimple *call = SSA_NAME_DEF_STMT (value);
+  if (gimple_bb (call) != bb
+      || !is_gimple_call (call)
+      || !gimple_call_internal_p (call))
+    return false;
+
+  *ifn = gimple_call_internal_fn (call);
+  if (*ifn != IFN_CTZ && *ifn != IFN_CLZ)
+    return false;
+
+  unsigned int nargs = gimple_call_num_args (call);
+  if (nargs != 1 && nargs != 2)
+    return false;
+  *half = gimple_call_arg (call, 0);
+  tree half_type = TREE_TYPE (*half);
+  if (!INTEGRAL_TYPE_P (half_type)
+      || !TYPE_UNSIGNED (half_type)
+      || TYPE_PRECISION (half_type) != 32)
+    return false;
+  if (nargs == 2)
+    {
+      tree at_zero = gimple_call_arg (call, 1);
+      int target_zero = 0;
+      scalar_int_mode mode = SCALAR_INT_TYPE_MODE (half_type);
+      int defined = *ifn == IFN_CTZ
+	? CTZ_DEFINED_VALUE_AT_ZERO (mode, target_zero)
+	: CLZ_DEFINED_VALUE_AT_ZERO (mode, target_zero);
+      if (!tree_fits_shwi_p (at_zero)
+	  || defined != 2
+	  || tree_to_shwi (at_zero) != target_zero)
+	return false;
+    }
+
+  if ((*ifn == IFN_CTZ && clz_select_p)
+      || (*ifn == IFN_CLZ && ctz_mask_p)
+      || (add_p && *ifn == IFN_CTZ && !ctz_mask_p)
+      || (add_p && *ifn == IFN_CLZ && !clz_select_p)
+      || (clz_select_p && guarded_half != *half))
+    return false;
+  ++count;
+
+  return count == nondebug_stmt_count (bb);
+}
+
+/* Match HALF as either the low or high 32-bit half of a 64-bit value.
+   Return the original 64-bit value in FULL.  */
+
+static bool
+match_split_word_half (tree half, bool high_p, tree *full, tree *precast)
+{
+  if (TREE_CODE (half) != SSA_NAME
+      || !INTEGRAL_TYPE_P (TREE_TYPE (half))
+      || !TYPE_UNSIGNED (TREE_TYPE (half))
+      || TYPE_PRECISION (TREE_TYPE (half)) != 32)
+    return false;
+
+  gimple *cast = SSA_NAME_DEF_STMT (half);
+  if (!gimple_assign_cast_p (cast))
+    return false;
+  tree value = gimple_assign_rhs1 (cast);
+  if (precast)
+    *precast = value;
+
+  if (high_p)
+    {
+      if (TREE_CODE (value) != SSA_NAME)
+	return false;
+      gimple *shift = SSA_NAME_DEF_STMT (value);
+      if (!is_gimple_assign (shift)
+	  || gimple_assign_rhs_code (shift) != RSHIFT_EXPR
+	  || TREE_CODE (gimple_assign_rhs2 (shift)) != INTEGER_CST
+	  || wi::to_wide (gimple_assign_rhs2 (shift)) != 32)
+	return false;
+      value = gimple_assign_rhs1 (shift);
+    }
+
+  if (TREE_CODE (value) != SSA_NAME
+      || !INTEGRAL_TYPE_P (TREE_TYPE (value))
+      || !TYPE_UNSIGNED (TREE_TYPE (value))
+      || TYPE_PRECISION (TREE_TYPE (value)) != 64)
+    return false;
+  *full = value;
+  return true;
+}
+
+/* Replace the zstd-style split-word CTZ64/CLZ64 diamond rooted at COND_BB
+   with a single 64-bit IFN_CTZ/IFN_CLZ operation.  Preserve the original
+   split-word result when the full input is zero.  */
+
+static bool
+split_word_bitcount_replacement (basic_block cond_bb, basic_block bb1,
+				 basic_block bb2, basic_block join_bb)
+{
+  if (!single_pred_p (bb1) || single_pred (bb1) != cond_bb
+      || !single_pred_p (bb2) || single_pred (bb2) != cond_bb
+      || !single_succ_p (bb1) || single_succ (bb1) != join_bb
+      || !single_succ_p (bb2) || single_succ (bb2) != join_bb
+      || EDGE_COUNT (join_bb->preds) != 2)
+    return false;
+
+  edge join1 = EDGE_SUCC (bb1, 0);
+  edge join2 = EDGE_SUCC (bb2, 0);
+  gphi *phi = single_non_singleton_phi_for_edges (phi_nodes (join_bb),
+						 join1, join2);
+  if (!phi)
+    return false;
+
+  /* replace_uses_by cannot replace a real abnormal-PHI operand with a
+     fresh SSA name.  Reject before inserting any statements.  */
+  if (SSA_NAME_OCCURS_IN_ABNORMAL_PHI (gimple_phi_result (phi)))
+    return false;
+
+  tree arg1 = gimple_phi_arg_def (phi, join1->dest_idx);
+  tree arg2 = gimple_phi_arg_def (phi, join2->dest_idx);
+  basic_block add_bb = bb1;
+  basic_block plain_bb = bb2;
+  tree add_arg = arg1;
+  tree plain_arg = arg2;
+  internal_fn add_ifn, plain_ifn;
+  tree add_half, plain_half;
+
+  if (!match_split_word_bitcount_arm (add_arg, add_bb, true,
+					      &add_ifn, &add_half)
+      || !match_split_word_bitcount_arm (plain_arg, plain_bb, false,
+						 &plain_ifn, &plain_half))
+    {
+      std::swap (add_bb, plain_bb);
+      std::swap (add_arg, plain_arg);
+      if (!match_split_word_bitcount_arm (add_arg, add_bb, true,
+						  &add_ifn, &add_half)
+	  || !match_split_word_bitcount_arm (plain_arg, plain_bb, false,
+						     &plain_ifn, &plain_half))
+	return false;
+    }
+  if (add_ifn != plain_ifn)
+    return false;
+
+  bool add_is_high = add_ifn == IFN_CTZ;
+  tree add_full, plain_full, plain_precast;
+  if (!match_split_word_half (add_half, add_is_high,
+			      &add_full, NULL)
+      || !match_split_word_half (plain_half, !add_is_high,
+				 &plain_full, &plain_precast)
+      || add_full != plain_full
+      || SSA_NAME_OCCURS_IN_ABNORMAL_PHI (add_full)
+      || !direct_internal_fn_supported_p (add_ifn, TREE_TYPE (add_full),
+					  OPTIMIZE_FOR_BOTH))
+    return false;
+
+  bool nonzero_p = tree_expr_nonzero_p (add_full);
+
+  gcond *cond = as_a <gcond *> (*gsi_last_bb (cond_bb));
+  if ((gimple_cond_code (cond) != EQ_EXPR
+       && gimple_cond_code (cond) != NE_EXPR)
+      || !integer_zerop (gimple_cond_rhs (cond)))
+    return false;
+
+  tree tested = gimple_cond_lhs (cond);
+  if (tested != plain_half
+      && !(add_ifn == IFN_CLZ && tested == plain_precast))
+    return false;
+
+  edge add_edge = find_edge (cond_bb, add_bb);
+  if (!add_edge
+      || ((gimple_cond_code (cond) == EQ_EXPR)
+	  != ((add_edge->flags & EDGE_TRUE_VALUE) != 0)))
+    return false;
+
+  int full_zero_value = 0;
+  if (!nonzero_p)
+    {
+      scalar_int_mode mode = SCALAR_INT_TYPE_MODE (TREE_TYPE (add_full));
+      int defined = add_ifn == IFN_CTZ
+	? CTZ_DEFINED_VALUE_AT_ZERO (mode, full_zero_value)
+	: CLZ_DEFINED_VALUE_AT_ZERO (mode, full_zero_value);
+      if (defined != 2)
+	return false;
+    }
+
+  gimple_stmt_iterator gsi = gsi_last_bb (cond_bb);
+  /* Keep the defined target zero value visible to GIMPLE optimizers.  */
+  gcall *call
+    = gimple_build_call_internal (add_ifn, nonzero_p ? 1 : 2, add_full,
+				  nonzero_p ? NULL_TREE
+				  : build_int_cst (integer_type_node,
+						   full_zero_value));
+  gimple_set_location (call, gimple_location (cond));
+  tree call_lhs = make_ssa_name (integer_type_node);
+  gimple_call_set_lhs (call, call_lhs);
+  gsi_insert_before (&gsi, call, GSI_SAME_STMT);
+
+  tree result = call_lhs;
+  if (!nonzero_p)
+    {
+      int zero_value = add_ifn == IFN_CTZ ? 32 : 63;
+      /* The CTZ add arm is 32 + (ctz (high) & 31).  Preserve that
+	 expression's value if the 32-bit optab defines ctz (0) to a value
+	 that the mask does not normalize to zero.  */
+      if (add_ifn == IFN_CTZ)
+	{
+	  int half_zero_value = 0;
+	  scalar_int_mode half_mode
+	    = SCALAR_INT_TYPE_MODE (TREE_TYPE (add_half));
+	  if (CTZ_DEFINED_VALUE_AT_ZERO (half_mode, half_zero_value) == 2)
+	    zero_value += half_zero_value & 31;
+	}
+      tree zero_result = build_int_cst (integer_type_node, zero_value);
+      tree zero_cond = make_ssa_name (boolean_type_node);
+      gassign *compare
+	= gimple_build_assign (zero_cond, EQ_EXPR, add_full,
+			       build_zero_cst (TREE_TYPE (add_full)));
+      gimple_set_location (compare, gimple_location (cond));
+      gsi_insert_before (&gsi, compare, GSI_SAME_STMT);
+      result = make_ssa_name (integer_type_node);
+      gassign *select = gimple_build_assign (result, COND_EXPR, zero_cond,
+					     zero_result, call_lhs);
+      gimple_set_location (select, gimple_location (cond));
+      gsi_insert_before (&gsi, select, GSI_SAME_STMT);
+    }
+
+  tree phi_result = gimple_phi_result (phi);
+  if (TREE_TYPE (phi_result) != TREE_TYPE (call_lhs))
+    {
+      tree source = result;
+      result = make_ssa_name (TREE_TYPE (phi_result));
+      gassign *cast = gimple_build_assign (result, NOP_EXPR, source);
+      gimple_set_location (cast, gimple_location (cond));
+      gsi_insert_before (&gsi, cast, GSI_SAME_STMT);
+    }
+
+  replace_uses_by (phi_result, result);
+  gimple_stmt_iterator psi = gsi_for_stmt (phi);
+  remove_phi_node (&psi, true);
+  gimple_cond_make_false (cond);
+  update_stmt (cond);
+
+  statistics_counter_event (cfun, "Split-word bitcount replacement", 1);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file,
+	     "Split-word C[LT]Z in block %d converted to a 64-bit operation.\n",
+	     cond_bb->index);
+  return true;
 }
 
 /* Replace PHI node element whose edge is E in block BB with variable NEW.
@@ -3958,6 +4363,449 @@ hoist_adjacent_loads (basic_block bb0, basic_block bb1,
     }
 }
 
+static bool check_uses (tree, hash_set<tree> *);
+
+/* Check SSA_NAME is used in
+     if (SSA_NAME == 0)
+     ...
+   or
+     if (SSA_NAME != 0)
+     ...
+*/
+static bool
+check_uses_cond (const_tree ssa_name, gimple *stmt,
+		 hash_set<tree> *hset ATTRIBUTE_UNUSED)
+{
+  tree_code code = gimple_cond_code (stmt);
+  if (code != EQ_EXPR && code != NE_EXPR)
+    {
+      return false;
+    }
+
+  tree lhs = gimple_cond_lhs (stmt);
+  tree rhs = gimple_cond_rhs (stmt);
+  if ((lhs == ssa_name && integer_zerop (rhs))
+      || (rhs == ssa_name && integer_zerop (lhs)))
+    {
+      return true;
+    }
+
+  return false;
+}
+
+/* Check SSA_NAME is used in
+     _tmp = SSA_NAME == 0;
+   or
+     _tmp = SSA_NAME != 0;
+   or
+     _tmp = SSA_NAME | _tmp2;
+*/
+static bool
+check_uses_assign (const_tree ssa_name, gimple *stmt, hash_set<tree> *hset)
+{
+  tree_code code = gimple_assign_rhs_code (stmt);
+  tree lhs, rhs1, rhs2;
+
+  switch (code)
+    {
+    case EQ_EXPR:
+    case NE_EXPR:
+      rhs1 = gimple_assign_rhs1 (stmt);
+      rhs2 = gimple_assign_rhs2 (stmt);
+      if ((rhs1 == ssa_name && integer_zerop (rhs2))
+	  || (rhs2 == ssa_name && integer_zerop (rhs1)))
+	{
+	  return true;
+	}
+      break;
+
+    case BIT_IOR_EXPR:
+      lhs = gimple_assign_lhs (stmt);
+      if (hset->contains (lhs))
+	{
+	  return false;
+	}
+      /* We should check the use of _tmp further.  */
+      return check_uses (lhs, hset);
+
+    default:
+      break;
+    }
+  return false;
+}
+
+/* Check SSA_NAME is used in
+     # result = PHI <SSA_NAME (bb1), 0 (bb2), 0 (bb3)>
+*/
+static bool
+check_uses_phi (const_tree ssa_name, gimple *stmt, hash_set<tree> *hset)
+{
+  for (unsigned i = 0; i < gimple_phi_num_args (stmt); i++)
+    {
+      tree arg = gimple_phi_arg_def (stmt, i);
+      if (!integer_zerop (arg) && arg != ssa_name)
+	{
+	  return false;
+	}
+    }
+
+  tree result = gimple_phi_result (stmt);
+
+  /* It is used to avoid infinite recursion,
+     <bb 1>
+     if (cond)
+       goto <bb 2>
+     else
+       goto <bb 3>
+
+     <bb 2>
+     # _tmp2 = PHI <0 (bb 1), _tmp3 (bb 3)>
+     {BODY}
+     if (cond)
+       goto <bb 3>
+     else
+       goto <bb 4>
+
+     <bb 3>
+     # _tmp3 = PHI <0 (bb 1), _tmp2 (bb 2)>
+     {BODY}
+     if (cond)
+       goto <bb 2>
+     else
+       goto <bb 4>
+
+     <bb 4>
+     ...
+  */
+  if (hset->contains (result))
+    {
+      return false;
+    }
+
+  return check_uses (result, hset);
+}
+
+/* Check the use of SSA_NAME, it should only be used in comparison
+   operation and PHI node.  HSET is used to record the ssa_names
+   that have been already checked.  */
+static bool
+check_uses (tree ssa_name, hash_set<tree> *hset)
+{
+  imm_use_iterator imm_iter;
+  use_operand_p use_p;
+
+  if (TREE_CODE (ssa_name) != SSA_NAME)
+    {
+      return false;
+    }
+
+  if (SSA_NAME_VAR (ssa_name)
+      && is_global_var (SSA_NAME_VAR (ssa_name)))
+    {
+      return false;
+    }
+
+  hset->add (ssa_name);
+
+  FOR_EACH_IMM_USE_FAST (use_p, imm_iter, ssa_name)
+    {
+      gimple *stmt = USE_STMT (use_p);
+
+      /* Ignore debug gimple statements.  */
+      if (is_gimple_debug (stmt))
+	{
+	  continue;
+	}
+
+      switch (gimple_code (stmt))
+	{
+	case GIMPLE_COND:
+	  if (!check_uses_cond (ssa_name, stmt, hset))
+	    {
+	      return false;
+	    }
+	  break;
+
+	case GIMPLE_ASSIGN:
+	  if (!check_uses_assign (ssa_name, stmt, hset))
+	    {
+	      return false;
+	    }
+	  break;
+
+	case GIMPLE_PHI:
+	  if (!check_uses_phi (ssa_name, stmt, hset))
+	    {
+	      return false;
+	    }
+	  break;
+
+	default:
+	  return false;
+	}
+    }
+  return true;
+}
+
+static bool
+check_def_gimple (gimple *def1, gimple *def2, const_tree result)
+{
+  /* def1 and def2 should be POINTER_PLUS_EXPR.  */
+  if (!is_gimple_assign (def1) || !is_gimple_assign (def2)
+      || gimple_assign_rhs_code (def1) != POINTER_PLUS_EXPR
+      || gimple_assign_rhs_code (def2) != POINTER_PLUS_EXPR)
+    {
+      return false;
+    }
+
+  tree rhs12 = gimple_assign_rhs2 (def1);
+
+  tree rhs21 = gimple_assign_rhs1 (def2);
+  tree rhs22 = gimple_assign_rhs2 (def2);
+
+  if (rhs21 != result)
+    {
+      return false;
+    }
+
+  /* We should have a positive pointer-plus constant to ensure
+     that the pointer value is continuously increasing.  */
+  if (TREE_CODE (rhs12) != INTEGER_CST || TREE_CODE (rhs22) != INTEGER_CST
+      || compare_tree_int (rhs12, 0) <= 0 || compare_tree_int (rhs22, 0) <= 0)
+    {
+      return false;
+    }
+
+  return true;
+}
+
+static bool
+check_loop_body (basic_block bb0, basic_block bb2, const_tree result)
+{
+  gimple *g01 = first_stmt (bb0);
+  if (!g01 || !is_gimple_assign (g01)
+      || gimple_assign_rhs_code (g01) != MEM_REF
+      || TREE_OPERAND (gimple_assign_rhs1 (g01), 0) != result)
+    {
+      return false;
+    }
+
+  gimple *g02 = g01->next;
+  /* GIMPLE_COND would be the last gimple in a basic block,
+     and have no other side effects on RESULT.  */
+  if (!g02 || gimple_code (g02) != GIMPLE_COND)
+    {
+      return false;
+    }
+
+  if (first_stmt (bb2) != last_nondebug_stmt (bb2))
+    {
+      return false;
+    }
+
+  return true;
+}
+
+/* Pattern is like
+   <pre bb>
+   arg1 = base (rhs11) + cst (rhs12); [def1]
+   goto <bb 0>
+
+   <bb 2>
+   arg2 = result (rhs21) + cst (rhs22); [def2]
+
+   <bb 0>
+   # result = PHI <arg1 (pre bb), arg2 (bb 2)>
+   _v = *result;  [g01]
+   if (_v == 0)   [g02]
+     goto <bb 1>
+   else
+     goto <bb 2>
+
+   <bb 1>
+   _1 = result - base;     [g1]
+   _2 = _1 /[ex] cst;      [g2]
+   _3 = (unsigned int) _2; [g3]
+   if (_3 == 0)
+   ...
+*/
+static bool
+check_bb_order (basic_block bb0, basic_block &bb1, basic_block &bb2,
+		gphi *phi_stmt, gimple *&output)
+{
+  /* Start check from PHI node in BB0.  */
+  if (gimple_phi_num_args (phi_stmt) != 2
+      || virtual_operand_p (gimple_phi_result (phi_stmt)))
+    {
+      return false;
+    }
+
+  tree result = gimple_phi_result (phi_stmt);
+  tree arg1 = gimple_phi_arg_def (phi_stmt, 0);
+  tree arg2 = gimple_phi_arg_def (phi_stmt, 1);
+
+  if (TREE_CODE (arg1) != SSA_NAME
+      || TREE_CODE (arg2) != SSA_NAME
+      || SSA_NAME_IS_DEFAULT_DEF (arg1)
+      || SSA_NAME_IS_DEFAULT_DEF (arg2))
+    {
+      return false;
+    }
+
+  gimple *def1 = SSA_NAME_DEF_STMT (arg1);
+  gimple *def2 = SSA_NAME_DEF_STMT (arg2);
+
+  /* Swap bb1 and bb2 if pattern is like
+     if (_v != 0)
+       goto <bb 2>
+     else
+       goto <bb 1>
+  */
+  if (gimple_bb (def2) == bb1 && EDGE_SUCC (bb1, 0)->dest == bb0)
+    {
+      std::swap (bb1, bb2);
+    }
+
+  /* prebb[def1] --> bb0 <-- bb2[def2] */
+  if (!gimple_bb (def1)
+      || EDGE_SUCC (gimple_bb (def1), 0)->dest != bb0
+      || gimple_bb (def2) != bb2 || EDGE_SUCC (bb2, 0)->dest != bb0)
+    {
+      return false;
+    }
+
+  /* Check whether define gimple meets the pattern requirements.  */
+  if (!check_def_gimple (def1, def2, result))
+    {
+      return false;
+    }
+
+  if (!check_loop_body (bb0, bb2, result))
+    {
+      return false;
+    }
+
+  output = def1;
+  return true;
+}
+
+/* Check pattern
+   <bb 1>
+   _1 = result - base;     [g1]
+   _2 = _1 /[ex] cst;      [g2]
+   _3 = (unsigned int) _2; [g3]
+   if (_3 == 0)
+   ...
+*/
+static bool
+check_gimple_order (basic_block bb1, const_tree base, const_tree cst,
+		    const_tree result, gimple *&output)
+{
+  gimple *g1 = first_stmt (bb1);
+  if (!g1 || !is_gimple_assign (g1)
+      || gimple_assign_rhs_code (g1) != POINTER_DIFF_EXPR
+      || gimple_assign_rhs1 (g1) != result
+      || gimple_assign_rhs2 (g1) != base)
+    {
+      return false;
+    }
+
+  gimple *g2 = g1->next;
+  if (!g2 || !is_gimple_assign (g2)
+      || gimple_assign_rhs_code (g2) != EXACT_DIV_EXPR
+      || gimple_assign_lhs (g1) != gimple_assign_rhs1 (g2)
+      || TREE_CODE (gimple_assign_rhs2 (g2)) != INTEGER_CST)
+    {
+      return false;
+    }
+
+  /* INTEGER_CST cst in gimple def1.  */
+  HOST_WIDE_INT num1 = TREE_INT_CST_LOW (cst);
+  /* INTEGER_CST cst in gimple g2.  */
+  HOST_WIDE_INT num2 = TREE_INT_CST_LOW (gimple_assign_rhs2 (g2));
+  /* _2 must be at least a positive number.  */
+  if (num2 == 0 || num1 / num2 <= 0)
+    {
+      return false;
+    }
+
+  gimple *g3 = g2->next;
+  if (!g3 || !is_gimple_assign (g3)
+      || gimple_assign_rhs_code (g3) != NOP_EXPR
+      || gimple_assign_lhs (g2) != gimple_assign_rhs1 (g3)
+      || TREE_CODE (gimple_assign_lhs (g3)) != SSA_NAME)
+    {
+      return false;
+    }
+
+  /* _3 should only be used in comparison operation or PHI node.  */
+  hash_set<tree> *hset = new hash_set<tree>;
+  if (!check_uses (gimple_assign_lhs (g3), hset))
+    {
+      delete hset;
+      return false;
+    }
+  delete hset;
+
+  output = g3;
+  return true;
+}
+
+static bool
+do_phiopt_pattern (basic_block bb0, basic_block bb1, basic_block bb2)
+{
+  gphi_iterator gsi;
+
+  for (gsi = gsi_start_phis (bb0); !gsi_end_p (gsi); gsi_next (&gsi))
+    {
+      gphi *phi_stmt = gsi.phi ();
+      gimple *def1 = NULL;
+      tree base, cst, result;
+
+      if (!check_bb_order (bb0, bb1, bb2, phi_stmt, def1))
+	{
+	  continue;
+	}
+
+      base = gimple_assign_rhs1 (def1);
+      cst = gimple_assign_rhs2 (def1);
+      result = gimple_phi_result (phi_stmt);
+
+      gimple *stmt = NULL;
+      if (!check_gimple_order (bb1, base, cst, result, stmt))
+	{
+	  continue;
+	}
+
+      gcc_assert (stmt);
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  fprintf (dump_file, "PHIOPT pattern optimization (1) - Rewrite:\n");
+	  print_gimple_stmt (dump_file, stmt, 0);
+	  fprintf (dump_file, "to\n");
+	}
+
+      /* Rewrite statement
+	   _3 = (unsigned int) _2;
+	 to
+	   _3 = (unsigned int) 1;
+      */
+      tree type = TREE_TYPE (gimple_assign_rhs1 (stmt));
+      gimple_assign_set_rhs1 (stmt, build_int_cst (type, 1));
+      update_stmt (stmt);
+
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	{
+	  print_gimple_stmt (dump_file, stmt, 0);
+	  fprintf (dump_file, "\n");
+	}
+
+      return true;
+    }
+  return false;
+}
+
 /* Determine whether we should attempt to hoist adjacent loads out of
    diamond patterns in pass_phiopt.  Always hoist loads if
    -fhoist-adjacent-loads is specified and the target machine has
@@ -4242,6 +5090,15 @@ pass_phiopt::execute (function *)
 	  || EDGE_COUNT (bb2->succs) == 0)
 	continue;
 
+      if (flag_debruijn_clz
+	  && EDGE_SUCC (bb1, 0)->dest == EDGE_SUCC (bb2, 0)->dest
+	  && split_word_bitcount_replacement (bb, bb1, bb2,
+						EDGE_SUCC (bb1, 0)->dest))
+	{
+	  cfgchanged = true;
+	  continue;
+	}
+
       /* Find the bb which is the fall through to the other.  */
       if (EDGE_SUCC (bb1, 0)->dest == bb2)
 	;
@@ -4259,6 +5116,8 @@ pass_phiopt::execute (function *)
 	  if ((e2->flags & EDGE_FALLTHRU) == 0)
 	    continue;
 	}
+      else if (flag_loop_elim && do_phiopt_pattern (bb, bb1, bb2))
+	continue;
       else
 	continue;
 

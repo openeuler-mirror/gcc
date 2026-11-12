@@ -56,6 +56,9 @@
 #include "attr-fnspec.h"
 #include "pointer-query.h"
 
+/* Check whether in C language or LTO with only C language.  */
+extern bool lang_c_p (void);
+
 /* Return true if tree node X has an associated location.  */
 
 static inline location_t
@@ -2218,6 +2221,16 @@ pass_waccess::set_pass_param (unsigned int n, bool early)
 bool
 pass_waccess::gate (function *)
 {
+  /* FIXME: In structure optimizations, some statements will be
+     rewritten and removed from the BB, leaving some unused SSA.
+     In pass waccess, it will traverse all SSA and cause ICE
+     when handling these unused SSA.  So temporarily disable
+     pass waccess when enable structure optimizations.  */
+  if (optimize >= 3 && flag_ipa_struct_reorg && !seen_error ()
+      && flag_lto_partition == LTO_PARTITION_ONE && lang_c_p ()
+      && (in_lto_p || flag_whole_program))
+    return false;
+
   return (warn_free_nonheap_object
 	  || warn_mismatched_alloc
 	  || warn_mismatched_new_delete);

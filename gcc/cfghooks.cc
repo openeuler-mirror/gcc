@@ -1121,6 +1121,7 @@ duplicate_block (basic_block bb, edge e, basic_block after, copy_bb_data *id)
     move_block_after (new_bb, after);
 
   new_bb->flags = (bb->flags & ~BB_DUPLICATED);
+  /* gcc-14 carries discriminators on statement locations; no bb-level copy needed. */
   FOR_EACH_EDGE (s, ei, bb->succs)
     {
       /* Since we are creating edges from a new block to successors

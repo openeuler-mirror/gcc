@@ -394,6 +394,7 @@ Objective-C and Objective-C++ Dialects}.
 -Wno-pragmas  -Wno-prio-ctor-dtor  -Wredundant-decls
 -Wrestrict  -Wno-return-local-addr  -Wreturn-type
 -Wno-scalar-storage-order  -Wsequence-point
+-Wno-simdmath
 -Wshadow  -Wshadow=global  -Wshadow=local  -Wshadow=compatible-local
 -Wno-shadow-ivar
 -Wno-shift-count-negative  -Wno-shift-count-overflow  -Wshift-negative-value
@@ -549,19 +550,23 @@ Objective-C and Objective-C++ Dialects}.
 -falign-loops[=@var{n}[:@var{m}:[@var{n2}[:@var{m2}]]]]
 -fmin-function-alignment=[@var{n}]
 -fno-allocation-dce -fallow-store-data-races
+-farray-widen-compare
 -fassociative-math  -fauto-profile  -fauto-profile[=@var{path}]
 -fauto-inc-dec  -fbranch-probabilities
+-fbuiltin-will-return
 -fcaller-saves
 -fcombine-stack-adjustments  -fconserve-stack
 -ffold-mem-offsets
 -fcompare-elim  -fcprop-registers  -fcrossjumping
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules
 -fcx-limited-range
--fdata-sections  -fdce  -fdelayed-branch
--fdelete-null-pointer-checks  -fdevirtualize  -fdevirtualize-speculatively
+-fdata-sections  -fdce  -fdebruijn-clz  -fdelayed-branch
+-fdelete-null-pointer-checks
+-fdevirtualize  -fdevirtualize-speculatively
 -fdevirtualize-at-ltrans  -fdse
 -fearly-inlining  -fipa-sra  -fexpensive-optimizations  -ffat-lto-objects
 -ffast-math  -ffinite-math-only  -ffloat-store  -fexcess-precision=@var{style}
+-ffp-model=@var{model}  -fsimdmath  -fno-simdmath
 -ffinite-loops
 -fforward-propagate  -ffp-contract=@var{style}  -ffunction-sections
 -fgcse  -fgcse-after-reload  -fgcse-las  -fgcse-lm  -fgraphite-identity
@@ -570,7 +575,7 @@ Objective-C and Objective-C++ Dialects}.
 -finline-stringops[=@var{fn}]
 -finline-functions  -finline-functions-called-once  -finline-limit=@var{n}
 -finline-small-functions -fipa-modref -fipa-cp  -fipa-cp-clone
--fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
+-fipa-array-load-inline  -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm}
 -flive-patching=@var{level}
@@ -579,7 +584,8 @@ Objective-C and Objective-C++ Dialects}.
 -fno-ira-share-spill-slots
 -fisolate-erroneous-paths-dereference  -fisolate-erroneous-paths-attribute
 -fivopts  -fkeep-inline-functions  -fkeep-static-functions
--fkeep-static-consts  -flimit-function-alignment  -flive-range-shrinkage
+-fkeep-static-consts  -flim-after-jam  -flimit-function-alignment
+-flive-range-shrinkage
 -floop-block  -floop-interchange  -floop-strip-mine
 -floop-unroll-and-jam  -floop-nest-optimize
 -floop-parallelize-all  -flra-remat  -flto  -flto-compression-level
@@ -593,7 +599,7 @@ Objective-C and Objective-C++ Dialects}.
 -fno-toplevel-reorder  -fno-trapping-math  -fno-zero-initialized-in-bss
 -fomit-frame-pointer  -foptimize-sibling-calls
 -fpartial-inlining  -fpeel-loops  -fpredictive-commoning
--fprefetch-loop-arrays
+-fprefetch-loop-arrays  -fpreserve-vect-idioms
 -fprofile-correction
 -fprofile-use  -fprofile-use=@var{path} -fprofile-partial-training
 -fprofile-values -fprofile-reorder-functions
@@ -620,15 +626,19 @@ Objective-C and Objective-C++ Dialects}.
 -fstdarg-opt  -fstore-merging  -fstrict-aliasing -fipa-strict-aliasing
 -fthread-jumps  -ftracer  -ftree-bit-ccp
 -ftree-builtin-call-dce  -ftree-ccp  -ftree-ch
--ftree-coalesce-vars  -ftree-copy-prop  -ftree-dce  -ftree-dominator-opts
+-ftree-coalesce-vars  -ftree-constant-byte-range
+-ftree-constant-byte-range-cursor  -ftree-copy-prop  -ftree-dce
+-ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
 -ftree-bitset-store-coalescing
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
--ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
+-ftree-loop-invariant-split  -ftree-loop-ivcanon  -ftree-loop-linear
+-ftree-loop-optimize
 -ftree-loop-vectorize
 -ftree-parallelize-loops=@var{n}  -ftree-pre  -ftree-partial-pre  -ftree-pta
--ftree-reassoc  -ftree-scev-cprop  -ftree-sink  -ftree-slsr  -ftree-sra
+-ftree-reassoc  -ftree-replacement-index-prefetch  -ftree-scev-cprop
+-ftree-sink  -ftree-slsr  -ftree-sra
 -ftree-switch-conversion  -ftree-tail-merge
 -ftree-ter  -ftree-vectorize  -ftree-vrp  -ftrivial-auto-var-init
 -funconstrained-commons -funit-at-a-time  -funroll-all-loops
@@ -642,6 +652,7 @@ Objective-C and Objective-C++ Dialects}.
 @xref{Instrumentation Options,,Program Instrumentation Options}.
 @gccoptlist{-p  -pg  -fprofile-arcs  --coverage  -ftest-coverage
 -fcondition-coverage
+-fkernel-pgo
 -fprofile-abs-path
 -fprofile-dir=@var{path}  -fprofile-generate  -fprofile-generate=@var{path}
 -fprofile-info-section  -fprofile-info-section=@var{name}
@@ -799,6 +810,8 @@ Objective-C and Objective-C++ Dialects}.
 -mtls-size=@var{size}
 -mfix-cortex-a53-835769  -mfix-cortex-a53-843419
 -mlow-precision-recip-sqrt  -mlow-precision-sqrt  -mlow-precision-div
+-mdaz-ftz  -mno-daz-ftz
+-mmul-widen128  -mno-mul-widen128  -msimdmath-vec64  -mno-simdmath-vec64
 -mpc-relative-literal-loads
 -msign-return-address=@var{scope}
 -mbranch-protection=@var{none}|@var{standard}|@var{pac-ret}[+@var{leaf}
@@ -8985,6 +8998,22 @@ allowed in GCC@.  It is not supported by ISO C90.  @xref{Mixed Labels and Declar
 
 This warning is upgraded to an error by @option{-pedantic-errors}.
 
+@opindex Wsimdmath
+@opindex Wno-simdmath
+@item -Wno-simdmath
+Do not report how @option{-fsimdmath} interacts with the floating-point
+settings in effect.  The report is on by default.  In C and C++ it says
+that vectorization cannot happen, naming the setting responsible and,
+where the option is only partly disabled, which functions are affected.
+In Fortran it says the opposite where that is the truth: the vector
+calls are emitted whatever the model asks for, because the declarations
+go through @code{!GCC$ builtin} rather than through the gates the C
+front end honors.  One option covers both, so switching it off switches
+off the Fortran report as well.  It is made once per translation unit,
+before parsing, so @code{#pragma GCC diagnostic} cannot reach it -
+@option{-Wno-simdmath} or @option{-Wno-error=simdmath} on the command
+line is the way to quiet it.
+
 @opindex Wshadow
 @opindex Wno-shadow
 @item -Wshadow
@@ -12989,12 +13018,44 @@ resulting code may or may not perform better than without cross-jumping.
 
 Enabled at levels @option{-O2}, @option{-O3}, @option{-Os}.
 
+@opindex farray-widen-compare
+@item -farray-widen-compare
+Rewrite loops that compare two arrays byte by byte until the first
+mismatch - the match-finder loops of LZMA-style compressors, typically -
+to compare eight bytes at a time, locating the mismatching byte with a
+count-trailing-zeros instruction.  Off by default; takes effect at
+@option{-O3} and above, on little-endian LP64 targets only.
+
+@strong{Warning:} this option is unsafe.  The rewritten loop may read up
+to eight bytes beyond the first mismatching byte (never beyond the loop
+bound).  The original loop stops reading at the first mismatch, so a
+conforming program that places the mismatching byte at the very end of
+readable memory - the loop bound lying beyond it - is correct as
+written, yet faults when compiled with this option.  Enable it only
+when both arrays are fully readable up to the loop bound, as is the
+case for compressor match buffers with padding.
+
 @opindex fauto-inc-dec
 @item -fauto-inc-dec
 Combine increments or decrements of addresses with memory accesses.
 This pass is always skipped on architectures that do not have
 instructions to support this.  Enabled by default at @option{-O1} and
 higher on architectures that support this.
+
+@opindex fbuiltin-will-return
+@item -fbuiltin-will-return
+Treat built-in calls that cannot loop, throw or exit the program -
+currently only @code{__builtin_prefetch} - as calls that always
+return.  Off by default.
+
+GCC normally assumes any call that is not @code{const} or @code{pure}
+might not return, and refuses to hoist a possibly-trapping expression
+- a memory load, typically - across it.  A prefetch only drops a hint
+to the hardware, but its attributes cannot say so, so code dense with
+prefetches (for example, produced by an automatic prefetch insertion
+pass) loses redundancy elimination around every one of them.  This
+option lifts that pessimization for the whitelisted built-ins.  It
+never changes what the program computes.
 
 @opindex fdce
 @item -fdce
@@ -13035,6 +13096,30 @@ base and complete variants are changed to be thunks that call a common
 implementation.
 
 Enabled by @option{-Os}.
+
+@opindex fdebruijn-clz
+@item -fdebruijn-clz
+Recognize DeBruijn table-based count-leading-zero idioms for unsigned
+32-bit and 64-bit inputs, and enable the backported extensions to
+table-based count-trailing-zero recognition, including fallback handling
+for zero inputs.  The transformations preserve the original table result
+for zero.  The variant that isolates the most significant bit with
+@code{s - (s >> 1)} after an OR cascade is recognized for 64-bit inputs.
+
+Also recognize 64-bit count-leading-zero and count-trailing-zero
+operations implemented by selecting between operations on their
+32-bit halves, and replace them with the corresponding 64-bit
+target operation.  The transformation preserves the split-word
+implementation's result for zero inputs and requires target support
+for the corresponding 64-bit operation.
+
+This option is disabled by default at all optimization levels.  Enabling
+it only affects transformations when the relevant forward-propagation
+and PHI optimization passes are enabled.
+If an input may be zero, the transformations also require a defined
+target result for the corresponding count-zero operation.
+Without this option, or with @option{-fno-debruijn-clz}, GCC retains
+its original count-trailing-zero table recognition and zero handling.
 
 @opindex fdelete-null-pointer-checks
 @item -fdelete-null-pointer-checks
@@ -13441,6 +13526,31 @@ and the @option{large-stack-frame-growth} parameter to 400.
 Perform reassociation on trees.  This flag is enabled by default
 at @option{-O1} and higher.
 
+@item -ftree-replacement-index-prefetch
+@opindex ftree-replacement-index-prefetch
+Use a new unsigned index written over a previously loaded index to prefetch
+indirect addresses derived from that old index.  In addition to replacements
+in loops, handle loop-external replacements that feed a PHI through one
+direct normal edge.  Translate only that edge's incoming unsigned scalar
+when constructing a hint; do not change the PHI or copy memory loads.
+This option enables its path independently of @option{-fprefetch-loop-arrays}
+and its cache-line model.  The enclosing loop-pass group still requires a
+loop in the function, so wholly loopless functions are not handled.
+
+The address computation must contain only a small number of pure unsigned
+operations and values already available at the replacement.  No additional
+data loads are issued and demand accesses keep their original order.
+Each new direct-edge entry selects at most one address, preferring the
+base address of a store reference.  Reconstructed hints need not retain
+component offsets within an aggregate object.  This extension emits at
+most eight hints per function.  Candidate analysis is bounded independently
+of successful hints, and candidates exceeding its budget are skipped.
+Its direct-edge path is disabled when
+@option{--param=simultaneous-prefetches=0} is used.
+This transformation adds nonfaulting read hints on targets with prefetch
+support and is disabled by default.  It does not add region-start,
+second-cache-line or write-intent hints.
+
 @opindex fcode-hoisting
 @item -fcode-hoisting
 Perform code hoisting.  Code hoisting tries to move the
@@ -13510,6 +13620,22 @@ Enabled by default at @option{-O1} and higher.
 @item -fipa-stack-alignment
 Reduce stack alignment on call sites if possible.
 Enabled by default.
+
+@opindex fipa-array-load-inline
+@item -fipa-array-load-inline
+Replace loads from fixed-size lookup tables with computations of their
+initialization formulas in terms of the array indices.  The optimization
+requires explicit references, complete initialization, compatible arithmetic
+semantics, and proof that each load is initialized or protected by a suitable
+guard.  Initialization stores are removed when all references permit it.
+
+This option is disabled by default, including at @option{-O3}.  Explicitly
+enabling it requires @option{-O3} or a higher optimization level; it has no
+effect at lower levels.  It can also run during LTO, subject to the visibility
+of the references and function bodies in the current partition.  Escaping
+arrays and guards, including guards accessed through atomic operations, are
+not supported.  A thread-local table cannot use a non-thread-local guard to
+prove that initialization has completed in the current thread.
 
 @opindex fipa-pta
 @item -fipa-pta
@@ -13677,12 +13803,62 @@ Perform sparse conditional constant propagation (CCP) on trees.  This
 pass only operates on local scalar variables and is enabled by default
 at @option{-O1} and higher.
 
+@opindex ftree-constant-byte-range
+@item -ftree-constant-byte-range
+Infer possible byte values for loads through cursors derived from complete
+immutable byte arrays.  The analysis follows bounded pointer definition
+graphs, including all incoming loop PHI edges, and feeds existing value
+range propagation.  Searches for characters absent from a proven
+nul-terminated constant array may also be eliminated.  Unknown or mutable
+pointer sources are excluded.  The analysis can also follow @code{strchr}
+results when @option{-fdelete-null-pointer-checks} is enabled.  It runs after
+early jump threading and again after dominator and copy propagation cleanup
+so that newly exposed cursors can contribute ranges.  This option is disabled by
+default and has no effect with @option{-fwrapv-pointer}.
+
+Enabling this option also enables @option{-ftree-constant-byte-range-cursor}
+unless explicitly disabled with @option{-fno-tree-constant-byte-range-cursor}.
+The explicit cursor setting takes precedence regardless of option order.
+
+@opindex ftree-constant-byte-range-cursor
+@item -ftree-constant-byte-range-cursor
+Refine byte-load ranges at constant displacements from @code{strchr} results
+within proven complete immutable byte arrays.  Enumerate all possible matching
+positions conservatively and merge all pointer PHI inputs.  Unsupported
+arithmetic falls back to the whole-object alphabet only when
+@option{-ftree-constant-byte-range} is also enabled.  This option is disabled by
+default and does not infer trip counts or introduce speculative loads.
+Wrapping-pointer arithmetic and targets allowing accessible null pointers are
+excluded from this refinement.  Analysis work is bounded per function.
+
+This option can also be enabled independently of
+@option{-ftree-constant-byte-range}.  Both are disabled when neither option
+is requested.  Search semantics are currently modeled only for @code{strchr};
+unrecognized calls are conservatively rejected.
+
+@option{-ftree-constant-byte-cursor-range} is a compatibility spelling of
+@option{-ftree-constant-byte-range-cursor}.
+
 @opindex fssa-backprop
 @item -fssa-backprop
 Propagate information about uses of a value up the definition chain
 in order to simplify the definitions.  For example, this pass strips
 sign operations if the sign of a value never matters.  The flag is
 enabled by default at @option{-O1} and higher.
+
+@opindex ftree-static-byte-cfg
+@item -ftree-static-byte-cfg
+Specialize bounded CFG states using immutable addresses and byte equality
+facts derived from GIMPLE.  Dynamic operations are retained, and parameter
+hypotheses use runtime guards with the original CFG as fallback.
+The pass runs in speed-optimized functions at @option{-O2} and higher when
+explicitly enabled, subject to side-effect, exception and bounded-growth
+checks.  Size-optimized and cold functions are skipped.  Functions with
+explicit loop unrolling or vectorization annotations are also skipped so
+that partial CFG duplication cannot discard those annotations.
+Functions that may
+throw non-call exceptions, including those compiled with
+@option{-fnon-call-exceptions}, are skipped.  It is disabled by default.
 
 @opindex fssa-phiopt
 @item -fssa-phiopt
@@ -13914,6 +14090,17 @@ nest this unrolls the outer loop by some factor and fuses the resulting
 multiple inner loops.  This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
 
+@opindex flim-after-jam
+@item -flim-after-jam
+Run tree loop invariant motion once after @option{-floop-unroll-and-jam}
+changes a function, before leaving the loop optimizer pipeline.  This can
+hoist invariants exposed by unroll-and-jam earlier than the later loop
+invariant motion pass.
+
+This option is independent of @option{-ftree-loop-im}: specifying
+@option{-fno-tree-loop-im} does not disable this additional invocation.
+The additional invocation does not perform store motion.
+
 @opindex ftree-loop-im
 @item -ftree-loop-im
 Perform loop invariant motion on trees.  This pass moves only invariants that
@@ -13923,12 +14110,49 @@ operands of conditions that are invariant out of the loop, so that we can use
 just trivial invariantness analysis in loop unswitching.  The pass also includes
 store motion.
 
+@opindex ftree-loop-invariant-split
+@item -ftree-loop-invariant-split
+Split selected two-level loop nests into a sequence of equivalent outer-loop
+copies, each covering a consecutive range of the original inner-loop iteration
+space.  The pass looks for read-only data referenced by the inner loop but not
+by the outer-loop induction variable, and limits each copy to a chunk of that
+data.  This can expose smaller invariant data blocks to later vectorization,
+unrolling and loop invariant motion passes.
+
+This optimization is conservative and is not enabled by default at any
+optimization level.  It runs only when loop vectorization is enabled or the
+function contains a loop marked for forced vectorization.  Enabling this
+option does not enable loop vectorization.  Loop vectorization is enabled by
+default at @option{-O2} and @option{-O3}, and can be enabled explicitly with
+@option{-ftree-loop-vectorize}.
+
 @opindex ftree-loop-ivcanon
 @item -ftree-loop-ivcanon
 Create a canonical counter for number of iterations in loops for which
 determining number of iterations requires complicated analysis.  Later
 optimizations then may determine the number easily.  Useful especially
 in connection with unrolling.
+
+@opindex fpreserve-vect-idioms
+@item -fpreserve-vect-idioms
+Preserve selected innermost loops containing widened integer multiply-add
+reductions during early complete unrolling, when complete unrolling would
+increase code size.  Leaving these loops intact can expose opportunities
+for later loop vectorization, including dot-product instructions.
+
+This option is disabled by default and requires both loop optimization
+and loop vectorization to be enabled.  It uses a target-independent shape
+heuristic: it does not require target dot-product instructions and does
+not guarantee vectorization or improved performance.  Loops marked with
+@code{#pragma GCC novector} are not preserved by this option.  Additional
+scalar recurrences are conservatively limited to affine inductions and
+simple integer sum, minimum and maximum reductions.
+
+This option does not inhibit unrolling that does not increase code size,
+override explicit loop-unrolling pragmas, or affect complete unrolling
+after vectorization.  It only changes otherwise permitted early unrolling
+of nested loops at @option{-O3} or higher; at @option{-O2}, early complete
+unrolling already avoids code growth.
 
 @opindex ftree-scev-cprop
 @item -ftree-scev-cprop
@@ -15021,6 +15245,177 @@ that depend on an exact implementation of IEEE or ISO rules/specifications
 for math functions. It may, however, yield faster code for programs
 that do not require the guarantees of these specifications.
 
+@opindex ffp-model
+@item -ffp-model=@var{model}
+Select a floating-point semantics model.  @var{model} is one of:
+
+@table @samp
+@item normal
+The default: no change to the usual floating-point behavior.
+@item fast
+Equivalent to @option{-ffast-math}.
+@item precise
+Disables @option{-ffast-math} and asks for reproducible results:
+@option{-frounding-math} and @option{-fsignaling-nans} are turned on and
+floating-point contraction is turned off.
+@item except
+Preserves floating-point exception semantics: @option{-ftrapping-math},
+@option{-fsignaling-nans} and @code{errno} setting are turned on, and
+optimizations that can raise an exception on a path that would not have
+executed it - @option{-fexpensive-optimizations}, @option{-fcode-hoisting}
+and @option{-fpredictive-commoning} - are turned off unless requested
+explicitly.  Turning off @option{-fpredictive-commoning} this way does
+not stop predictive commoning: that pass runs whenever loop
+vectorization is enabled and the option was not named on the command
+line, so reaching it takes an explicit
+@option{-fno-predictive-commoning}.  In Fortran it also asks for
+@option{-ffpe-trap=invalid,zero,overflow} and @option{-ffpe-summary=all};
+these are defaults, so a program that gives its own @option{-ffpe-trap=}
+or @option{-ffpe-summary=} keeps that choice, including the choice to
+trap nothing.
+@item strict
+Both @samp{precise} and @samp{except}.
+@end table
+
+@option{-ffp-model=precise}, @option{-ffp-model=except} and
+@option{-ffp-model=strict} take priority over fast-math settings on the
+same command line, wherever those appear: an @option{-Ofast} is degraded
+to @option{-O3} and an @option{-ffast-math} is dropped, each with a
+warning.  A @option{-fno-fast-math} is left alone, since it asks for the
+same thing the model does.  To go back to fast math, name the model:
+@option{-ffp-model=fast}.  When several @option{-ffp-model=} options are
+given, the last one wins and the others are reported.
+
+The individual options that make up @option{-ffast-math}, such as
+@option{-funsafe-math-optimizations} and @option{-ffinite-math-only}, are
+undone by these three models as well, so that appending a model to a set
+of flags that already asks for fast math gets the behavior the model
+names.  Unlike @option{-ffast-math} itself these are not removed from the
+command line but overridden where they are handled, so ordering applies
+in the usual way: a component named after the model wins, and one named
+before it does not.
+
+On AArch64 GNU/Linux the three models additionally suppress
+@file{crtfastmath.o}, whatever brought it in and wherever that appeared,
+unless flush-to-zero was asked for by name; see @option{-mdaz-ftz}.  This
+reaches the program only if the model appears on the command line that
+links it, since that is where the startup file is chosen.  On every other
+target the models govern code generation alone: a program built with
+@option{-funsafe-math-optimizations} and @option{-ffp-model=strict}
+elsewhere still runs with denormals flushed.
+
+@opindex fsimdmath
+@item -fsimdmath
+Declare vector variants of the math functions supported by the vector
+math library, so that loops calling them can be vectorized into calls
+to those variants.  The declarations are pre-included from
+@file{simdmath.h} for C and C++ and from @file{simdmath_f.h} for
+Fortran; both are installed with the compiler and list the functions
+the library covers.  They are looked up as system headers and are
+optional: where neither is installed, or where the search path excludes
+them as @option{-nostdinc} does, the option compiles without them
+instead of failing, and the declarations can be supplied by hand.
+Enabling this option also turns on @option{-fopenmp-simd} where that was
+not decided already, which is required for such calls to be vectorized;
+note that it also activates any @code{omp simd} directives already
+present in the source.  It turns on
+@option{-fno-math-errno} as well, but only where @code{errno} was not
+asked for: an explicit @option{-fmath-errno}, and every floating-point
+model other than @option{normal} and @option{fast}, keep it, and the
+functions that do not set @code{errno} still vectorize.  An explicit @option{-fmath-errno} and
+the value-safe models are honored whichever side of @option{-fsimdmath}
+they appear on.  @option{-fno-fast-math} is not in that set: it asks for
+@code{errno} only as one part of a bundle, so the usual last-one-wins
+rule applies and @option{-fno-fast-math -fsimdmath} vectorizes while
+@option{-fsimdmath -fno-fast-math} does not.
+@option{-fno-simdmath} disables the option itself.  On the command line
+this is all there is to it: the driver collapses an option and its
+negation to whichever came last, so @option{-fsimdmath -fno-simdmath}
+never turns the two flags on in the first place.  They do stay in effect,
+and must be negated separately, where the option is switched off for one
+function rather than for the command line, as with
+@code{__attribute__ ((optimize ("no-simdmath")))}.
+
+How much of the option survives depends on the floating-point settings in
+force, and the compiler says so rather than leaving it to be discovered:
+
+@table @asis
+@item @option{-ffp-model=normal} or @option{fast}
+All eleven functions are vectorized.
+@item @option{-ffp-model=except}, or an explicit @option{-fmath-errno}
+@code{errno} is kept, and a vector variant cannot set it per lane, so
+@code{exp}, @code{expf}, @code{log}, @code{logf}, @code{pow},
+@code{powf} and @code{exp2f} are not vectorized.  @code{sin},
+@code{sinf}, @code{cos} and @code{cosf} do not set @code{errno} and are
+unaffected.  This is the case worth watching: the compiler still emits
+some vector calls, so the option looks like it worked.
+@item @option{-ffp-model=precise} or @option{strict}
+Nothing is vectorized.  Both turn on @option{-frounding-math}, and a
+vector variant does not follow the rounding mode.
+@end table
+
+That table is for C and C++.  Fortran reaches the vector variants by a
+different route - the @code{!GCC$ builtin} declarations in
+@file{simdmath_f.h} attach the attribute to the builtin itself - which
+neither @option{-fmath-errno} nor @option{-frounding-math} gates, so
+there the calls are emitted whatever the model asks for and may not
+follow the rounding mode.  The compiler reports that where it applies.
+The @code{errno} half of a model has no effect in Fortran at all, which
+has no @code{errno} to set, so nothing is reported for it there.
+
+The option can cost compilation time in C and C++.  A precompiled header
+is only usable when nothing has been parsed before it, and these
+declarations are parsed first, so a translation unit that would otherwise
+have loaded one reads its headers from source instead.  Nothing is
+diagnosed and the generated code is the same, but a project that relies
+on precompiled headers builds noticeably slower with this option than
+without it.  Fortran is not affected.
+
+In C++ the declarations carry the same exception specification glibc
+gives these functions, so that they do not clash with the ones
+@file{math.h} declares later in the same translation unit.
+
+Wherever C++ modules are enabled - @option{-fmodules-ts} or
+@option{-fmodule-header} - the declarations are not pre-included at all,
+in any translation unit of that compilation.  A module-declaration has to
+be the first declaration in its file, and these are declarations rather
+than the preprocessor definitions a target pre-include is limited to, so
+a module interface unit would otherwise fail to compile.  Math calls in
+such a compilation are vectorized by declaring the functions with
+@code{omp declare simd} in the usual way; the rest of the option,
+including linking @code{libmathlib}, is unaffected.
+
+On AArch64 the implementations come from @code{libmathlib} (the
+packaged Arm optimized-routines).  The driver links it automatically
+when the option is also given on the command line that links the
+program, under the policy named by the @env{OPENEULER_GCC_SIMDMATH_LINK}
+environment variable:
+
+@table @samp
+@item as-needed
+The default.  Link @code{libmathlib} as needed; a missing library is a
+link error.
+@item none
+Never link @code{libmathlib}: the program supplies its own provider, or
+accepts that the vector math symbols stay unresolved.  This is what the
+compiler did before the option existed, and it is what a build should use
+where the library is not installed.
+@end table
+
+@code{libmathlib} is built without @option{-lm} and leaves its own
+references to the scalar math functions undefined, so a C link needs
+@option{-lm} as well; without it the link fails with undefined references
+to @code{cos}, @code{powl} and similar.  The driver does not supply one
+and does not warn about it either.  Supplying it would put @option{-lm}
+after the program's own objects and satisfy their references too, so
+removing @option{-fsimdmath} later would break a link that had been
+working; warning about it would mean warning on every C link, including
+the many that do not need it, since whether the library is reached is not
+known until the link runs.  C++ and Fortran are unaffected, having
+@code{libm} on the line already.
+
+Any other value is rejected with an error.
+
 @opindex fno-math-errno
 @opindex fmath-errno
 @item -fno-math-errno
@@ -15482,6 +15877,15 @@ In each case, the @var{value} is an integer.  The following choices
 of @var{name} are recognized for all targets:
 
 @table @gcctabopt
+@item struct-reorg-cold-struct-ratio
+The threshold ratio (as a percentage) between a structure frequency
+and the frequency of the hottest structure in the program.  This parameter
+is used by struct-reorg optimization enabled by @option{-fipa-struct-reorg}.
+We say that if the ratio of a structure frequency, calculated by profiling,
+to the hottest structure frequency in the program is less than this
+parameter, then structure reorganization is not applied to this structure.
+The default is 10.
+
 @item predictable-branch-outcome
 When branch is predicted to be taken with probability lower than this threshold
 (in percent), then it is considered well predictable.
@@ -16328,6 +16732,25 @@ Loop invariant motion can be very expensive, both in compilation time and
 in amount of needed compile-time memory, with very large loops.  Loops
 with more basic blocks than this parameter won't have loop invariant
 motion optimization performed on them.
+
+@item loop-invariant-split-chunk-bytes
+Maximum number of bytes of outer-invariant inner-loop loads to include in each
+chunk created by @option{-ftree-loop-invariant-split}.  A value of zero lets
+the compiler choose a target-dependent budget.
+
+@item loop-invariant-split-max-copies
+Maximum number of loop nest copies that
+@option{-ftree-loop-invariant-split} may create for one split.
+
+@item loop-invariant-split-reserved-vregs
+Number of vector registers reserved for the computation itself when
+@option{-ftree-loop-invariant-split} chooses an automatic chunk budget.  A
+value of zero lets the compiler reserve a target-dependent default.
+
+@item loop-invariant-split-vector-regs
+Number of vector registers available to @option{-ftree-loop-invariant-split}
+when choosing an automatic chunk budget.  A value of zero lets the compiler
+infer the value from the target.
 
 @item loop-max-datarefs-for-datadeps
 Building data dependencies is expensive for very large loops.  This
@@ -17269,6 +17692,31 @@ process ID.
 value of environment variable @var{VAR}
 
 @end table
+
+@opindex fkernel-pgo
+@item -fkernel-pgo
+Under profile instrumentation that includes value profiling
+(@option{-fprofile-generate}, or @option{-fprofile-arcs} with
+@option{-fprofile-values}), do not give the indirect-call profiling
+variable a TLS model.  Off by default.  Under link-time optimization
+the option takes effect where the instrumentation runs: give it when
+compiling; given only at link time it does nothing.
+
+The variable (@code{__gcov_indirect_call}) passes context from an
+indirect call site to the profiling stub in the called function, and
+is normally thread-local so that concurrent threads do not clobber
+each other's entry.  A kernel has no ELF TLS runtime - its loader does
+not process TLS relocations - and supplies its own non-TLS definition
+of the variable from its profiling runtime; this option is what makes
+an instrumented kernel build link.  The variable is then shared, so
+racing indirect calls can lose or misattribute some value-profile
+samples.  That costs profile quality, never correctness.
+
+This option is for freestanding builds that ship their own profiling
+runtime.  Do not use it for ordinary programs: libgcov defines the
+variable thread-locally wherever the target supports TLS, and linking
+an object compiled with this option against it fails with a TLS
+mismatch error.
 
 @opindex fprofile-generate
 @item -fprofile-generate
@@ -21358,6 +21806,53 @@ precision of square root results to about 16 bits for
 single precision and to 32 bits for double precision.
 If enabled, it implies @option{-mlow-precision-recip-sqrt}.
 
+@opindex mdaz-ftz
+@opindex mno-daz-ftz
+@item -mdaz-ftz
+@itemx -mno-daz-ftz
+Enable or disable flush-to-zero handling of denormal numbers at program
+startup.  This controls whether @file{crtfastmath.o} is linked, which
+sets the flush-to-zero bit in the floating-point control register; the
+AArch64 bit covers what x86 splits between its FTZ and DAZ flags, and the
+option is spelled the same way there.  Its point is to make flush-to-zero
+available on its own, since it is otherwise reachable only as part of the
+aggressive floating-point optimizations implied by @option{-Ofast},
+@option{-ffast-math}, @option{-funsafe-math-optimizations} and
+@option{-ffp-model=fast}, all of which link that file too.
+
+The two spellings are one option, so between them the last on the command
+line wins, as for any flag and its negation.  Once that is settled, the
+startup file is linked according to the first rule below that applies,
+whatever order the remaining options were given in:
+
+@table @asis
+@item @option{-mno-daz-ftz}
+Never linked.  Nothing else overrides it.
+@item @option{-shared}
+Never linked; a shared object does not set the control register for the
+process that loads it.
+@item @option{-mdaz-ftz}
+Linked.  An explicit request for flush-to-zero is honored even under
+@option{-ffp-model=precise}, @option{except} or @option{strict}: those
+models govern the transformations the compiler may perform, and asking
+for both is asking for IEEE code generation with denormals flushed.
+@item @option{-ffp-model=precise}, @option{except} or @option{strict}
+Not linked.  This is what keeps flush-to-zero from arriving implicitly,
+for instance through a @option{-funsafe-math-optimizations} that a
+project's @env{CFLAGS} carried in.
+@item @option{-Ofast}, @option{-ffast-math}, @option{-funsafe-math-optimizations}, @option{-ffp-model=fast}
+Linked.
+@end table
+
+Because it works by linking a startup file, it takes effect only when it
+appears on the command line that links the program, and what it sets is
+process-wide: one object built with it makes every part of that program
+run with denormals flushed, whatever the other objects were compiled
+with.  For that reason it is ignored for @option{-shared} here, which is
+a deliberate difference from the x86 option of the same name: a shared
+object should not decide the control register for a process that merely
+loads it.
+
 @opindex mlow-precision-div
 @opindex mno-low-precision-div
 @item -mlow-precision-div
@@ -21367,6 +21862,89 @@ This option only has an effect if @option{-ffast-math} or
 @option{-funsafe-math-optimizations} is used as well.  Enabling this reduces
 precision of division results to about 16 bits for
 single precision and to 32 bits for double precision.
+
+@opindex mmul-widen128
+@opindex mno-mul-widen128
+@item -mmul-widen128
+@itemx -mno-mul-widen128
+Recognize a hand-written 64x64 to 128-bit multiply---four 32-bit quadrant
+products recombined with shifts and carries---and let the hardware do it
+instead.  Both the bit-splice and the wrapping addition formulations of
+the low half are recognized, in either case only for unsigned 64-bit
+operands.  Code that keeps both halves, or only the high one, becomes a
+widening multiply; code that keeps only the low half becomes a plain
+64-bit multiply, since no widening is needed for it.  Disabled by
+default.
+
+The carries must be spelled as expressions---@code{hi += (uint64_t) (lo
+< a);} and the like.  A carry written as an @code{if} statement is not
+recognized, and neither is a schoolbook whose high half is stored only
+on one path or inside a loop.  In each such case the code is compiled as
+written---at most the low half is folded to a plain 64-bit
+multiply---never wrongly.
+
+Under link-time optimization this option takes effect only if it is given
+when compiling; passing it only at link time has no effect, since each
+function is optimized according to the options its own translation unit
+was compiled with.
+
+The recognition also depends on the shape reaching the pass intact, so a
+few option combinations leave the multiply alone even though the option
+is in force.  Instrumentation that splits a basic block is one:
+@option{-fprofile-arcs}, @option{-fprofile-generate} and
+@option{-fcondition-coverage} all leave parts of the idiom split across
+blocks, and they do so for both formulations - including the bit
+splice, whose source has no conditional in it, since the compiler
+introduces and normally collapses branches of its own.  This
+matters because the first step of a profile-guided build is a
+@option{-fprofile-generate} compile; @option{-fprofile-use} is
+unaffected.  @option{-Og} is a different case: the pass this one runs
+after is not in that pipeline, so it never runs at all.  In each case
+the effect is a missed optimization, never a wrong result.
+
+@opindex msimdmath-vec64
+@opindex mno-simdmath-vec64
+@item -msimdmath-vec64
+@itemx -mno-simdmath-vec64
+Under @option{-fsimdmath}, also consider 64-bit vector variants (for
+example @code{V2SF}) when vectorizing calls to the math functions
+declared by that option.  Disabled by default: no vector math library
+currently implements those variants, so enabling this option can leave
+unresolved symbols at link time.
+
+The 64-bit variants are withheld by name, from the eleven functions
+@file{simdmath.h} and @file{simdmath_f.h} declare, and only where the
+translation unit does not define them.  A function under any other name
+keeps its full clone set, and so does one this translation unit defines.
+
+The suppression is by name, so it also applies to a declaration the
+program wrote itself, when that declaration uses one of those eleven
+names.  A program that supplies its own vector implementation of, say,
+@code{sinf} and declares it with @code{omp declare simd} loses the
+@code{_ZGVnN2v_sinf} call path while @option{-fsimdmath} is in force,
+even if the symbol is renamed with @code{asm}.  This is a consequence of
+what the option means: @option{-fsimdmath} says the vector math comes
+from the packaged library, and that library has no 64-bit variants, so a
+build supplying its own should not enable it.  Where both are wanted,
+@option{-msimdmath-vec64} restores the 64-bit variants for every one of
+the eleven, which also means the compiler may then emit calls the
+packaged library cannot satisfy.
+
+In C and C++ the declarations @option{-fsimdmath} itself contributes name
+their own @code{simdlen} and are unaffected by this option either way;
+Fortran, which reaches the variants through @code{!GCC$ builtin}, is
+where it changes what the option does.
+
+Under link-time optimization the suppression follows the @emph{link}
+command line.  The vector clones are enumerated at link time, on
+library declarations that carry no per-function optimization state, so
+a @option{-fsimdmath} given only when compiling does not withhold the
+64-bit variants there, and the vectorizer may select a variant no
+library provides - the link then fails with an undefined @code{_ZGV}
+reference.  A Fortran program built with @option{-fsimdmath -flto}
+must therefore carry @option{-fsimdmath} on the link command line as
+well.  @option{-msimdmath-vec64} likewise takes effect at link time
+under LTO.
 
 @item -mtrack-speculation
 @itemx -mno-track-speculation
@@ -21415,7 +21993,8 @@ and the features that they enable by default:
 @item @samp{armv9.1-a} @tab Armv9.1-A @tab @samp{armv9-a}, @samp{+bf16}, @samp{+i8mm}
 @item @samp{armv9.2-a} @tab Armv9.2-A @tab @samp{armv9.1-a}, @samp{+ls64}
 @item @samp{armv9.3-a} @tab Armv9.3-A @tab @samp{armv9.2-a}, @samp{+mops}
-@item @samp{armv9.4-a} @tab Armv9.4-A @tab @samp{armv9.3-a}
+@item @samp{armv9.4-a} @tab Armv9.4-A @tab @samp{armv9.3-a}, @samp{+sve2p1}
+@item @samp{armv9.5-a} @tab Armv9.5-A @tab @samp{armv9.4-a}, @samp{cpa}, @samp{+faminmax}, @samp{+lut}
 @item @samp{armv8-r} @tab Armv8-R @tab @samp{armv8-r}
 @end multitable
 
@@ -21455,7 +22034,8 @@ performance of the code.  Permissible values for this option are:
 @samp{octeontx2f95mm},
 @samp{a64fx}, @samp{fujitsu-monaka},
 @samp{thunderx}, @samp{thunderxt88},
-@samp{thunderxt88p1}, @samp{thunderxt81}, @samp{tsv110}, @samp{hip12},
+@samp{thunderxt88p1}, @samp{thunderxt81}, @samp{tsv110},
+@samp{hip09}, @samp{hip10a}, @samp{hip10c}, @samp{hip11}, @samp{hip12},
 @samp{thunderxt83}, @samp{thunderx2t99}, @samp{thunderx3t110}, @samp{zeus},
 @samp{cortex-a57.cortex-a53}, @samp{cortex-a72.cortex-a53},
 @samp{cortex-a73.cortex-a35}, @samp{cortex-a73.cortex-a53},
@@ -21712,6 +22292,8 @@ Enable SVE2 sm4 instructions.  This also enables SVE2 instructions.
 Enable SVE2 aes instructions.  This also enables SVE2 instructions.
 @item sve2-sha3
 Enable SVE2 sha3 instructions.  This also enables SVE2 instructions.
+@item sve2p1
+Enable SVE2.1 instructions.  This also enables SVE2 instructions.
 @item tme
 Enable the Transactional Memory Extension.
 @item i8mm
@@ -21745,6 +22327,9 @@ Enable the Flag Manipulation instructions Extension.
 Enable the Pointer Authentication Extension.
 @item cssc
 Enable the Common Short Sequence Compression instructions.
+@item cmpbr
+Enable the shorter compare and branch instructions, @code{cbb}, @code{cbh} and
+@code{cb}.
 @item sme
 Enable the Scalable Matrix Extension.
 @item sme-i16i64
@@ -21761,10 +22346,43 @@ Enable support for 128-bit system register read/write instructions.
 This also enables the LSE128 extension.
 @item gcs
 Enable support for Armv9.4-a Guarded Control Stack extension.
+@item tlbid
+Enable the TLBI Domains Extension.
+@item lsui
+Enable the Unprivileged Load-Store instructions.
+@item fprcvt
+Enable the floating-point and integer conversion instructions that take
+their operand in, or produce their result in, a SIMD and floating-point
+register.
 @item the
 Enable support for Armv8.9-a/9.4-a translation hardening extension.
 @item rcpc3
 Enable the RCpc3 (Release Consistency) extension.
+@item fp8
+Enable the fp8 (8-bit floating point) extension.
+@item fp8fma
+Enable the fp8 (8-bit floating point) multiply accumulate extension.
+@item ssve-fp8fma
+Enable the fp8 (8-bit floating point) multiply accumulate extension in streaming
+mode.
+@item fp8dot4
+Enable the fp8 (8-bit floating point) to single-precision 4-way dot product
+extension.
+@item ssve-fp8dot4
+Enable the fp8 (8-bit floating point) to single-precision 4-way dot product
+extension in streaming mode.
+@item fp8dot2
+Enable the fp8 (8-bit floating point) to half-precision 2-way dot product
+extension.
+@item ssve-fp8dot2
+Enable the fp8 (8-bit floating point) to half-precision 2-way dot product
+extension in streaming mode.
+@item faminmax
+Enable the Floating Point Absolute Maximum/Minimum extension.
+@item lut
+Enable the Lookup Table extension.
+@item cpa
+Enable the Checked Pointer Arithmetic instructions.
 
 @end table
 
@@ -30971,6 +31589,10 @@ to @samp{zvks} and @samp{zvkg}.
 @item smepmp
 @tab 1.0
 @tab PMP Enhancements for memory access and execution prevention on Machine mode.
+
+@item smrnmi
+@tab 1.0
+@tab Resumable non-maskable interrupts.
 
 @item smstateen
 @tab 1.0

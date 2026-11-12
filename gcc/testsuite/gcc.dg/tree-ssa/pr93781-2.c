@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -fdump-tree-evrp" } */
+/* { dg-options "-O2 -fdump-tree-evrp1" } */
 
 void kill (void);
 
@@ -14,4 +14,4 @@ void foo (unsigned int arg)
     kill ();
 }
 
-/* { dg-final { scan-tree-dump-not "kill" "evrp" } } */
+/* { dg-final { scan-tree-dump-not "kill" "evrp1" } } */

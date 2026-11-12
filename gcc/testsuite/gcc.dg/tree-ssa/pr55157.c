@@ -1,5 +1,5 @@
 // { dg-do compile }
-// { dg-options "-O2 -fdump-tree-evrp" }
+// { dg-options "-O2 -fdump-tree-evrp1" }
 
 void gg(void);
 int f(unsigned t)
@@ -16,4 +16,4 @@ int f(unsigned t)
   return 0;
 }
 
-// { dg-final { scan-tree-dump-times " if " 1 "evrp" } }
+// { dg-final { scan-tree-dump-times " if " 1 "evrp1" } }

@@ -81,6 +81,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "rtl-iter.h"
 #include "print-rtl.h"
 #include "function-abi.h"
+#include "insn-codes.h"
 #include "common/common-target.h"
 #include "diagnostic.h"
 
@@ -4224,7 +4225,489 @@ leaf_renumber_regs_insn (rtx in_rtx)
       }
 }
 #endif
-
+
+#define ASM_FDO_SECTION_PREFIX ".text.fdo."
+
+#define ASM_FDO_CALLER_FLAG ".fdo.caller "
+#define ASM_FDO_CALLER_SIZE_FLAG ".fdo.caller.size "
+#define ASM_FDO_CALLER_BIND_FLAG ".fdo.caller.bind "
+
+#define ASM_FDO_CALLEE_FLAG ".fdo.callee "
+
+/* The AutoBOLT dump below runs at the very end of rest_of_handle_final,
+   after final has emitted the function and long after pass_free_cfg
+   released the CFG, so BB_HEAD/BB_END and the basic-block insn chains
+   carry no validity guarantee at this point.  With real profile counts
+   on GCC 14, a block's chain has been observed to end (NULL) before
+   reaching BB_END, and walking it blindly segfaulted the compiler.
+   The walkers below therefore tolerate chain breakage and every
+   INSN_ADDRESSES access is bounds-checked.  When either fires, the
+   .text.fdo payload for the affected function is emitted incomplete
+   (or not at all) and BOLT feedback for that function degrades - the
+   accepted behavior until this dump is moved to a point where the
+   data is still intact (right after shorten_branches).  */
+
+/* The stale block data does not only lose its NULL terminators: a
+   chain has been observed to lead through recycled rtx nodes whose
+   shallow fields still chain but whose contents are garbage, so a
+   pointer may only be dereferenced after it has been vouched for by
+   the live insn stream (get_insns () onward), which final itself has
+   just walked successfully.  The set is built once per function in
+   dump_profile_to_elf_sections.  */
+static hash_set<rtx_insn *> *fdo_live_insns;
+
+/* Return true if INSN is in the current function's live insn stream
+   and therefore safe to dereference.  */
+
+static bool
+fdo_live_insn_p (rtx_insn *insn)
+{
+  return insn && fdo_live_insns && fdo_live_insns->contains (insn);
+}
+
+/* Chain-breakage-tolerant variants of FOR_BB_INSNS(_REVERSE): every
+   step is validated against the live insn stream, a NULL or unknown
+   BB_HEAD/BB_END never gets dereferenced, and the walk stops at the
+   first pointer the stream does not vouch for.  */
+#define FDO_FOR_BB_INSNS(BB, INSN)					\
+  for ((INSN) = (fdo_live_insn_p (BB_HEAD (BB)) ? BB_HEAD (BB) : NULL);	\
+       (INSN);								\
+       (INSN) = ((INSN) == BB_END (BB) ? NULL				\
+		 : (fdo_live_insn_p (NEXT_INSN (INSN))			\
+		    ? NEXT_INSN (INSN) : NULL)))
+#define FDO_FOR_BB_INSNS_REVERSE(BB, INSN)				\
+  for ((INSN) = (fdo_live_insn_p (BB_END (BB)) ? BB_END (BB) : NULL);	\
+       (INSN);								\
+       (INSN) = ((INSN) == BB_HEAD (BB) ? NULL				\
+		 : (fdo_live_insn_p (PREV_INSN (INSN))			\
+		    ? PREV_INSN (INSN) : NULL)))
+
+/* Address of INSN, or -1 if the address table cannot answer for it.  */
+
+static int
+get_insn_address_checked (const rtx_insn *insn)
+{
+  if (!INSN_ADDRESSES_SET_P ()
+      || (unsigned) INSN_UID (insn) >= INSN_ADDRESSES_SIZE ())
+    return -1;
+  return INSN_ADDRESSES (INSN_UID (insn));
+}
+
+/* Return the relative offset address of the start instruction of BB,
+   return -1 if it is empty instruction.    */
+
+static int
+get_bb_start_addr (basic_block bb)
+{
+  rtx_insn *insn;
+  FDO_FOR_BB_INSNS (bb, insn)
+    {
+      if (!INSN_P (insn))
+	{
+	  continue;
+	}
+      /* The jump target of call is not in this function, so
+	 it should be excluded.    */
+      if (CALL_P (insn))
+        {
+	  return -1;
+	}
+
+      int insn_code = recog_memoized (insn);
+
+      /* The instruction NOP in llvm-bolt belongs to the previous
+	 BB, so it needs to be skipped.   */
+      if (insn_code != CODE_FOR_nop)
+        {
+	  return get_insn_address_checked (insn);
+	}
+    }
+  return -1;
+}
+
+/* Return the relative offet address of the end instruction of BB,
+   return -1 if it is empty or call instruction.    */
+
+static int
+get_bb_end_addr (basic_block bb)
+{
+  rtx_insn *insn;
+  int num_succs = EDGE_COUNT (bb->succs);
+  FDO_FOR_BB_INSNS_REVERSE (bb, insn)
+    {
+      if (!INSN_P (insn))
+        {
+	  continue;
+	}
+      /* The jump target of call is not in this function, so
+	 it should be excluded.     */
+      if (CALL_P (insn))
+        {
+	  return -1;
+	}
+      if ((num_succs == 1)
+	   || ((num_succs == 2) && any_condjump_p (insn)))
+	{
+	  return get_insn_address_checked (insn);
+	}
+      else
+        {
+	  return -1;
+	}
+    }
+  return -1;
+}
+
+/* Return the end address of cfun.    */
+
+static int 
+get_function_end_addr ()
+{
+  rtx_insn *insn = get_last_insn ();
+  for (; insn != get_insns (); insn = PREV_INSN (insn))
+    {
+      if (!INSN_P (insn))
+        {
+	  continue;
+	}
+      return get_insn_address_checked (insn);
+    }
+	  
+  return -1;
+} 
+
+/* Return the function profile status string.    */
+
+static const char * 
+get_function_profile_status () 
+{
+  const char *profile_status[] = {
+    "PROFILE_ABSENT",
+    "PROFILE_GUESSED",
+    "PROFILE_READ",
+    "PROFILE_LAST"     /* Last value, used by profile streaming.    */
+  };
+
+  return profile_status[profile_status_for_fn (cfun)];
+}
+
+/* Return the count from the feedback data, such as PGO or ADDO.    */
+
+inline static gcov_type 
+get_fdo_count (profile_count count)
+{
+  return count.quality () >= GUESSED 
+         ? count.to_gcov_type () : 0;
+}
+
+/* Return the profile quality string.    */
+
+static const char *
+get_fdo_count_quality (profile_count count)
+{
+  const char *profile_quality[] = {
+    "UNINITIALIZED_PROFILE",
+    "GUESSED_LOCAL",
+    "GUESSED_GLOBAL0",
+    "GUESSED_GLOBAL0_ADJUSTED",
+    "GUESSED",
+    "AFDO",
+    "ADJUSTED",
+    "PRECISE"
+  };
+
+  return profile_quality[count.quality ()];
+}
+
+/* If the function is not public, return the function_name/file_name for
+   disambiguation of local symbols since there could be identical function
+   names coming from identical file names.  The caller needs to free memory.  */
+static char *
+alias_local_functions (const char *fnname)
+{
+  if (TREE_PUBLIC (cfun->decl))
+    {
+      return concat (fnname, NULL);
+    }
+  return concat (fnname, "/", lbasename (dump_base_name), NULL);
+}
+
+/* Return function bind type string.    */
+
+static const char * 
+simple_get_function_bind ()
+{
+  const char *function_bind[] = {
+    "GLOBAL",
+    "WEAK",
+    "LOCAL",
+    "UNKNOWN"
+  };
+
+  if (TREE_PUBLIC (cfun->decl))
+    {
+      if (!(DECL_WEAK (cfun->decl)))
+        {
+	  return function_bind[0];
+	}
+      else
+        {
+	  return function_bind[1];
+	}
+    }
+  else  
+    {
+      return function_bind[2];
+    }
+		
+  return function_bind[3];
+}
+
+/* Dumo the callee functions insn in bb by CALL_P (insn).   */
+
+static void 
+dump_direct_callee_info_to_asm (basic_block bb, gcov_type call_count)
+{
+  rtx_insn *insn;
+  FDO_FOR_BB_INSNS (bb, insn)
+    {
+      if (insn && CALL_P (insn))
+        {
+	  tree callee = get_call_fndecl (insn);
+
+	  if (callee)
+	    {
+	      int call_addr = get_insn_address_checked (insn);
+	      /* Without a trustworthy address the record would be
+		 useless to the plugin - skip this callee.  */
+	      if (call_addr == -1)
+		continue;
+
+	      char *func_name
+		= alias_local_functions (get_fnname_from_decl (callee));
+
+	      fprintf (asm_out_file, "\t.string \"%x\"\n", call_addr);
+
+	      fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+		       ASM_FDO_CALLEE_FLAG, func_name);
+
+              fprintf (asm_out_file,
+                       "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+                       call_count);
+
+              if (dump_file)
+                {
+                  fprintf (dump_file, "call: %x --> %s \n",
+                           call_addr, func_name);
+                }
+	      free (func_name);
+            }
+        }
+     } 
+}
+
+/* Dump the edge info into asm.    */
+/* Declared int upstream but no path ever returned a value - falling
+   off the end of a non-void function is undefined behavior, and at
+   -O2 the optimizer treated the fall-off path as unreachable, which
+   miscompiled cc1 itself (the segfaults this dump used to produce
+   moved around with every hardening attempt precisely because of
+   this).  It never had a meaningful result: make it void.  */
+
+static void
+dump_edge_jump_info_to_asm (basic_block bb, gcov_type bb_count)
+{
+  edge e;
+  edge_iterator ei;
+  gcov_type edge_total_count = 0;
+
+  FOR_EACH_EDGE (e, ei, bb->succs)
+    {
+      gcov_type edge_count = get_fdo_count (e->count ());
+      edge_total_count += edge_count;
+
+      int edge_start_addr = get_bb_end_addr (e->src);
+      int edge_end_addr = get_bb_start_addr(e->dest);
+
+      if (edge_start_addr == -1 || edge_end_addr == -1)
+        {
+          continue;
+        }
+      
+      /* This is a reserved assert for the original design.    If this
+         assert is found, use the address of the previous instruction
+         as edge_start_addr.   */
+      gcc_assert (edge_start_addr != edge_end_addr);
+
+      if (dump_file)
+        {
+          fprintf (dump_file, "edge: %x --> %x = (%ld)\n",
+                   edge_start_addr, edge_end_addr, edge_count);
+        }
+
+      if (edge_count > 0)
+        {
+          fprintf(asm_out_file, "\t.string \"%x\"\n", edge_start_addr);
+          fprintf(asm_out_file, "\t.string \"%x\"\n", edge_end_addr);
+          fprintf(asm_out_file, "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+                  edge_count);
+        }
+    }
+
+    gcov_type call_count = MAX (edge_total_count, bb_count);
+    if (call_count > 0)
+      {
+        dump_direct_callee_info_to_asm (bb, call_count);
+      }
+}
+
+/* Dump the bb info into asm.    */
+
+static void 
+dump_bb_info_to_asm (basic_block bb, gcov_type bb_count)
+{
+  int bb_start_addr = get_bb_start_addr (bb);
+  if (bb_start_addr != -1)
+    {
+      fprintf (asm_out_file, "\t.string \"%x\"\n", bb_start_addr);
+      fprintf (asm_out_file, "\t.string \"" HOST_WIDE_INT_PRINT_DEC "\"\n",
+               bb_count);
+    }
+}
+
+/* Dump the function info into asm.    */
+
+static void 
+dump_function_info_to_asm (const char *fnname)
+{
+  char *func_name = alias_local_functions (fnname);
+  fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+           ASM_FDO_CALLER_FLAG, func_name);
+  fprintf (asm_out_file, "\t.string \"%s%d\"\n",
+           ASM_FDO_CALLER_SIZE_FLAG, get_function_end_addr ());
+  fprintf (asm_out_file, "\t.string \"%s%s\"\n",
+           ASM_FDO_CALLER_BIND_FLAG, simple_get_function_bind ());
+
+  if (dump_file)
+    {
+      fprintf (dump_file, "\n FUNC_NAME: %s\n",
+	       func_name);
+      fprintf (dump_file, " file: %s\n",
+               dump_base_name);
+      fprintf (dump_file, "profile_status: %s\n",
+               get_function_profile_status ());
+      fprintf (dump_file, " size: %x\n",
+               get_function_end_addr ());
+      fprintf (dump_file, " function_bind: %s\n",
+               simple_get_function_bind ());
+    }
+  free (func_name);
+}
+
+/* Dump function profile into form AutoFDO or PGO to asm.    */
+
+static void
+dump_fdo_info_to_asm (const char *fnname)
+{
+  basic_block bb;
+
+  dump_function_info_to_asm (fnname);
+
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      gcov_type bb_count = get_fdo_count (bb->count);
+      if (bb_count == 0)
+        {
+          continue;
+        }
+      
+      if (dump_file)
+        {
+          fprintf (dump_file, "BB: %x --> %x = (%ld) [%s]\n",
+                   get_bb_start_addr (bb), get_bb_end_addr (bb),
+                   bb_count, get_fdo_count_quality (bb->count));
+        }
+
+      if (flag_profile_use) 
+        {
+          dump_edge_jump_info_to_asm (bb, bb_count);
+        }
+      else if (flag_auto_profile)
+        {
+          dump_bb_info_to_asm (bb, bb_count);
+        }
+    }
+}
+
+/* When -fauto-bolt option is turnded on, the .text.fdo section 
+   will be generated in the *.s file if there is feedback information
+   from PGO or AutoFDO. This section will parserd in BOLT-plugin.    */
+
+static void 
+dump_profile_to_elf_sections ()
+{
+  if (!flag_function_sections)
+    {
+      error ("-fauto-bolt should work with -ffunction-sections");
+      return;
+    }
+  if (!flag_ipa_ra)
+    {
+      error ("-fauto-bolt should work with -fipa-ra");
+      return;
+    }
+  if (flag_align_jumps)
+    {
+      error ("-fauto-bolt is not supported with -falign-jumps");
+      return;
+    }
+  if (flag_align_labels)
+    {
+      error ("-fauto-bolt is not supported with -falign-labels");
+      return;
+    }
+  if (flag_align_loops)
+    {
+      error ("-fauto-bolt is not supported with -falign-loops");
+      return;
+    }
+  
+  /* Return if no feedback data.    */
+  if (!flag_profile_use && !flag_auto_profile)
+    {
+      error ("-fauto-bolt should use with -fprofile-use or -fauto-profile");
+      return;
+    }
+  
+  /* Avoid empty functions.    */
+  if (TREE_CODE (cfun->decl) != FUNCTION_DECL)
+    {
+      return;
+    }
+  int flags = SECTION_DEBUG | SECTION_EXCLUDE;
+  const char *fnname = get_fnname_from_decl (current_function_decl);
+  char *profile_fnname = NULL;
+
+  /* Collect the live insn stream: the only pointers the block walkers
+     are allowed to dereference (see fdo_live_insn_p).  */
+  fdo_live_insns = new hash_set<rtx_insn *>;
+  for (rtx_insn *insn = get_insns (); insn; insn = NEXT_INSN (insn))
+    fdo_live_insns->add (insn);
+
+  asprintf (&profile_fnname, "%s%s", ASM_FDO_SECTION_PREFIX, fnname);
+  switch_to_section (get_section (profile_fnname, flags, NULL));
+  dump_fdo_info_to_asm (fnname);
+
+  if (profile_fnname)
+    {
+      free (profile_fnname);
+      profile_fnname = NULL;
+    }
+
+  delete fdo_live_insns;
+  fdo_live_insns = NULL;
+}
+
 /* Turn the RTL into assembly.  */
 static unsigned int
 rest_of_handle_final (void)
@@ -4290,6 +4773,13 @@ rest_of_handle_final (void)
     targetm.asm_out.destructor (XEXP (DECL_RTL (current_function_decl), 0),
 				decl_fini_priority_lookup
 				  (current_function_decl));
+
+  if (flag_auto_bolt)
+    dump_profile_to_elf_sections ();
+
+  if (flag_oeaware)
+    create_oeaware_section ();
+
   return 0;
 }
 
