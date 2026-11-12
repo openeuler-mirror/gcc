@@ -335,6 +335,14 @@ struct GTY(()) function {
   unsigned int curr_properties;
   unsigned int last_verified;
 
+  /* Cumulative growth charged for successful IPA readonly loop peeling.
+     Retain it across loops and later passes on this GIMPLE function.  */
+  unsigned int ipa_value_specialization_peel_growth;
+
+  /* Effective limit frozen before the first extra readonly peel.  Zero
+     means that no enabled budget has been initialized on this function.  */
+  unsigned int ipa_value_specialization_peel_limit;
+
   /* Different from normal TODO_flags which are handled right at the
      beginning or the end of one pass execution, the pending_TODOs
      are passed down in the pipeline until one of its consumers can
