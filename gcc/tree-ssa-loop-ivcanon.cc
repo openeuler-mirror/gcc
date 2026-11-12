@@ -1173,12 +1173,16 @@ ipa_readonly_value_peel_count (class loop *loop)
 	initial = object;
       else if ((TREE_CODE (object) == VAR_DECL
 		|| TREE_CODE (object) == CONST_DECL)
-	       && DECL_INITIAL (object)
-	       && TREE_CONSTANT (DECL_INITIAL (object))
+	       && !TREE_THIS_VOLATILE (object)
 	       && (TREE_READONLY (object)
 		   || (TREE_CODE (object) == VAR_DECL
 		       && DECL_IN_CONSTANT_POOL (object))))
-	initial = DECL_INITIAL (object);
+	{
+	  initial = ctor_for_folding (object);
+	  if (!initial || initial == error_mark_node
+	      || !TREE_CONSTANT (initial))
+	    initial = NULL_TREE;
+	}
 
       unsigned HOST_WIDE_INT bytes = 0;
       if (initial && TREE_CODE (initial) == STRING_CST)
@@ -1340,7 +1344,7 @@ try_peel_loop (class loop *loop,
 
   /* We don't peel loops that will be unrolled as this can duplicate a
      loop more times than the user requested.  */
-  if (loop->unroll && !readonly_specialization)
+  if (loop->unroll)
     {
       if (dump_file)
         fprintf (dump_file, "Not peeling: user didn't want it peeled.\n");

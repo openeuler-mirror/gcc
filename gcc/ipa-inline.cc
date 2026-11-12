@@ -190,10 +190,11 @@ static std::set<std::string> force_inline_targets;
    For stack growth limits we always base the growth in stack usage
    of the callers.  We want to prevent applications from segfaulting
    on stack overflow when functions with huge stack frames gets
-   inlined. */
+   inlined.  DISREGARD_SIZE_LIMITS only relaxes function-body growth;
+   it does not relax stack usage growth.  */
 
 static bool
-caller_growth_limits (struct cgraph_edge *e)
+caller_growth_limits (struct cgraph_edge *e, bool disregard_size_limits)
 {
   struct cgraph_node *to = e->caller;
   struct cgraph_node *what = e->callee->ultimate_alias_target ();
@@ -234,7 +235,8 @@ caller_growth_limits (struct cgraph_edge *e)
   /* Check the size after inlining against the function limits.  But allow
      the function to shrink if it went over the limits by forced inlining.  */
   newsize = estimate_size_after_inlining (to, e);
-  if (newsize >= ipa_size_summaries->get (what)->size
+  if (!disregard_size_limits
+      && newsize >= ipa_size_summaries->get (what)->size
       && newsize > opt_for_fn (to->decl, param_large_function_insns)
       && newsize > limit)
     {
@@ -632,8 +634,20 @@ immutable_program_inline_p (cgraph_edge *e)
 	return false;
     }
   bool expand = opt_for_fn (root->decl, flag_ipa_immutable_helper_expansion);
-  if (estimate_edge_growth (e) > (expand ? 4096 : 1200)
-      || estimate_size_after_inlining (root, e) > (expand ? 65536 : 4096))
+  /* These policies apply to the complete resulting caller.  Use its
+     option context, including function-specific parameter settings.  */
+  int growth_limit = expand
+    ? opt_for_fn (root->decl,
+		  param_ipa_value_specialization_helper_expanded_growth_limit)
+    : opt_for_fn (root->decl,
+		  param_ipa_value_specialization_helper_growth_limit);
+  int size_limit = expand
+    ? opt_for_fn (root->decl,
+		  param_ipa_value_specialization_helper_expanded_size_limit)
+    : opt_for_fn (root->decl,
+		  param_ipa_value_specialization_helper_size_limit);
+  if (estimate_edge_growth (e) > growth_limit
+      || estimate_size_after_inlining (root, e) > size_limit)
     return false;
   tree result = TREE_TYPE (TREE_TYPE (callee->decl));
   if (!INTEGRAL_TYPE_P (result) && !POINTER_TYPE_P (result))
@@ -686,8 +700,7 @@ can_inline_edge_by_limits_p (struct cgraph_edge *e, int flags)
 	  || (!DECL_DISREGARD_INLINE_LIMITS (callee->decl)
 	      && !lookup_attribute ("flatten",
 			 DECL_ATTRIBUTES (caller->decl))))
-      && !immutable_program_inline_p (e)
-      && !caller_growth_limits (e))
+      && !caller_growth_limits (e, immutable_program_inline_p (e)))
     inlinable = false;
   else if (callee->externally_visible
 	   && !DECL_DISREGARD_INLINE_LIMITS (callee->decl)

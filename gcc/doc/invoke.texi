@@ -13620,6 +13620,23 @@ regardless of argument order.  All five mechanisms require this master option
 for execution: enabling a suboption alone does not activate specialization.
 Use consistent options during compilation and LTO linking.
 
+The master option and all five suboptions are disabled by default for code
+generation.  The generic RTL variable-tracking maintenance delivered with
+these specialization changes follows the existing variable-tracking and
+debug-information conditions, independently of this master option.  It can
+reconstruct proven debug values at control-flow joins and discard stale
+bindings for address-taken variables when their storage may have changed.
+This maintenance also applies when neither the master option nor any
+suboption is enabled, so debug information can change on those default paths.
+
+IPA cloning, inlining and bounded cold specialization can expose additional
+control-flow joins.  The specialization changes and the generic
+variable-tracking maintenance are delivered together to cover the general
+debug-information responsibilities of those control-flow changes.  The
+variable-tracking rules apply to other code as well and do not depend on
+immutable-program context markers.  Specialization itself does not require
+variable tracking to generate executable code.
+
 The clone context marker is retained on proven immutable clones, including
 mandatory inline candidates, and streamed through LTO.  Helper lookup follows
 at most four actual inline ancestors; it does not grant unrelated calls in the
@@ -13683,7 +13700,14 @@ clone admission, not all subsequent inlining or loop transformations.
 For bounded helper inlining in an established immutable context, raise the
 maximum estimated edge growth from 1200 to 4096 and the resulting root size
 from 4096 to 65536.  Disabling this option restores the smaller limits without
-disabling the basic helper inlining policy.  Helper eligibility, the four-level
+disabling the basic helper inlining policy.  The edge-growth and resulting-caller
+limits for each policy can be changed independently with
+@option{ipa-value-specialization-helper-growth-limit},
+@option{ipa-value-specialization-helper-size-limit},
+@option{ipa-value-specialization-helper-expanded-growth-limit} and
+@option{ipa-value-specialization-helper-expanded-size-limit}.
+Both policies retain the ordinary @option{large-stack-frame} and
+@option{large-stack-frame-growth} limits.  Helper eligibility, the four-level
 depth bound and ordinary target, exception and inlining legality are unchanged.
 
 @opindex fipa-cp-clone
@@ -16747,6 +16771,26 @@ reserve.  The default is 131072.  Zero disables extra loop-reserve admissions.
 Maximum extra estimated clone instructions admitted by the cold immutable
 route.  The default is 1024.  Zero disables additional cold admissions.
 
+@item ipa-value-specialization-helper-growth-limit
+Maximum estimated edge growth for basic immutable helper inlining.  The
+default is 1200.  This limit is independent of the resulting-caller size limit.
+
+@item ipa-value-specialization-helper-size-limit
+Maximum estimated resulting-caller size for basic immutable helper inlining.
+The default is 4096.
+
+@item ipa-value-specialization-helper-expanded-growth-limit
+Maximum estimated edge growth when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 4096.
+
+@item ipa-value-specialization-helper-expanded-size-limit
+Maximum estimated resulting-caller size when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 65536.  These four helper limits use the resulting caller's option context.
+They only control this additional profitability policy; ordinary inlining
+may still accept an edge.  None of them relax the ordinary stack-frame limits.
+
 @item ipa-value-specialization-peel-growth-budget
 Fixed floor for the cumulative estimated growth allowance from readonly
 loop peeling in one GIMPLE function when
@@ -16758,8 +16802,9 @@ copied blocks, PHIs and non-debug statements, including previously peeled
 inner loops, without credit for possible later simplification.  The
 consumed budget is retained across loops and subsequent peeling passes on
 the same function.  Zero disables this additional readonly peeling route;
-ordinary loop peeling keeps its existing limits.  This budget is separate
-from the IPA clone admission budgets.
+ordinary loop peeling keeps its existing limits.  User-specified
+@code{#pragma GCC unroll} factors remain in force for both routes.  This budget
+is separate from the IPA clone admission budgets.
 
 @item ipa-value-specialization-peel-growth-percent
 Additional copied cost allowance as a percentage of the complete function

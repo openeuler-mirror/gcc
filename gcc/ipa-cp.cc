@@ -231,10 +231,30 @@ values_equal_for_ipcp_p (tree x, tree y)
     return operand_equal_p (x, y, 0);
 }
 
-/* Recognize a potentially useful constant-object address from its declaration
-   and initializer.  This is a profitability hint, not permission to fold a
-   volatile or interposable load.  Cloning and subsequent scalar folding must
-   still satisfy their ordinary semantic checks.  */
+/* Return a complete, foldable constant initializer, loading an LTO
+   constructor on demand.  Keep the usual volatility and symbol replacement
+   rules; a declaration's readonly bit alone does not establish those facts.  */
+
+static tree
+ipcp_readonly_constant_initializer (tree object)
+{
+  if (TREE_CODE (object) == STRING_CST)
+    return object;
+  if ((TREE_CODE (object) != VAR_DECL && TREE_CODE (object) != CONST_DECL)
+      || TREE_THIS_VOLATILE (object)
+      || !(TREE_READONLY (object)
+	   || (TREE_CODE (object) == VAR_DECL
+	       && DECL_IN_CONSTANT_POOL (object))))
+    return NULL_TREE;
+
+  tree initial = ctor_for_folding (object);
+  if (!initial || initial == error_mark_node || !TREE_CONSTANT (initial))
+    return NULL_TREE;
+  return initial;
+}
+
+/* This is a profitability hint; subsequent scalar folding must still
+   satisfy its ordinary semantic checks.  */
 
 static bool
 ipcp_readonly_constant_address_p (tree value)
@@ -245,19 +265,7 @@ ipcp_readonly_constant_address_p (tree value)
   tree object = TREE_OPERAND (value, 0);
   while (handled_component_p (object))
     object = TREE_OPERAND (object, 0);
-
-  if (TREE_CODE (object) == STRING_CST)
-    return true;
-
-  if ((TREE_CODE (object) == VAR_DECL || TREE_CODE (object) == CONST_DECL)
-      && DECL_INITIAL (object)
-      && TREE_CONSTANT (DECL_INITIAL (object))
-      && (TREE_READONLY (object)
-	  || (TREE_CODE (object) == VAR_DECL
-	      && DECL_IN_CONSTANT_POOL (object))))
-    return true;
-
-  return false;
+  return ipcp_readonly_constant_initializer (object) != NULL_TREE;
 }
 
 static bool
@@ -274,15 +282,16 @@ ipcp_readonly_constant_address_p (ipa_polymorphic_call_context)
 static unsigned HOST_WIDE_INT
 ipcp_readonly_constant_object_size (tree value)
 {
-  if (!ipcp_readonly_constant_address_p (value))
+  if (TREE_CODE (value) != ADDR_EXPR)
     return 0;
 
   tree object = TREE_OPERAND (value, 0);
   while (handled_component_p (object))
     object = TREE_OPERAND (object, 0);
 
-  tree initial = TREE_CODE (object) == STRING_CST
-		 ? object : DECL_INITIAL (object);
+  tree initial = ipcp_readonly_constant_initializer (object);
+  if (!initial)
+    return 0;
   if (initial && TREE_CODE (initial) == STRING_CST)
     return TREE_STRING_LENGTH (initial);
 
@@ -308,14 +317,16 @@ static bool
 ipcp_readonly_program_p (cgraph_node *node, int index,
 			 ipcp_value<tree> *value)
 {
-  const unsigned HOST_WIDE_INT max_program_size = 64;
+  if (!opt_for_fn (node->decl, flag_ipa_value_specialization))
+    return false;
   ipa_node_params *info = ipa_node_params_sum->get (node);
+  if (!ipa_is_param_used_by_ipa_predicates (info, index))
+    return false;
+
+  const unsigned HOST_WIDE_INT max_program_size = 64;
   unsigned HOST_WIDE_INT object_size
     = ipcp_readonly_constant_object_size (value->value);
-  return (opt_for_fn (node->decl, flag_ipa_value_specialization)
-	  && ipa_is_param_used_by_ipa_predicates (info, index)
-	  && object_size >= 2
-	  && object_size <= max_program_size);
+  return object_size >= 2 && object_size <= max_program_size;
 }
 
 static bool
@@ -352,7 +363,7 @@ ipcp_bounded_cold_immutable_p (cgraph_node *node, int index,
       if (!TREE_READONLY (obj) || TREE_THIS_VOLATILE (obj)
 	  || DECL_EXTERNAL (obj) || TREE_PUBLIC (obj))
 	return false;
-      init = DECL_INITIAL (obj);
+      init = ipcp_readonly_constant_initializer (obj);
       if (!init || !TYPE_SIZE_UNIT (TREE_TYPE (obj))
 	  || !tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (obj)))
 	  || TREE_CODE (init) != STRING_CST
@@ -6239,13 +6250,13 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
       if (offset != -1)
 	fprintf (dump_file, ", offset: " HOST_WIDE_INT_PRINT_DEC, offset);
       fprintf (dump_file, " (caller_count: %i)\n", caller_count);
-      unsigned HOST_WIDE_INT object_size
-	= ipcp_readonly_constant_object_size (val->value);
-      if (opt_for_fn (node->decl, flag_ipa_value_specialization)
-	  && object_size)
+      if (opt_for_fn (node->decl, flag_ipa_value_specialization))
 	{
-	  fprintf (dump_file, "   immutable object size: "
-		   HOST_WIDE_INT_PRINT_UNSIGNED " bytes\n", object_size);
+	  unsigned HOST_WIDE_INT object_size
+	    = ipcp_readonly_constant_object_size (val->value);
+	  if (object_size)
+	    fprintf (dump_file, "   immutable object size: "
+		     HOST_WIDE_INT_PRINT_UNSIGNED " bytes\n", object_size);
 	}
     }
 

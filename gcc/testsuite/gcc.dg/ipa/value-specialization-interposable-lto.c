@@ -28,4 +28,5 @@ int main (void)
 /* { dg-final { scan-ltrans-tree-dump " ={v} " "optimized" } } */
 /* Prove that the constant pointer arguments reach the specialization path.  */
 /* { dg-final { scan-wpa-ipa-dump "Creating a specialized node of read_volatile" "cp" } } */
-/* { dg-final { scan-wpa-ipa-dump "Adjusting immutable value benefit for read_volatile" "cp" } } */
+/* Volatile objects do not receive an immutable profitability hint.  */
+/* { dg-final { scan-wpa-ipa-dump-not "Adjusting immutable value benefit for read_volatile" "cp" } } */
