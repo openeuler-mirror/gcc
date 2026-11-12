@@ -374,9 +374,11 @@ extern gimple_opt_pass *make_pass_tree_no_loop (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_loop_init (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_loop_versioning (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lim (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_static_byte_cfg (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_linterchange (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_unswitch (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_loop_split (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_loop_invariant_split (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_loop_jam (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_predcom (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_iv_canon (gcc::context *ctxt);
@@ -550,6 +552,7 @@ extern ipa_opt_pass_d *make_pass_ipa_reference (gcc::context *ctxt);
 extern ipa_opt_pass_d *make_pass_ipa_pure_const (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_prefetch (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_struct_reorg (gcc::context *ctxt);
+extern simple_ipa_opt_pass *make_pass_ipa_array_load_inline (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_pta (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_ipa_tm (gcc::context *ctxt);
 extern simple_ipa_opt_pass *make_pass_target_clone (gcc::context *ctxt);
@@ -564,6 +567,7 @@ extern ipa_opt_pass_d *make_pass_ipa_modref (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_cleanup_cfg_post_optimizing (gcc::context
 							       *ctxt);
 extern gimple_opt_pass *make_pass_fixup_cfg (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_constant_byte_range (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_backprop (gcc::context *ctxt);
 
 extern rtl_opt_pass *make_pass_expand (gcc::context *ctxt);
