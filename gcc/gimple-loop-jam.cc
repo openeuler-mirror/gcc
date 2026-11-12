@@ -641,6 +641,10 @@ tree_loop_unroll_and_jam (void)
 	{
 	  cleanup_tree_cfg ();
 	  todo &= ~TODO_cleanup_cfg;
+	  /* CFG cleanup restores the dominators needed by LIM.  The LCSSA
+	     repair and SCEV reset below cover the complete transformation.  */
+	  if (flag_lim_after_jam)
+	    todo |= loop_invariant_motion_in_fun (cfun, false);
 	}
       rewrite_into_loop_closed_ssa (NULL, 0);
       scev_reset ();
