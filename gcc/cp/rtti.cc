@@ -803,8 +803,10 @@ build_dynamic_cast_1 (location_t loc, tree type, tree expr,
 	     only when the result has the same address as the source subobject.
 	     A zero base hint alone does not guarantee this for cross-casts.
 	     Repeated casts of a cached dynamic type need not enter the RTTI
-	     runtime; misses and adjusted results retain the full semantics.  */
-	  if (flag_component_type_flow && tc == POINTER_TYPE
+	     runtime; misses and adjusted results retain the full semantics.
+	     The independent unsafe cache option requires vtable addresses to
+	     retain their dynamic type while a thread keeps an entry.  */
+	  if (flag_unsafe_dynamic_cast_cache && tc == POINTER_TYPE
 	      && optimize >= 2 && integer_zerop (boff))
 	    {
 	      tree caches[2];

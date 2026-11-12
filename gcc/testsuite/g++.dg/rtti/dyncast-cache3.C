@@ -1,5 +1,5 @@
 // { dg-do run { target c++20 } }
-// { dg-options "-O2 -fcomponent-type-flow -fdump-tree-gimple" }
+// { dg-options "-O2 -funsafe-dynamic-cast-cache -fdump-tree-gimple" }
 
 // Preserve constant evaluation both in constexpr-capable functions and in
 // initializers/static assertions outside such functions.

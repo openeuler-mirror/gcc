@@ -635,7 +635,8 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-switch-conversion  -ftree-tail-merge
 -ftree-ter  -ftree-vectorize  -ftree-vrp  -ftrivial-auto-var-init
 -funconstrained-commons -funit-at-a-time  -funroll-all-loops
--funroll-loops -funsafe-math-optimizations  -funswitch-loops
+-funroll-loops -funsafe-dynamic-cast-cache
+-funsafe-math-optimizations  -funswitch-loops
 -fipa-ra  -fvariable-expansion-in-unroller  -fvect-cost-model  -fvpt
 -fweb  -fwhole-program  -fwpa  -fuse-linker-plugin -fzero-call-used-regs
 --param @var{name}=@var{value}
@@ -13114,25 +13115,7 @@ are enabled independently at different optimization levels.
 
 @opindex fcomponent-type-flow
 @item -fcomponent-type-flow
-Use C++ type-flow information to optimize repeated run-time type checks.
-At optimization levels @option{-O2} and above, including @option{-Os} and
-@option{-Oz}, zero-offset pointer
-@code{dynamic_cast} expressions use a small per-call-site, thread-local
-positive cache.  Only successful results equal to the source address enter
-this cache.  A cache miss, a failed cast, and casts requiring pointer
-adjustment continue to use the complete ABI run-time check.  Constant
-evaluation uses the original cast without accessing the cache.
-
-The cache does not track the lifetime of loaded modules.  It assumes that a
-cached vtable address is not reused for a different dynamic type while a
-thread retains the cache.  Unloading and reloading modules containing
-polymorphic types can violate this assumption and cause a cached cast to
-return an incorrect nonnull result.  Such module unloading and reloading,
-and run-time generated or recycled vtables, are not supported by this
-cache.  The ABI check on a cache miss does not protect against stale cache
-hits.
-
-During speculative devirtualization, this option also permits GCC to select a
+During speculative devirtualization, this option permits GCC to select a
 target shared by a uniquely dominant number of live virtual tables when there
 is more than one otherwise likely target.  GCC emits a target-address guard
 and retains the original indirect call as the fallback, so a less-common
@@ -13142,14 +13125,39 @@ Live-vtable references are a static profitability estimate, not execution
 counts.  Function-specific optimization settings control whether this
 additional target-selection heuristic is enabled at each caller.
 
-The cache and the additional speculative-devirtualization heuristic reduce
-different costs of C++ polymorphism and are controlled by this single
-option.  Neither mechanism depends on results produced by the other.
+This option does not enable @code{dynamic_cast} result caching.  The
+independent @option{-funsafe-dynamic-cast-cache} option controls that
+optimization and its additional vtable-lifetime assumption.  Both options
+may be enabled together, but neither enables the other.
 
 The option is disabled by default at all optimization levels.  Use
 @option{-fcomponent-type-flow} to enable it explicitly.  Without the option,
 or with @option{-fno-component-type-flow}, GCC retains the original
-@code{dynamic_cast} and speculative-devirtualization behavior.
+speculative-devirtualization behavior.
+
+@opindex funsafe-dynamic-cast-cache
+@item -funsafe-dynamic-cast-cache
+At optimization levels @option{-O2} and above, including @option{-Os} and
+@option{-Oz}, use a small per-call-site, thread-local positive cache for
+zero-offset pointer @code{dynamic_cast} expressions.  Only successful
+results equal to the source address enter this cache.  A cache miss, a
+failed cast, and casts requiring pointer adjustment continue to use the
+complete ABI run-time check.  Constant evaluation uses the original cast
+without accessing the cache.
+
+This optimization requires cached vtable addresses to retain their dynamic
+type while a thread keeps an entry.  The cache does not track the lifetime
+of loaded modules.  Unloading and reloading modules containing polymorphic
+types can violate this assumption and cause a cached cast to return an
+incorrect nonnull result.  Such module unloading and reloading, and
+run-time generated or recycled vtables, are not supported by this cache.
+The ABI check on a cache miss does not protect against stale cache hits.
+
+The option is disabled by default at all optimization levels and is not
+enabled by @option{-fcomponent-type-flow}.  It does not enable the
+additional speculative-devirtualization heuristic.  Without the option,
+or with @option{-fno-unsafe-dynamic-cast-cache}, GCC retains the original
+@code{dynamic_cast} behavior independently of @option{-fcomponent-type-flow}.
 
 @opindex fdevirtualize
 @item -fdevirtualize

@@ -1,5 +1,5 @@
 // { dg-do run }
-// { dg-options "-O2 -fcomponent-type-flow -fdump-tree-gimple" }
+// { dg-options "-O2 -funsafe-dynamic-cast-cache -fdump-tree-gimple" }
 
 // A zero static base offset does not imply that a successful cross-cast
 // returns the source address.  Reuse the same cast site after a success.
