@@ -519,6 +519,8 @@ Mask(SMNPM) Var(riscv_sm_subext)
 
 Mask(SMMPM) Var(riscv_sm_subext)
 
+Mask(SMRNMI) Var(riscv_sm_subext)
+
 TargetVariable
 int riscv_su_subext
 

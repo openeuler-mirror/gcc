@@ -652,6 +652,215 @@ static vec<edge> edges_to_remove;
 /* Stores loops that has been peeled.  */
 static bitmap peeled_loops;
 
+/* Return the defining statement of SSA_NAME if it is inside LOOP.  */
+
+static gimple *
+ssa_name_def_stmt_in_loop (class loop *loop, tree name)
+{
+  if (TREE_CODE (name) != SSA_NAME)
+    return NULL;
+
+  gimple *stmt = SSA_NAME_DEF_STMT (name);
+  if (!stmt || gimple_nop_p (stmt) || !gimple_bb (stmt))
+    return NULL;
+
+  if (!flow_bb_inside_loop_p (loop, gimple_bb (stmt)))
+    return NULL;
+
+  return stmt;
+}
+
+/* Strip widening and same-precision integer conversions that are defined
+   inside LOOP from OP.  */
+
+static tree
+strip_integer_conversions_in_loop (class loop *loop, tree op)
+{
+  while (TREE_CODE (op) == SSA_NAME)
+    {
+      gimple *stmt = ssa_name_def_stmt_in_loop (loop, op);
+      if (!stmt
+	  || !is_gimple_assign (stmt)
+	  || !CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (stmt)))
+	break;
+
+      tree rhs = gimple_assign_rhs1 (stmt);
+      if (!INTEGRAL_TYPE_P (TREE_TYPE (op))
+	  || !INTEGRAL_TYPE_P (TREE_TYPE (rhs))
+	  || (TYPE_PRECISION (TREE_TYPE (rhs))
+	      > TYPE_PRECISION (TREE_TYPE (op))))
+	break;
+
+      op = rhs;
+    }
+
+  return op;
+}
+
+/* Return true if OP is an integer value that is widened from a narrower
+   integer definition inside LOOP.  TO_PRECISION is the precision of the
+   operation using OP.  */
+
+static bool
+widened_integer_operand_p (class loop *loop, tree op,
+			   unsigned int to_precision)
+{
+  op = strip_integer_conversions_in_loop (loop, op);
+  if (TREE_CODE (op) != SSA_NAME
+      || !INTEGRAL_TYPE_P (TREE_TYPE (op))
+      || TYPE_PRECISION (TREE_TYPE (op)) >= to_precision)
+    return false;
+
+  return ssa_name_def_stmt_in_loop (loop, op) != NULL;
+}
+
+/* Return true if ADDEND is a multiplication of widened integer operands.
+   Such multiply-add reductions are often recognized by the vectorizer as
+   DOT_PROD_EXPRs, but early complete unrolling can hide the idiom.  */
+
+static bool
+widened_integer_mult_p (class loop *loop, tree addend)
+{
+  addend = strip_integer_conversions_in_loop (loop, addend);
+
+  gimple *stmt = ssa_name_def_stmt_in_loop (loop, addend);
+  if (!stmt
+      || !is_gimple_assign (stmt)
+      || gimple_assign_rhs_code (stmt) != MULT_EXPR)
+    return false;
+
+  tree type = TREE_TYPE (gimple_assign_lhs (stmt));
+  if (!INTEGRAL_TYPE_P (type))
+    return false;
+
+  unsigned int precision = TYPE_PRECISION (type);
+  return (widened_integer_operand_p (loop, gimple_assign_rhs1 (stmt),
+				     precision)
+	  && widened_integer_operand_p (loop, gimple_assign_rhs2 (stmt),
+					precision));
+}
+
+/* Return true if NAME has a non-debug use inside LOOP other than STMT.
+   Uses outside LOOP can consume the final value of a reduction.  */
+
+static bool
+has_other_use_in_loop_p (class loop *loop, tree name, gimple *stmt)
+{
+  imm_use_iterator iter;
+  use_operand_p use_p;
+  FOR_EACH_IMM_USE_FAST (use_p, iter, name)
+    {
+      gimple *use_stmt = USE_STMT (use_p);
+      if (!is_gimple_debug (use_stmt)
+	  && use_stmt != stmt
+	  && flow_bb_inside_loop_p (loop, gimple_bb (use_stmt)))
+	return true;
+    }
+  return false;
+}
+
+/* Return true if PHI is a simple integer sum, minimum or maximum reduction
+   in LOOP.  Set CODE to its operation and OPERAND to its non-reduction
+   operand.  This deliberately excludes more general scalar recurrences.  */
+
+static bool
+simple_integer_reduction_phi_p (class loop *loop, gphi *phi, edge latch,
+				enum tree_code &code, tree &operand)
+{
+  tree result = PHI_RESULT (phi);
+  if (!INTEGRAL_TYPE_P (TREE_TYPE (result)))
+    return false;
+
+  tree latch_arg = PHI_ARG_DEF_FROM_EDGE (phi, latch);
+  gimple *stmt = ssa_name_def_stmt_in_loop (loop, latch_arg);
+  if (!stmt || !is_gimple_assign (stmt))
+    return false;
+
+  code = gimple_assign_rhs_code (stmt);
+  if (code != PLUS_EXPR && code != MIN_EXPR && code != MAX_EXPR)
+    return false;
+
+  tree rhs1 = gimple_assign_rhs1 (stmt);
+  tree rhs2 = gimple_assign_rhs2 (stmt);
+  if (rhs1 == result)
+    operand = rhs2;
+  else if (rhs2 == result)
+    operand = rhs1;
+  else
+    return false;
+
+  if (operand == result)
+    return false;
+
+  /* Inside LOOP the PHI result must only feed the operation, and the
+     updated value must only feed PHI.  Either can supply the final value
+     outside LOOP, depending on the position of the exit test.  Do not
+     preserve prefix sums as simple reductions.  */
+  return (!has_other_use_in_loop_p (loop, result, stmt)
+	  && !has_other_use_in_loop_p (loop, latch_arg, phi));
+}
+
+/* Return true if LOOP has a widened integer multiply sum reduction and
+   all its other scalar recurrences are affine inductions or simple integer
+   reductions.  This conservative shape heuristic does not recognize every
+   recurrence supported by the vectorizer, or check target support.  */
+
+static bool
+loop_has_widened_mult_reduction_p (class loop *loop)
+{
+  edge latch = loop_latch_edge (loop);
+  if (!latch)
+    return false;
+
+  bool found = false;
+  for (gphi_iterator psi = gsi_start_phis (loop->header);
+       !gsi_end_p (psi); gsi_next (&psi))
+    {
+      gphi *phi = psi.phi ();
+      tree result = PHI_RESULT (phi);
+      if (virtual_operand_p (result))
+	continue;
+
+      affine_iv iv;
+      if (simple_iv (loop, loop, result, &iv, true))
+	continue;
+
+      enum tree_code code;
+      tree operand;
+      if (!simple_integer_reduction_phi_p (loop, phi, latch, code, operand))
+	return false;
+
+      if (code == PLUS_EXPR && widened_integer_mult_p (loop, operand))
+	found = true;
+    }
+
+  return found;
+}
+
+/* Return true if early complete unrolling should leave LOOP for vectorizer
+   idiom recognition.  */
+
+static bool
+preserve_vect_idiom_for_vectorizer_p (class loop *loop,
+				      unsigned HOST_WIDE_INT n_unroll)
+{
+  if (!flag_tree_loop_optimize
+      || !(flag_tree_loop_vectorize || loop->force_vectorize)
+      || loop->inner
+      || loop->unroll
+      || loop->dont_vectorize)
+    return false;
+
+  /* Leave very short loops to the usual unrolling heuristics.  This is a
+     minimum unroll-count threshold, not a target vector length.  N_UNROLL
+     counts latch executions (or their upper bound), which need not equal
+     the number of executions of the source-level loop body.  */
+  if (n_unroll < 4)
+    return false;
+
+  return loop_has_widened_mult_reduction_p (loop);
+}
+
 /* Cancel all fully unrolled loops by putting __builtin_unreachable
    on the latch edge.  
    We do it after all unrolling since unlooping moves basic blocks
@@ -734,7 +943,8 @@ try_unroll_loop_completely (class loop *loop,
 			    edge exit, tree niter, bool may_be_zero,
 			    enum unroll_level ul,
 			    HOST_WIDE_INT maxiter,
-			    dump_user_location_t locus, bool allow_peel)
+			    dump_user_location_t locus, bool allow_peel,
+			    bool preserve_vect_idioms)
 {
   unsigned HOST_WIDE_INT n_unroll = 0;
   bool n_unroll_found = false;
@@ -848,11 +1058,14 @@ try_unroll_loop_completely (class loop *loop,
 	  /* If the code is going to shrink, we don't need to be extra
 	     cautious on guessing if the unrolling is going to be
 	     profitable.  */
-	  if (unr_insns
-	      /* If there is IV variable that will become constant, we
-		 save one instruction in the loop prologue we do not
-		 account otherwise.  */
-	      <= ninsns + (size.constant_iv != false))
+	  bool code_would_grow
+	    = (unr_insns
+	       /* If there is IV variable that will become constant, we
+		  save one instruction in the loop prologue we do not
+		  account otherwise.  */
+	       > ninsns + (size.constant_iv != false));
+
+	  if (!code_would_grow)
 	    ;
 	  /* We unroll only inner loops, because we do not consider it
 	     profitable otheriwse.  We still can cancel loopback edge
@@ -927,6 +1140,16 @@ try_unroll_loop_completely (class loop *loop,
 			 "number of insns in the unrolled sequence reaches "
 			 "--param max-completely-peeled-insns limit.\n",
 			 loop->num);
+	      return false;
+	    }
+	  /* Preserve an idiom only when it would otherwise be unrolled.  */
+	  else if (preserve_vect_idioms
+		   && preserve_vect_idiom_for_vectorizer_p (loop, n_unroll))
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		fprintf (dump_file, "Not unrolling loop %d: "
+			 "preserving widened multiply reduction for "
+			 "vectorization.\n", loop->num);
 	      return false;
 	    }
 	}
@@ -1419,7 +1642,8 @@ try_peel_loop (class loop *loop,
 static bool
 canonicalize_loop_induction_variables (class loop *loop,
 				       bool create_iv, enum unroll_level ul,
-				       bool try_eval, bool allow_peel)
+				       bool try_eval, bool allow_peel,
+				       bool preserve_vect_idioms)
 {
   edge exit = NULL;
   tree niter;
@@ -1506,7 +1730,8 @@ canonicalize_loop_induction_variables (class loop *loop,
 
   dump_user_location_t locus = find_loop_location (loop);
   if (try_unroll_loop_completely (loop, exit, niter, may_be_zero, ul,
-				  maxiter, locus, allow_peel))
+				  maxiter, locus, allow_peel,
+				  preserve_vect_idioms))
     return true;
 
   if (create_iv
@@ -1550,7 +1775,7 @@ canonicalize_induction_variables (void)
     {
       changed |= canonicalize_loop_induction_variables (loop,
 							true, UL_SINGLE_ITER,
-							true, false);
+							true, false, false);
     }
   gcc_assert (!need_ssa_update_p (cfun));
 
@@ -1584,6 +1809,7 @@ canonicalize_induction_variables (void)
 
 static bool
 tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
+				bool preserve_vect_idioms,
 				bitmap father_bbs, class loop *loop)
 {
   class loop *loop_father;
@@ -1602,6 +1828,7 @@ tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
 	if (!child_father_bbs)
 	  child_father_bbs = BITMAP_ALLOC (NULL);
 	if (tree_unroll_loops_completely_1 (may_increase_size, unroll_outer,
+					    preserve_vect_idioms,
 					    child_father_bbs, inner))
 	  {
 	    bitmap_ior_into (father_bbs, child_father_bbs);
@@ -1648,7 +1875,8 @@ tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
     ul = UL_NO_GROWTH;
 
   if (canonicalize_loop_induction_variables
-        (loop, false, ul, !flag_tree_loop_ivcanon, unroll_outer))
+	(loop, false, ul, !flag_tree_loop_ivcanon, unroll_outer,
+	 preserve_vect_idioms))
     {
       /* If we'll continue unrolling, we need to propagate constants
 	 within the new basic blocks to fold away induction variable
@@ -1677,7 +1905,8 @@ tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
    size of the code does not increase.  */
 
 static unsigned int
-tree_unroll_loops_completely (bool may_increase_size, bool unroll_outer)
+tree_unroll_loops_completely (bool may_increase_size, bool unroll_outer,
+			      bool preserve_vect_idioms)
 {
   bitmap father_bbs = BITMAP_ALLOC (NULL);
   bool changed;
@@ -1698,7 +1927,9 @@ tree_unroll_loops_completely (bool may_increase_size, bool unroll_outer)
       estimate_numbers_of_iterations (cfun);
 
       changed = tree_unroll_loops_completely_1 (may_increase_size,
-						unroll_outer, father_bbs,
+						unroll_outer,
+						preserve_vect_idioms,
+						father_bbs,
 						current_loops->tree_root);
       if (changed)
 	{
@@ -1864,7 +2095,7 @@ pass_complete_unroll::execute (function *fun)
   if (flag_peel_loops)
     peeled_loops = BITMAP_ALLOC (NULL);
   unsigned int val = tree_unroll_loops_completely (flag_cunroll_grow_size, 
-						   true);
+						   true, false);
   if (peeled_loops)
     {
       BITMAP_FREE (peeled_loops);
@@ -1920,7 +2151,9 @@ pass_complete_unrolli::execute (function *fun)
   if (number_of_loops (fun) > 1)
     {
       scev_initialize ();
-      ret = tree_unroll_loops_completely (optimize >= 3, false);
+      ret = tree_unroll_loops_completely
+	      (optimize >= 3, false,
+	       flag_preserve_vect_idioms);
       scev_finalize ();
     }
   loop_optimizer_finalize ();

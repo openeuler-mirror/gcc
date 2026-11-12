@@ -560,8 +560,9 @@ Objective-C and Objective-C++ Dialects}.
 -fcompare-elim  -fcprop-registers  -fcrossjumping
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules
 -fcx-limited-range
--fdata-sections  -fdce  -fdelayed-branch
--fdelete-null-pointer-checks  -fdevirtualize  -fdevirtualize-speculatively
+-fdata-sections  -fdce  -fdebruijn-clz  -fdelayed-branch
+-fdelete-null-pointer-checks
+-fdevirtualize  -fdevirtualize-speculatively
 -fdevirtualize-at-ltrans  -fdse
 -fearly-inlining  -fipa-sra  -fexpensive-optimizations  -ffat-lto-objects
 -ffast-math  -ffinite-math-only  -ffloat-store  -fexcess-precision=@var{style}
@@ -578,7 +579,7 @@ Objective-C and Objective-C++ Dialects}.
 -fipa-value-specialization-loop -fipa-value-specialization-shared-loop
 -fipa-value-specialization-cold -fipa-value-specialization-helper-expansion
 -ftree-immutable-loop-specialization  -ftree-immutable-loop-specialization-cursor
--fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
+-fipa-array-load-inline  -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm}
 -flive-patching=@var{level}
@@ -587,7 +588,8 @@ Objective-C and Objective-C++ Dialects}.
 -fno-ira-share-spill-slots
 -fisolate-erroneous-paths-dereference  -fisolate-erroneous-paths-attribute
 -fivopts  -fkeep-inline-functions  -fkeep-static-functions
--fkeep-static-consts  -flimit-function-alignment  -flive-range-shrinkage
+-fkeep-static-consts  -flim-after-jam  -flimit-function-alignment
+-flive-range-shrinkage
 -floop-block  -floop-interchange  -floop-strip-mine
 -floop-unroll-and-jam  -floop-nest-optimize
 -floop-parallelize-all  -flra-remat  -flto  -flto-compression-level
@@ -601,7 +603,7 @@ Objective-C and Objective-C++ Dialects}.
 -fno-toplevel-reorder  -fno-trapping-math  -fno-zero-initialized-in-bss
 -fomit-frame-pointer  -foptimize-sibling-calls
 -fpartial-inlining  -fpeel-loops  -fpredictive-commoning
--fprefetch-loop-arrays
+-fprefetch-loop-arrays  -fpreserve-vect-idioms
 -fprofile-correction
 -fprofile-use  -fprofile-use=@var{path} -fprofile-partial-training
 -fprofile-values -fprofile-reorder-functions
@@ -628,14 +630,18 @@ Objective-C and Objective-C++ Dialects}.
 -fstdarg-opt  -fstore-merging  -fstrict-aliasing -fipa-strict-aliasing
 -fthread-jumps  -ftracer  -ftree-bit-ccp
 -ftree-builtin-call-dce  -ftree-ccp  -ftree-ch
--ftree-coalesce-vars  -ftree-copy-prop  -ftree-dce  -ftree-dominator-opts
+-ftree-coalesce-vars  -ftree-constant-byte-range
+-ftree-constant-byte-range-cursor  -ftree-copy-prop  -ftree-dce
+-ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
--ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
+-ftree-loop-invariant-split  -ftree-loop-ivcanon  -ftree-loop-linear
+-ftree-loop-optimize
 -ftree-loop-vectorize
 -ftree-parallelize-loops=@var{n}  -ftree-pre  -ftree-partial-pre  -ftree-pta
--ftree-reassoc  -ftree-scev-cprop  -ftree-sink  -ftree-slsr  -ftree-sra
+-ftree-reassoc  -ftree-replacement-index-prefetch  -ftree-scev-cprop
+-ftree-sink  -ftree-slsr  -ftree-sra
 -ftree-switch-conversion  -ftree-tail-merge
 -ftree-ter  -ftree-vectorize  -ftree-vrp  -ftrivial-auto-var-init
 -funconstrained-commons -funit-at-a-time  -funroll-all-loops
@@ -13094,6 +13100,30 @@ implementation.
 
 Enabled by @option{-Os}.
 
+@opindex fdebruijn-clz
+@item -fdebruijn-clz
+Recognize DeBruijn table-based count-leading-zero idioms for unsigned
+32-bit and 64-bit inputs, and enable the backported extensions to
+table-based count-trailing-zero recognition, including fallback handling
+for zero inputs.  The transformations preserve the original table result
+for zero.  The variant that isolates the most significant bit with
+@code{s - (s >> 1)} after an OR cascade is recognized for 64-bit inputs.
+
+Also recognize 64-bit count-leading-zero and count-trailing-zero
+operations implemented by selecting between operations on their
+32-bit halves, and replace them with the corresponding 64-bit
+target operation.  The transformation preserves the split-word
+implementation's result for zero inputs and requires target support
+for the corresponding 64-bit operation.
+
+This option is disabled by default at all optimization levels.  Enabling
+it only affects transformations when the relevant forward-propagation
+and PHI optimization passes are enabled.
+If an input may be zero, the transformations also require a defined
+target result for the corresponding count-zero operation.
+Without this option, or with @option{-fno-debruijn-clz}, GCC retains
+its original count-trailing-zero table recognition and zero handling.
+
 @opindex fdelete-null-pointer-checks
 @item -fdelete-null-pointer-checks
 Assume that programs cannot safely dereference null pointers, and that
@@ -13499,6 +13529,31 @@ and the @option{large-stack-frame-growth} parameter to 400.
 Perform reassociation on trees.  This flag is enabled by default
 at @option{-O1} and higher.
 
+@item -ftree-replacement-index-prefetch
+@opindex ftree-replacement-index-prefetch
+Use a new unsigned index written over a previously loaded index to prefetch
+indirect addresses derived from that old index.  In addition to replacements
+in loops, handle loop-external replacements that feed a PHI through one
+direct normal edge.  Translate only that edge's incoming unsigned scalar
+when constructing a hint; do not change the PHI or copy memory loads.
+This option enables its path independently of @option{-fprefetch-loop-arrays}
+and its cache-line model.  The enclosing loop-pass group still requires a
+loop in the function, so wholly loopless functions are not handled.
+
+The address computation must contain only a small number of pure unsigned
+operations and values already available at the replacement.  No additional
+data loads are issued and demand accesses keep their original order.
+Each new direct-edge entry selects at most one address, preferring the
+base address of a store reference.  Reconstructed hints need not retain
+component offsets within an aggregate object.  This extension emits at
+most eight hints per function.  Candidate analysis is bounded independently
+of successful hints, and candidates exceeding its budget are skipped.
+Its direct-edge path is disabled when
+@option{--param=simultaneous-prefetches=0} is used.
+This transformation adds nonfaulting read hints on targets with prefetch
+support and is disabled by default.  It does not add region-start,
+second-cache-line or write-intent hints.
+
 @opindex fcode-hoisting
 @item -fcode-hoisting
 Perform code hoisting.  Code hoisting tries to move the
@@ -13568,6 +13623,22 @@ Enabled by default at @option{-O1} and higher.
 @item -fipa-stack-alignment
 Reduce stack alignment on call sites if possible.
 Enabled by default.
+
+@opindex fipa-array-load-inline
+@item -fipa-array-load-inline
+Replace loads from fixed-size lookup tables with computations of their
+initialization formulas in terms of the array indices.  The optimization
+requires explicit references, complete initialization, compatible arithmetic
+semantics, and proof that each load is initialized or protected by a suitable
+guard.  Initialization stores are removed when all references permit it.
+
+This option is disabled by default, including at @option{-O3}.  Explicitly
+enabling it requires @option{-O3} or a higher optimization level; it has no
+effect at lower levels.  It can also run during LTO, subject to the visibility
+of the references and function bodies in the current partition.  Escaping
+arrays and guards, including guards accessed through atomic operations, are
+not supported.  A thread-local table cannot use a non-thread-local guard to
+prove that initialization has completed in the current thread.
 
 @opindex fipa-pta
 @item -fipa-pta
@@ -13884,12 +13955,62 @@ Perform sparse conditional constant propagation (CCP) on trees.  This
 pass only operates on local scalar variables and is enabled by default
 at @option{-O1} and higher.
 
+@opindex ftree-constant-byte-range
+@item -ftree-constant-byte-range
+Infer possible byte values for loads through cursors derived from complete
+immutable byte arrays.  The analysis follows bounded pointer definition
+graphs, including all incoming loop PHI edges, and feeds existing value
+range propagation.  Searches for characters absent from a proven
+nul-terminated constant array may also be eliminated.  Unknown or mutable
+pointer sources are excluded.  The analysis can also follow @code{strchr}
+results when @option{-fdelete-null-pointer-checks} is enabled.  It runs after
+early jump threading and again after dominator and copy propagation cleanup
+so that newly exposed cursors can contribute ranges.  This option is disabled by
+default and has no effect with @option{-fwrapv-pointer}.
+
+Enabling this option also enables @option{-ftree-constant-byte-range-cursor}
+unless explicitly disabled with @option{-fno-tree-constant-byte-range-cursor}.
+The explicit cursor setting takes precedence regardless of option order.
+
+@opindex ftree-constant-byte-range-cursor
+@item -ftree-constant-byte-range-cursor
+Refine byte-load ranges at constant displacements from @code{strchr} results
+within proven complete immutable byte arrays.  Enumerate all possible matching
+positions conservatively and merge all pointer PHI inputs.  Unsupported
+arithmetic falls back to the whole-object alphabet only when
+@option{-ftree-constant-byte-range} is also enabled.  This option is disabled by
+default and does not infer trip counts or introduce speculative loads.
+Wrapping-pointer arithmetic and targets allowing accessible null pointers are
+excluded from this refinement.  Analysis work is bounded per function.
+
+This option can also be enabled independently of
+@option{-ftree-constant-byte-range}.  Both are disabled when neither option
+is requested.  Search semantics are currently modeled only for @code{strchr};
+unrecognized calls are conservatively rejected.
+
+@option{-ftree-constant-byte-cursor-range} is a compatibility spelling of
+@option{-ftree-constant-byte-range-cursor}.
+
 @opindex fssa-backprop
 @item -fssa-backprop
 Propagate information about uses of a value up the definition chain
 in order to simplify the definitions.  For example, this pass strips
 sign operations if the sign of a value never matters.  The flag is
 enabled by default at @option{-O1} and higher.
+
+@opindex ftree-static-byte-cfg
+@item -ftree-static-byte-cfg
+Specialize bounded CFG states using immutable addresses and byte equality
+facts derived from GIMPLE.  Dynamic operations are retained, and parameter
+hypotheses use runtime guards with the original CFG as fallback.
+The pass runs in speed-optimized functions at @option{-O2} and higher when
+explicitly enabled, subject to side-effect, exception and bounded-growth
+checks.  Size-optimized and cold functions are skipped.  Functions with
+explicit loop unrolling or vectorization annotations are also skipped so
+that partial CFG duplication cannot discard those annotations.
+Functions that may
+throw non-call exceptions, including those compiled with
+@option{-fnon-call-exceptions}, are skipped.  It is disabled by default.
 
 @opindex fssa-phiopt
 @item -fssa-phiopt
@@ -14089,6 +14210,17 @@ nest this unrolls the outer loop by some factor and fuses the resulting
 multiple inner loops.  This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
 
+@opindex flim-after-jam
+@item -flim-after-jam
+Run tree loop invariant motion once after @option{-floop-unroll-and-jam}
+changes a function, before leaving the loop optimizer pipeline.  This can
+hoist invariants exposed by unroll-and-jam earlier than the later loop
+invariant motion pass.
+
+This option is independent of @option{-ftree-loop-im}: specifying
+@option{-fno-tree-loop-im} does not disable this additional invocation.
+The additional invocation does not perform store motion.
+
 @opindex ftree-loop-im
 @item -ftree-loop-im
 Perform loop invariant motion on trees.  This pass moves only invariants that
@@ -14098,12 +14230,49 @@ operands of conditions that are invariant out of the loop, so that we can use
 just trivial invariantness analysis in loop unswitching.  The pass also includes
 store motion.
 
+@opindex ftree-loop-invariant-split
+@item -ftree-loop-invariant-split
+Split selected two-level loop nests into a sequence of equivalent outer-loop
+copies, each covering a consecutive range of the original inner-loop iteration
+space.  The pass looks for read-only data referenced by the inner loop but not
+by the outer-loop induction variable, and limits each copy to a chunk of that
+data.  This can expose smaller invariant data blocks to later vectorization,
+unrolling and loop invariant motion passes.
+
+This optimization is conservative and is not enabled by default at any
+optimization level.  It runs only when loop vectorization is enabled or the
+function contains a loop marked for forced vectorization.  Enabling this
+option does not enable loop vectorization.  Loop vectorization is enabled by
+default at @option{-O2} and @option{-O3}, and can be enabled explicitly with
+@option{-ftree-loop-vectorize}.
+
 @opindex ftree-loop-ivcanon
 @item -ftree-loop-ivcanon
 Create a canonical counter for number of iterations in loops for which
 determining number of iterations requires complicated analysis.  Later
 optimizations then may determine the number easily.  Useful especially
 in connection with unrolling.
+
+@opindex fpreserve-vect-idioms
+@item -fpreserve-vect-idioms
+Preserve selected innermost loops containing widened integer multiply-add
+reductions during early complete unrolling, when complete unrolling would
+increase code size.  Leaving these loops intact can expose opportunities
+for later loop vectorization, including dot-product instructions.
+
+This option is disabled by default and requires both loop optimization
+and loop vectorization to be enabled.  It uses a target-independent shape
+heuristic: it does not require target dot-product instructions and does
+not guarantee vectorization or improved performance.  Loops marked with
+@code{#pragma GCC novector} are not preserved by this option.  Additional
+scalar recurrences are conservatively limited to affine inductions and
+simple integer sum, minimum and maximum reductions.
+
+This option does not inhibit unrolling that does not increase code size,
+override explicit loop-unrolling pragmas, or affect complete unrolling
+after vectorization.  It only changes otherwise permitted early unrolling
+of nested loops at @option{-O3} or higher; at @option{-O2}, early complete
+unrolling already avoids code growth.
 
 @opindex ftree-scev-cprop
 @item -ftree-scev-cprop
@@ -16683,6 +16852,25 @@ Loop invariant motion can be very expensive, both in compilation time and
 in amount of needed compile-time memory, with very large loops.  Loops
 with more basic blocks than this parameter won't have loop invariant
 motion optimization performed on them.
+
+@item loop-invariant-split-chunk-bytes
+Maximum number of bytes of outer-invariant inner-loop loads to include in each
+chunk created by @option{-ftree-loop-invariant-split}.  A value of zero lets
+the compiler choose a target-dependent budget.
+
+@item loop-invariant-split-max-copies
+Maximum number of loop nest copies that
+@option{-ftree-loop-invariant-split} may create for one split.
+
+@item loop-invariant-split-reserved-vregs
+Number of vector registers reserved for the computation itself when
+@option{-ftree-loop-invariant-split} chooses an automatic chunk budget.  A
+value of zero lets the compiler reserve a target-dependent default.
+
+@item loop-invariant-split-vector-regs
+Number of vector registers available to @option{-ftree-loop-invariant-split}
+when choosing an automatic chunk budget.  A value of zero lets the compiler
+infer the value from the target.
 
 @item loop-max-datarefs-for-datadeps
 Building data dependencies is expensive for very large loops.  This
@@ -31552,6 +31740,10 @@ to @samp{zvks} and @samp{zvkg}.
 @item smepmp
 @tab 1.0
 @tab PMP Enhancements for memory access and execution prevention on Machine mode.
+
+@item smrnmi
+@tab 1.0
+@tab Resumable non-maskable interrupts.
 
 @item smstateen
 @tab 1.0
