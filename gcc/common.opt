@@ -1270,6 +1270,10 @@ fcode-hoisting
 Common Var(flag_code_hoisting) Optimization
 Enable code hoisting.
 
+ftree-bitset-store-coalescing
+Common Var(flag_tree_bitset_store_coalescing) Optimization
+Coalesce canonical packed-bit loop nests into masked word stores.
+
 fcombine-stack-adjustments
 Common Var(flag_combine_stack_adjustments) Optimization
 Looks for opportunities to reduce stack adjustments and stack references.

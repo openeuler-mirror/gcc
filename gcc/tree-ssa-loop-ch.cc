@@ -30,6 +30,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-cfg.h"
 #include "tree-into-ssa.h"
 #include "cfgloop.h"
+#include "tree-ssa-loop.h"
 #include "tree-inline.h"
 #include "tree-ssa-threadedge.h"
 #include "tree-ssa-sccvn.h"
@@ -701,24 +702,49 @@ const pass_data pass_data_ch =
   0, /* todo_flags_finish */
 };
 
+/* Keep the preparation instance out of the ordinary ch1/ch2 sequence.  */
+const pass_data pass_data_ch_bitset =
+{
+  GIMPLE_PASS, /* type */
+  "ch_bitset", /* name */
+  OPTGROUP_LOOP, /* optinfo_flags */
+  TV_TREE_CH, /* tv_id */
+  ( PROP_cfg | PROP_ssa ), /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  0, /* todo_flags_finish */
+};
+
 class pass_ch : public ch_base
 {
 public:
-  pass_ch (gcc::context *ctxt)
-    : ch_base (pass_data_ch, ctxt)
+  pass_ch (gcc::context *ctxt, bool bitset_prepare = false)
+    : ch_base (bitset_prepare ? pass_data_ch_bitset : pass_data_ch, ctxt),
+      bitset_prepare_p (bitset_prepare)
   {}
 
   /* opt_pass methods: */
-  bool gate (function *) final override { return flag_tree_ch != 0; }
+  bool gate (function *) final override
+  {
+    return flag_tree_ch != 0
+	   && (!bitset_prepare_p || flag_tree_bitset_store_coalescing);
+  }
 
   /* Initialize and finalize loop structures, copying headers inbetween.  */
   unsigned int execute (function *) final override;
 
-  opt_pass * clone () final override { return new pass_ch (m_ctxt); }
+  opt_pass *clone () final override
+  {
+    return new pass_ch (m_ctxt, bitset_prepare_p);
+  }
 
 protected:
   /* ch_base method: */
   bool process_loop_p (class loop *loop) final override;
+
+private:
+  const bool bitset_prepare_p;
 }; // class pass_ch
 
 const pass_data pass_data_ch_vect =
@@ -1221,9 +1247,12 @@ pass_ch_vect::execute (function *fun)
 /* Apply header copying according to a very simple test of do-while shape.  */
 
 bool
-pass_ch::process_loop_p (class loop *)
+pass_ch::process_loop_p (class loop *loop)
 {
-  return true;
+  if (!bitset_prepare_p)
+    return true;
+
+  return bitset_store_coalescing_candidate_p (loop);
 }
 
 /* Apply header-copying to loops where we might enable vectorization.  */
@@ -1260,4 +1289,10 @@ gimple_opt_pass *
 make_pass_ch (gcc::context *ctxt)
 {
   return new pass_ch (ctxt);
+}
+
+gimple_opt_pass *
+make_pass_ch_bitset (gcc::context *ctxt)
+{
+  return new pass_ch (ctxt, true);
 }

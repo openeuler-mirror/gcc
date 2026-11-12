@@ -630,6 +630,7 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-constant-byte-range-cursor  -ftree-copy-prop  -ftree-dce
 -ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
+-ftree-bitset-store-coalescing
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
 -ftree-loop-invariant-split  -ftree-loop-ivcanon  -ftree-loop-linear
@@ -14049,6 +14050,38 @@ for (int i = 0; i < N; i++)
 @end smallexample
 This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
+
+@opindex ftree-bitset-store-coalescing
+@item -ftree-bitset-store-coalescing
+Recognize canonical two-level packed-bit update loops and create a guarded
+fast path that combines adjacent bit updates into masked word stores.  The
+original loop nest is retained as a fallback when the accessed writable and
+mask intervals overlap, when different output rows partially overlap, or
+when a write can change the contiguous row-index
+input or invariant metadata, or when the packed-bit range is outside the
+profitability bound.  Base-pointer inequality alone is not used as proof of
+nonoverlap.  A read-only preflight computes the selected row footprint and
+rejects unsafe or wrapping address ranges before any packed store.
+Only exact unit-stride rotating indices and single-bit
+update predicates are recognized; negative or wrapping index ranges use
+the original loop.  The fast path preserves zero-trip and presence tests
+and only writes words whose final values change.  Candidates must have a single
+inner loop and single exits, and at most 16 blocks in each loop.  This is
+a structural work bound, not an exact block-count requirement.  Unsupported
+scalar live-outs, additional store guards, insufficient alignment and
+incompatible alias types prevent the transformation.  External debug
+bindings are reset when their definitions are removed.  This option requires
+@option{-O3} and is disabled by default.
+
+Preparation uses a restricted header-copying pass and may repeat
+loop-invariant motion without store motion on the whole function when a
+potentially matching loop shape is present, even if subsequent recognition
+rejects it.  Header-copying preparation respects @option{-fno-tree-ch}.
+The transformation runs before IPA inlining; loops that only become visible
+after later inlining are not recognized by this pass.  At most one successful
+loop nest is transformed per function; a rejected candidate does not prevent
+trying later nests.  The fast-path bound of 65535 bits is a conservative
+profitability policy and is not an assumption about distinct input objects.
 
 @opindex floop-unroll-and-jam
 @item -floop-unroll-and-jam
