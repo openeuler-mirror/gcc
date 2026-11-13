@@ -2288,6 +2288,41 @@ build_cltz_expr (tree src, bool leading, bool define_at_zero)
   return call;
 }
 
+/* Match the original left shift by one, or unsigned multiplication by two.
+   Folding canonicalizes x + x to x * 2.  Multiplication is opt-in to preserve
+   GCC 14's recognition when -fbit-scan-loop-idiom is disabled.  */
+
+static bool
+is_lshift_by_1 (gassign *stmt)
+{
+  if (gimple_assign_rhs_code (stmt) == LSHIFT_EXPR
+      && integer_onep (gimple_assign_rhs2 (stmt)))
+    return true;
+  return (flag_bit_scan_loop_idiom
+	  && TYPE_UNSIGNED (TREE_TYPE (gimple_assign_lhs (stmt)))
+	  && gimple_assign_rhs_code (stmt) == MULT_EXPR
+	  && tree_fits_shwi_p (gimple_assign_rhs2 (stmt))
+	  && tree_to_shwi (gimple_assign_rhs2 (stmt)) == 2);
+}
+
+/* Return true when STMT is equivalent to an unsigned right shift by one.
+   The division form is intentionally opt-in for the same reason.  */
+
+static bool
+is_rshift_by_1 (gassign *stmt)
+{
+  if (!TYPE_UNSIGNED (TREE_TYPE (gimple_assign_lhs (stmt))))
+    return false;
+  if (gimple_assign_rhs_code (stmt) == RSHIFT_EXPR
+      && integer_onep (gimple_assign_rhs2 (stmt)))
+    return true;
+  enum tree_code code = gimple_assign_rhs_code (stmt);
+  return (flag_bit_scan_loop_idiom
+	  && (code == TRUNC_DIV_EXPR || code == EXACT_DIV_EXPR)
+	  && tree_fits_shwi_p (gimple_assign_rhs2 (stmt))
+	  && tree_to_shwi (gimple_assign_rhs2 (stmt)) == 2);
+}
+
 /* See comment below for number_of_iterations_bitcount.
    For c[lt]z, we have:
 
@@ -2383,16 +2418,13 @@ number_of_iterations_cltz (loop_p loop, edge exit,
       modify_before_test = false;
     }
 
-  /* Make sure iv_2_stmt is a logical shift by one stmt:
-     iv_2 = iv_1 {<<|>>} 1  */
-  if (!is_gimple_assign (iv_2_stmt)
-      || (gimple_assign_rhs_code (iv_2_stmt) != LSHIFT_EXPR
-	  && (gimple_assign_rhs_code (iv_2_stmt) != RSHIFT_EXPR
-	      || !TYPE_UNSIGNED (TREE_TYPE (gimple_assign_lhs (iv_2_stmt)))))
-      || !integer_onep (gimple_assign_rhs2 (iv_2_stmt)))
+  /* Match a shift by one, or an equivalent unsigned multiplication or
+     division by two when -fbit-scan-loop-idiom is enabled.  */
+  if (!is_gimple_assign (iv_2_stmt))
     return false;
-
-  bool left_shift = (gimple_assign_rhs_code (iv_2_stmt) == LSHIFT_EXPR);
+  bool left_shift = is_lshift_by_1 (as_a <gassign *> (iv_2_stmt));
+  if (!left_shift && !is_rshift_by_1 (as_a <gassign *> (iv_2_stmt)))
+    return false;
 
   tree iv_1 = gimple_assign_rhs1 (iv_2_stmt);
 
@@ -2499,16 +2531,13 @@ number_of_iterations_cltz_complement (loop_p loop, edge exit,
       modify_before_test = false;
     }
 
-  /* Make sure iv_2_stmt is a logical shift by one stmt:
-     iv_2 = iv_1 {>>|<<} 1  */
-  if (!is_gimple_assign (iv_2_stmt)
-      || (gimple_assign_rhs_code (iv_2_stmt) != LSHIFT_EXPR
-	  && (gimple_assign_rhs_code (iv_2_stmt) != RSHIFT_EXPR
-	      || !TYPE_UNSIGNED (TREE_TYPE (gimple_assign_lhs (iv_2_stmt)))))
-      || !integer_onep (gimple_assign_rhs2 (iv_2_stmt)))
+  /* Match a shift by one, or an equivalent unsigned multiplication or
+     division by two when -fbit-scan-loop-idiom is enabled.  */
+  if (!is_gimple_assign (iv_2_stmt))
     return false;
-
-  bool left_shift = (gimple_assign_rhs_code (iv_2_stmt) == LSHIFT_EXPR);
+  bool left_shift = is_lshift_by_1 (as_a <gassign *> (iv_2_stmt));
+  if (!left_shift && !is_rshift_by_1 (as_a <gassign *> (iv_2_stmt)))
+    return false;
 
   tree iv_1 = gimple_assign_rhs1 (iv_2_stmt);
 
