@@ -1298,6 +1298,10 @@ fcompare-elim
 Common Var(flag_compare_elim_after_reload) Optimization
 Perform comparison elimination after register allocation has finished.
 
+fcomponent-type-flow
+Common Var(flag_component_type_flow) Init(0) Optimization
+Select additional speculative C++ devirtualization targets using type-flow information.
+
 floop-elim
 Common Var(flag_loop_elim) Init(0) Optimization
 Perform redundant loop elimination.
@@ -3542,6 +3546,10 @@ Perform loop unrolling for all loops.
 funroll-completely-grow-size
 Undocumented Var(flag_cunroll_grow_size) Optimization
 ; Internal undocumented flag, allow size growth during complete unrolling
+
+funsafe-dynamic-cast-cache
+Common Var(flag_unsafe_dynamic_cast_cache) Init(0) Optimization
+Cache successful zero-adjustment C++ dynamic casts assuming stable vtable addresses.
 
 ; Nonzero means that loop optimizer may assume that the induction variables
 ; that control loops do not overflow and that the loops with nontrivial
