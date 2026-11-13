@@ -3470,6 +3470,10 @@ ftree-phiprop
 Common Var(flag_tree_phiprop) Init(1) Optimization
 Enable hoisting loads from conditional pointers.
 
+ftree-phiprop-disjoint-stores
+Common Var(flag_tree_phiprop_disjoint_stores) Optimization Init(0)
+Propagate local scalar loads through address PHIs across proven-disjoint stores.
+
 ftree-pre
 Common Var(flag_tree_pre) Optimization
 Enable SSA-PRE optimization on trees.

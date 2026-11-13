@@ -905,6 +905,10 @@ Set pointer compression size.
 Common Joined UInteger Var(semi_relayout_level) Init(13) IntegerRange(11, 15) Param Optimization
 Set capacity of each bucket to semi-relayout to (1 << semi-relayout-level) / 8 .
 
+-param=phiprop-disjoint-stores-max-work=
+Common Joined UInteger Var(param_phiprop_disjoint_stores_max_work) Init(16384) Param Optimization
+Maximum cumulative work for PHI propagation across disjoint stores per function and pass.
+
 -param=predictable-branch-outcome=
 Common Joined UInteger Var(param_predictable_branch_outcome) Init(2) IntegerRange(0, 50) Param Optimization
 Maximal estimated outcome of branch considered predictable.

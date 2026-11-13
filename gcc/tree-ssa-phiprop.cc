@@ -33,6 +33,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "gimple-iterator.h"
 #include "stor-layout.h"
 #include "tree-ssa-loop.h"
+#include "tree-ssa-alias.h"
 #include "tree-cfg.h"
 
 /* This pass propagates indirect loads through the PHI node for its
@@ -98,6 +99,30 @@ struct phiprop_d
   tree vuse;
 };
 
+/* Bound the additional analysis across all PHIs and loads in a function.
+   Charge reference construction, every nondebug statement visited (including
+   those without a VDEF), and every alias query.  A per-load limit would still
+   allow quadratic repeated scans of a large block.  */
+struct phiprop_work_budget
+{
+  unsigned remaining;
+  bool exhausted;
+
+  bool consume ()
+  {
+    if (remaining)
+      {
+	--remaining;
+	return true;
+      }
+    if (!exhausted && dump_file && (dump_flags & TDF_DETAILS))
+      fprintf (dump_file,
+	       "PHI load propagation: disjoint-store work budget exhausted.\n");
+    exhausted = true;
+    return false;
+  }
+};
+
 /* Verify if the value recorded for NAME in PHIVN is still valid at
    the start of basic block BB.  */
 
@@ -132,7 +157,8 @@ phivn_valid_p (struct phiprop_d *phivn, tree name, basic_block bb)
 
 static tree
 phiprop_insert_phi (basic_block bb, gphi *phi, gimple *use_stmt,
-		    struct phiprop_d *phivn, size_t n)
+		    struct phiprop_d *phivn, size_t n,
+		    tree insertion_vuse)
 {
   tree res;
   gphi *new_phi = NULL;
@@ -200,7 +226,7 @@ phiprop_insert_phi (basic_block bb, gphi *phi, gimple *use_stmt,
 	      if (vphi)
 		vuse = PHI_ARG_DEF_FROM_EDGE (vphi, e);
 	      else
-		vuse = gimple_vuse (use_stmt);
+		vuse = insertion_vuse;
 	    }
 	  else
 	    /* For the aggregate copy case updating virtual operands
@@ -260,6 +286,79 @@ chk_uses (tree, tree *idx, void *data)
   return true;
 }
 
+/* Allow scalar loads of local objects to cross stores that cannot change
+   any incoming object of the address PHI.  Restrict this relaxation to a
+   single block so the virtual memory state at its entry can be recovered
+   without path speculation.  */
+static bool
+phiprop_disjoint_local_stores_p (basic_block bb, gphi *phi,
+				gimple *load, tree *entry_vuse,
+				phiprop_work_budget &budget)
+{
+  if (!flag_tree_phiprop_disjoint_stores || budget.exhausted
+      || gimple_bb (load) != bb
+      || !is_gimple_reg_type (TREE_TYPE (gimple_assign_lhs (load))))
+    return false;
+
+  tree rhs = gimple_assign_rhs1 (load);
+  auto_vec<tree> refs;
+  for (unsigned i = 0; i < gimple_phi_num_args (phi); ++i)
+    {
+      if (!budget.consume ())
+	return false;
+      tree arg = gimple_phi_arg_def (phi, i);
+      /* The usual PHI propagation checks have already checked copies.
+	 Keep this extension limited to explicit automatic objects.  */
+      if (TREE_CODE (arg) != ADDR_EXPR)
+	return false;
+      tree obj = TREE_OPERAND (arg, 0);
+      if ((TREE_CODE (obj) != VAR_DECL && TREE_CODE (obj) != PARM_DECL)
+	  || DECL_CONTEXT (obj) != cfun->decl || TREE_STATIC (obj)
+	  || TREE_THIS_VOLATILE (obj)
+	  || !types_compatible_p (TREE_TYPE (obj), TREE_TYPE (rhs)))
+	return false;
+      refs.safe_push (fold_build2 (MEM_REF, TREE_TYPE (rhs),
+				  unshare_expr (arg), TREE_OPERAND (rhs, 1)));
+    }
+
+  tree vuse = gimple_vuse (load);
+  bool crossed_store = false;
+  gimple_stmt_iterator si = gsi_for_stmt (load);
+  for (gsi_prev_nondebug (&si); !gsi_end_p (si); gsi_prev_nondebug (&si))
+    {
+      if (!budget.consume ())
+	return false;
+      gimple *stmt = gsi_stmt (si);
+      if (!gimple_vdef (stmt))
+	continue;
+      if (gimple_vdef (stmt) != vuse || !gimple_vuse (stmt))
+	return false;
+      for (tree ref : refs)
+	if (!budget.consume () || stmt_may_clobber_ref_p (stmt, ref))
+	  return false;
+      vuse = gimple_vuse (stmt);
+      crossed_store = true;
+    }
+
+  if (!crossed_store)
+    return false;
+  if (!SSA_NAME_IS_DEFAULT_DEF (vuse))
+    {
+      gimple *def = SSA_NAME_DEF_STMT (vuse);
+      basic_block def_bb = gimple_bb (def);
+      if (def_bb == bb)
+	{
+	  if (gimple_code (def) != GIMPLE_PHI)
+	    return false;
+	}
+      else if (def_bb
+	       && !dominated_by_p (CDI_DOMINATORS, bb, def_bb))
+	return false;
+    }
+  *entry_vuse = vuse;
+  return true;
+}
+
 /* Propagate between the phi node arguments of PHI in BB and phi result
    users.  For now this matches
         # p_2 = PHI <&x, &y>
@@ -276,7 +375,7 @@ chk_uses (tree, tree *idx, void *data)
 
 static bool
 propagate_with_phi (basic_block bb, gphi *phi, struct phiprop_d *phivn,
-		    size_t n)
+		    size_t n, phiprop_work_budget &budget)
 {
   tree ptr = PHI_RESULT (phi);
   gimple *use_stmt;
@@ -372,13 +471,18 @@ propagate_with_phi (basic_block bb, gphi *phi, struct phiprop_d *phivn,
 	 needs to be in a different basic block dominating bb.  When the
 	 def is an edge-inserted one we know it dominates us.  */
       vuse = gimple_vuse (use_stmt);
+      tree insertion_vuse = vuse;
       def_stmt = SSA_NAME_DEF_STMT (vuse);
       if (!SSA_NAME_IS_DEFAULT_DEF (vuse)
 	  && (gimple_bb (def_stmt) == bb
 	      || (gimple_bb (def_stmt)
 		  && !dominated_by_p (CDI_DOMINATORS,
 				      bb, gimple_bb (def_stmt)))))
-	goto next;
+	{
+	  if (!phiprop_disjoint_local_stores_p (bb, phi, use_stmt,
+					       &insertion_vuse, budget))
+	    goto next;
+	}
 
       /* Found a proper dereference with an aggregate copy.  Just
          insert aggregate copies on the edges instead.  */
@@ -420,7 +524,8 @@ propagate_with_phi (basic_block bb, gphi *phi, struct phiprop_d *phivn,
 		goto next;
 	    }
 
-	  phiprop_insert_phi (bb, phi, use_stmt, phivn, n);
+	  phiprop_insert_phi (bb, phi, use_stmt, phivn, n,
+			      insertion_vuse);
 
 	  /* Remove old stmt.  The phi is taken care of by DCE.  */
 	  gsi = gsi_for_stmt (use_stmt);
@@ -442,7 +547,12 @@ propagate_with_phi (basic_block bb, gphi *phi, struct phiprop_d *phivn,
 	 is the first load transformation.  */
       else if (!phi_inserted)
 	{
-	  res = phiprop_insert_phi (bb, phi, use_stmt, phivn, n);
+	  if (dump_file && (dump_flags & TDF_DETAILS)
+	      && insertion_vuse != vuse)
+	    fprintf (dump_file,
+		     "PHI load propagation: crossed proven-disjoint local stores.\n");
+	  res = phiprop_insert_phi (bb, phi, use_stmt, phivn, n,
+			      insertion_vuse);
 	  type = TREE_TYPE (res);
 
 	  /* Remember the value we created for *ptr.  */
@@ -514,6 +624,8 @@ pass_phiprop::execute (function *fun)
   gphi_iterator gsi;
   unsigned i;
   size_t n;
+  phiprop_work_budget budget = { param_phiprop_disjoint_stores_max_work,
+				false };
 
   calculate_dominance_info (CDI_DOMINATORS);
 
@@ -531,7 +643,7 @@ pass_phiprop::execute (function *fun)
       if (bb_has_abnormal_pred (bb))
 	continue;
       for (gsi = gsi_start_phis (bb); !gsi_end_p (gsi); gsi_next (&gsi))
-	did_something |= propagate_with_phi (bb, gsi.phi (), phivn, n);
+	did_something |= propagate_with_phi (bb, gsi.phi (), phivn, n, budget);
     }
 
   if (did_something)
