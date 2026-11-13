@@ -372,6 +372,22 @@ extern gimple_opt_pass *make_pass_fix_loops (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_loop (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_no_loop (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_loop_init (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_loop_specialization (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_cursor_specialization (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_cursor_thread (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_cursor_ccp (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_cursor_forwprop (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_cursor_dce (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_cursor_fre (gcc::context *ctxt);
+
+extern gimple_opt_pass *make_pass_immutable_loop_init (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_unroll (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_ccp (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_forwprop (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_dce (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_loop_done (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_fre (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_immutable_dom (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_loop_versioning (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lim (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_bitset_store_coalescing_prepare (

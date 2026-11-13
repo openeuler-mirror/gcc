@@ -1323,6 +1323,14 @@ readonly_pointer_base_object_1 (tree value, unsigned depth, unsigned &remaining)
       tree object = TREE_OPERAND (value, 0);
       while (handled_component_p (object))
 	object = TREE_OPERAND (object, 0);
+      /* Folded constant pointer offsets are commonly represented as the
+	 address of a MEM_REF, rather than as POINTER_PLUS_EXPR.  Follow its
+	 address operand, not a loaded pointer: the caller must still prove
+	 that the ultimate object has a complete immutable initializer.  */
+      if (flag_tree_immutable_loop_specialization
+	  && TREE_CODE (object) == MEM_REF)
+	return readonly_pointer_base_object_1 (TREE_OPERAND (object, 0),
+					     depth - 1, remaining);
       return object;
     }
 
@@ -1330,6 +1338,26 @@ readonly_pointer_base_object_1 (tree value, unsigned depth, unsigned &remaining)
     return NULL_TREE;
 
   gimple *def = SSA_NAME_DEF_STMT (value);
+  if (flag_tree_immutable_loop_specialization
+      && gimple_code (def) == GIMPLE_PHI)
+    {
+      gphi *phi = as_a <gphi *> (def);
+      if (gimple_phi_num_args (phi) > 8
+	  || SSA_NAME_OCCURS_IN_ABNORMAL_PHI (value))
+	return NULL_TREE;
+      tree common = NULL_TREE;
+      for (unsigned i = 0; i < gimple_phi_num_args (phi); ++i)
+	{
+	  tree object = readonly_pointer_base_object_1
+	    (gimple_phi_arg_def (phi, i), depth - 1, remaining);
+	  if (!object || (common && common != object))
+	    return NULL_TREE;
+	  common = object;
+	}
+      if (common && dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Pointer PHI shares one constant-address object.\n");
+      return common;
+    }
   if (!is_gimple_assign (def))
     return NULL_TREE;
 
@@ -1362,6 +1390,8 @@ readonly_pointer_base_object (tree value, unsigned depth)
    is a profitability hint, not proof of an exact trip count or of successful
    inlining.  Runtime exits and ordinary transformation checks remain in force;
    try_peel_loop separately limits cumulative copied cost.  */
+
+static unsigned immutable_stage_peel_cost;
 
 static unsigned
 ipa_readonly_value_peel_count (class loop *loop)
@@ -1421,6 +1451,9 @@ ipa_readonly_value_peel_count (class loop *loop)
 	    fprintf (dump_file, "Considering IPA readonly-value loop %d for "
 		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states in %s.\n",
 		     loop->num, bytes, node->dump_name ());
+	  if (flag_tree_immutable_loop_specialization)
+	    return MIN ((unsigned) bytes,
+		      (unsigned) param_immutable_state_peel_limit);
 	  return (unsigned) bytes;
 	}
     }
@@ -1666,6 +1699,23 @@ try_peel_loop (class loop *loop,
 		 cfun->ipa_value_specialization_peel_growth,
 		 readonly_limit);
       return false;
+    }
+
+  if (readonly_specialization && flag_tree_immutable_loop_specialization)
+    {
+      const unsigned stage_budget = 32768;
+      unsigned HOST_WIDE_INT cost
+	= estimated_peeled_sequence_size (&size, (int) npeel);
+      if (cost > stage_budget - immutable_stage_peel_cost)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, "Immutable state stage growth budget exhausted.\n");
+	  return false;
+	}
+      immutable_stage_peel_cost += cost;
+      if (dump_file)
+	fprintf (dump_file, "Bounded immutable state peeling: %u copies.\n",
+		 (unsigned) npeel);
     }
 
   if (!dbg_cnt (gimple_unroll))
@@ -2171,6 +2221,7 @@ public:
 unsigned int
 pass_complete_unroll::execute (function *fun)
 {
+  immutable_stage_peel_cost = 0;
   if (number_of_loops (fun) <= 1)
     return 0;
 
