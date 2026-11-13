@@ -575,8 +575,10 @@ Objective-C and Objective-C++ Dialects}.
 -finline-stringops[=@var{fn}]
 -finline-functions  -finline-functions-called-once  -finline-limit=@var{n}
 -finline-memcmp -finline-memcmp-small-equality -finline-memcmp-prefix
--finline-small-functions
--fipa-modref -fipa-cp  -fipa-cp-clone
+-finline-small-functions -fipa-modref -fipa-cp  -fipa-cp-clone
+-fipa-value-specialization -fipa-value-specialization-clone-budget
+-fipa-value-specialization-loop -fipa-value-specialization-shared-loop
+-fipa-value-specialization-cold -fipa-value-specialization-helper-expansion
 -fipa-array-load-inline  -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm}
@@ -632,6 +634,7 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-constant-byte-range-cursor  -ftree-copy-prop  -ftree-dce
 -ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
+-ftree-bitset-store-coalescing
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
 -ftree-loop-invariant-split  -ftree-loop-ivcanon  -ftree-loop-linear
@@ -13713,6 +13716,115 @@ if the application has constants passed to functions.
 This flag is enabled by default at @option{-O2}, @option{-Os} and @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
 
+@item -fipa-value-specialization
+@opindex fipa-value-specialization
+Specialize calls with complete immutable object arguments and expose their
+constant states to subsequent scalar optimization.  This option is disabled
+by default.  It includes shared immutable clones, bounded helper inlining,
+and preservation of proven immutable context through actual inline ancestry.
+Ordinary cloning and inlining legality, exception handling, recursive-edge
+exclusions and residual runtime control flow remain in force.
+
+Enabling this option also enables @option{-fipa-value-specialization-clone-budget},
+@option{-fipa-value-specialization-loop},
+@option{-fipa-value-specialization-shared-loop},
+@option{-fipa-value-specialization-cold}, and
+@option{-fipa-value-specialization-helper-expansion}, unless explicitly disabled.
+An explicit positive or negative setting of a suboption takes precedence
+regardless of argument order.  All five mechanisms require this master option
+for execution: enabling a suboption alone does not activate specialization.
+Use consistent options during compilation and LTO linking.
+
+The master option and all five suboptions are disabled by default for code
+generation.  The generic RTL variable-tracking maintenance delivered with
+these specialization changes follows the existing variable-tracking and
+debug-information conditions, independently of this master option.  It can
+reconstruct proven debug values at control-flow joins and discard stale
+bindings for address-taken variables when their storage may have changed.
+This maintenance also applies when neither the master option nor any
+suboption is enabled, so debug information can change on those default paths.
+
+IPA cloning, inlining and bounded cold specialization can expose additional
+control-flow joins.  The specialization changes and the generic
+variable-tracking maintenance are delivered together to cover the general
+debug-information responsibilities of those control-flow changes.  The
+variable-tracking rules apply to other code as well and do not depend on
+immutable-program context markers.  Specialization itself does not require
+variable tracking to generate executable code.
+
+The clone context marker is retained on proven immutable clones, including
+mandatory inline candidates, and streamed through LTO.  Helper lookup follows
+at most four actual inline ancestors; it does not grant unrelated calls in the
+enclosing function the same context.  A separate caller marker records receipt
+of a specialization candidate, without promising that inlining took place.
+Tree consumers recheck each loop before using that hint.  String initializer
+lengths and other object sizes are profitability hints, not proof of loop trip
+counts or permission to fold volatile or interposable loads.  Helper growth
+limits apply per edge and per resulting root, not to a compilation unit as a
+whole.
+
+@item -fipa-value-specialization-clone-budget
+@opindex fipa-value-specialization-clone-budget
+Allow bounded extra clones for repeated immutable values when ordinary IPA
+profitability misses later constant-state simplification.  Candidates require
+at least two necessary source edges, a complete immutable object of 2 through
+64 bytes, an IPA predicate dependency and a clone cost of at most 512 estimated
+instructions.  The ordinary unit-size limit still applies.  Extra admission
+is bounded by @option{--param=ipa-value-specialization-clone-growth-budget}.
+Disabling this option does not prohibit otherwise profitable ordinary clones.
+
+@item -fipa-value-specialization-loop
+@opindex fipa-value-specialization-loop
+Specialize immutable values from one necessary source edge in a static loop,
+including a real loop inside a recursive caller.  Recursion alone does not
+establish a loop context; recursive callees and recursive call edges remain
+excluded.  The bounded search follows at most two wrapper levels and examines
+at most 16 edges.  Recursive callers require a loop on the actual call edge;
+the search does not walk through their recursive component.
+Disabling this option also disables the single-source recursive-caller case.
+The shared-source case is controlled independently by
+@option{-fipa-value-specialization-shared-loop}.
+
+Loop candidates cost at most 512 estimated instructions and use the
+@option{--param=ipa-value-specialization-loop-growth-budget} reserve.  Accepted reserve
+cost is accounted separately from ordinary IPA growth so these clones do not
+consume the ordinary allowance.  Total code size can still grow.
+
+@item -fipa-value-specialization-shared-loop
+@opindex fipa-value-specialization-shared-loop
+Allow two or more necessary source edges to share a clone for one immutable
+value when at least one edge has an eligible loop context.  This includes
+actual loops in recursive callers under the same exclusions as the
+single-source mechanism.  A shared clone is charged once to the loop-value
+reserve.  This option can be disabled independently of the single-source
+loop mechanism, and still requires @option{-fipa-value-specialization}.
+
+@item -fipa-value-specialization-cold
+@opindex fipa-value-specialization-cold
+Allow a separately budgeted immutable clone when ordinary hot-edge admission
+fails.  Candidates require a complete immutable byte object of 2 through 64
+bytes, an IPA predicate dependency, one through four necessary source edges,
+a nonrecursive context and a cost of at most 128 estimated instructions.
+Offsets, mutable or interposable objects and recursive SCCs are excluded.
+No profile frequencies are changed and ordinary cloning legality still applies.
+The separate @option{--param=ipa-value-specialization-cold-growth-budget} reserve bounds
+clone admission, not all subsequent inlining or loop transformations.
+
+@item -fipa-value-specialization-helper-expansion
+@opindex fipa-value-specialization-helper-expansion
+For bounded helper inlining in an established immutable context, raise the
+maximum estimated edge growth from 1200 to 4096 and the resulting root size
+from 4096 to 65536.  Disabling this option restores the smaller limits without
+disabling the basic helper inlining policy.  The edge-growth and resulting-caller
+limits for each policy can be changed independently with
+@option{ipa-value-specialization-helper-growth-limit},
+@option{ipa-value-specialization-helper-size-limit},
+@option{ipa-value-specialization-helper-expanded-growth-limit} and
+@option{ipa-value-specialization-helper-expanded-size-limit}.
+Both policies retain the ordinary @option{large-stack-frame} and
+@option{large-stack-frame-growth} limits.  Helper eligibility, the four-level
+depth bound and ordinary target, exception and inlining legality are unchanged.
+
 @opindex fipa-cp-clone
 @item -fipa-cp-clone
 Perform function cloning to make interprocedural constant propagation stronger.
@@ -14093,6 +14205,38 @@ for (int i = 0; i < N; i++)
 @end smallexample
 This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
+
+@opindex ftree-bitset-store-coalescing
+@item -ftree-bitset-store-coalescing
+Recognize canonical two-level packed-bit update loops and create a guarded
+fast path that combines adjacent bit updates into masked word stores.  The
+original loop nest is retained as a fallback when the accessed writable and
+mask intervals overlap, when different output rows partially overlap, or
+when a write can change the contiguous row-index
+input or invariant metadata, or when the packed-bit range is outside the
+profitability bound.  Base-pointer inequality alone is not used as proof of
+nonoverlap.  A read-only preflight computes the selected row footprint and
+rejects unsafe or wrapping address ranges before any packed store.
+Only exact unit-stride rotating indices and single-bit
+update predicates are recognized; negative or wrapping index ranges use
+the original loop.  The fast path preserves zero-trip and presence tests
+and only writes words whose final values change.  Candidates must have a single
+inner loop and single exits, and at most 16 blocks in each loop.  This is
+a structural work bound, not an exact block-count requirement.  Unsupported
+scalar live-outs, additional store guards, insufficient alignment and
+incompatible alias types prevent the transformation.  External debug
+bindings are reset when their definitions are removed.  This option requires
+@option{-O3} and is disabled by default.
+
+Preparation uses a restricted header-copying pass and may repeat
+loop-invariant motion without store motion on the whole function when a
+potentially matching loop shape is present, even if subsequent recognition
+rejects it.  Header-copying preparation respects @option{-fno-tree-ch}.
+The transformation runs before IPA inlining; loops that only become visible
+after later inlining are not recognized by this pass.  At most one successful
+loop nest is transformed per function; a rejected candidate does not prevent
+trying later nests.  The fast-path bound of 65535 bits is a conservative
+profitability policy and is not an assumption about distinct input objects.
 
 @opindex floop-unroll-and-jam
 @item -floop-unroll-and-jam
@@ -16876,6 +17020,65 @@ IPA-CP attempts to track all possible values and types passed to a function's
 parameter in order to propagate them and perform devirtualization.
 @option{ipa-cp-value-list-size} is the maximum number of values and types it
 stores per one formal parameter of a function.
+
+@item ipa-value-specialization-clone-growth-budget
+Maximum extra estimated clone instructions admitted for repeated immutable
+values.  The default is 32768.  Zero disables this extra admission route;
+it does not suppress ordinary profitable clones.
+
+@item ipa-value-specialization-loop-growth-budget
+Maximum extra estimated clone instructions for single-source or shared
+immutable values in eligible loop contexts.  These mechanisms share this
+reserve.  The default is 131072.  Zero disables extra loop-reserve admissions.
+
+@item ipa-value-specialization-cold-growth-budget
+Maximum extra estimated clone instructions admitted by the cold immutable
+route.  The default is 1024.  Zero disables additional cold admissions.
+
+@item ipa-value-specialization-helper-growth-limit
+Maximum estimated edge growth for basic immutable helper inlining.  The
+default is 1200.  This limit is independent of the resulting-caller size limit.
+
+@item ipa-value-specialization-helper-size-limit
+Maximum estimated resulting-caller size for basic immutable helper inlining.
+The default is 4096.
+
+@item ipa-value-specialization-helper-expanded-growth-limit
+Maximum estimated edge growth when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 4096.
+
+@item ipa-value-specialization-helper-expanded-size-limit
+Maximum estimated resulting-caller size when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 65536.  These four helper limits use the resulting caller's option context.
+They only control this additional profitability policy; ordinary inlining
+may still accept an edge.  None of them relax the ordinary stack-frame limits.
+
+@item ipa-value-specialization-peel-growth-budget
+Fixed floor for the cumulative estimated growth allowance from readonly
+loop peeling in one GIMPLE function when
+@option{-fipa-value-specialization} is enabled.  The default is 524288.
+The effective allowance is the greater of this floor and the allowance
+computed by @option{ipa-value-specialization-peel-growth-percent}.
+Each successful duplication is charged for all
+copied blocks, PHIs and non-debug statements, including previously peeled
+inner loops, without credit for possible later simplification.  The
+consumed budget is retained across loops and subsequent peeling passes on
+the same function.  Zero disables this additional readonly peeling route;
+ordinary loop peeling keeps its existing limits.  User-specified
+@code{#pragma GCC unroll} factors remain in force for both routes.  This budget
+is separate from the IPA clone admission budgets.
+
+@item ipa-value-specialization-peel-growth-percent
+Additional copied cost allowance as a percentage of the complete function
+cost before its first extra readonly peel.  The default is 800.  The
+effective allowance is computed once, is capped at @code{INT_MAX}, and is
+not increased by later expansion.  Zero uses only the fixed floor.
+Setting @option{ipa-value-specialization-peel-growth-budget} to zero
+disables this route regardless of the percentage.  These are estimated
+copy costs, not a bound on final machine-code size or on growth caused by
+other optimizations.
 
 @item ipa-cp-eval-threshold
 IPA-CP calculates its own score of cloning profitability heuristics

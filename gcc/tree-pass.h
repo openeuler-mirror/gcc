@@ -374,6 +374,9 @@ extern gimple_opt_pass *make_pass_tree_no_loop (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_loop_init (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_loop_versioning (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_lim (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_bitset_store_coalescing_prepare (
+  gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_bitset_store_coalescing (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_static_byte_cfg (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_linterchange (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_unswitch (gcc::context *ctxt);
@@ -403,6 +406,7 @@ extern gimple_opt_pass *make_pass_loop_prefetch (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_iv_optimize (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tree_loop_done (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ch (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_ch_bitset (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ch_vect (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_sccopy (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ccp (gcc::context *ctxt);

@@ -1306,6 +1306,233 @@ adjust_loop_info_after_peeling (class loop *loop, int npeel, bool precise)
     }
 }
 
+/* Follow a pointer SSA value through simple copies and constant pointer
+   adjustments.  Return the addressed object when the chain starts at a
+   compile-time address, otherwise return NULL_TREE.  */
+
+static tree
+readonly_pointer_base_object_1 (tree value, unsigned depth, unsigned &remaining)
+{
+  if (!value || depth == 0 || remaining == 0)
+    return NULL_TREE;
+
+  --remaining;
+  STRIP_NOPS (value);
+  if (TREE_CODE (value) == ADDR_EXPR)
+    {
+      tree object = TREE_OPERAND (value, 0);
+      while (handled_component_p (object))
+	object = TREE_OPERAND (object, 0);
+      return object;
+    }
+
+  if (TREE_CODE (value) != SSA_NAME)
+    return NULL_TREE;
+
+  gimple *def = SSA_NAME_DEF_STMT (value);
+  if (!is_gimple_assign (def))
+    return NULL_TREE;
+
+  enum tree_code code = gimple_assign_rhs_code (def);
+  if (code == SSA_NAME || CONVERT_EXPR_CODE_P (code)
+      || code == ADDR_EXPR)
+    return readonly_pointer_base_object_1 (gimple_assign_rhs1 (def), depth - 1, remaining);
+
+  if ((code == POINTER_PLUS_EXPR || code == PLUS_EXPR)
+      && TREE_CODE (gimple_assign_rhs2 (def)) == INTEGER_CST)
+    return readonly_pointer_base_object_1 (gimple_assign_rhs1 (def), depth - 1, remaining);
+
+  return NULL_TREE;
+}
+
+/* Keep branching PHI exploration linear in a small fixed budget.  This only
+   supplies the existing peeling profitability hint; the caller still
+   verifies the complete immutable initializer, and no loop exit is removed
+   based on this result.  Cycles or unknown incoming values are rejected.  */
+
+static tree
+readonly_pointer_base_object (tree value, unsigned depth)
+{
+  unsigned remaining = 64;
+  return readonly_pointer_base_object_1 (value, depth, remaining);
+}
+
+/* For an IPA clone or candidate-context caller, use a pointer PHI's visible
+   constant-object initializer to suggest a bounded number of copies.  This
+   is a profitability hint, not proof of an exact trip count or of successful
+   inlining.  Runtime exits and ordinary transformation checks remain in force;
+   try_peel_loop separately limits cumulative copied cost.  */
+
+static unsigned
+ipa_readonly_value_peel_count (class loop *loop)
+{
+  if (!flag_ipa_value_specialization)
+    return 0;
+
+  cgraph_node *node = cgraph_node::get (current_function_decl);
+  if (!node
+      || (!node->ipcp_clone && !node->ipa_value_specialized))
+    return 0;
+
+  edge preheader = loop_preheader_edge (loop);
+  if (!preheader)
+    return 0;
+
+  for (gphi_iterator gpi = gsi_start_phis (loop->header);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    {
+      gphi *phi = gpi.phi ();
+      tree result = gimple_phi_result (phi);
+      if (!POINTER_TYPE_P (TREE_TYPE (result)))
+	continue;
+
+      tree value = PHI_ARG_DEF_FROM_EDGE (phi, preheader);
+      tree object = readonly_pointer_base_object (value, 12);
+      if (!object)
+	continue;
+
+      tree initial = NULL_TREE;
+      if (TREE_CODE (object) == STRING_CST)
+	initial = object;
+      else if ((TREE_CODE (object) == VAR_DECL
+		|| TREE_CODE (object) == CONST_DECL)
+	       && !TREE_THIS_VOLATILE (object)
+	       && (TREE_READONLY (object)
+		   || (TREE_CODE (object) == VAR_DECL
+		       && DECL_IN_CONSTANT_POOL (object))))
+	{
+	  initial = ctor_for_folding (object);
+	  if (!initial || initial == error_mark_node
+	      || !TREE_CONSTANT (initial))
+	    initial = NULL_TREE;
+	}
+
+      unsigned HOST_WIDE_INT bytes = 0;
+      if (initial && TREE_CODE (initial) == STRING_CST)
+	bytes = TREE_STRING_LENGTH (initial);
+      else if (initial && TREE_TYPE (object)
+	       && TYPE_SIZE_UNIT (TREE_TYPE (object))
+	       && tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (object))))
+	bytes = tree_to_uhwi (TYPE_SIZE_UNIT (TREE_TYPE (object)));
+
+      if (bytes > 1 && bytes <= 64)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Considering IPA readonly-value loop %d for "
+		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states in %s.\n",
+		     loop->num, bytes, node->dump_name ());
+	  return (unsigned) bytes;
+	}
+    }
+
+  return 0;
+}
+
+/* Charge every block and PHI, and at least one unit per non-debug statement.
+   Do not subtract instructions that later passes might eliminate.  */
+
+static bool
+ipa_readonly_peel_charge_block (basic_block bb, unsigned limit,
+			       unsigned *cost)
+{
+  auto charge = [&] (unsigned amount) -> bool
+    {
+      if (amount > limit - *cost)
+	return false;
+      *cost += amount;
+      return true;
+    };
+
+  if (!charge (1))
+    return false;
+  for (gphi_iterator gpi = gsi_start_phis (bb);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    if (!charge (1))
+      return false;
+  for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
+       !gsi_end_p (gsi); gsi_next (&gsi))
+    {
+      gimple *stmt = gsi_stmt (gsi);
+      if (!is_gimple_debug (stmt)
+	  && !charge (MAX (1, estimate_num_insns (stmt, &eni_size_weights))))
+	return false;
+    }
+  return true;
+}
+
+/* Freeze a function-wide allowance before the first extra readonly peel.
+   Subsequent expansion must not replenish it.  A fixed floor avoids making
+   small functions depend on a ratio, while the initial full function cost
+   gives large functions room for several independent profitable loops.  */
+
+static unsigned
+ipa_readonly_peel_growth_limit ()
+{
+  unsigned floor = param_ipa_value_specialization_peel_growth_budget;
+  if (floor == 0)
+    return 0;
+  if (cfun->ipa_value_specialization_peel_limit)
+    return cfun->ipa_value_specialization_peel_limit;
+
+  unsigned initial_cost = 0;
+  unsigned percent = param_ipa_value_specialization_peel_growth_percent;
+  if (percent)
+    {
+      basic_block bb;
+      FOR_EACH_BB_FN (bb, cfun)
+	if (!ipa_readonly_peel_charge_block (bb, INT_MAX, &initial_cost))
+	  {
+	    initial_cost = INT_MAX;
+	    break;
+	  }
+    }
+  unsigned HOST_WIDE_INT relative
+    = (unsigned HOST_WIDE_INT) initial_cost * percent / 100;
+  unsigned limit = MAX (floor, (unsigned) MIN (relative, INT_MAX));
+  cfun->ipa_value_specialization_peel_limit = limit;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      if (percent)
+	fprintf (dump_file, "IPA readonly peeling budget: %u units "
+		 "(initial function cost %u, growth %u%%).\n",
+		 limit, initial_cost, percent);
+      else
+	fprintf (dump_file, "IPA readonly peeling budget: %u units "
+		 "(fixed allowance; function cost not scanned).\n", limit);
+    }
+  return limit;
+}
+
+/* Compute a conservative cost of all copies, including already expanded
+   inner loops.  Unlike tree_estimate_loop_size, a partial scan can only
+   reject the transformation, never supply an accepted cost.  */
+
+static bool
+ipa_readonly_peel_growth_cost (class loop *loop, unsigned npeel,
+			      unsigned limit, unsigned *growth)
+{
+  unsigned used = cfun->ipa_value_specialization_peel_growth;
+  if (used >= limit)
+    return false;
+
+  gcc_assert (npeel != 0);
+  unsigned max_body_cost = (limit - used) / npeel;
+  unsigned body_cost = 0;
+
+  basic_block *body = get_loop_body (loop);
+  bool fits = true;
+  for (unsigned i = 0; i < loop->num_nodes && fits; ++i)
+    fits = ipa_readonly_peel_charge_block (body[i], max_body_cost, &body_cost);
+  free (body);
+  if (!fits)
+    return false;
+
+  /* The division above bounds both the multiplication and the subsequent
+     cumulative addition by LIMIT, which is at most INT_MAX.  */
+  *growth = body_cost * npeel;
+  return true;
+}
+
 /* If the loop is expected to iterate N times and is
    small enough, duplicate the loop body N+1 times before
    the loop itself.  This way the hot path will never
@@ -1320,6 +1547,8 @@ try_peel_loop (class loop *loop,
   HOST_WIDE_INT npeel;
   struct loop_size size;
   int peeled_size;
+  unsigned readonly_growth = 0;
+  unsigned readonly_limit = 0;
 
   if (!flag_peel_loops
       || param_max_peel_times <= 0
@@ -1333,6 +1562,9 @@ try_peel_loop (class loop *loop,
       return false;
     }
 
+  unsigned readonly_npeel = ipa_readonly_value_peel_count (loop);
+  bool readonly_specialization = readonly_npeel != 0;
+
   /* We don't peel loops that will be unrolled as this can duplicate a
      loop more times than the user requested.  */
   if (loop->unroll)
@@ -1345,7 +1577,7 @@ try_peel_loop (class loop *loop,
   /* Peel only innermost loops.
      While the code is perfectly capable of peeling non-innermost loops,
      the heuristics would probably need some improvements. */
-  if (loop->inner)
+  if (loop->inner && !readonly_specialization)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: outer loop\n");
@@ -1360,9 +1592,14 @@ try_peel_loop (class loop *loop,
     }
 
   /* Check if there is an estimate on the number of iterations.  */
-  npeel = estimated_loop_iterations_int (loop);
-  if (npeel < 0)
-    npeel = likely_max_loop_iterations_int (loop);
+  if (readonly_specialization)
+    npeel = readonly_npeel - 1;
+  else
+    {
+      npeel = estimated_loop_iterations_int (loop);
+      if (npeel < 0)
+	npeel = likely_max_loop_iterations_int (loop);
+    }
   if (npeel < 0)
     {
       if (dump_file)
@@ -1370,7 +1607,7 @@ try_peel_loop (class loop *loop,
 	         "estimated\n");
       return false;
     }
-  if (maxiter >= 0 && maxiter <= npeel)
+  if (!readonly_specialization && maxiter >= 0 && maxiter <= npeel)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: upper bound is known so can "
@@ -1381,7 +1618,7 @@ try_peel_loop (class loop *loop,
   /* We want to peel estimated number of iterations + 1 (so we never
      enter the loop on quick path).  Check against PARAM_MAX_PEEL_TIMES
      and be sure to avoid overflows.  */
-  if (npeel > param_max_peel_times - 1)
+  if (!readonly_specialization && npeel > param_max_peel_times - 1)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: rolls too much "
@@ -1390,15 +1627,44 @@ try_peel_loop (class loop *loop,
     }
   npeel++;
 
+  /* The readonly object size is only an upper bound on the number of byte
+     states available to the loop.  The loop itself may have a smaller,
+     independently proven upper bound (for example, a two-element pointer
+     array backed by 16 bytes).  Do not let the specialization override that
+     proof: adjust_loop_info_after_peeling requires the precise peel count not
+     to exceed it.  */
+  if (readonly_specialization && loop->any_upper_bound
+      && !wi::leu_p (npeel, loop->nb_iterations_upper_bound))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Not peeling IPA readonly-value loop: requested "
+		 "%i copies exceed known upper bound.\n", (int) npeel);
+      return false;
+    }
+
   /* Check peeled loops size.  */
   tree_estimate_loop_size (loop, exit, NULL, &size,
 			   param_max_peeled_insns);
   if ((peeled_size = estimated_peeled_sequence_size (&size, (int) npeel))
-      > param_max_peeled_insns)
+      > param_max_peeled_insns && !readonly_specialization)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: peeled sequence size is too large "
 		 "(%i insns > --param max-peel-insns)", peeled_size);
+      return false;
+    }
+
+  if (readonly_specialization)
+    readonly_limit = ipa_readonly_peel_growth_limit ();
+  if (readonly_specialization
+      && !ipa_readonly_peel_growth_cost (loop, (unsigned) npeel,
+					readonly_limit, &readonly_growth))
+    {
+      if (dump_file)
+	fprintf (dump_file, "IPA readonly peeling growth budget exhausted: "
+		 "%u of %u units already used.\n",
+		 cfun->ipa_value_specialization_peel_growth,
+		 readonly_limit);
       return false;
     }
 
@@ -1431,6 +1697,18 @@ try_peel_loop (class loop *loop,
       return false;
     }
   free_original_copy_tables ();
+  if (readonly_specialization)
+    {
+      cfun->ipa_value_specialization_peel_growth += readonly_growth;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Peeled IPA readonly-value loop %d, %i times.\n",
+		 loop->num, (int) npeel);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "IPA readonly peeling growth: %u units, "
+		 "%u of %u cumulative.\n", readonly_growth,
+		 cfun->ipa_value_specialization_peel_growth,
+		 readonly_limit);
+    }
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "Peeled loop %d, %i times.\n",

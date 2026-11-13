@@ -645,6 +645,8 @@ cgraph_node::create_virtual_clone (const vec<cgraph_edge *> &redirect_callers,
      ABI support for this.  */
   set_new_clone_decl_and_node_flags (new_node);
   new_node->ipcp_clone = ipcp_clone;
+  new_node->ipa_value_specialized = ipa_value_specialized;
+  new_node->ipa_immutable_program = ipa_immutable_program;
   if (tree_map)
     clone_info::get_create (new_node)->tree_map = tree_map;
   if (!implicit_section)

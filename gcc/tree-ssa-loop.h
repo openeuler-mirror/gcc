@@ -81,4 +81,6 @@ loop_containing_stmt (gimple *stmt)
   return bb->loop_father;
 }
 
+extern bool bitset_store_coalescing_candidate_p (class loop *);
+
 #endif /* GCC_TREE_SSA_LOOP_H */

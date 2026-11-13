@@ -1279,3 +1279,51 @@ Common Joined UInteger Var(param_small_memcmp_equality_outline) Init(0) IntegerR
 Diagnostic equality strategy: inline, external bounded helper, external byte loop.
 
 ; This comment is to ensure we retain the blank line above.
+
+-param=ipa-value-specialization-clone-growth-budget=
+Common Joined UInteger Var(param_ipa_immutable_clone_growth_budget) Init(32768) IntegerRange(0, 2147483647) Param Optimization
+Maximum extra estimated IPA clone instructions for repeated bounded immutable programs.
+
+-param=ipa-value-specialization-loop-growth-budget=
+Common Joined UInteger Var(param_ipa_loop_value_clone_growth_budget) Init(131072) IntegerRange(0, 2147483647) Param Optimization
+Maximum extra estimated IPA clone instructions for immutable values in static loop contexts.
+
+-param=ipa-value-specialization-cold-growth-budget=
+Common Joined UInteger Var(param_ipa_cold_immutable_growth_budget) Init(1024) IntegerRange(0, 65536) Param Optimization
+Independent estimated instruction budget for statically cold immutable clones.
+
+-param=ipa-value-specialization-helper-growth-limit=
+Common Joined UInteger Var(param_ipa_value_specialization_helper_growth_limit) Init(1200) IntegerRange(0, 2147483647) Param Optimization
+Maximum estimated edge growth for basic immutable helper inlining.
+
+-param=ipa-value-specialization-helper-size-limit=
+Common Joined UInteger Var(param_ipa_value_specialization_helper_size_limit) Init(4096) IntegerRange(0, 2147483647) Param Optimization
+Maximum resulting caller size for basic immutable helper inlining.
+
+-param=ipa-value-specialization-helper-expanded-growth-limit=
+Common Joined UInteger Var(param_ipa_value_specialization_helper_expanded_growth_limit) Init(4096) IntegerRange(0, 2147483647) Param Optimization
+Maximum estimated edge growth for expanded immutable helper inlining.
+
+-param=ipa-value-specialization-helper-expanded-size-limit=
+Common Joined UInteger Var(param_ipa_value_specialization_helper_expanded_size_limit) Init(65536) IntegerRange(0, 2147483647) Param Optimization
+Maximum resulting caller size for expanded immutable helper inlining.
+
+-param=ipa-value-specialization-peel-growth-budget=
+Common Joined UInteger Var(param_ipa_value_specialization_peel_growth_budget) Init(524288) IntegerRange(0, 2147483647) Param Optimization
+Minimum cumulative estimated growth allowance for IPA readonly loop peeling in one function. Zero disables this route.
+
+-param=ipa-value-specialization-peel-growth-percent=
+Common Joined UInteger Var(param_ipa_value_specialization_peel_growth_percent) Init(800) IntegerRange(0, 10000) Param Optimization
+Additional copied cost allowance as a percentage of the function cost before its first IPA readonly peel. Zero uses only the fixed allowance.
+
+-param=ipa-immutable-clone-growth-budget=
+Common Joined Alias(-param=ipa-value-specialization-clone-growth-budget=)
+Compatibility spelling of --param=ipa-value-specialization-clone-growth-budget=.
+
+-param=ipa-loop-value-clone-growth-budget=
+Common Joined Alias(-param=ipa-value-specialization-loop-growth-budget=)
+Compatibility spelling of --param=ipa-value-specialization-loop-growth-budget=.
+
+-param=ipa-cold-immutable-growth-budget=
+Common Joined Alias(-param=ipa-value-specialization-cold-growth-budget=)
+Compatibility spelling of --param=ipa-value-specialization-cold-growth-budget=.

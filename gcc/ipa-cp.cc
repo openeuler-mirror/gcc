@@ -155,6 +155,13 @@ static profile_count base_count;
 
 static long overall_size, orig_overall_size;
 
+/* Additional clones accepted by the immutable-program profitability model.  */
+static unsigned immutable_clone_growth;
+
+/* Independent reserve for bounded, statically cold immutable values.  */
+static unsigned cold_immutable_clone_growth;
+static unsigned immutable_loop_clone_growth;
+
 /* Node name to unique clone suffix number map.  */
 static hash_map<const char *, unsigned> *clone_num_suffixes;
 
@@ -222,6 +229,215 @@ values_equal_for_ipcp_p (tree x, tree y)
 			       DECL_INITIAL (TREE_OPERAND (y, 0)), 0);
   else
     return operand_equal_p (x, y, 0);
+}
+
+/* Return a complete, foldable constant initializer, loading an LTO
+   constructor on demand.  Keep the usual volatility and symbol replacement
+   rules; a declaration's readonly bit alone does not establish those facts.  */
+
+static tree
+ipcp_readonly_constant_initializer (tree object)
+{
+  if (TREE_CODE (object) == STRING_CST)
+    return object;
+  if ((TREE_CODE (object) != VAR_DECL && TREE_CODE (object) != CONST_DECL)
+      || TREE_THIS_VOLATILE (object)
+      || !(TREE_READONLY (object)
+	   || (TREE_CODE (object) == VAR_DECL
+	       && DECL_IN_CONSTANT_POOL (object))))
+    return NULL_TREE;
+
+  tree initial = ctor_for_folding (object);
+  if (!initial || initial == error_mark_node || !TREE_CONSTANT (initial))
+    return NULL_TREE;
+  return initial;
+}
+
+/* This is a profitability hint; subsequent scalar folding must still
+   satisfy its ordinary semantic checks.  */
+
+static bool
+ipcp_readonly_constant_address_p (tree value)
+{
+  if (TREE_CODE (value) != ADDR_EXPR)
+    return false;
+
+  tree object = TREE_OPERAND (value, 0);
+  while (handled_component_p (object))
+    object = TREE_OPERAND (object, 0);
+  return ipcp_readonly_constant_initializer (object) != NULL_TREE;
+}
+
+static bool
+ipcp_readonly_constant_address_p (ipa_polymorphic_call_context)
+{
+  return false;
+}
+
+/* Return the visible initializer length for a string, otherwise the known
+   object size, or zero when neither is known.  A partially initialized array
+   can therefore yield fewer bytes than its type size.  This is a profitability
+   hint and does not prove a loop trip count.  */
+
+static unsigned HOST_WIDE_INT
+ipcp_readonly_constant_object_size (tree value)
+{
+  if (TREE_CODE (value) != ADDR_EXPR)
+    return 0;
+
+  tree object = TREE_OPERAND (value, 0);
+  while (handled_component_p (object))
+    object = TREE_OPERAND (object, 0);
+
+  tree initial = ipcp_readonly_constant_initializer (object);
+  if (!initial)
+    return 0;
+  if (initial && TREE_CODE (initial) == STRING_CST)
+    return TREE_STRING_LENGTH (initial);
+
+  if (TREE_TYPE (object)
+      && TYPE_SIZE_UNIT (TREE_TYPE (object))
+      && tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (object))))
+    return tree_to_uhwi (TYPE_SIZE_UNIT (TREE_TYPE (object)));
+  return 0;
+}
+
+static unsigned HOST_WIDE_INT
+ipcp_readonly_constant_object_size (ipa_polymorphic_call_context)
+{
+  return 0;
+}
+
+/* Return true when VALUE is a bounded immutable byte program and the
+   corresponding parameter controls predicates in the callee.  Specializing
+   such a value exposes constant loads and bounded control flow to scalar
+   passes without depending on symbol names or literal contents.  */
+
+static bool
+ipcp_readonly_program_p (cgraph_node *node, int index,
+			 ipcp_value<tree> *value)
+{
+  if (!opt_for_fn (node->decl, flag_ipa_value_specialization))
+    return false;
+  ipa_node_params *info = ipa_node_params_sum->get (node);
+  if (!ipa_is_param_used_by_ipa_predicates (info, index))
+    return false;
+
+  const unsigned HOST_WIDE_INT max_program_size = 64;
+  unsigned HOST_WIDE_INT object_size
+    = ipcp_readonly_constant_object_size (value->value);
+  return object_size >= 2 && object_size <= max_program_size;
+}
+
+static bool
+ipcp_readonly_program_p (cgraph_node *, int,
+			 ipcp_value<ipa_polymorphic_call_context> *)
+{
+  return false;
+}
+
+/* This admission rule changes profitability only.  A complete immutable byte
+   object and an IPA predicate dependency suggest folding potential, but do not
+   prove a trip count, non-aliasing, or absence of exceptions.  Normal IPA-CP
+   edge validation and clone materialization retain those semantic obligations.
+   Reject offsets, mutable/interposable storage, recursive SCCs and large
+   fan-in.  No profile frequencies are changed.  */
+static bool
+ipcp_bounded_cold_immutable_p (cgraph_node *node, int index,
+			      HOST_WIDE_INT offset, ipcp_value<tree> *val,
+			      int callers)
+{
+  ipa_node_params *info = ipa_node_params_sum->get (node);
+  if (!opt_for_fn (node->decl, flag_ipa_value_specialization)
+      || !opt_for_fn (node->decl, flag_ipa_bounded_cold_immutable_specialization)
+      || offset != -1 || callers < 1 || callers > 4
+      || info->node_within_scc || val->self_recursion_generated_p ()
+      || val->local_size_cost <= 0 || val->local_size_cost > 128
+      || !ipa_is_param_used_by_ipa_predicates (info, index)
+      || TREE_CODE (val->value) != ADDR_EXPR)
+    return false;
+  tree obj = TREE_OPERAND (val->value, 0);
+  tree init = obj;
+  if (TREE_CODE (obj) == VAR_DECL)
+    {
+      if (!TREE_READONLY (obj) || TREE_THIS_VOLATILE (obj)
+	  || DECL_EXTERNAL (obj) || TREE_PUBLIC (obj))
+	return false;
+      init = ipcp_readonly_constant_initializer (obj);
+      if (!init || !TYPE_SIZE_UNIT (TREE_TYPE (obj))
+	  || !tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (obj)))
+	  || TREE_CODE (init) != STRING_CST
+	  || tree_to_uhwi (TYPE_SIZE_UNIT (TREE_TYPE (obj)))
+	     != (unsigned) TREE_STRING_LENGTH (init))
+	return false;
+    }
+  else if (TREE_CODE (obj) != STRING_CST)
+    return false;
+  if (TREE_CODE (TREE_TYPE (init)) != ARRAY_TYPE
+      || !INTEGRAL_TYPE_P (TREE_TYPE (TREE_TYPE (init)))
+      || TYPE_PRECISION (TREE_TYPE (TREE_TYPE (init))) != BITS_PER_UNIT
+      || TREE_STRING_LENGTH (init) < 2 || TREE_STRING_LENGTH (init) > 64)
+    return false;
+  unsigned limit = opt_for_fn (node->decl,
+			       param_ipa_cold_immutable_growth_budget);
+  unsigned cost = val->local_size_cost;
+  return cost <= limit && cold_immutable_clone_growth <= limit - cost;
+}
+
+static bool
+ipcp_bounded_cold_immutable_p (cgraph_node *, int, HOST_WIDE_INT,
+			      ipcp_value<ipa_polymorphic_call_context> *, int)
+{
+  return false;
+}
+
+/* IPA's generic estimate assigns the same unit benefit to most constant
+   pointer values.  An immutable object address is richer: after cloning,
+   loads at constant offsets can fold and remove the control flow they feed.
+   Account for that downstream simplification without lowering the global
+   IPA-CP threshold.  */
+
+static sreal
+ipcp_value_specialization_time_benefit (cgraph_node *node, tree value,
+					 sreal benefit)
+{
+  if (opt_for_fn (node->decl, flag_ipa_value_specialization)
+      && ipcp_readonly_constant_address_p (value))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Adjusting immutable value benefit for %s.\n",
+		 node->dump_name ());
+      return benefit * 5 / 4;
+    }
+  return benefit;
+}
+
+static sreal
+ipcp_value_specialization_time_benefit (cgraph_node *,
+					 ipa_polymorphic_call_context,
+					sreal benefit)
+{
+  return benefit;
+}
+
+/* Return true when VALUES already contains an immutable constant object
+   address.  A later ordinary value must not make the lattice fall back to the
+   small scalar budget and discard the high-value entries already collected.  */
+
+static bool
+ipcp_values_contain_readonly_constant_address_p (ipcp_value<tree> *values)
+{
+  for (ipcp_value<tree> *value = values; value; value = value->next)
+    if (ipcp_readonly_constant_address_p (value->value))
+      return true;
+  return false;
+}
+
+static bool
+ipcp_values_contain_readonly_constant_address_p (
+  ipcp_value<ipa_polymorphic_call_context> *)
+{
+  return false;
 }
 
 /* Print V which is extracted from a value in a lattice to F.  */
@@ -428,13 +644,13 @@ determine_versionability (struct cgraph_node *node,
     for (cgraph_edge *edge = node->callees; !reason && edge;
 	 edge = edge->next_callee)
       if (fndecl_built_in_p (edge->callee->decl, BUILT_IN_NORMAL))
-        {
+	{
 	  if (DECL_FUNCTION_CODE (edge->callee->decl) == BUILT_IN_VA_ARG_PACK)
 	    reason = "external function which calls va_arg_pack";
 	  if (DECL_FUNCTION_CODE (edge->callee->decl)
 	      == BUILT_IN_VA_ARG_PACK_LEN)
 	    reason = "external function which calls va_arg_pack_len";
-        }
+	}
 
   if (reason && dump_file && !node->alias && !node->thunk)
     fprintf (dump_file, "Function %s is not versionable, reason: %s.\n",
@@ -2031,8 +2247,18 @@ ipcp_lattice<valtype>::add_value (valtype newval, cgraph_edge *cs,
 	return false;
       }
 
-  if (!same_lat_gen_level && values_count >= opt_for_fn (cs->callee->decl,
-						param_ipa_cp_value_list_size))
+  int value_limit = opt_for_fn (cs->callee->decl,
+				param_ipa_cp_value_list_size);
+  /* Preserve useful immutable addresses with a larger limit for this entire
+     lattice, including ordinary pointer values arriving later.  There is no
+     separate immutable-entry quota.  The decision depends on value properties,
+     independently of symbol names or literal contents.  */
+  if (opt_for_fn (cs->callee->decl, flag_ipa_value_specialization)
+      && (ipcp_readonly_constant_address_p (newval)
+	  || ipcp_values_contain_readonly_constant_address_p (values)))
+    value_limit = MAX (value_limit, 4096);
+
+  if (!same_lat_gen_level && values_count >= value_limit)
     {
       /* We can only free sources, not the values themselves, because sources
 	 of other values in this SCC might point to them.   */
@@ -3499,7 +3725,14 @@ get_max_overall_size (cgraph_node *node)
     max_new_size = large_unit;
   int unit_growth = opt_for_fn (node->decl, param_ipa_cp_unit_growth);
   max_new_size += max_new_size * unit_growth / 100 + 1;
-  return max_new_size;
+  /* Charge loop-context experiments to their bounded reserve.  They must
+     not consume the ordinary unit-growth allowance and displace established
+     cloning opportunities.  With the option disabled the reserve is zero.  */
+  long reserve = (long) immutable_loop_clone_growth
+		 + (long) cold_immutable_clone_growth;
+  if (max_new_size > LONG_MAX - reserve)
+    return LONG_MAX;
+  return max_new_size + reserve;
 }
 
 /* Return true if NODE should be cloned just for a parameter removal, possibly
@@ -4023,8 +4256,8 @@ ipcp_propagate_stage (class ipa_topo_info *topo)
 	&& opt_for_fn (node->decl, flag_ipa_cp)
 	&& opt_for_fn (node->decl, optimize))
       {
-        ipa_node_params *info = ipa_node_params_sum->get (node);
-        determine_versionability (node, info);
+	ipa_node_params *info = ipa_node_params_sum->get (node);
+	determine_versionability (node, info);
 
 	unsigned nlattices = ipa_get_param_count (info);
 	info->lattices.safe_grow_cleared (nlattices, true);
@@ -4810,8 +5043,8 @@ update_profiling_info (struct cgraph_node *orig_node,
 		 are still unmodified copies of ORIG_NODE's.  Just clear
 		 the latter and bail out.  */
 	      profile_count zero;
-              if (opt_for_fn (orig_node->decl, flag_profile_partial_training))
-                zero = profile_count::zero ().guessed_local ();
+	      if (opt_for_fn (orig_node->decl, flag_profile_partial_training))
+		zero = profile_count::zero ().guessed_local ();
 	      else
 		zero = profile_count::adjusted_zero ();
 	      orig_node->count = zero;
@@ -5080,9 +5313,9 @@ want_remove_some_param_p (cgraph_node *node, vec<tree> known_csts)
        {
 	 clone_info *info = clone_info::get (node);
 	 if (!info || !info->param_adjustments)
-           return true;
+	   return true;
 	 info->param_adjustments->get_surviving_params (&surviving);
-         filled_vec = true;
+	 filled_vec = true;
        }
       if (surviving.length() < (unsigned) i &&  surviving[i])
        return true;
@@ -5867,6 +6100,80 @@ ipcp_val_agg_replacement_ok_p (vec<ipa_argagg_value, va_gc> *,
   return offset == -1;
 }
 
+/* A single source call may execute repeatedly even though its immutable
+   argument has only one incoming edge.  Recognize a local loop, or a loop
+   calling one of two wrapper levels.  This is a static profitability hint:
+   ordinary cloning legality remains in force, with a separately bounded
+   growth reserve.
+   Bound wrapper exploration and reject recursive or cold edges.  */
+
+static bool
+ipcp_edge_in_loop_context_p (cgraph_edge *edge, unsigned depth,
+			    unsigned &examined, bool ordinary_context,
+			    bool recursive_context)
+{
+  if (++examined > 16 || !ipa_call_summaries
+      || edge->recursive_p () || !edge->maybe_hot_p ())
+    return false;
+  ipa_node_params *caller_info = ipa_node_params_sum->get (edge->caller);
+  ipa_node_params *callee_info = ipa_node_params_sum->get (edge->callee);
+  /* Specializing a nonrecursive leaf does not unfold its recursive
+     controller.  Accept only an actual loop in that controller, never
+     recursion alone, and never traverse its SCC.  Keep recursive callees
+     and recursive call edges excluded.  The caller's constant argument
+     and all ordinary IPA cloning legality checks still apply.  */
+  if (callee_info && callee_info->node_within_scc)
+    return false;
+  bool recursive_caller = caller_info && caller_info->node_within_scc;
+  ipa_call_summary *summary = ipa_call_summaries->get (edge);
+  if (summary && summary->loop_depth)
+    {
+      if (recursive_caller && recursive_context)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, "Recursive caller loop context for immutable value.\n");
+	  return true;
+	}
+      if (!recursive_caller && ordinary_context)
+	return true;
+    }
+  if (!depth || recursive_caller)
+    return false;
+  for (cgraph_edge *incoming = edge->caller->callers; incoming;
+       incoming = incoming->next_caller)
+    {
+      if (examined >= 16)
+	break;
+      if (incoming->caller != edge->callee
+	  && ipcp_edge_in_loop_context_p (incoming, depth - 1, examined,
+					    ordinary_context, recursive_context))
+	return true;
+    }
+  return false;
+}
+
+template <typename valtype>
+static bool
+ipcp_value_in_loop_context_p (ipcp_value<valtype> *value, cgraph_node *node,
+			      bool shared_context)
+{
+  for (ipcp_value_source<valtype> *src = value->sources; src; src = src->next)
+    for (cgraph_edge *edge = src->cs; edge;
+	 edge = get_next_cgraph_edge_clone (edge))
+      if (cgraph_edge_brings_value_p (edge, src, node, value))
+	{
+	  unsigned examined = 0;
+	  if (ipcp_edge_in_loop_context_p
+		(edge, 2, examined,
+		 (opt_for_fn (node->decl, flag_ipa_loop_value_specialization)
+		  || shared_context),
+		 (opt_for_fn (node->decl, flag_ipa_loop_value_specialization)
+		  || shared_context)))
+	    return true;
+	}
+  return false;
+}
+
 /* Decide whether to create a special version of NODE for value VAL of
    parameter at the given INDEX.  If OFFSET is -1, the value is for the
    parameter itself, otherwise it is stored at the given OFFSET of the
@@ -5880,7 +6187,7 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
 		    ipcp_value<valtype> *val, ipa_auto_call_arg_values *avals,
 		    vec<cgraph_node *> *self_gen_clones)
 {
-  int caller_count;
+  int caller_count = 0;
   sreal freq_sum;
   profile_count count_sum, rec_count_sum;
   vec<cgraph_edge *> callers;
@@ -5890,7 +6197,12 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
       perhaps_add_new_callers (node, val);
       return false;
     }
-  else if (val->local_size_cost + overall_size > get_max_overall_size (node))
+  bool unit_exhausted
+    = val->local_size_cost + overall_size > get_max_overall_size (node);
+  if (unit_exhausted
+      && !opt_for_fn (node->decl, flag_ipa_loop_value_specialization)
+      && !opt_for_fn (node->decl, flag_ipa_shared_loop_value_specialization)
+      && !opt_for_fn (node->decl, flag_ipa_bounded_cold_immutable_specialization))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "   Ignoring candidate value because "
@@ -5898,9 +6210,15 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
 		 val->local_size_cost + overall_size);
       return false;
     }
-  else if (!get_info_about_necessary_edges (val, node, &freq_sum, &caller_count,
-					    &rec_count_sum, &count_sum))
+  bool hot = get_info_about_necessary_edges (val, node, &freq_sum,
+					      &caller_count, &rec_count_sum,
+					      &count_sum);
+  bool budgeted_cold = (!hot
+		       && ipcp_bounded_cold_immutable_p (node, index, offset,
+							val, caller_count));
+  if (!hot && !budgeted_cold)
     return false;
+
 
   if (!dbg_cnt (ipa_cp_values))
     return false;
@@ -5932,14 +6250,83 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
       if (offset != -1)
 	fprintf (dump_file, ", offset: " HOST_WIDE_INT_PRINT_DEC, offset);
       fprintf (dump_file, " (caller_count: %i)\n", caller_count);
+      if (opt_for_fn (node->decl, flag_ipa_value_specialization))
+	{
+	  unsigned HOST_WIDE_INT object_size
+	    = ipcp_readonly_constant_object_size (val->value);
+	  if (object_size)
+	    fprintf (dump_file, "   immutable object size: "
+		     HOST_WIDE_INT_PRINT_UNSIGNED " bytes\n", object_size);
+	}
     }
 
-  if (!good_cloning_opportunity_p (node, val->local_time_benefit,
-				   freq_sum, count_sum,
-				   val->local_size_cost)
-      && !good_cloning_opportunity_p (node, val->prop_time_benefit,
-				      freq_sum, count_sum, val->prop_size_cost))
+  sreal local_time_benefit
+    = ipcp_value_specialization_time_benefit (node, val->value,
+					       val->local_time_benefit);
+  sreal prop_time_benefit
+    = ipcp_value_specialization_time_benefit (node, val->value,
+					       val->prop_time_benefit);
+
+  bool readonly_program = ipcp_readonly_program_p (node, index, val);
+  /* Multiple callers sharing one immutable value need only one clone.  Do
+     not exclude that value from the loop reserve merely because it also has
+     another source edge.  At least one statically hot loop context must be
+     present; the existing reserve charges the clone once, not per caller.  */
+  bool shared_loop_candidate
+    = (caller_count >= 2
+       && opt_for_fn (node->decl, flag_ipa_shared_loop_value_specialization));
+  bool single_loop_candidate
+    = (caller_count == 1
+       && opt_for_fn (node->decl, flag_ipa_loop_value_specialization));
+  bool loop_program = (readonly_program
+		       && (single_loop_candidate || shared_loop_candidate)
+		       && ipcp_value_in_loop_context_p (val, node,
+						shared_loop_candidate));
+  if (unit_exhausted && !loop_program && !budgeted_cold)
     return false;
+  bool profitable
+    = (!unit_exhausted
+       && (good_cloning_opportunity_p (node, local_time_benefit,
+				  freq_sum, count_sum, val->local_size_cost)
+       || good_cloning_opportunity_p (node, prop_time_benefit,
+				      freq_sum, count_sum, val->prop_size_cost)));
+  /* Ordinary IPA predicates cannot model constant states reached only after
+     interpreting a byte array.  Explore small, repeated immutable programs
+     under a profitability budget within the normal unit-size limit.  Loop
+     contexts use a separately charged reserve so they do not displace
+     these opportunities.  All cloning legality checks remain in force.  This is a profitability estimate,
+     never a claim that the object size proves a loop's iteration count.  */
+  bool budgeted = false;
+  bool budgeted_loop = false;
+  if (!profitable && !budgeted_cold)
+    {
+      unsigned limit = opt_for_fn (node->decl,
+				  param_ipa_immutable_clone_growth_budget);
+      budgeted = (!unit_exhausted
+		  && opt_for_fn (node->decl, flag_ipa_immutable_clone_budget)
+		  && readonly_program
+		  && caller_count >= 2 && val->local_size_cost > 0
+		  && val->local_size_cost <= 512
+		  && (unsigned) val->local_size_cost <= limit
+		  && immutable_clone_growth
+		     <= limit - (unsigned) val->local_size_cost);
+      if (!budgeted)
+	{
+	  unsigned loop_limit
+	    = opt_for_fn (node->decl, param_ipa_loop_value_clone_growth_budget);
+	  budgeted_loop = (loop_program && val->local_size_cost > 0
+			   && val->local_size_cost <= 512
+			   && (unsigned) val->local_size_cost <= loop_limit
+			   && immutable_loop_clone_growth
+			      <= loop_limit - (unsigned) val->local_size_cost);
+	  if (!budgeted_loop)
+	    return false;
+	}
+    }
+
+  if (dump_file && loop_program && shared_loop_candidate && budgeted_loop)
+    fprintf (dump_file, "Budgeted shared loop value clone for %u callers.\n",
+	     caller_count);
 
   if (dump_file)
     fprintf (dump_file, "  Creating a specialized node of %s.\n",
@@ -5960,15 +6347,75 @@ decide_about_value (struct cgraph_node *node, int index, HOST_WIDE_INT offset,
   find_more_contexts_for_caller_subset (node, &known_contexts, callers);
   vec<ipa_argagg_value, va_gc> *aggvals
     = find_aggregate_values_for_callers_subset (node, callers);
+  /* Record candidate context before inlining decisions.  This does not prove
+     that the clone will be inlined; tree consumers recheck their own loops.  */
+  if (readonly_program)
+    for (unsigned int i = 0; i < callers.length (); ++i)
+      {
+	cgraph_node *caller = callers[i]->caller;
+	caller->ipa_value_specialized = true;
+	if (dump_file && (dump_flags & TDF_DETAILS))
+	  fprintf (dump_file, "Recording immutable value context for %s.\n",
+		   caller->dump_name ());
+      }
   gcc_checking_assert (ipcp_val_agg_replacement_ok_p (aggvals, index,
 						      offset, val->value));
   val->spec_node = create_specialized_node (node, known_csts, known_contexts,
 					    aggvals, callers);
 
+  /* Keep the proven immutable context on every byte-program clone, including
+     single-use mandatory-inline candidates.  The context marker records clone
+     provenance; the choice to share a clone or relax its inline limits is a
+     separate profitability policy.  */
+  if (readonly_program)
+    {
+      val->spec_node->ipa_immutable_program = true;
+      if (opt_for_fn (node->decl, flag_ipa_value_specialization)
+	  && (callers.length () >= 2 || loop_program))
+	{
+	  if (dump_file)
+	    {
+	      if (loop_program)
+		fprintf (dump_file, "Retaining immutable loop-call clone.\n");
+	      else
+		fprintf (dump_file, "Sharing immutable program across %u calls.\n",
+			 callers.length ());
+	    }
+	}
+      else
+	DECL_DISREGARD_INLINE_LIMITS (val->spec_node->decl) = 1;
+    }
+
   if (val->self_recursion_generated_p ())
     self_gen_clones->safe_push (val->spec_node);
   else
     update_profiling_info (node, val->spec_node);
+
+  if (budgeted_cold)
+    {
+      cold_immutable_clone_growth += val->local_size_cost;
+      if (dump_file)
+	fprintf (dump_file, "Bounded cold immutable clone: cost %d, "
+		 "%u estimated instructions used, %d source edges.\n",
+		 val->local_size_cost, cold_immutable_clone_growth,
+		 caller_count);
+    }
+
+  if (budgeted)
+    {
+      immutable_clone_growth += val->local_size_cost;
+      if (dump_file)
+	fprintf (dump_file, "Budgeted immutable clone: %u estimated "
+		 "instructions used.\n", immutable_clone_growth);
+    }
+
+  if (budgeted_loop)
+    {
+      immutable_loop_clone_growth += val->local_size_cost;
+      if (dump_file)
+	fprintf (dump_file, "Budgeted loop value clone: %u estimated "
+		 "instructions used.\n", immutable_loop_clone_growth);
+    }
 
   callers.release ();
   overall_size += val->local_size_cost;
@@ -6031,6 +6478,13 @@ decide_whether_version_node (struct cgraph_node *node)
       if (!lat->bottom
 	  && !avals.m_known_vals[i])
 	{
+	  struct cold_candidate
+	  {
+	    ipcp_value<tree> *value;
+	    sreal frequency;
+	    unsigned order;
+	  };
+	  auto_vec<cold_candidate> deferred;
 	  ipcp_value<tree> *val;
 	  for (val = lat->values; val; val = val->next)
 	    {
@@ -6056,9 +6510,40 @@ decide_whether_version_node (struct cgraph_node *node)
 		    }
 		  continue;
 		}
+	      /* Keep normal candidate ordering.  Only the new cold fallback
+		 is deferred, so a small reserve is not assigned by lattice
+		 insertion order.  Frequencies remain estimates, not profiles.  */
+	      if (!val->spec_node
+		  && opt_for_fn (node->decl,
+			 flag_ipa_bounded_cold_immutable_specialization))
+		{
+		  int sources = 0;
+		  sreal frequency;
+		  profile_count recursive, nonrecursive;
+		  bool hot = get_info_about_necessary_edges (val, node,
+				 &frequency, &sources, &recursive, &nonrecursive);
+		  if (!hot && ipcp_bounded_cold_immutable_p (node, i, -1,
+							 val, sources))
+		    {
+		      cold_candidate c = {val, frequency, deferred.length ()};
+		      deferred.safe_push (c);
+		      continue;
+		    }
+		}
 	      ret |= decide_about_value (node, i, -1, val, &avals,
 					 &self_gen_clones);
 	    }
+	  deferred.qsort ([] (const void *a, const void *b) -> int
+	    {
+	      const cold_candidate *x = (const cold_candidate *) a;
+	      const cold_candidate *y = (const cold_candidate *) b;
+	      if (x->frequency != y->frequency)
+		return x->frequency > y->frequency ? -1 : 1;
+	      return x->order < y->order ? -1 : x->order > y->order;
+	    });
+	  for (const cold_candidate &c : deferred)
+	    ret |= decide_about_value (node, i, -1, c.value, &avals,
+				       &self_gen_clones);
 	}
 
       if (!plats->aggs_bottom)
@@ -6419,6 +6904,9 @@ ipcp_store_vr_results (void)
 static unsigned int
 ipcp_driver (void)
 {
+  immutable_clone_growth = 0;
+  cold_immutable_clone_growth = 0;
+  immutable_loop_clone_growth = 0;
   class ipa_topo_info topo;
 
   if (edge_clone_summaries == NULL)
