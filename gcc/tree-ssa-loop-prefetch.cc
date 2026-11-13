@@ -48,6 +48,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-data-ref.h"
 #include "diagnostic-core.h"
 #include "dbgcnt.h"
+#include "tree-parloops.h"
 
 /* This pass inserts prefetch instructions to optimize cache usage during
    accesses to arrays in loops.  It processes loops sequentially and:
@@ -1243,7 +1244,7 @@ issue_prefetches (struct mem_ref_group *groups,
    can be used.  */
 
 static bool
-nontemporal_store_p (struct mem_ref *ref)
+nontemporal_store_p (struct mem_ref *ref, bool nontemporal_store_analysis_p)
 {
   machine_mode mode;
   enum insn_code code;
@@ -1262,6 +1263,20 @@ nontemporal_store_p (struct mem_ref *ref)
     return false;
 
   code = optab_handler (storent_optab, mode);
+
+  /* If there is no nontemporal store instruction for the current scalar mode,
+     then try to get the preferred SIMD (vector) mode for this scalar type
+     and check if there is a corresponding nontemporal store instruction.  */
+  if (nontemporal_store_analysis_p && code == CODE_FOR_nothing
+      && is_a<scalar_mode> (mode))
+    {
+      scalar_mode smode = as_a<scalar_mode> (mode);
+      machine_mode simd_mode = targetm.vectorize.preferred_simd_mode (smode);
+
+      if (VECTOR_MODE_P (simd_mode))
+	code = optab_handler (storent_optab, simd_mode);
+    }
+
   return code != CODE_FOR_nothing;
 }
 
@@ -1269,9 +1284,9 @@ nontemporal_store_p (struct mem_ref *ref)
    and return true.  Otherwise, we return false.  */
 
 static bool
-mark_nontemporal_store (struct mem_ref *ref)
+mark_nontemporal_store (struct mem_ref *ref, bool nontemporal_store_analysis_p)
 {
-  if (!nontemporal_store_p (ref))
+  if (!nontemporal_store_p (ref, nontemporal_store_analysis_p))
     return false;
 
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -1343,7 +1358,8 @@ may_use_storent_in_loop_p (class loop *loop)
    references in the loop.  */
 
 static void
-mark_nontemporal_stores (class loop *loop, struct mem_ref_group *groups)
+mark_nontemporal_stores (class loop *loop, struct mem_ref_group *groups,
+			 bool nontemporal_store_analysis_p)
 {
   struct mem_ref *ref;
   bool any = false;
@@ -1353,9 +1369,12 @@ mark_nontemporal_stores (class loop *loop, struct mem_ref_group *groups)
 
   for (; groups; groups = groups->next)
     for (ref = groups->refs; ref; ref = ref->next)
-      any |= mark_nontemporal_store (ref);
+      any |= mark_nontemporal_store (ref, nontemporal_store_analysis_p);
 
-  if (any && FENCE_FOLLOWING_MOVNT != NULL_TREE)
+  /* Avoid inserting excessive fence instructions, insert only in the aprefetch2
+     pass.  */
+  if (!nontemporal_store_analysis_p && any
+      && FENCE_FOLLOWING_MOVNT != NULL_TREE)
     emit_mfence_after_loop (loop);
 }
 
@@ -1645,6 +1664,11 @@ determine_loop_nest_reuse (class loop *loop, struct mem_ref_group *refs,
 
       aloop = vloops[i];
       vol = estimated_stmt_executions_int (aloop);
+
+      if (vol == -1 && flag_non_temporal_store
+	  && flag_openmp && parallelized_function_p (cfun->decl))
+	vol = get_const_niters_from_omp_outlined (aloop);
+
       if (vol == -1)
 	vol = expected_loop_iterations (aloop);
       volume *= vol;
@@ -1826,7 +1850,7 @@ mem_ref_count_reasonable_p (unsigned ninsns, unsigned mem_ref_count)
   if (insn_to_mem_ratio < param_prefetch_min_insn_to_mem_ratio)
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
-        fprintf (dump_file,
+	fprintf (dump_file,
 		 "Not prefetching -- instruction to memory reference ratio (%d) too small\n",
 		 insn_to_mem_ratio);
       return false;
@@ -1877,7 +1901,7 @@ insn_to_prefetch_ratio_too_small_p (unsigned ninsns, unsigned prefetch_count,
    true if the LOOP was unrolled.  */
 
 static bool
-loop_prefetch_arrays (class loop *loop)
+loop_prefetch_arrays (class loop *loop, bool nontemporal_store_analysis_p)
 {
   struct mem_ref_group *refs;
   unsigned ahead, ninsns, time, unroll_factor;
@@ -1918,7 +1942,8 @@ loop_prefetch_arrays (class loop *loop)
   /* Give up prefetching if the number of memory references in the
      loop is not reasonable based on profitablity and compilation time
      considerations.  */
-  if (!mem_ref_count_reasonable_p (ninsns, mem_ref_count))
+  if (!nontemporal_store_analysis_p
+      && !mem_ref_count_reasonable_p (ninsns, mem_ref_count))
     goto fail;
 
   /* Step 2: estimate the reuse effects.  */
@@ -1948,11 +1973,17 @@ loop_prefetch_arrays (class loop *loop)
 
   /* Prefetching is not likely to be profitable if the instruction to prefetch
      ratio is too small.  */
-  if (insn_to_prefetch_ratio_too_small_p (ninsns, prefetch_count,
-					  unroll_factor))
+  if (!nontemporal_store_analysis_p
+      && insn_to_prefetch_ratio_too_small_p (ninsns, prefetch_count,
+					   unroll_factor))
     goto fail;
 
-  mark_nontemporal_stores (loop, refs);
+  mark_nontemporal_stores (loop, refs, nontemporal_store_analysis_p);
+
+  /* The first pass only marks NT candidates.  In the second pass,
+     software prefetching and loop unrolling require array prefetching.  */
+  if (nontemporal_store_analysis_p || flag_prefetch_loop_arrays <= 0)
+    goto fail;
 
   /* Step 4: what to prefetch?  */
   if (!schedule_prefetches (refs, unroll_factor, ahead))
@@ -1974,10 +2005,32 @@ fail:
   return unrolled;
 }
 
+/* Cancel the nontemporal store marked in aprefetch1 pass.  */
+void
+unset_nontemporal_move (void)
+{
+  basic_block bb;
+  gimple_stmt_iterator bsi;
+  gimple *stmt;
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      for (bsi = gsi_start_bb (bb); !gsi_end_p (bsi); gsi_next (&bsi))
+	{
+	  stmt = gsi_stmt (bsi);
+	  if (!is_gimple_assign (stmt))
+	    continue;
+
+	  gassign *assign_stmt = as_a<gassign *> (stmt);
+	  if (gimple_assign_nontemporal_move_p (assign_stmt))
+	    gimple_assign_set_nontemporal_move (assign_stmt, false);
+	}
+    }
+}
+
 /* Issue prefetch instructions for array references in loops.  */
 
 unsigned int
-tree_ssa_prefetch_arrays (void)
+tree_ssa_prefetch_arrays (bool nontemporal_store_analysis_p)
 {
   bool unrolled = false;
   int todo_flags = 0;
@@ -2023,12 +2076,20 @@ tree_ssa_prefetch_arrays (void)
       set_builtin_decl (BUILT_IN_PREFETCH, decl, false);
     }
 
+  /* In the aprefetch1 pass, stmts that are successfully analyzed are marked
+     with nontemporal store, but no fence is inserted.  The main purpose is
+     to complete alignment operations in the vect pass.  In the aprefetch2
+     pass, the nontemporal store flag is removed, and the stmts are
+     re-analyzed under the condition of alignment.  */
+  if (!nontemporal_store_analysis_p)
+    unset_nontemporal_move ();
+
   for (auto loop : loops_list (cfun, LI_FROM_INNERMOST))
     {
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Processing loop %d:\n", loop->num);
 
-      unrolled |= loop_prefetch_arrays (loop);
+      unrolled |= loop_prefetch_arrays (loop, nontemporal_store_analysis_p);
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "\n\n");
@@ -2065,12 +2126,33 @@ class pass_loop_prefetch : public gimple_opt_pass
 {
 public:
   pass_loop_prefetch (gcc::context *ctxt)
-    : gimple_opt_pass (pass_data_loop_prefetch, ctxt)
+    : gimple_opt_pass (pass_data_loop_prefetch, ctxt),
+      nontemporal_store_analysis_p (false)
   {}
 
   /* opt_pass methods: */
-  virtual bool gate (function *) { return flag_prefetch_loop_arrays > 0; }
+  opt_pass *clone ()
+  {
+    return new pass_loop_prefetch (m_ctxt);
+  }
+  virtual bool gate (function *)
+  {
+    if (nontemporal_store_analysis_p)
+      return optimize >= 3 && flag_non_temporal_store
+	     && (flag_tree_loop_vectorize || cfun->has_force_vectorize_loops);
+    else
+      return flag_prefetch_loop_arrays > 0
+	     || (optimize >= 3 && flag_non_temporal_store);
+  }
   virtual unsigned int execute (function *);
+  void set_pass_param (unsigned int n, bool param)
+  {
+    gcc_assert (n == 0);
+    nontemporal_store_analysis_p = param;
+  }
+
+private:
+  bool nontemporal_store_analysis_p;
 
 }; // class pass_loop_prefetch
 
@@ -2094,7 +2176,7 @@ pass_loop_prefetch::execute (function *fun)
       return 0;
     }
 
-  return tree_ssa_prefetch_arrays ();
+  return tree_ssa_prefetch_arrays (nontemporal_store_analysis_p);
 }
 
 } // anon namespace

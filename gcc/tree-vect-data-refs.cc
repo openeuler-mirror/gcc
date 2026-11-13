@@ -1866,6 +1866,27 @@ vect_enhance_data_refs_alignment (loop_vec_info loop_vinfo)
     = LOOP_VINFO_DATAREFS (loop_vinfo).copy ();
   datarefs.qsort (dr_align_group_sort_cmp);
 
+  /* Record the NT requirements before any trial peeling changes the
+     misalignments.  */
+  bool try_nontemporal_alignment = false;
+  if (!loop_vinfo->ignore_nontemporal_alignment)
+    for (data_reference *dr : datarefs)
+      {
+	dr_vec_info *dr_info = loop_vinfo->lookup_dr (dr);
+	if (!vect_relevant_for_alignment_p (dr_info))
+	  continue;
+
+	gassign *stmt = dyn_cast <gassign *> (dr_info->stmt->stmt);
+	if (!stmt || !gimple_assign_nontemporal_move_p (stmt))
+	  continue;
+
+	tree vectype = STMT_VINFO_VECTYPE (dr_info->stmt);
+	if (!known_alignment_for_access_p (dr_info, vectype)
+	    || dr_misalignment (dr_info, vectype)
+	       != vect_dr_misalign_for_aligned_access (dr_info))
+	  try_nontemporal_alignment = true;
+      }
+
   /* Compute the number of DRs that become aligned when we peel
      a dataref so it becomes aligned.  */
   auto_vec<unsigned> n_same_align_refs (datarefs.length ());
@@ -2508,6 +2529,23 @@ vect_enhance_data_refs_alignment (loop_vec_info loop_vinfo)
 
   /* This point is reached if neither peeling nor versioning is being done.  */
   gcc_assert (! (do_peeling || do_versioning));
+
+  /* Nontemporal stores are an optimization opportunity.  If their alignment
+     requirements cannot be met, retry using ordinary vector stores.  Keep
+     the original statement flags so other vectorization attempts can still
+     try to align these candidates.  */
+  if (try_nontemporal_alignment)
+    {
+      loop_vinfo->ignore_nontemporal_alignment = true;
+      LOOP_VINFO_UNALIGNED_DR (loop_vinfo) = NULL;
+      LOOP_VINFO_PTR_MASK (loop_vinfo) = 0;
+
+      if (dump_enabled_p ())
+	dump_printf_loc (MSG_NOTE, vect_location,
+			 "Retrying alignment without nontemporal store "
+			 "requirements.\n");
+      return vect_enhance_data_refs_alignment (loop_vinfo);
+    }
 
   return opt_result::success ();
 }
@@ -6965,6 +7003,14 @@ vect_supportable_dr_alignment (vec_info *vinfo, dr_vec_info *dr_info,
 
   if (misalignment == 0)
     return dr_aligned;
+
+  /* Loop vectorization first tries to align streaming vector stores using
+     peeling or versioning, then can retry with ordinary unaligned stores.
+     BB SLP uses the normal alignment checks below.  */
+  gassign *assign_stmt = dyn_cast <gassign *> (stmt_info->stmt);
+  if (assign_stmt && gimple_assign_nontemporal_move_p (assign_stmt)
+      && loop_vinfo && !loop_vinfo->ignore_nontemporal_alignment)
+    return dr_unaligned_unsupported;
 
   /* For now assume all conditional loads/stores support unaligned
      access without any special code.  */

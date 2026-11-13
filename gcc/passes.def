@@ -322,6 +322,7 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_parallelize_loops, false /* oacc_kernels_p */);
 	  NEXT_PASS (pass_expand_omp_ssa);
 	  NEXT_PASS (pass_ch_vect);
+	  NEXT_PASS (pass_loop_prefetch, true /* nontemporal_store_analysis_p */);
 	  NEXT_PASS (pass_if_conversion);
 	  /* pass_vectorize must immediately follow pass_if_conversion.
 	     Please do not add any other passes in between.  */
@@ -337,7 +338,7 @@ along with GCC; see the file COPYING3.  If not see
 	      NEXT_PASS (pass_dse);
 	  POP_INSERT_PASSES ()
 	  NEXT_PASS (pass_slp_vectorize);
-	  NEXT_PASS (pass_loop_prefetch);
+	  NEXT_PASS (pass_loop_prefetch, false);
 	  /* Run IVOPTs after the last pass that uses data-reference analysis
 	     as that doesn't handle TARGET_MEM_REFs.  */
 	  NEXT_PASS (pass_iv_optimize);

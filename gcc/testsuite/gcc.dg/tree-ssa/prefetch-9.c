@@ -14,8 +14,8 @@ void test()
 
 }
 
-/* { dg-final { scan-tree-dump-times "Issued nontemporal prefetch" 1 "aprefetch" } } */
-/* { dg-final { scan-tree-dump-times "a nontemporal store" 1 "aprefetch" } } */
+/* { dg-final { scan-tree-dump-times "Issued nontemporal prefetch" 1 "aprefetch2" } } */
+/* { dg-final { scan-tree-dump-times "a nontemporal store" 1 "aprefetch2" } } */
 
 /* { dg-final { scan-tree-dump-times "builtin_prefetch" 1 "optimized" } } */
 /* { dg-final { scan-tree-dump "=\\{nt\\}" "optimized" } } */

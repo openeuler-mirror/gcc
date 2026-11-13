@@ -13,7 +13,7 @@ void test()
     a[i] = 0;
 }
 
-/* { dg-final { scan-tree-dump-times "a nontemporal store" 1 "aprefetch" } } */
+/* { dg-final { scan-tree-dump-times "a nontemporal store" 1 "aprefetch2" } } */
 
 /* { dg-final { scan-tree-dump "=\\{nt\\}" "optimized" } } */
 /* { dg-final { scan-tree-dump-times "__builtin_ia32_mfence" 1 "optimized" } } */
