@@ -3617,27 +3617,116 @@ decl_warning_cmp (const void *p1, const void *p2)
   return t2->count - t1->count;
 }
 
+/* Count live vtables that directly refer to N.  This is a simple whole-unit
+   popularity estimate for virtual methods.  Do not follow aliases: identical
+   code folding may merge unrelated virtual methods, whose vtables are not
+   useful predictors for this call target.  Cache each count in COUNTS, owned
+   by the caller and discarded before any later pass can change vtables.  */
+
+static unsigned int
+vtable_reference_count (cgraph_node *n,
+			hash_map<cgraph_node *, unsigned int> &counts)
+{
+  if (unsigned int *cached = counts.get (n))
+    return *cached;
+
+  unsigned int count = 0;
+  ipa_ref *ref;
+  int i;
+
+  for (i = 0; n->iterate_referring (i, ref); i++)
+    if (ref->use == IPA_REF_ADDR
+	&& VAR_P (ref->referring->decl)
+	&& DECL_VIRTUAL_P (ref->referring->decl))
+      count++;
+
+  counts.put (n, count);
+  return count;
+}
+
+/* Pick the only likely target in TARGETS, as before, or a uniquely dominant
+   target referenced by at least twice as many live vtables as the runner-up.
+   The latter is only a profitability prediction: speculative
+   devirtualization retains the original indirect call as its fallback.
+   COMPONENT_TYPE_FLOW is the caller's selection policy.  Allocate COUNTS
+   lazily, only for enabled multiple-target queries.  */
+
+static cgraph_node *
+select_likely_target (vec<cgraph_node *> targets, bool component_type_flow,
+		      bool *multiple,
+		      unsigned int *best_count, unsigned int *second_count,
+		      hash_map<cgraph_node *, unsigned int> *&counts)
+{
+  cgraph_node *best = NULL;
+  *multiple = false;
+  *best_count = 0;
+  *second_count = 0;
+
+  /* Preserve the original early return on the second likely target when
+     the option is disabled.  Even when enabled, a sole likely target needs
+     no popularity estimate.  */
+  for (unsigned int i = 0; i < targets.length (); i++)
+    if (likely_target_p (targets[i]))
+      {
+	if (best)
+	  {
+	    *multiple = true;
+	    if (!component_type_flow)
+	      return NULL;
+	    break;
+	  }
+	best = targets[i];
+      }
+  if (!*multiple)
+    return best;
+
+  if (!counts)
+    counts = new hash_map<cgraph_node *, unsigned int>;
+  best = NULL;
+  unsigned int best_refs = 0;
+  unsigned int second_refs = 0;
+  for (unsigned int i = 0; i < targets.length (); i++)
+    if (likely_target_p (targets[i]))
+      {
+	unsigned int refs = vtable_reference_count (targets[i], *counts);
+	if (!best || refs > best_refs)
+	  {
+	    second_refs = best_refs;
+	    best_refs = refs;
+	    best = targets[i];
+	  }
+	else if (refs > second_refs)
+	  second_refs = refs;
+      }
+
+  *best_count = best_refs;
+  *second_count = second_refs;
+  if (best_refs >= 2 && best_refs / 2 >= second_refs)
+    return best;
+  return NULL;
+}
+
 
 /* Try to speculatively devirtualize call to OTR_TYPE with OTR_TOKEN with
-   context CTX.  */
+   context CTX.  COMPONENT_TYPE_FLOW is the calling function's option, not
+   the global option state active while running an IPA pass.  */
 
 struct cgraph_node *
 try_speculative_devirtualization (tree otr_type, HOST_WIDE_INT otr_token,
-				  ipa_polymorphic_call_context ctx)
+				  ipa_polymorphic_call_context ctx,
+				  bool component_type_flow)
 {
   vec <cgraph_node *>targets
      = possible_polymorphic_call_targets
 	  (otr_type, otr_token, ctx, NULL, NULL, true);
-  unsigned int i;
-  struct cgraph_node *likely_target = NULL;
-
-  for (i = 0; i < targets.length (); i++)
-    if (likely_target_p (targets[i]))
-      {
-	if (likely_target)
-	  return NULL;
-	likely_target = targets[i];
-      }
+  bool multiple;
+  unsigned int best_count;
+  unsigned int second_count;
+  hash_map<cgraph_node *, unsigned int> *vtable_counts = NULL;
+  cgraph_node *likely_target
+    = select_likely_target (targets, component_type_flow, &multiple,
+			    &best_count, &second_count, vtable_counts);
+  delete vtable_counts;
   if (!likely_target
       ||!likely_target->definition
       || DECL_EXTERNAL (likely_target->decl))
@@ -3662,7 +3751,10 @@ static unsigned int
 ipa_devirt (void)
 {
   struct cgraph_node *n;
-  hash_set<void *> bad_call_targets;
+  /* A target list rejected for a disabled caller can still be useful for
+     an enabled caller.  Keep the two policies' negative caches separate,
+     without allocating a table for an unused policy.  */
+  hash_set<void *, true> bad_call_targets[2];
   struct cgraph_edge *e;
 
   int npolymorphic = 0, nspeculated = 0, nconverted = 0, ncold = 0;
@@ -3672,6 +3764,10 @@ ipa_devirt (void)
 
   if (!odr_types_ptr)
     return 0;
+
+  /* This pass does not change vtable references.  Reuse counts across call
+     sites, but never carry them across a pass boundary.  */
+  hash_map<cgraph_node *, unsigned int> *vtable_counts = NULL;
 
   if (dump_file)
     dump_type_inheritance_graph (dump_file);
@@ -3694,6 +3790,10 @@ ipa_devirt (void)
       bool update = false;
       if (!opt_for_fn (n->decl, flag_devirtualize))
 	continue;
+      const bool component_type_flow
+	= opt_for_fn (n->decl, flag_component_type_flow);
+      hash_set<void *, true> &bad_targets
+	= bad_call_targets[component_type_flow];
       if (dump_file && n->indirect_calls)
 	fprintf (dump_file, "\n\nProcesing function %s\n",
 		 n->dump_name ());
@@ -3764,31 +3864,35 @@ ipa_devirt (void)
 		if (!dump_file)
 		  continue;
 	      }
-	    if (bad_call_targets.contains (cache_token))
+	    if (bad_targets.contains (cache_token))
 	      {
 		if (dump_file)
 		  fprintf (dump_file, "Target list is known to be useless\n\n");
 		nmultiple++;
 		continue;
 	      }
-	    for (i = 0; i < targets.length (); i++)
-	      if (likely_target_p (targets[i]))
-		{
-		  if (likely_target)
-		    {
-		      likely_target = NULL;
-		      if (dump_file)
-			fprintf (dump_file, "More than one likely target\n\n");
-		      nmultiple++;
-		      break;
-		    }
-		  likely_target = targets[i];
-		}
+	    bool multiple;
+	    unsigned int best_count;
+	    unsigned int second_count;
+	    likely_target = select_likely_target (targets, component_type_flow,
+					    &multiple,
+					    &best_count, &second_count,
+					    vtable_counts);
 	    if (!likely_target)
 	      {
-		bad_call_targets.add (cache_token);
+		if (multiple)
+		  {
+		    if (dump_file)
+		      fprintf (dump_file, "More than one likely target\n\n");
+		    nmultiple++;
+		  }
+		bad_targets.add (cache_token);
 	        continue;
 	      }
+	    if (multiple && dump_file)
+	      fprintf (dump_file,
+		       "Selecting dominant target (%u versus %u live vtables)\n",
+		       best_count, second_count);
 	    /* This is reached only when dumping; check if we agree or disagree
  	       with the speculation.  */
 	    if (e->speculative)
@@ -3976,6 +4080,7 @@ ipa_devirt (void)
 	     npolymorphic, ndevirtualized, nconverted, ncold,
 	     nmultiple, noverwritable, nspeculated, nok, nwrong,
 	     nexternal, nnotdefined, nartificial, ndropped);
+  delete vtable_counts;
   return ndevirtualized || ndropped ? TODO_remove_functions : 0;
 }
 

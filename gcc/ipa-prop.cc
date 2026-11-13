@@ -4010,9 +4010,12 @@ try_make_edge_direct_virtual_call (struct cgraph_edge *ie,
 	   && !ie->speculative && ie->maybe_hot_p ())
     {
       cgraph_node *n;
+      const bool component_type_flow
+	= opt_for_fn (ie->caller->decl, flag_component_type_flow);
       n = try_speculative_devirtualization (ie->indirect_info->otr_type,
 					    ie->indirect_info->otr_token,
-					    ie->indirect_info->context);
+					    ie->indirect_info->context,
+					    component_type_flow);
       if (n)
 	{
 	  target = n->decl;

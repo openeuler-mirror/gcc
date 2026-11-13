@@ -555,13 +555,15 @@ Objective-C and Objective-C++ Dialects}.
 -fauto-inc-dec  -fbranch-probabilities
 -fbuiltin-will-return
 -fcaller-saves
--fcombine-stack-adjustments  -fbit-scan-loop-idiom  -fconserve-stack
+-fcombine-stack-adjustments  -fbit-scan-loop-idiom
+-fcomponent-type-flow  -fconserve-stack
 -ffold-mem-offsets
 -fcompare-elim  -fcprop-registers  -fcrossjumping
 -fcse-follow-jumps  -fcse-skip-blocks  -fcx-fortran-rules
 -fcx-limited-range
--fdata-sections  -fdce  -fdelayed-branch
--fdelete-null-pointer-checks  -fdevirtualize  -fdevirtualize-speculatively
+-fdata-sections  -fdce  -fdebruijn-clz  -fdelayed-branch
+-fdelete-null-pointer-checks
+-fdevirtualize  -fdevirtualize-speculatively
 -fdevirtualize-at-ltrans  -fdse
 -fearly-inlining  -fipa-sra  -fexpensive-optimizations  -ffat-lto-objects
 -ffast-math  -ffinite-math-only  -ffloat-store  -fexcess-precision=@var{style}
@@ -574,7 +576,11 @@ Objective-C and Objective-C++ Dialects}.
 -finline-stringops[=@var{fn}]
 -finline-functions  -finline-functions-called-once  -finline-limit=@var{n}
 -finline-small-functions -fipa-modref -fipa-cp  -fipa-cp-clone
--fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
+-fipa-value-specialization -fipa-value-specialization-clone-budget
+-fipa-value-specialization-loop -fipa-value-specialization-shared-loop
+-fipa-value-specialization-cold -fipa-value-specialization-helper-expansion
+-ftree-immutable-loop-specialization  -ftree-immutable-loop-specialization-cursor
+-fipa-array-load-inline  -fipa-bit-cp  -fipa-vrp  -fipa-pta  -fipa-profile  -fipa-pure-const
 -fipa-reference  -fipa-reference-addressable
 -fipa-stack-alignment  -fipa-icf  -fira-algorithm=@var{algorithm}
 -flive-patching=@var{level}
@@ -583,7 +589,8 @@ Objective-C and Objective-C++ Dialects}.
 -fno-ira-share-spill-slots
 -fisolate-erroneous-paths-dereference  -fisolate-erroneous-paths-attribute
 -fivopts  -fkeep-inline-functions  -fkeep-static-functions
--fkeep-static-consts  -flimit-function-alignment  -flive-range-shrinkage
+-fkeep-static-consts  -flim-after-jam  -flimit-function-alignment
+-flive-range-shrinkage
 -floop-block  -floop-interchange  -floop-strip-mine
 -floop-unroll-and-jam  -floop-nest-optimize
 -floop-parallelize-all  -flra-remat  -flto  -flto-compression-level
@@ -597,7 +604,7 @@ Objective-C and Objective-C++ Dialects}.
 -fno-toplevel-reorder  -fno-trapping-math  -fno-zero-initialized-in-bss
 -fomit-frame-pointer  -foptimize-sibling-calls
 -fpartial-inlining  -fpeel-loops  -fpredictive-commoning
--fprefetch-loop-arrays
+-fprefetch-loop-arrays  -fpreserve-vect-idioms
 -fprofile-correction
 -fprofile-use  -fprofile-use=@var{path} -fprofile-partial-training
 -fprofile-values -fprofile-reorder-functions
@@ -624,18 +631,25 @@ Objective-C and Objective-C++ Dialects}.
 -fstdarg-opt  -fstore-merging  -fstrict-aliasing -fipa-strict-aliasing
 -fthread-jumps  -ftracer  -ftree-bit-ccp
 -ftree-builtin-call-dce  -ftree-ccp  -ftree-ch
--ftree-coalesce-vars  -ftree-copy-prop  -ftree-dce  -ftree-dominator-opts
+-ftree-coalesce-vars  -ftree-constant-byte-range
+-ftree-constant-byte-range-cursor  -ftree-copy-prop  -ftree-dce
+-ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
+-ftree-bitset-store-coalescing
 -ftree-loop-if-convert  -ftree-loop-im
--ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
--ftree-loop-ivcanon  -ftree-loop-linear  -ftree-loop-optimize
+-ftree-phiprop  -ftree-phiprop-disjoint-stores
+-ftree-loop-distribution  -ftree-loop-distribute-patterns
+-ftree-loop-invariant-split  -ftree-loop-ivcanon  -ftree-loop-linear
+-ftree-loop-optimize
 -ftree-loop-vectorize
 -ftree-parallelize-loops=@var{n}  -ftree-pre  -ftree-partial-pre  -ftree-pta
--ftree-reassoc  -ftree-scev-cprop  -ftree-sink  -ftree-slsr  -ftree-sra
+-ftree-reassoc  -ftree-replacement-index-prefetch  -ftree-scev-cprop
+-ftree-sink  -ftree-slsr  -ftree-sra
 -ftree-switch-conversion  -ftree-tail-merge
 -ftree-ter  -ftree-vectorize  -ftree-vrp  -ftrivial-auto-var-init
 -funconstrained-commons -funit-at-a-time  -funroll-all-loops
--funroll-loops -funsafe-math-optimizations  -funswitch-loops
+-funroll-loops -funsafe-dynamic-cast-cache
+-funsafe-math-optimizations  -funswitch-loops
 -fipa-ra  -fvariable-expansion-in-unroller  -fvect-cost-model  -fvpt
 -fweb  -fwhole-program  -fwpa  -fuse-linker-plugin -fzero-call-used-regs
 --param @var{name}=@var{value}
@@ -13090,6 +13104,30 @@ implementation.
 
 Enabled by @option{-Os}.
 
+@opindex fdebruijn-clz
+@item -fdebruijn-clz
+Recognize DeBruijn table-based count-leading-zero idioms for unsigned
+32-bit and 64-bit inputs, and enable the backported extensions to
+table-based count-trailing-zero recognition, including fallback handling
+for zero inputs.  The transformations preserve the original table result
+for zero.  The variant that isolates the most significant bit with
+@code{s - (s >> 1)} after an OR cascade is recognized for 64-bit inputs.
+
+Also recognize 64-bit count-leading-zero and count-trailing-zero
+operations implemented by selecting between operations on their
+32-bit halves, and replace them with the corresponding 64-bit
+target operation.  The transformation preserves the split-word
+implementation's result for zero inputs and requires target support
+for the corresponding 64-bit operation.
+
+This option is disabled by default at all optimization levels.  Enabling
+it only affects transformations when the relevant forward-propagation
+and PHI optimization passes are enabled.
+If an input may be zero, the transformations also require a defined
+target result for the corresponding count-zero operation.
+Without this option, or with @option{-fno-debruijn-clz}, GCC retains
+its original count-trailing-zero table recognition and zero handling.
+
 @opindex fdelete-null-pointer-checks
 @item -fdelete-null-pointer-checks
 Assume that programs cannot safely dereference null pointers, and that
@@ -13127,6 +13165,52 @@ The arithmetic idioms are based on the recognition available in GCC 15.
 This GCC 14 backport makes those additional forms opt-in and restricts
 the multiplication form to unsigned types, leaving signed overflow and
 trapping semantics outside this extension.
+
+@opindex fcomponent-type-flow
+@item -fcomponent-type-flow
+During speculative devirtualization, this option permits GCC to select a
+target shared by a uniquely dominant number of live virtual tables when there
+is more than one otherwise likely target.  GCC emits a target-address guard
+and retains the original indirect call as the fallback, so a less-common
+dynamic type preserves the original behavior.
+
+Live-vtable references are a static profitability estimate, not execution
+counts.  Function-specific optimization settings control whether this
+additional target-selection heuristic is enabled at each caller.
+
+This option does not enable @code{dynamic_cast} result caching.  The
+independent @option{-funsafe-dynamic-cast-cache} option controls that
+optimization and its additional vtable-lifetime assumption.  Both options
+may be enabled together, but neither enables the other.
+
+The option is disabled by default at all optimization levels.  Use
+@option{-fcomponent-type-flow} to enable it explicitly.  Without the option,
+or with @option{-fno-component-type-flow}, GCC retains the original
+speculative-devirtualization behavior.
+
+@opindex funsafe-dynamic-cast-cache
+@item -funsafe-dynamic-cast-cache
+At optimization levels @option{-O2} and above, including @option{-Os} and
+@option{-Oz}, use a small per-call-site, thread-local positive cache for
+zero-offset pointer @code{dynamic_cast} expressions.  Only successful
+results equal to the source address enter this cache.  A cache miss, a
+failed cast, and casts requiring pointer adjustment continue to use the
+complete ABI run-time check.  Constant evaluation uses the original cast
+without accessing the cache.
+
+This optimization requires cached vtable addresses to retain their dynamic
+type while a thread keeps an entry.  The cache does not track the lifetime
+of loaded modules.  Unloading and reloading modules containing polymorphic
+types can violate this assumption and cause a cached cast to return an
+incorrect nonnull result.  Such module unloading and reloading, and
+run-time generated or recycled vtables, are not supported by this cache.
+The ABI check on a cache miss does not protect against stale cache hits.
+
+The option is disabled by default at all optimization levels and is not
+enabled by @option{-fcomponent-type-flow}.  It does not enable the
+additional speculative-devirtualization heuristic.  Without the option,
+or with @option{-fno-unsafe-dynamic-cast-cache}, GCC retains the original
+@code{dynamic_cast} behavior independently of @option{-fcomponent-type-flow}.
 
 @opindex fdevirtualize
 @item -fdevirtualize
@@ -13511,6 +13595,31 @@ and the @option{large-stack-frame-growth} parameter to 400.
 Perform reassociation on trees.  This flag is enabled by default
 at @option{-O1} and higher.
 
+@item -ftree-replacement-index-prefetch
+@opindex ftree-replacement-index-prefetch
+Use a new unsigned index written over a previously loaded index to prefetch
+indirect addresses derived from that old index.  In addition to replacements
+in loops, handle loop-external replacements that feed a PHI through one
+direct normal edge.  Translate only that edge's incoming unsigned scalar
+when constructing a hint; do not change the PHI or copy memory loads.
+This option enables its path independently of @option{-fprefetch-loop-arrays}
+and its cache-line model.  The enclosing loop-pass group still requires a
+loop in the function, so wholly loopless functions are not handled.
+
+The address computation must contain only a small number of pure unsigned
+operations and values already available at the replacement.  No additional
+data loads are issued and demand accesses keep their original order.
+Each new direct-edge entry selects at most one address, preferring the
+base address of a store reference.  Reconstructed hints need not retain
+component offsets within an aggregate object.  This extension emits at
+most eight hints per function.  Candidate analysis is bounded independently
+of successful hints, and candidates exceeding its budget are skipped.
+Its direct-edge path is disabled when
+@option{--param=simultaneous-prefetches=0} is used.
+This transformation adds nonfaulting read hints on targets with prefetch
+support and is disabled by default.  It does not add region-start,
+second-cache-line or write-intent hints.
+
 @opindex fcode-hoisting
 @item -fcode-hoisting
 Perform code hoisting.  Code hoisting tries to move the
@@ -13581,6 +13690,22 @@ Enabled by default at @option{-O1} and higher.
 Reduce stack alignment on call sites if possible.
 Enabled by default.
 
+@opindex fipa-array-load-inline
+@item -fipa-array-load-inline
+Replace loads from fixed-size lookup tables with computations of their
+initialization formulas in terms of the array indices.  The optimization
+requires explicit references, complete initialization, compatible arithmetic
+semantics, and proof that each load is initialized or protected by a suitable
+guard.  Initialization stores are removed when all references permit it.
+
+This option is disabled by default, including at @option{-O3}.  Explicitly
+enabling it requires @option{-O3} or a higher optimization level; it has no
+effect at lower levels.  It can also run during LTO, subject to the visibility
+of the references and function bodies in the current partition.  Escaping
+arrays and guards, including guards accessed through atomic operations, are
+not supported.  A thread-local table cannot use a non-thread-local guard to
+prove that initialization has completed in the current thread.
+
 @opindex fipa-pta
 @item -fipa-pta
 Perform interprocedural pointer analysis and interprocedural modification
@@ -13613,6 +13738,188 @@ This optimization can substantially increase performance
 if the application has constants passed to functions.
 This flag is enabled by default at @option{-O2}, @option{-Os} and @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
+
+@item -fipa-value-specialization
+@opindex fipa-value-specialization
+Specialize calls with complete immutable object arguments and expose their
+constant states to subsequent scalar optimization.  This option is disabled
+by default.  It includes shared immutable clones, bounded helper inlining,
+and preservation of proven immutable context through actual inline ancestry.
+Ordinary cloning and inlining legality, exception handling, recursive-edge
+exclusions and residual runtime control flow remain in force.
+
+Enabling this option also enables @option{-fipa-value-specialization-clone-budget},
+@option{-fipa-value-specialization-loop},
+@option{-fipa-value-specialization-shared-loop},
+@option{-fipa-value-specialization-cold}, and
+@option{-fipa-value-specialization-helper-expansion}, unless explicitly disabled.
+An explicit positive or negative setting of a suboption takes precedence
+regardless of argument order.  All five mechanisms require this master option
+for execution: enabling a suboption alone does not activate specialization.
+Use consistent options during compilation and LTO linking.
+
+The master option and all five suboptions are disabled by default for code
+generation.  The generic RTL variable-tracking maintenance delivered with
+these specialization changes follows the existing variable-tracking and
+debug-information conditions, independently of this master option.  It can
+reconstruct proven debug values at control-flow joins and discard stale
+bindings for address-taken variables when their storage may have changed.
+This maintenance also applies when neither the master option nor any
+suboption is enabled, so debug information can change on those default paths.
+
+IPA cloning, inlining and bounded cold specialization can expose additional
+control-flow joins.  The specialization changes and the generic
+variable-tracking maintenance are delivered together to cover the general
+debug-information responsibilities of those control-flow changes.  The
+variable-tracking rules apply to other code as well and do not depend on
+immutable-program context markers.  Specialization itself does not require
+variable tracking to generate executable code.
+
+The clone context marker is retained on proven immutable clones, including
+mandatory inline candidates, and streamed through LTO.  Helper lookup follows
+at most four actual inline ancestors; it does not grant unrelated calls in the
+enclosing function the same context.  A separate caller marker records receipt
+of a specialization candidate, without promising that inlining took place.
+Tree consumers recheck each loop before using that hint.  String initializer
+lengths and other object sizes are profitability hints, not proof of loop trip
+counts or permission to fold volatile or interposable loads.  Helper growth
+limits apply per edge and per resulting root, not to a compilation unit as a
+whole.
+
+@item -fipa-value-specialization-clone-budget
+@opindex fipa-value-specialization-clone-budget
+Allow bounded extra clones for repeated immutable values when ordinary IPA
+profitability misses later constant-state simplification.  Candidates require
+at least two necessary source edges, a complete immutable object of 2 through
+64 bytes, an IPA predicate dependency and a clone cost of at most 512 estimated
+instructions.  The ordinary unit-size limit still applies.  Extra admission
+is bounded by @option{--param=ipa-value-specialization-clone-growth-budget}.
+Disabling this option does not prohibit otherwise profitable ordinary clones.
+
+@item -fipa-value-specialization-loop
+@opindex fipa-value-specialization-loop
+Specialize immutable values from one necessary source edge in a static loop,
+including a real loop inside a recursive caller.  Recursion alone does not
+establish a loop context; recursive callees and recursive call edges remain
+excluded.  The bounded search follows at most two wrapper levels and examines
+at most 16 edges.  Recursive callers require a loop on the actual call edge;
+the search does not walk through their recursive component.
+Disabling this option also disables the single-source recursive-caller case.
+The shared-source case is controlled independently by
+@option{-fipa-value-specialization-shared-loop}.
+
+Loop candidates cost at most 512 estimated instructions and use the
+@option{--param=ipa-value-specialization-loop-growth-budget} reserve.  Accepted reserve
+cost is accounted separately from ordinary IPA growth so these clones do not
+consume the ordinary allowance.  Total code size can still grow.
+
+@item -fipa-value-specialization-shared-loop
+@opindex fipa-value-specialization-shared-loop
+Allow two or more necessary source edges to share a clone for one immutable
+value when at least one edge has an eligible loop context.  This includes
+actual loops in recursive callers under the same exclusions as the
+single-source mechanism.  A shared clone is charged once to the loop-value
+reserve.  This option can be disabled independently of the single-source
+loop mechanism, and still requires @option{-fipa-value-specialization}.
+
+@item -fipa-value-specialization-cold
+@opindex fipa-value-specialization-cold
+Allow a separately budgeted immutable clone when ordinary hot-edge admission
+fails.  Candidates require a complete immutable byte object of 2 through 64
+bytes, an IPA predicate dependency, one through four necessary source edges,
+a nonrecursive context and a cost of at most 128 estimated instructions.
+Offsets, mutable or interposable objects and recursive SCCs are excluded.
+No profile frequencies are changed and ordinary cloning legality still applies.
+The separate @option{--param=ipa-value-specialization-cold-growth-budget} reserve bounds
+clone admission, not all subsequent inlining or loop transformations.
+
+@item -fipa-value-specialization-helper-expansion
+@opindex fipa-value-specialization-helper-expansion
+For bounded helper inlining in an established immutable context, raise the
+maximum estimated edge growth from 1200 to 4096 and the resulting root size
+from 4096 to 65536.  Disabling this option restores the smaller limits without
+disabling the basic helper inlining policy.  The edge-growth and resulting-caller
+limits for each policy can be changed independently with
+@option{ipa-value-specialization-helper-growth-limit},
+@option{ipa-value-specialization-helper-size-limit},
+@option{ipa-value-specialization-helper-expanded-growth-limit} and
+@option{ipa-value-specialization-helper-expanded-size-limit}.
+Both policies retain the ordinary @option{large-stack-frame} and
+@option{large-stack-frame-growth} limits.  Helper eligibility, the four-level
+depth bound and ordinary target, exception and inlining legality are unchanged.
+
+@item -ftree-immutable-loop-specialization
+@opindex ftree-immutable-loop-specialization
+Run two loop and scalar simplification stages in functions containing
+IPA-specialized immutable arguments, after initial SSA simplification,
+access diagnostics and builtin constant folding.  Each stage uses the existing
+complete-unroll pass, including its ordinary unrolling and peeling, followed
+by constant propagation, forward propagation, dead code elimination,
+redundancy elimination and dominator optimization passes.  Path cleanup
+between stages exposes further constant states to the next peeling stage.  The immutable peeling heuristic is limited to
+@option{--param=immutable-state-peel-limit} copies per loop (eight by
+default, at most 64) and 32768 estimated instructions of growth per
+complete-unroll invocation.  The function-wide readonly peeling growth
+budget controlled by @option{ipa-value-specialization-peel-growth-budget}
+and @option{ipa-value-specialization-peel-growth-percent} also applies.
+This allowance applies to the additional immutable
+peeling heuristic, not to ordinary unrolling and peeling, which retain their
+existing limits.  The copy cap applies separately to each invocation; a later
+invocation may peel a residual loop again.  Functions with more than 8192
+nondebug, non-label GIMPLE statements at entry
+are skipped; this is an entry-size check, not a resulting code-size limit.
+Normal loop bounds and residual control flow are
+preserved.  The regular later loop pipeline still runs.
+
+The two loop stages require @option{-ftree-loop-optimize} and
+@option{-fipa-value-specialization}; this option
+does not enable that IPA option automatically.  Loop specialization is disabled
+by default.  Enabling the tree option also enables
+@option{-ftree-immutable-loop-specialization-cursor} unless that option was
+explicitly disabled.  Use
+@option{-ftree-immutable-loop-specialization
+-fno-tree-immutable-loop-specialization-cursor} for loop specialization alone;
+the explicit cursor setting takes precedence regardless of option order.
+
+Constant-address tracking can follow a pointer PHI when every incoming
+value refers to the same object.  It examines at most eight PHI arguments
+and 64 values per query, rejecting cycles and unknown or differing objects.
+The complete immutable initializer must still be available.  This is only
+a peeling profitability hint; it does not prove an iteration count or
+permit removal of a residual loop.
+
+@item -ftree-immutable-loop-specialization-cursor
+@opindex ftree-immutable-loop-specialization-cursor
+Specialize bounded control-flow paths entered with a pointer into an immutable
+object.  This pass runs after loop optimization, and therefore after early
+compact event caching, IPA cloning and inlining.  It interprets PHIs from the
+actual incoming edge and uses ordinary constant folding to prove branch
+outcomes.  Unknown conditions and their side exits are retained, as are
+residual loops.  No runtime trip bound is inferred from the object size.
+
+At most eight path-threading and scalar-cleanup rounds run per eligible
+function.  The generic path copier restricts each duplicated region to one
+loop; exception and abnormal edges are excluded.  Constant propagation,
+forward propagation, dead code elimination and redundancy elimination follow
+only rounds that changed the CFG.  Statement and recursive valueization
+work is bounded independently of code growth.  This option is disabled unless enabled explicitly or by
+@option{-ftree-immutable-loop-specialization}.  It may be enabled independently
+of loop specialization.  An explicit positive or negative cursor setting
+takes precedence over the loop option regardless of their order.  The pass
+requires optimization level @option{-O2} or higher and
+@option{-fthread-jumps}.
+
+The cursor pass does not require @option{-fipa-value-specialization} or an
+IPA clone marker.  It examines eligible immutable-address paths in ordinary
+functions too.  PHI inputs are interpreted on their actual incoming edges:
+an unknown alternative is retained, rather than assumed to share the constant
+object of another input.  Enabling the tree option without the IPA option can
+therefore still enable cursor specialization while skipping the two loop stages.
+
+This transformation does not replace length-aware string comparisons with
+zero-terminated comparisons or infer application-specific string grammars.
+The parameters @option{immutable-cursor-max-path-insns} and
+@option{immutable-cursor-growth-budget} bound copied code.
 
 @opindex fipa-cp-clone
 @item -fipa-cp-clone
@@ -13747,12 +14054,76 @@ Perform sparse conditional constant propagation (CCP) on trees.  This
 pass only operates on local scalar variables and is enabled by default
 at @option{-O1} and higher.
 
+@opindex ftree-constant-byte-range
+@item -ftree-constant-byte-range
+Infer possible byte values for loads through cursors derived from complete
+immutable byte arrays.  The analysis follows bounded pointer definition
+graphs, including all incoming loop PHI edges, and feeds existing value
+range propagation.  Searches for characters absent from a proven
+nul-terminated constant array may also be eliminated.  Unknown or mutable
+pointer sources are excluded.  The analysis can also follow @code{strchr}
+results when @option{-fdelete-null-pointer-checks} is enabled.  It runs after
+early jump threading and again after dominator and copy propagation cleanup
+so that newly exposed cursors can contribute ranges.  This option is disabled by
+default and has no effect with @option{-fwrapv-pointer}.
+
+Enabling this option also enables @option{-ftree-constant-byte-range-cursor}
+unless explicitly disabled with @option{-fno-tree-constant-byte-range-cursor}.
+The explicit cursor setting takes precedence regardless of option order.
+
+@opindex ftree-constant-byte-range-cursor
+@item -ftree-constant-byte-range-cursor
+Refine byte-load ranges at constant displacements from @code{strchr} results
+within proven complete immutable byte arrays.  Enumerate all possible matching
+positions conservatively and merge all pointer PHI inputs.  Unsupported
+arithmetic falls back to the whole-object alphabet only when
+@option{-ftree-constant-byte-range} is also enabled.  This option is disabled by
+default and does not infer trip counts or introduce speculative loads.
+Wrapping-pointer arithmetic and targets allowing accessible null pointers are
+excluded from this refinement.  Analysis work is bounded per function.
+
+This option can also be enabled independently of
+@option{-ftree-constant-byte-range}.  Both are disabled when neither option
+is requested.  Search semantics are currently modeled only for @code{strchr};
+unrecognized calls are conservatively rejected.
+
+@option{-ftree-constant-byte-cursor-range} is a compatibility spelling of
+@option{-ftree-constant-byte-range-cursor}.
+
 @opindex fssa-backprop
 @item -fssa-backprop
 Propagate information about uses of a value up the definition chain
 in order to simplify the definitions.  For example, this pass strips
 sign operations if the sign of a value never matters.  The flag is
 enabled by default at @option{-O1} and higher.
+
+@opindex ftree-phiprop-disjoint-stores
+@item -ftree-phiprop-disjoint-stores
+Propagate scalar loads through PHIs of automatic object addresses even
+when intervening stores change virtual memory state, provided that alias
+analysis proves that each crossed store cannot modify any incoming object.
+The relaxation is limited to loads in the PHI block and preserves the
+memory state on each incoming edge.  It is disabled by default.
+The cumulative analysis cost is bounded by
+@option{--param=phiprop-disjoint-stores-max-work=}.
+Unlike the single-store relaxation in later GCC versions, this extension
+can cross multiple proven-disjoint memory definitions in the same block.
+It uses the normal alias oracle and requires compatible automatic scalar
+objects; it does not authorize otherwise invalid type-punning accesses.
+
+@opindex ftree-static-byte-cfg
+@item -ftree-static-byte-cfg
+Specialize bounded CFG states using immutable addresses and byte equality
+facts derived from GIMPLE.  Dynamic operations are retained, and parameter
+hypotheses use runtime guards with the original CFG as fallback.
+The pass runs in speed-optimized functions at @option{-O2} and higher when
+explicitly enabled, subject to side-effect, exception and bounded-growth
+checks.  Size-optimized and cold functions are skipped.  Functions with
+explicit loop unrolling or vectorization annotations are also skipped so
+that partial CFG duplication cannot discard those annotations.
+Functions that may
+throw non-call exceptions, including those compiled with
+@option{-fnon-call-exceptions}, are skipped.  It is disabled by default.
 
 @opindex fssa-phiopt
 @item -fssa-phiopt
@@ -13945,12 +14316,55 @@ for (int i = 0; i < N; i++)
 This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
 
+@opindex ftree-bitset-store-coalescing
+@item -ftree-bitset-store-coalescing
+Recognize canonical two-level packed-bit update loops and create a guarded
+fast path that combines adjacent bit updates into masked word stores.  The
+original loop nest is retained as a fallback when the accessed writable and
+mask intervals overlap, when different output rows partially overlap, or
+when a write can change the contiguous row-index
+input or invariant metadata, or when the packed-bit range is outside the
+profitability bound.  Base-pointer inequality alone is not used as proof of
+nonoverlap.  A read-only preflight computes the selected row footprint and
+rejects unsafe or wrapping address ranges before any packed store.
+Only exact unit-stride rotating indices and single-bit
+update predicates are recognized; negative or wrapping index ranges use
+the original loop.  The fast path preserves zero-trip and presence tests
+and only writes words whose final values change.  Candidates must have a single
+inner loop and single exits, and at most 16 blocks in each loop.  This is
+a structural work bound, not an exact block-count requirement.  Unsupported
+scalar live-outs, additional store guards, insufficient alignment and
+incompatible alias types prevent the transformation.  External debug
+bindings are reset when their definitions are removed.  This option requires
+@option{-O3} and is disabled by default.
+
+Preparation uses a restricted header-copying pass and may repeat
+loop-invariant motion without store motion on the whole function when a
+potentially matching loop shape is present, even if subsequent recognition
+rejects it.  Header-copying preparation respects @option{-fno-tree-ch}.
+The transformation runs before IPA inlining; loops that only become visible
+after later inlining are not recognized by this pass.  At most one successful
+loop nest is transformed per function; a rejected candidate does not prevent
+trying later nests.  The fast-path bound of 65535 bits is a conservative
+profitability policy and is not an assumption about distinct input objects.
+
 @opindex floop-unroll-and-jam
 @item -floop-unroll-and-jam
 Apply unroll and jam transformations on feasible loops.  In a loop
 nest this unrolls the outer loop by some factor and fuses the resulting
 multiple inner loops.  This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
+
+@opindex flim-after-jam
+@item -flim-after-jam
+Run tree loop invariant motion once after @option{-floop-unroll-and-jam}
+changes a function, before leaving the loop optimizer pipeline.  This can
+hoist invariants exposed by unroll-and-jam earlier than the later loop
+invariant motion pass.
+
+This option is independent of @option{-ftree-loop-im}: specifying
+@option{-fno-tree-loop-im} does not disable this additional invocation.
+The additional invocation does not perform store motion.
 
 @opindex ftree-loop-im
 @item -ftree-loop-im
@@ -13961,12 +14375,49 @@ operands of conditions that are invariant out of the loop, so that we can use
 just trivial invariantness analysis in loop unswitching.  The pass also includes
 store motion.
 
+@opindex ftree-loop-invariant-split
+@item -ftree-loop-invariant-split
+Split selected two-level loop nests into a sequence of equivalent outer-loop
+copies, each covering a consecutive range of the original inner-loop iteration
+space.  The pass looks for read-only data referenced by the inner loop but not
+by the outer-loop induction variable, and limits each copy to a chunk of that
+data.  This can expose smaller invariant data blocks to later vectorization,
+unrolling and loop invariant motion passes.
+
+This optimization is conservative and is not enabled by default at any
+optimization level.  It runs only when loop vectorization is enabled or the
+function contains a loop marked for forced vectorization.  Enabling this
+option does not enable loop vectorization.  Loop vectorization is enabled by
+default at @option{-O2} and @option{-O3}, and can be enabled explicitly with
+@option{-ftree-loop-vectorize}.
+
 @opindex ftree-loop-ivcanon
 @item -ftree-loop-ivcanon
 Create a canonical counter for number of iterations in loops for which
 determining number of iterations requires complicated analysis.  Later
 optimizations then may determine the number easily.  Useful especially
 in connection with unrolling.
+
+@opindex fpreserve-vect-idioms
+@item -fpreserve-vect-idioms
+Preserve selected innermost loops containing widened integer multiply-add
+reductions during early complete unrolling, when complete unrolling would
+increase code size.  Leaving these loops intact can expose opportunities
+for later loop vectorization, including dot-product instructions.
+
+This option is disabled by default and requires both loop optimization
+and loop vectorization to be enabled.  It uses a target-independent shape
+heuristic: it does not require target dot-product instructions and does
+not guarantee vectorization or improved performance.  Loops marked with
+@code{#pragma GCC novector} are not preserved by this option.  Additional
+scalar recurrences are conservatively limited to affine inductions and
+simple integer sum, minimum and maximum reductions.
+
+This option does not inhibit unrolling that does not increase code size,
+override explicit loop-unrolling pragmas, or affect complete unrolling
+after vectorization.  It only changes otherwise permitted early unrolling
+of nested loops at @option{-O3} or higher; at @option{-O2}, early complete
+unrolling already avoids code growth.
 
 @opindex ftree-scev-cprop
 @item -ftree-scev-cprop
@@ -16091,6 +16542,16 @@ Maximum number of queries into the alias oracle per store.
 Larger values result in larger compilation times and may result in more
 removed dead stores.
 
+@item phiprop-disjoint-stores-max-work
+Maximum cumulative work for @option{-ftree-phiprop-disjoint-stores} in
+each function and each invocation of the PHI propagation pass.  Constructing
+an incoming-object reference, visiting a nondebug statement, and querying the alias
+oracle each consume one unit.  The budget is shared across all candidate
+loads and PHIs, including unsuccessful attempts.  On exhaustion, further
+cross-store transformations are declined; ordinary PHI propagation remains
+enabled.  Debug statements do not consume the budget.  Zero disables the
+additional analysis.  The default is 16384.
+
 @item scev-max-expr-size
 Bound on size of expressions used in the scalar evolutions analyzer.
 Large expressions slow the analyzer.
@@ -16547,6 +17008,25 @@ in amount of needed compile-time memory, with very large loops.  Loops
 with more basic blocks than this parameter won't have loop invariant
 motion optimization performed on them.
 
+@item loop-invariant-split-chunk-bytes
+Maximum number of bytes of outer-invariant inner-loop loads to include in each
+chunk created by @option{-ftree-loop-invariant-split}.  A value of zero lets
+the compiler choose a target-dependent budget.
+
+@item loop-invariant-split-max-copies
+Maximum number of loop nest copies that
+@option{-ftree-loop-invariant-split} may create for one split.
+
+@item loop-invariant-split-reserved-vregs
+Number of vector registers reserved for the computation itself when
+@option{-ftree-loop-invariant-split} chooses an automatic chunk budget.  A
+value of zero lets the compiler reserve a target-dependent default.
+
+@item loop-invariant-split-vector-regs
+Number of vector registers available to @option{-ftree-loop-invariant-split}
+when choosing an automatic chunk budget.  A value of zero lets the compiler
+infer the value from the target.
+
 @item loop-max-datarefs-for-datadeps
 Building data dependencies is expensive for very large loops.  This
 parameter limits the number of data references in loops that are
@@ -16660,6 +17140,82 @@ IPA-CP attempts to track all possible values and types passed to a function's
 parameter in order to propagate them and perform devirtualization.
 @option{ipa-cp-value-list-size} is the maximum number of values and types it
 stores per one formal parameter of a function.
+
+@item ipa-value-specialization-clone-growth-budget
+Maximum extra estimated clone instructions admitted for repeated immutable
+values.  The default is 32768.  Zero disables this extra admission route;
+it does not suppress ordinary profitable clones.
+
+@item ipa-value-specialization-loop-growth-budget
+Maximum extra estimated clone instructions for single-source or shared
+immutable values in eligible loop contexts.  These mechanisms share this
+reserve.  The default is 131072.  Zero disables extra loop-reserve admissions.
+
+@item ipa-value-specialization-cold-growth-budget
+Maximum extra estimated clone instructions admitted by the cold immutable
+route.  The default is 1024.  Zero disables additional cold admissions.
+
+@item immutable-state-peel-limit
+Maximum copies peeled from one immutable state loop per specialization
+stage when @option{-ftree-immutable-loop-specialization} is enabled.
+The default is eight and the range is one through 64.  The initializer
+size and per-stage growth budget can further limit peeling; the residual
+loop and all runtime exits remain unless ordinary simplification removes them.
+
+@item immutable-cursor-max-path-insns
+Maximum estimated instructions copied by one path under
+@option{-ftree-immutable-loop-specialization-cursor}.  The default is 64 and
+permitted values range from 1 through 1024.  Cost is charged before cleanup.
+
+@item immutable-cursor-growth-budget
+Maximum cumulative estimated copied instructions per function under
+@option{-ftree-immutable-loop-specialization-cursor}.  The default is 1024 and
+permitted values range from 0 through 65536.  Zero disables this specialization.
+
+@item ipa-value-specialization-helper-growth-limit
+Maximum estimated edge growth for basic immutable helper inlining.  The
+default is 1200.  This limit is independent of the resulting-caller size limit.
+
+@item ipa-value-specialization-helper-size-limit
+Maximum estimated resulting-caller size for basic immutable helper inlining.
+The default is 4096.
+
+@item ipa-value-specialization-helper-expanded-growth-limit
+Maximum estimated edge growth when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 4096.
+
+@item ipa-value-specialization-helper-expanded-size-limit
+Maximum estimated resulting-caller size when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 65536.  These four helper limits use the resulting caller's option context.
+They only control this additional profitability policy; ordinary inlining
+may still accept an edge.  None of them relax the ordinary stack-frame limits.
+
+@item ipa-value-specialization-peel-growth-budget
+Fixed floor for the cumulative estimated growth allowance from readonly
+loop peeling in one GIMPLE function when
+@option{-fipa-value-specialization} is enabled.  The default is 524288.
+The effective allowance is the greater of this floor and the allowance
+computed by @option{ipa-value-specialization-peel-growth-percent}.
+Each successful duplication is charged for all
+copied blocks, PHIs and non-debug statements, including previously peeled
+inner loops, without credit for possible later simplification.  The
+consumed budget is retained across loops and subsequent peeling passes on
+the same function.  Zero disables this additional readonly peeling route;
+ordinary loop peeling keeps its existing limits.  User-specified
+@code{#pragma GCC unroll} factors remain in force for both routes.  This budget
+is separate from the IPA clone admission budgets.
+
+@item ipa-value-specialization-peel-growth-percent
+Additional copied cost allowance as a percentage of the complete function
+cost before its first extra readonly peel.  The default is 800.  The
+effective allowance is computed once, is capped at @code{INT_MAX}, and is
+not increased by later expansion.  Zero uses only the fixed floor.
+Setting @option{ipa-value-specialization-peel-growth-budget} to zero
+disables this route regardless of the percentage.  These are estimated
+copy costs, not a bound on final machine-code size or on growth caused by
+other optimizations.
 
 @item ipa-cp-eval-threshold
 IPA-CP calculates its own score of cloning profitability heuristics
@@ -31384,6 +31940,10 @@ to @samp{zvks} and @samp{zvkg}.
 @item smepmp
 @tab 1.0
 @tab PMP Enhancements for memory access and execution prevention on Machine mode.
+
+@item smrnmi
+@tab 1.0
+@tab Resumable non-maskable interrupts.
 
 @item smstateen
 @tab 1.0

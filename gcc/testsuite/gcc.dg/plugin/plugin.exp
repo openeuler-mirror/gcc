@@ -56,6 +56,7 @@ gcc_parallel_test_enable 0
 # Specify the plugin source file and the associated test files in a list.
 # plugin_test_list={ {plugin1 test1 test2 ...} {plugin2 test1 ...} ... }
 set plugin_test_list [list \
+    { immutable-loop-properties_plugin.c immutable-loop-properties.c } \
     { selfassign.c self-assign-test-1.c self-assign-test-2.c } \
     { ggcplug.c ggcplug-test-1.c } \
     { one_time_plugin.c one_time-test-1.c } \

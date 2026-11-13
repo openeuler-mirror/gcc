@@ -107,6 +107,10 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_if_split);
 	  NEXT_PASS (pass_sccopy);
 	  NEXT_PASS (pass_profile);
+	  NEXT_PASS (pass_bitset_store_coalescing_prepare);
+	  NEXT_PASS (pass_ch_bitset);
+	  NEXT_PASS (pass_bitset_store_coalescing_prepare);
+	  NEXT_PASS (pass_bitset_store_coalescing);
 	  NEXT_PASS (pass_local_pure_const);
 	  NEXT_PASS (pass_modref);
 	  /* Split functions creates parts that are not run through
@@ -202,6 +206,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_rebuild_cgraph_edges);
   POP_INSERT_PASSES ()
   NEXT_PASS (pass_ipa_array_dse);
+  NEXT_PASS (pass_ipa_array_load_inline);
   NEXT_PASS (pass_ipa_pta);
   /* FIXME: this should be a normal IP pass.  */
   NEXT_PASS (pass_ipa_struct_reorg);
@@ -248,6 +253,7 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_fre, true /* may_iterate */);
       NEXT_PASS (pass_merge_phi);
       NEXT_PASS (pass_thread_jumps_full, /*first=*/true);
+      NEXT_PASS (pass_constant_byte_range);
       NEXT_PASS (pass_vrp, false /* final_p*/);
       NEXT_PASS (pass_dse);
       NEXT_PASS (pass_dce);
@@ -277,6 +283,29 @@ along with GCC; see the file COPYING3.  If not see
 	 Clean them up.  Failure to do so well can lead to false
 	 positives from warnings for erroneous code.  */
       NEXT_PASS (pass_copy_prop);
+      NEXT_PASS (pass_constant_byte_range);
+      /* Scalar cleanup does not preserve loop-closed SSA.  Finish loop
+	 maintenance before running it, and rebuild loop state for the
+	 second bounded specialization stage.  */
+      NEXT_PASS (pass_immutable_loop_specialization);
+      PUSH_INSERT_PASSES_WITHIN (pass_immutable_loop_specialization)
+	NEXT_PASS (pass_immutable_loop_init);
+	NEXT_PASS (pass_immutable_unroll);
+	NEXT_PASS (pass_immutable_loop_done);
+	NEXT_PASS (pass_immutable_ccp);
+	NEXT_PASS (pass_immutable_forwprop);
+	NEXT_PASS (pass_immutable_dce);
+	NEXT_PASS (pass_immutable_fre);
+	NEXT_PASS (pass_immutable_dom);
+	NEXT_PASS (pass_immutable_loop_init);
+	NEXT_PASS (pass_immutable_unroll);
+	NEXT_PASS (pass_immutable_loop_done);
+	NEXT_PASS (pass_immutable_ccp);
+	NEXT_PASS (pass_immutable_forwprop);
+	NEXT_PASS (pass_immutable_dce);
+	NEXT_PASS (pass_immutable_fre);
+	NEXT_PASS (pass_immutable_dom);
+      POP_INSERT_PASSES ()
       /* Identify paths that should never be executed in a conforming
 	 program and isolate those paths.  */
       NEXT_PASS (pass_isolate_erroneous_paths);
@@ -304,6 +333,7 @@ along with GCC; see the file COPYING3.  If not see
 	 to discover/remove loops before running the gate function
 	 of pass_tree_loop.  */
       NEXT_PASS (pass_fix_loops);
+      NEXT_PASS (pass_static_byte_cfg);
       NEXT_PASS (pass_tree_loop);
       PUSH_INSERT_PASSES_WITHIN (pass_tree_loop)
           /* Before loop_init we rewrite no longer addressed locals into SSA
@@ -312,6 +342,7 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_tree_unswitch);
 	  NEXT_PASS (pass_loop_split);
 	  NEXT_PASS (pass_scev_cprop);
+	  NEXT_PASS (pass_loop_invariant_split);
 	  NEXT_PASS (pass_loop_versioning);
 	  NEXT_PASS (pass_loop_jam);
 	  /* All unswitching, final value replacement and splitting can expose
@@ -358,6 +389,49 @@ along with GCC; see the file COPYING3.  If not see
       NEXT_PASS (pass_tree_no_loop);
       PUSH_INSERT_PASSES_WITHIN (pass_tree_no_loop)
 	  NEXT_PASS (pass_slp_vectorize);
+      POP_INSERT_PASSES ()
+      NEXT_PASS (pass_immutable_cursor_specialization);
+      PUSH_INSERT_PASSES_WITHIN (pass_immutable_cursor_specialization)
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
+	NEXT_PASS (pass_immutable_cursor_thread);
+	NEXT_PASS (pass_cursor_ccp);
+	NEXT_PASS (pass_cursor_forwprop);
+	NEXT_PASS (pass_cursor_dce);
+	NEXT_PASS (pass_cursor_fre);
       POP_INSERT_PASSES ()
       NEXT_PASS (pass_simduid_cleanup);
       NEXT_PASS (pass_lower_vector_ssa);

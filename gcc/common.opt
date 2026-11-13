@@ -1270,6 +1270,10 @@ fcode-hoisting
 Common Var(flag_code_hoisting) Optimization
 Enable code hoisting.
 
+ftree-bitset-store-coalescing
+Common Var(flag_tree_bitset_store_coalescing) Optimization
+Coalesce canonical packed-bit loop nests into masked word stores.
+
 fcombine-stack-adjustments
 Common Var(flag_combine_stack_adjustments) Optimization
 Looks for opportunities to reduce stack adjustments and stack references.
@@ -1297,6 +1301,10 @@ Run only the second compilation of -fcompare-debug.
 fcompare-elim
 Common Var(flag_compare_elim_after_reload) Optimization
 Perform comparison elimination after register allocation has finished.
+
+fcomponent-type-flow
+Common Var(flag_component_type_flow) Init(0) Optimization
+Select additional speculative C++ devirtualization targets using type-flow information.
 
 floop-elim
 Common Var(flag_loop_elim) Init(0) Optimization
@@ -1345,6 +1353,10 @@ List all available debugging counters with their limits and counts.
 fdbg-cnt=
 Common RejectNegative Joined Var(common_deferred_options) Defer
 -fdbg-cnt=<counter>[:<lower_limit1>-]<upper_limit1>[:<lower_limit2>-<upper_limit2>:...][,<counter>:...]	Set the debug counter limit.
+
+fdebruijn-clz
+Common Var(flag_debruijn_clz) Init(0) Optimization
+Recognize DeBruijn table and split-word count-zero idioms while preserving zero.
 
 fdebug-prefix-map=
 Common Joined RejectNegative Var(common_deferred_options) Defer
@@ -1876,6 +1888,10 @@ Common Var(flag_large_source_files) Init(0)
 Improve GCC's ability to track column numbers in large source files,
 at the expense of slower compilation.
 
+flim-after-jam
+Common Var(flag_lim_after_jam) Optimization
+Do loop-invariant-motion after unroll-and-jam.
+
 floop-parallelize-all
 Common Var(flag_loop_parallelize_all) Optimization
 Mark all loops as parallel.
@@ -2226,6 +2242,10 @@ Array dead and redundant store elimination.
 fipa-reorder-fields
 Common Var(flag_ipa_reorder_fields) Init(0) Optimization
 Perform structure fields reorder optimizations.
+
+fipa-array-load-inline
+Common Var(flag_ipa_array_load_inline) Init(0) Optimization
+Replace recognized fixed array loads with inline computations at -O3 and above.
 
 fipa-struct-reorg
 Common Var(flag_ipa_struct_reorg) Init(0) Optimization
@@ -2651,6 +2671,10 @@ Run predictive commoning optimization.
 fprefetch-loop-arrays
 Common Var(flag_prefetch_loop_arrays) Init(-1) Optimization
 Generate prefetch instructions, if available, for arrays in loops.
+
+fpreserve-vect-idioms
+Common Var(flag_preserve_vect_idioms) Init(0) Optimization
+Preserve selected widened multiply reductions during early complete unrolling.
 
 fipa-prefetch
 Common Var(flag_ipa_prefetch) Init(0) Optimization
@@ -3313,6 +3337,18 @@ ftree-ccp
 Common Var(flag_tree_ccp) Optimization
 Enable SSA-CCP optimization on trees.
 
+ftree-constant-byte-range
+Common Var(flag_tree_constant_byte_range) Init(0) Optimization
+Propagate byte value ranges from complete immutable arrays through pointer cursors.
+
+ftree-constant-byte-range-cursor
+Common Var(flag_tree_constant_byte_range_cursor) Optimization Init(0) EnabledBy(ftree-constant-byte-range)
+Refine byte values at fixed displacements from constant-character searches.
+
+ftree-constant-byte-cursor-range
+Common Alias(ftree-constant-byte-range-cursor)
+Compatibility spelling of -ftree-constant-byte-range-cursor.
+
 ftree-bit-ccp
 Common Var(flag_tree_bit_ccp) Optimization
 Enable SSA-BIT-CCP optimization on trees.
@@ -3414,6 +3450,10 @@ ftree-loop-im
 Common Var(flag_tree_loop_im) Init(1) Optimization
 Enable loop invariant motion on trees.
 
+ftree-loop-invariant-split
+Common Var(flag_tree_loop_invariant_split) Optimization Init(0)
+Split loop nests around inner-loop invariant data blocks.
+
 ftree-loop-linear
 Common Alias(floop-nest-optimize)
 Enable loop nest transforms.  Same as -floop-nest-optimize.
@@ -3434,6 +3474,10 @@ ftree-phiprop
 Common Var(flag_tree_phiprop) Init(1) Optimization
 Enable hoisting loads from conditional pointers.
 
+ftree-phiprop-disjoint-stores
+Common Var(flag_tree_phiprop_disjoint_stores) Optimization Init(0)
+Propagate local scalar loads through address PHIs across proven-disjoint stores.
+
 ftree-pre
 Common Var(flag_tree_pre) Optimization
 Enable SSA-PRE optimization on trees.
@@ -3449,6 +3493,10 @@ Perform function-local points-to analysis on trees.
 ftree-reassoc
 Common Var(flag_tree_reassoc) Init(1) Optimization
 Enable reassociation on tree level.
+
+ftree-replacement-index-prefetch
+Common Var(flag_tree_replacement_index_prefetch) Init(0) Optimization
+Prefetch indirect addresses using a replacement index in loops or direct joins.
 
 ftree-salias
 Common Ignore
@@ -3506,6 +3554,10 @@ Perform loop unrolling for all loops.
 funroll-completely-grow-size
 Undocumented Var(flag_cunroll_grow_size) Optimization
 ; Internal undocumented flag, allow size growth during complete unrolling
+
+funsafe-dynamic-cast-cache
+Common Var(flag_unsafe_dynamic_cast_cache) Init(0) Optimization
+Cache successful zero-adjustment C++ dynamic casts assuming stable vtable addresses.
 
 ; Nonzero means that loop optimizer may assume that the induction variables
 ; that control loops do not overflow and that the loops with nontrivial
@@ -4164,4 +4216,65 @@ fsve-expand-std-find-threshold
 Common Var(sve_expand_std_find_threshold) Init(8) Optimization
 Minimal length of the array to search
 
+ftree-static-byte-cfg
+Common Var(flag_tree_static_byte_cfg) Init(0) Optimization
+Specialize bounded CFG states using immutable addresses and byte equality facts derived from GIMPLE.
+
 ; This comment is to ensure we retain the blank line above.
+
+fipa-value-specialization-clone-budget
+Common Var(flag_ipa_immutable_clone_budget) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Consider bounded repeated immutable programs using a dedicated IPA clone profitability budget.
+
+fipa-value-specialization-loop
+Common Var(flag_ipa_loop_value_specialization) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Specialize immutable arguments at a single call site in a bounded static loop context.
+
+fipa-value-specialization-shared-loop
+Common Var(flag_ipa_shared_loop_value_specialization) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Allow shared immutable values in hot loop contexts to use the IPA loop clone reserve.
+
+fipa-value-specialization-cold
+Common Var(flag_ipa_bounded_cold_immutable_specialization) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Admit bounded immutable value clones rejected only by static coldness.
+
+fipa-value-specialization-helper-expansion
+Common Var(flag_ipa_immutable_helper_expansion) Optimization Init(0) EnabledBy(fipa-value-specialization)
+Allow larger bounded helper inlining in immutable specialization contexts.
+
+fipa-value-specialization
+Common Var(flag_ipa_value_specialization) Optimization Init(0)
+Specialize calls for immutable constant-object values and expose their states to scalar optimization.
+
+fipa-immutable-clone-budget
+Common Alias(fipa-value-specialization-clone-budget)
+Compatibility spelling of -fipa-value-specialization-clone-budget.
+
+fipa-loop-value-specialization
+Common Alias(fipa-value-specialization-loop)
+Compatibility spelling of -fipa-value-specialization-loop.
+
+fipa-shared-loop-value-specialization
+Common Alias(fipa-value-specialization-shared-loop)
+Compatibility spelling of -fipa-value-specialization-shared-loop.
+
+fipa-bounded-cold-immutable-specialization
+Common Alias(fipa-value-specialization-cold)
+Compatibility spelling of -fipa-value-specialization-cold.
+
+fipa-immutable-helper-expansion
+Common Alias(fipa-value-specialization-helper-expansion)
+Compatibility spelling of -fipa-value-specialization-helper-expansion.
+
+
+ftree-immutable-loop-specialization
+Common Var(flag_tree_immutable_loop_specialization) Optimization Init(0)
+Expose immutable loop states; loop stages require -fipa-value-specialization.
+
+ftree-immutable-loop-specialization-cursor
+Common Var(flag_tree_immutable_cursor_specialization) Optimization Init(0) EnabledBy(ftree-immutable-loop-specialization)
+Specialize bounded control-flow paths for cursors into immutable objects.
+
+ftree-immutable-cursor-specialization
+Common Alias(ftree-immutable-loop-specialization-cursor)
+Compatibility spelling of -ftree-immutable-loop-specialization-cursor.

@@ -652,6 +652,215 @@ static vec<edge> edges_to_remove;
 /* Stores loops that has been peeled.  */
 static bitmap peeled_loops;
 
+/* Return the defining statement of SSA_NAME if it is inside LOOP.  */
+
+static gimple *
+ssa_name_def_stmt_in_loop (class loop *loop, tree name)
+{
+  if (TREE_CODE (name) != SSA_NAME)
+    return NULL;
+
+  gimple *stmt = SSA_NAME_DEF_STMT (name);
+  if (!stmt || gimple_nop_p (stmt) || !gimple_bb (stmt))
+    return NULL;
+
+  if (!flow_bb_inside_loop_p (loop, gimple_bb (stmt)))
+    return NULL;
+
+  return stmt;
+}
+
+/* Strip widening and same-precision integer conversions that are defined
+   inside LOOP from OP.  */
+
+static tree
+strip_integer_conversions_in_loop (class loop *loop, tree op)
+{
+  while (TREE_CODE (op) == SSA_NAME)
+    {
+      gimple *stmt = ssa_name_def_stmt_in_loop (loop, op);
+      if (!stmt
+	  || !is_gimple_assign (stmt)
+	  || !CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (stmt)))
+	break;
+
+      tree rhs = gimple_assign_rhs1 (stmt);
+      if (!INTEGRAL_TYPE_P (TREE_TYPE (op))
+	  || !INTEGRAL_TYPE_P (TREE_TYPE (rhs))
+	  || (TYPE_PRECISION (TREE_TYPE (rhs))
+	      > TYPE_PRECISION (TREE_TYPE (op))))
+	break;
+
+      op = rhs;
+    }
+
+  return op;
+}
+
+/* Return true if OP is an integer value that is widened from a narrower
+   integer definition inside LOOP.  TO_PRECISION is the precision of the
+   operation using OP.  */
+
+static bool
+widened_integer_operand_p (class loop *loop, tree op,
+			   unsigned int to_precision)
+{
+  op = strip_integer_conversions_in_loop (loop, op);
+  if (TREE_CODE (op) != SSA_NAME
+      || !INTEGRAL_TYPE_P (TREE_TYPE (op))
+      || TYPE_PRECISION (TREE_TYPE (op)) >= to_precision)
+    return false;
+
+  return ssa_name_def_stmt_in_loop (loop, op) != NULL;
+}
+
+/* Return true if ADDEND is a multiplication of widened integer operands.
+   Such multiply-add reductions are often recognized by the vectorizer as
+   DOT_PROD_EXPRs, but early complete unrolling can hide the idiom.  */
+
+static bool
+widened_integer_mult_p (class loop *loop, tree addend)
+{
+  addend = strip_integer_conversions_in_loop (loop, addend);
+
+  gimple *stmt = ssa_name_def_stmt_in_loop (loop, addend);
+  if (!stmt
+      || !is_gimple_assign (stmt)
+      || gimple_assign_rhs_code (stmt) != MULT_EXPR)
+    return false;
+
+  tree type = TREE_TYPE (gimple_assign_lhs (stmt));
+  if (!INTEGRAL_TYPE_P (type))
+    return false;
+
+  unsigned int precision = TYPE_PRECISION (type);
+  return (widened_integer_operand_p (loop, gimple_assign_rhs1 (stmt),
+				     precision)
+	  && widened_integer_operand_p (loop, gimple_assign_rhs2 (stmt),
+					precision));
+}
+
+/* Return true if NAME has a non-debug use inside LOOP other than STMT.
+   Uses outside LOOP can consume the final value of a reduction.  */
+
+static bool
+has_other_use_in_loop_p (class loop *loop, tree name, gimple *stmt)
+{
+  imm_use_iterator iter;
+  use_operand_p use_p;
+  FOR_EACH_IMM_USE_FAST (use_p, iter, name)
+    {
+      gimple *use_stmt = USE_STMT (use_p);
+      if (!is_gimple_debug (use_stmt)
+	  && use_stmt != stmt
+	  && flow_bb_inside_loop_p (loop, gimple_bb (use_stmt)))
+	return true;
+    }
+  return false;
+}
+
+/* Return true if PHI is a simple integer sum, minimum or maximum reduction
+   in LOOP.  Set CODE to its operation and OPERAND to its non-reduction
+   operand.  This deliberately excludes more general scalar recurrences.  */
+
+static bool
+simple_integer_reduction_phi_p (class loop *loop, gphi *phi, edge latch,
+				enum tree_code &code, tree &operand)
+{
+  tree result = PHI_RESULT (phi);
+  if (!INTEGRAL_TYPE_P (TREE_TYPE (result)))
+    return false;
+
+  tree latch_arg = PHI_ARG_DEF_FROM_EDGE (phi, latch);
+  gimple *stmt = ssa_name_def_stmt_in_loop (loop, latch_arg);
+  if (!stmt || !is_gimple_assign (stmt))
+    return false;
+
+  code = gimple_assign_rhs_code (stmt);
+  if (code != PLUS_EXPR && code != MIN_EXPR && code != MAX_EXPR)
+    return false;
+
+  tree rhs1 = gimple_assign_rhs1 (stmt);
+  tree rhs2 = gimple_assign_rhs2 (stmt);
+  if (rhs1 == result)
+    operand = rhs2;
+  else if (rhs2 == result)
+    operand = rhs1;
+  else
+    return false;
+
+  if (operand == result)
+    return false;
+
+  /* Inside LOOP the PHI result must only feed the operation, and the
+     updated value must only feed PHI.  Either can supply the final value
+     outside LOOP, depending on the position of the exit test.  Do not
+     preserve prefix sums as simple reductions.  */
+  return (!has_other_use_in_loop_p (loop, result, stmt)
+	  && !has_other_use_in_loop_p (loop, latch_arg, phi));
+}
+
+/* Return true if LOOP has a widened integer multiply sum reduction and
+   all its other scalar recurrences are affine inductions or simple integer
+   reductions.  This conservative shape heuristic does not recognize every
+   recurrence supported by the vectorizer, or check target support.  */
+
+static bool
+loop_has_widened_mult_reduction_p (class loop *loop)
+{
+  edge latch = loop_latch_edge (loop);
+  if (!latch)
+    return false;
+
+  bool found = false;
+  for (gphi_iterator psi = gsi_start_phis (loop->header);
+       !gsi_end_p (psi); gsi_next (&psi))
+    {
+      gphi *phi = psi.phi ();
+      tree result = PHI_RESULT (phi);
+      if (virtual_operand_p (result))
+	continue;
+
+      affine_iv iv;
+      if (simple_iv (loop, loop, result, &iv, true))
+	continue;
+
+      enum tree_code code;
+      tree operand;
+      if (!simple_integer_reduction_phi_p (loop, phi, latch, code, operand))
+	return false;
+
+      if (code == PLUS_EXPR && widened_integer_mult_p (loop, operand))
+	found = true;
+    }
+
+  return found;
+}
+
+/* Return true if early complete unrolling should leave LOOP for vectorizer
+   idiom recognition.  */
+
+static bool
+preserve_vect_idiom_for_vectorizer_p (class loop *loop,
+				      unsigned HOST_WIDE_INT n_unroll)
+{
+  if (!flag_tree_loop_optimize
+      || !(flag_tree_loop_vectorize || loop->force_vectorize)
+      || loop->inner
+      || loop->unroll
+      || loop->dont_vectorize)
+    return false;
+
+  /* Leave very short loops to the usual unrolling heuristics.  This is a
+     minimum unroll-count threshold, not a target vector length.  N_UNROLL
+     counts latch executions (or their upper bound), which need not equal
+     the number of executions of the source-level loop body.  */
+  if (n_unroll < 4)
+    return false;
+
+  return loop_has_widened_mult_reduction_p (loop);
+}
+
 /* Cancel all fully unrolled loops by putting __builtin_unreachable
    on the latch edge.  
    We do it after all unrolling since unlooping moves basic blocks
@@ -734,7 +943,8 @@ try_unroll_loop_completely (class loop *loop,
 			    edge exit, tree niter, bool may_be_zero,
 			    enum unroll_level ul,
 			    HOST_WIDE_INT maxiter,
-			    dump_user_location_t locus, bool allow_peel)
+			    dump_user_location_t locus, bool allow_peel,
+			    bool preserve_vect_idioms)
 {
   unsigned HOST_WIDE_INT n_unroll = 0;
   bool n_unroll_found = false;
@@ -848,11 +1058,14 @@ try_unroll_loop_completely (class loop *loop,
 	  /* If the code is going to shrink, we don't need to be extra
 	     cautious on guessing if the unrolling is going to be
 	     profitable.  */
-	  if (unr_insns
-	      /* If there is IV variable that will become constant, we
-		 save one instruction in the loop prologue we do not
-		 account otherwise.  */
-	      <= ninsns + (size.constant_iv != false))
+	  bool code_would_grow
+	    = (unr_insns
+	       /* If there is IV variable that will become constant, we
+		  save one instruction in the loop prologue we do not
+		  account otherwise.  */
+	       > ninsns + (size.constant_iv != false));
+
+	  if (!code_would_grow)
 	    ;
 	  /* We unroll only inner loops, because we do not consider it
 	     profitable otheriwse.  We still can cancel loopback edge
@@ -927,6 +1140,16 @@ try_unroll_loop_completely (class loop *loop,
 			 "number of insns in the unrolled sequence reaches "
 			 "--param max-completely-peeled-insns limit.\n",
 			 loop->num);
+	      return false;
+	    }
+	  /* Preserve an idiom only when it would otherwise be unrolled.  */
+	  else if (preserve_vect_idioms
+		   && preserve_vect_idiom_for_vectorizer_p (loop, n_unroll))
+	    {
+	      if (dump_file && (dump_flags & TDF_DETAILS))
+		fprintf (dump_file, "Not unrolling loop %d: "
+			 "preserving widened multiply reduction for "
+			 "vectorization.\n", loop->num);
 	      return false;
 	    }
 	}
@@ -1083,6 +1306,266 @@ adjust_loop_info_after_peeling (class loop *loop, int npeel, bool precise)
     }
 }
 
+/* Follow a pointer SSA value through simple copies and constant pointer
+   adjustments.  Return the addressed object when the chain starts at a
+   compile-time address, otherwise return NULL_TREE.  */
+
+static tree
+readonly_pointer_base_object_1 (tree value, unsigned depth, unsigned &remaining)
+{
+  if (!value || depth == 0 || remaining == 0)
+    return NULL_TREE;
+
+  --remaining;
+  STRIP_NOPS (value);
+  if (TREE_CODE (value) == ADDR_EXPR)
+    {
+      tree object = TREE_OPERAND (value, 0);
+      while (handled_component_p (object))
+	object = TREE_OPERAND (object, 0);
+      /* Folded constant pointer offsets are commonly represented as the
+	 address of a MEM_REF, rather than as POINTER_PLUS_EXPR.  Follow its
+	 address operand, not a loaded pointer: the caller must still prove
+	 that the ultimate object has a complete immutable initializer.  */
+      if (flag_tree_immutable_loop_specialization
+	  && TREE_CODE (object) == MEM_REF)
+	return readonly_pointer_base_object_1 (TREE_OPERAND (object, 0),
+					     depth - 1, remaining);
+      return object;
+    }
+
+  if (TREE_CODE (value) != SSA_NAME)
+    return NULL_TREE;
+
+  gimple *def = SSA_NAME_DEF_STMT (value);
+  if (flag_tree_immutable_loop_specialization
+      && gimple_code (def) == GIMPLE_PHI)
+    {
+      gphi *phi = as_a <gphi *> (def);
+      if (gimple_phi_num_args (phi) > 8
+	  || SSA_NAME_OCCURS_IN_ABNORMAL_PHI (value))
+	return NULL_TREE;
+      tree common = NULL_TREE;
+      for (unsigned i = 0; i < gimple_phi_num_args (phi); ++i)
+	{
+	  tree object = readonly_pointer_base_object_1
+	    (gimple_phi_arg_def (phi, i), depth - 1, remaining);
+	  if (!object || (common && common != object))
+	    return NULL_TREE;
+	  common = object;
+	}
+      if (common && dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Pointer PHI shares one constant-address object.\n");
+      return common;
+    }
+  if (!is_gimple_assign (def))
+    return NULL_TREE;
+
+  enum tree_code code = gimple_assign_rhs_code (def);
+  if (code == SSA_NAME || CONVERT_EXPR_CODE_P (code)
+      || code == ADDR_EXPR)
+    return readonly_pointer_base_object_1 (gimple_assign_rhs1 (def), depth - 1, remaining);
+
+  if ((code == POINTER_PLUS_EXPR || code == PLUS_EXPR)
+      && TREE_CODE (gimple_assign_rhs2 (def)) == INTEGER_CST)
+    return readonly_pointer_base_object_1 (gimple_assign_rhs1 (def), depth - 1, remaining);
+
+  return NULL_TREE;
+}
+
+/* Keep branching PHI exploration linear in a small fixed budget.  This only
+   supplies the existing peeling profitability hint; the caller still
+   verifies the complete immutable initializer, and no loop exit is removed
+   based on this result.  Cycles or unknown incoming values are rejected.  */
+
+static tree
+readonly_pointer_base_object (tree value, unsigned depth)
+{
+  unsigned remaining = 64;
+  return readonly_pointer_base_object_1 (value, depth, remaining);
+}
+
+/* For an IPA clone or candidate-context caller, use a pointer PHI's visible
+   constant-object initializer to suggest a bounded number of copies.  This
+   is a profitability hint, not proof of an exact trip count or of successful
+   inlining.  Runtime exits and ordinary transformation checks remain in force;
+   try_peel_loop separately limits cumulative copied cost.  */
+
+static unsigned immutable_stage_peel_cost;
+
+static unsigned
+ipa_readonly_value_peel_count (class loop *loop)
+{
+  if (!flag_ipa_value_specialization)
+    return 0;
+
+  cgraph_node *node = cgraph_node::get (current_function_decl);
+  if (!node
+      || (!node->ipcp_clone && !node->ipa_value_specialized))
+    return 0;
+
+  edge preheader = loop_preheader_edge (loop);
+  if (!preheader)
+    return 0;
+
+  for (gphi_iterator gpi = gsi_start_phis (loop->header);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    {
+      gphi *phi = gpi.phi ();
+      tree result = gimple_phi_result (phi);
+      if (!POINTER_TYPE_P (TREE_TYPE (result)))
+	continue;
+
+      tree value = PHI_ARG_DEF_FROM_EDGE (phi, preheader);
+      tree object = readonly_pointer_base_object (value, 12);
+      if (!object)
+	continue;
+
+      tree initial = NULL_TREE;
+      if (TREE_CODE (object) == STRING_CST)
+	initial = object;
+      else if ((TREE_CODE (object) == VAR_DECL
+		|| TREE_CODE (object) == CONST_DECL)
+	       && !TREE_THIS_VOLATILE (object)
+	       && (TREE_READONLY (object)
+		   || (TREE_CODE (object) == VAR_DECL
+		       && DECL_IN_CONSTANT_POOL (object))))
+	{
+	  initial = ctor_for_folding (object);
+	  if (!initial || initial == error_mark_node
+	      || !TREE_CONSTANT (initial))
+	    initial = NULL_TREE;
+	}
+
+      unsigned HOST_WIDE_INT bytes = 0;
+      if (initial && TREE_CODE (initial) == STRING_CST)
+	bytes = TREE_STRING_LENGTH (initial);
+      else if (initial && TREE_TYPE (object)
+	       && TYPE_SIZE_UNIT (TREE_TYPE (object))
+	       && tree_fits_uhwi_p (TYPE_SIZE_UNIT (TREE_TYPE (object))))
+	bytes = tree_to_uhwi (TYPE_SIZE_UNIT (TREE_TYPE (object)));
+
+      if (bytes > 1 && bytes <= 64)
+	{
+	  if (dump_file && (dump_flags & TDF_DETAILS))
+	    fprintf (dump_file, "Considering IPA readonly-value loop %d for "
+		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states in %s.\n",
+		     loop->num, bytes, node->dump_name ());
+	  if (flag_tree_immutable_loop_specialization)
+	    return MIN ((unsigned) bytes,
+		      (unsigned) param_immutable_state_peel_limit);
+	  return (unsigned) bytes;
+	}
+    }
+
+  return 0;
+}
+
+/* Charge every block and PHI, and at least one unit per non-debug statement.
+   Do not subtract instructions that later passes might eliminate.  */
+
+static bool
+ipa_readonly_peel_charge_block (basic_block bb, unsigned limit,
+			       unsigned *cost)
+{
+  auto charge = [&] (unsigned amount) -> bool
+    {
+      if (amount > limit - *cost)
+	return false;
+      *cost += amount;
+      return true;
+    };
+
+  if (!charge (1))
+    return false;
+  for (gphi_iterator gpi = gsi_start_phis (bb);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    if (!charge (1))
+      return false;
+  for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
+       !gsi_end_p (gsi); gsi_next (&gsi))
+    {
+      gimple *stmt = gsi_stmt (gsi);
+      if (!is_gimple_debug (stmt)
+	  && !charge (MAX (1, estimate_num_insns (stmt, &eni_size_weights))))
+	return false;
+    }
+  return true;
+}
+
+/* Freeze a function-wide allowance before the first extra readonly peel.
+   Subsequent expansion must not replenish it.  A fixed floor avoids making
+   small functions depend on a ratio, while the initial full function cost
+   gives large functions room for several independent profitable loops.  */
+
+static unsigned
+ipa_readonly_peel_growth_limit ()
+{
+  unsigned floor = param_ipa_value_specialization_peel_growth_budget;
+  if (floor == 0)
+    return 0;
+  if (cfun->ipa_value_specialization_peel_limit)
+    return cfun->ipa_value_specialization_peel_limit;
+
+  unsigned initial_cost = 0;
+  unsigned percent = param_ipa_value_specialization_peel_growth_percent;
+  if (percent)
+    {
+      basic_block bb;
+      FOR_EACH_BB_FN (bb, cfun)
+	if (!ipa_readonly_peel_charge_block (bb, INT_MAX, &initial_cost))
+	  {
+	    initial_cost = INT_MAX;
+	    break;
+	  }
+    }
+  unsigned HOST_WIDE_INT relative
+    = (unsigned HOST_WIDE_INT) initial_cost * percent / 100;
+  unsigned limit = MAX (floor, (unsigned) MIN (relative, INT_MAX));
+  cfun->ipa_value_specialization_peel_limit = limit;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      if (percent)
+	fprintf (dump_file, "IPA readonly peeling budget: %u units "
+		 "(initial function cost %u, growth %u%%).\n",
+		 limit, initial_cost, percent);
+      else
+	fprintf (dump_file, "IPA readonly peeling budget: %u units "
+		 "(fixed allowance; function cost not scanned).\n", limit);
+    }
+  return limit;
+}
+
+/* Compute a conservative cost of all copies, including already expanded
+   inner loops.  Unlike tree_estimate_loop_size, a partial scan can only
+   reject the transformation, never supply an accepted cost.  */
+
+static bool
+ipa_readonly_peel_growth_cost (class loop *loop, unsigned npeel,
+			      unsigned limit, unsigned *growth)
+{
+  unsigned used = cfun->ipa_value_specialization_peel_growth;
+  if (used >= limit)
+    return false;
+
+  gcc_assert (npeel != 0);
+  unsigned max_body_cost = (limit - used) / npeel;
+  unsigned body_cost = 0;
+
+  basic_block *body = get_loop_body (loop);
+  bool fits = true;
+  for (unsigned i = 0; i < loop->num_nodes && fits; ++i)
+    fits = ipa_readonly_peel_charge_block (body[i], max_body_cost, &body_cost);
+  free (body);
+  if (!fits)
+    return false;
+
+  /* The division above bounds both the multiplication and the subsequent
+     cumulative addition by LIMIT, which is at most INT_MAX.  */
+  *growth = body_cost * npeel;
+  return true;
+}
+
 /* If the loop is expected to iterate N times and is
    small enough, duplicate the loop body N+1 times before
    the loop itself.  This way the hot path will never
@@ -1097,6 +1580,8 @@ try_peel_loop (class loop *loop,
   HOST_WIDE_INT npeel;
   struct loop_size size;
   int peeled_size;
+  unsigned readonly_growth = 0;
+  unsigned readonly_limit = 0;
 
   if (!flag_peel_loops
       || param_max_peel_times <= 0
@@ -1110,6 +1595,9 @@ try_peel_loop (class loop *loop,
       return false;
     }
 
+  unsigned readonly_npeel = ipa_readonly_value_peel_count (loop);
+  bool readonly_specialization = readonly_npeel != 0;
+
   /* We don't peel loops that will be unrolled as this can duplicate a
      loop more times than the user requested.  */
   if (loop->unroll)
@@ -1122,7 +1610,7 @@ try_peel_loop (class loop *loop,
   /* Peel only innermost loops.
      While the code is perfectly capable of peeling non-innermost loops,
      the heuristics would probably need some improvements. */
-  if (loop->inner)
+  if (loop->inner && !readonly_specialization)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: outer loop\n");
@@ -1137,9 +1625,14 @@ try_peel_loop (class loop *loop,
     }
 
   /* Check if there is an estimate on the number of iterations.  */
-  npeel = estimated_loop_iterations_int (loop);
-  if (npeel < 0)
-    npeel = likely_max_loop_iterations_int (loop);
+  if (readonly_specialization)
+    npeel = readonly_npeel - 1;
+  else
+    {
+      npeel = estimated_loop_iterations_int (loop);
+      if (npeel < 0)
+	npeel = likely_max_loop_iterations_int (loop);
+    }
   if (npeel < 0)
     {
       if (dump_file)
@@ -1147,7 +1640,7 @@ try_peel_loop (class loop *loop,
 	         "estimated\n");
       return false;
     }
-  if (maxiter >= 0 && maxiter <= npeel)
+  if (!readonly_specialization && maxiter >= 0 && maxiter <= npeel)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: upper bound is known so can "
@@ -1158,7 +1651,7 @@ try_peel_loop (class loop *loop,
   /* We want to peel estimated number of iterations + 1 (so we never
      enter the loop on quick path).  Check against PARAM_MAX_PEEL_TIMES
      and be sure to avoid overflows.  */
-  if (npeel > param_max_peel_times - 1)
+  if (!readonly_specialization && npeel > param_max_peel_times - 1)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: rolls too much "
@@ -1167,16 +1660,62 @@ try_peel_loop (class loop *loop,
     }
   npeel++;
 
+  /* The readonly object size is only an upper bound on the number of byte
+     states available to the loop.  The loop itself may have a smaller,
+     independently proven upper bound (for example, a two-element pointer
+     array backed by 16 bytes).  Do not let the specialization override that
+     proof: adjust_loop_info_after_peeling requires the precise peel count not
+     to exceed it.  */
+  if (readonly_specialization && loop->any_upper_bound
+      && !wi::leu_p (npeel, loop->nb_iterations_upper_bound))
+    {
+      if (dump_file)
+	fprintf (dump_file, "Not peeling IPA readonly-value loop: requested "
+		 "%i copies exceed known upper bound.\n", (int) npeel);
+      return false;
+    }
+
   /* Check peeled loops size.  */
   tree_estimate_loop_size (loop, exit, NULL, &size,
 			   param_max_peeled_insns);
   if ((peeled_size = estimated_peeled_sequence_size (&size, (int) npeel))
-      > param_max_peeled_insns)
+      > param_max_peeled_insns && !readonly_specialization)
     {
       if (dump_file)
 	fprintf (dump_file, "Not peeling: peeled sequence size is too large "
 		 "(%i insns > --param max-peel-insns)", peeled_size);
       return false;
+    }
+
+  if (readonly_specialization)
+    readonly_limit = ipa_readonly_peel_growth_limit ();
+  if (readonly_specialization
+      && !ipa_readonly_peel_growth_cost (loop, (unsigned) npeel,
+					readonly_limit, &readonly_growth))
+    {
+      if (dump_file)
+	fprintf (dump_file, "IPA readonly peeling growth budget exhausted: "
+		 "%u of %u units already used.\n",
+		 cfun->ipa_value_specialization_peel_growth,
+		 readonly_limit);
+      return false;
+    }
+
+  if (readonly_specialization && flag_tree_immutable_loop_specialization)
+    {
+      const unsigned stage_budget = 32768;
+      unsigned HOST_WIDE_INT cost
+	= estimated_peeled_sequence_size (&size, (int) npeel);
+      if (cost > stage_budget - immutable_stage_peel_cost)
+	{
+	  if (dump_file)
+	    fprintf (dump_file, "Immutable state stage growth budget exhausted.\n");
+	  return false;
+	}
+      immutable_stage_peel_cost += cost;
+      if (dump_file)
+	fprintf (dump_file, "Bounded immutable state peeling: %u copies.\n",
+		 (unsigned) npeel);
     }
 
   if (!dbg_cnt (gimple_unroll))
@@ -1208,6 +1747,18 @@ try_peel_loop (class loop *loop,
       return false;
     }
   free_original_copy_tables ();
+  if (readonly_specialization)
+    {
+      cfun->ipa_value_specialization_peel_growth += readonly_growth;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Peeled IPA readonly-value loop %d, %i times.\n",
+		 loop->num, (int) npeel);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "IPA readonly peeling growth: %u units, "
+		 "%u of %u cumulative.\n", readonly_growth,
+		 cfun->ipa_value_specialization_peel_growth,
+		 readonly_limit);
+    }
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "Peeled loop %d, %i times.\n",
@@ -1227,7 +1778,8 @@ try_peel_loop (class loop *loop,
 static bool
 canonicalize_loop_induction_variables (class loop *loop,
 				       bool create_iv, enum unroll_level ul,
-				       bool try_eval, bool allow_peel)
+				       bool try_eval, bool allow_peel,
+				       bool preserve_vect_idioms)
 {
   edge exit = NULL;
   tree niter;
@@ -1314,7 +1866,8 @@ canonicalize_loop_induction_variables (class loop *loop,
 
   dump_user_location_t locus = find_loop_location (loop);
   if (try_unroll_loop_completely (loop, exit, niter, may_be_zero, ul,
-				  maxiter, locus, allow_peel))
+				  maxiter, locus, allow_peel,
+				  preserve_vect_idioms))
     return true;
 
   if (create_iv
@@ -1358,7 +1911,7 @@ canonicalize_induction_variables (void)
     {
       changed |= canonicalize_loop_induction_variables (loop,
 							true, UL_SINGLE_ITER,
-							true, false);
+							true, false, false);
     }
   gcc_assert (!need_ssa_update_p (cfun));
 
@@ -1392,6 +1945,7 @@ canonicalize_induction_variables (void)
 
 static bool
 tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
+				bool preserve_vect_idioms,
 				bitmap father_bbs, class loop *loop)
 {
   class loop *loop_father;
@@ -1410,6 +1964,7 @@ tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
 	if (!child_father_bbs)
 	  child_father_bbs = BITMAP_ALLOC (NULL);
 	if (tree_unroll_loops_completely_1 (may_increase_size, unroll_outer,
+					    preserve_vect_idioms,
 					    child_father_bbs, inner))
 	  {
 	    bitmap_ior_into (father_bbs, child_father_bbs);
@@ -1456,7 +2011,8 @@ tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
     ul = UL_NO_GROWTH;
 
   if (canonicalize_loop_induction_variables
-        (loop, false, ul, !flag_tree_loop_ivcanon, unroll_outer))
+	(loop, false, ul, !flag_tree_loop_ivcanon, unroll_outer,
+	 preserve_vect_idioms))
     {
       /* If we'll continue unrolling, we need to propagate constants
 	 within the new basic blocks to fold away induction variable
@@ -1485,7 +2041,8 @@ tree_unroll_loops_completely_1 (bool may_increase_size, bool unroll_outer,
    size of the code does not increase.  */
 
 static unsigned int
-tree_unroll_loops_completely (bool may_increase_size, bool unroll_outer)
+tree_unroll_loops_completely (bool may_increase_size, bool unroll_outer,
+			      bool preserve_vect_idioms)
 {
   bitmap father_bbs = BITMAP_ALLOC (NULL);
   bool changed;
@@ -1506,7 +2063,9 @@ tree_unroll_loops_completely (bool may_increase_size, bool unroll_outer)
       estimate_numbers_of_iterations (cfun);
 
       changed = tree_unroll_loops_completely_1 (may_increase_size,
-						unroll_outer, father_bbs,
+						unroll_outer,
+						preserve_vect_idioms,
+						father_bbs,
 						current_loops->tree_root);
       if (changed)
 	{
@@ -1662,6 +2221,7 @@ public:
 unsigned int
 pass_complete_unroll::execute (function *fun)
 {
+  immutable_stage_peel_cost = 0;
   if (number_of_loops (fun) <= 1)
     return 0;
 
@@ -1671,7 +2231,7 @@ pass_complete_unroll::execute (function *fun)
   if (flag_peel_loops)
     peeled_loops = BITMAP_ALLOC (NULL);
   unsigned int val = tree_unroll_loops_completely (flag_cunroll_grow_size, 
-						   true);
+						   true, false);
   if (peeled_loops)
     {
       BITMAP_FREE (peeled_loops);
@@ -1727,7 +2287,9 @@ pass_complete_unrolli::execute (function *fun)
   if (number_of_loops (fun) > 1)
     {
       scev_initialize ();
-      ret = tree_unroll_loops_completely (optimize >= 3, false);
+      ret = tree_unroll_loops_completely
+	      (optimize >= 3, false,
+	       flag_preserve_vect_idioms);
       scev_finalize ();
     }
   loop_optimizer_finalize ();

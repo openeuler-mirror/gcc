@@ -28,6 +28,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "stringpool.h"
 #include "intl.h"
 #include "stor-layout.h"
+#include "gimple-expr.h"
+#include "varasm.h"
 #include "c-family/c-pragma.h"
 #include "gcc-rich-location.h"
 
@@ -796,6 +798,79 @@ build_dynamic_cast_1 (location_t loc, tree type, tree expr,
 	    }
 	  result = build_cxx_call (dcast_fn, 4, elems, complain);
 	  SET_EXPR_LOCATION (result, loc);
+
+	  /* For a zero-offset downcast, remember a successful dynamic vptr
+	     only when the result has the same address as the source subobject.
+	     A zero base hint alone does not guarantee this for cross-casts.
+	     Repeated casts of a cached dynamic type need not enter the RTTI
+	     runtime; misses and adjusted results retain the full semantics.
+	     The independent unsafe cache option requires vtable addresses to
+	     retain their dynamic type while a thread keeps an entry.  */
+	  if (flag_unsafe_dynamic_cast_cache && tc == POINTER_TYPE
+	      && optimize >= 2 && integer_zerop (boff))
+	    {
+	      tree caches[2];
+	      for (unsigned int i = 0; i < 2; ++i)
+		{
+		  caches[i] = build_decl (loc, VAR_DECL,
+					  create_tmp_var_name ("__dcast_cache"),
+					  ptr_type_node);
+		  TREE_PUBLIC (caches[i]) = false;
+		  TREE_STATIC (caches[i]) = true;
+		  DECL_ARTIFICIAL (caches[i]) = true;
+		  DECL_IGNORED_P (caches[i]) = true;
+		  TREE_USED (caches[i]) = true;
+		  CP_DECL_THREAD_LOCAL_P (caches[i]) = true;
+		  set_decl_tls_model (caches[i],
+				      decl_default_tls_model (caches[i]));
+		  pushdecl_top_level_and_finish (caches[i], NULL_TREE);
+		}
+
+	      tree vptr_addr = build1 (NOP_EXPR,
+				       build_pointer_type (ptr_type_node),
+				       expr1);
+	      tree vptr = cp_build_fold_indirect_ref (vptr_addr);
+	      vptr = save_expr (vptr);
+	      tree hit = cp_build_binary_op (loc, EQ_EXPR, caches[0], vptr,
+					     complain);
+	      for (unsigned int i = 1; i < 2; ++i)
+		hit = build2 (TRUTH_ORIF_EXPR, boolean_type_node, hit,
+			      cp_build_binary_op (loc, EQ_EXPR, caches[i], vptr,
+						  complain));
+
+	      tree uncached_result = result;
+	      result = save_expr (result);
+	      tree nonnull = cp_truthvalue_conversion (result, complain);
+	      tree same_address = cp_build_binary_op (loc, EQ_EXPR, result,
+						     expr1, complain);
+	      tree cacheable = build2 (TRUTH_ANDIF_EXPR, boolean_type_node,
+				       nonnull, same_address);
+	      tree update = cp_build_modify_expr (loc, caches[1], NOP_EXPR,
+					  caches[0], complain);
+	      tree insert = cp_build_modify_expr (loc, caches[0], NOP_EXPR,
+					  vptr, complain);
+	      update = build2 (COMPOUND_EXPR, TREE_TYPE (insert), update,
+			       insert);
+	      tree update_result = build2 (COMPOUND_EXPR, TREE_TYPE (result),
+					   update, result);
+	      tree miss = build3 (COND_EXPR, TREE_TYPE (result), cacheable,
+				  update_result, result);
+	      tree fast = build1 (NOP_EXPR, TREE_TYPE (result), expr1);
+	      result = build3 (COND_EXPR, TREE_TYPE (result), hit, fast, miss);
+
+	      /* Constant evaluation must not read or update the mutable TLS
+		 cache.  This also covers constant initializers and assertions
+		 outside constexpr functions.  At run time the builtin folds to
+		 false, so constexpr-capable functions still benefit from caching.  */
+	      if (cxx_dialect >= cxx20)
+		{
+		  tree fn = OVL_FIRST (get_global_binding
+		    (get_identifier ("__builtin_is_constant_evaluated")));
+		  tree constant_p = build_cxx_call (fn, 0, NULL, complain);
+		  result = build3 (COND_EXPR, TREE_TYPE (result), constant_p,
+				   uncached_result, result);
+		}
+	    }
 
 	  if (tc == REFERENCE_TYPE)
 	    {

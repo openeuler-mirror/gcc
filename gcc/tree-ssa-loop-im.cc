@@ -3596,7 +3596,10 @@ tree_ssa_lim_finalize (void)
 
 /* Moves invariants from loops.  Only "expensive" invariants are moved out --
    i.e. those that are likely to be win regardless of the register pressure.
-   Only perform store motion if STORE_MOTION is true.  */
+   Only perform store motion if STORE_MOTION is true.  FUN must be the current
+   function, with valid SSA, initialized loop structures and available
+   dominator information.  The caller maintains the loop optimizer lifecycle,
+   including invalidating SCEV information after the transformation.  */
 
 unsigned int
 loop_invariant_motion_in_fun (function *fun, bool store_motion)

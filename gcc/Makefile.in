@@ -1538,6 +1538,7 @@ OBJS = \
 	inchash.o \
 	incpath.o \
 	init-regs.o \
+	ipa-array-load-inline.o \
 	internal-fn.o \
 	ipa-struct-reorg/ipa-struct-reorg.o \
 	ipa-alignment-propagation.o \
@@ -1740,8 +1741,11 @@ OBJS = \
 	tree-ssa-address.o \
 	tree-ssa-alias.o \
 	tree-ssa-ccp.o \
+	tree-ssa-bitset-store-coalescing.o \
 	tree-ssa-coalesce.o \
+	tree-ssa-constant-byte-range.o \
 	tree-ssa-copy.o \
+	tree-ssa-static-byte-cfg.o \
 	tree-ssa-dce.o \
 	tree-ssa-dom.o \
 	tree-ssa-dse.o \
@@ -1757,9 +1761,11 @@ OBJS = \
 	tree-ssa-loop-niter.o \
 	tree-ssa-loop-array-widen-compare.o \
 	tree-ssa-loop-prefetch.o \
+	tree-ssa-loop-invariant-split.o \
 	tree-ssa-loop-split.o \
 	tree-ssa-loop-unswitch.o \
 	tree-ssa-loop.o \
+	tree-ssa-immutable-cursor.o \
 	tree-ssa-math-opts.o \
 	tree-ssa-operands.o \
 	gimple-range-path.o \

@@ -550,6 +550,10 @@ lto_output_node (struct lto_simple_output_block *ob, struct cgraph_node *node,
   bp_pack_value (&bp, node->merged_extern_inline, 1);
   bp_pack_value (&bp, node->thunk, 1);
   bp_pack_value (&bp, node->parallelized_function, 1);
+  bp_pack_value (&bp, node->ipcp_clone
+		 && opt_for_fn (node->decl, flag_ipa_value_specialization), 1);
+  bp_pack_value (&bp, node->ipa_value_specialized, 1);
+  bp_pack_value (&bp, node->ipa_immutable_program, 1);
   bp_pack_value (&bp, node->declare_variant_alt, 1);
   bp_pack_value (&bp, node->calls_declare_variant_alt, 1);
 
@@ -1251,6 +1255,9 @@ input_overwrite_node (struct lto_file_decl_data *file_data,
   node->merged_extern_inline = bp_unpack_value (bp, 1);
   node->thunk = bp_unpack_value (bp, 1);
   node->parallelized_function = bp_unpack_value (bp, 1);
+  node->ipcp_clone = bp_unpack_value (bp, 1);
+  node->ipa_value_specialized = bp_unpack_value (bp, 1);
+  node->ipa_immutable_program = bp_unpack_value (bp, 1);
   node->declare_variant_alt = bp_unpack_value (bp, 1);
   node->calls_declare_variant_alt = bp_unpack_value (bp, 1);
   *has_thunk_info = bp_unpack_value (bp, 1);
