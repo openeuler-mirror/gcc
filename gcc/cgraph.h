@@ -1498,11 +1498,13 @@ struct GTY((tag ("SYMTAB_FUNCTION"))) cgraph_node : public symtab_node
   unsigned tm_may_enter_irr : 1;
   /* True if this was a clone created by ipa-cp.  */
   unsigned ipcp_clone : 1;
-  /* True if an IPA value-specialized clone was inlined into this function
-     and exposed a bounded immutable-object interpreter loop.  */
+  /* This function received an immutable-value specialization candidate.
+     This is a context hint, not proof that a clone was inlined or that any
+     particular loop was exposed.  Propagated to clones and through LTO.  */
   unsigned ipa_value_specialized : 1;
-  /* An IPA clone for a bounded immutable argument retained for specialization.
-     Kept distinct from ipa_value_specialized, which also marks callers.  */
+  /* Proven bounded immutable-argument clone context, also retained on
+     mandatory-inline candidates for lookup along actual inline ancestry.
+     Unlike ipa_value_specialized, this does not mark general callers.  */
   unsigned ipa_immutable_program : 1;
   /* True if this is the deferred declare variant resolution artificial
      function.  */

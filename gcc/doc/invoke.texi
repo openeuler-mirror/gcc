@@ -634,6 +634,7 @@ Objective-C and Objective-C++ Dialects}.
 -ftree-constant-byte-range-cursor  -ftree-copy-prop  -ftree-dce
 -ftree-dominator-opts
 -ftree-dse  -ftree-forwprop  -ftree-fre  -fcode-hoisting
+-ftree-bitset-store-coalescing
 -ftree-loop-if-convert  -ftree-loop-im
 -ftree-phiprop  -ftree-loop-distribution  -ftree-loop-distribute-patterns
 -ftree-loop-invariant-split  -ftree-loop-ivcanon  -ftree-loop-linear
@@ -13692,10 +13693,33 @@ regardless of argument order.  All five mechanisms require this master option
 for execution: enabling a suboption alone does not activate specialization.
 Use consistent options during compilation and LTO linking.
 
-The context marker is retained on proven immutable clones and streamed
-through LTO.  Helper lookup follows at most four actual inline ancestors;
-it does not grant unrelated calls in the enclosing function the same context.
-Immutable object size is a profitability hint, not proof of a loop trip count.
+The master option and all five suboptions are disabled by default for code
+generation.  The generic RTL variable-tracking maintenance delivered with
+these specialization changes follows the existing variable-tracking and
+debug-information conditions, independently of this master option.  It can
+reconstruct proven debug values at control-flow joins and discard stale
+bindings for address-taken variables when their storage may have changed.
+This maintenance also applies when neither the master option nor any
+suboption is enabled, so debug information can change on those default paths.
+
+IPA cloning, inlining and bounded cold specialization can expose additional
+control-flow joins.  The specialization changes and the generic
+variable-tracking maintenance are delivered together to cover the general
+debug-information responsibilities of those control-flow changes.  The
+variable-tracking rules apply to other code as well and do not depend on
+immutable-program context markers.  Specialization itself does not require
+variable tracking to generate executable code.
+
+The clone context marker is retained on proven immutable clones, including
+mandatory inline candidates, and streamed through LTO.  Helper lookup follows
+at most four actual inline ancestors; it does not grant unrelated calls in the
+enclosing function the same context.  A separate caller marker records receipt
+of a specialization candidate, without promising that inlining took place.
+Tree consumers recheck each loop before using that hint.  String initializer
+lengths and other object sizes are profitability hints, not proof of loop trip
+counts or permission to fold volatile or interposable loads.  Helper growth
+limits apply per edge and per resulting root, not to a compilation unit as a
+whole.
 
 @item -fipa-value-specialization-clone-budget
 @opindex fipa-value-specialization-clone-budget
@@ -13749,7 +13773,14 @@ clone admission, not all subsequent inlining or loop transformations.
 For bounded helper inlining in an established immutable context, raise the
 maximum estimated edge growth from 1200 to 4096 and the resulting root size
 from 4096 to 65536.  Disabling this option restores the smaller limits without
-disabling the basic helper inlining policy.  Helper eligibility, the four-level
+disabling the basic helper inlining policy.  The edge-growth and resulting-caller
+limits for each policy can be changed independently with
+@option{ipa-value-specialization-helper-growth-limit},
+@option{ipa-value-specialization-helper-size-limit},
+@option{ipa-value-specialization-helper-expanded-growth-limit} and
+@option{ipa-value-specialization-helper-expanded-size-limit}.
+Both policies retain the ordinary @option{large-stack-frame} and
+@option{large-stack-frame-growth} limits.  Helper eligibility, the four-level
 depth bound and ordinary target, exception and inlining legality are unchanged.
 
 @item -ftree-immutable-loop-specialization
@@ -13763,7 +13794,10 @@ redundancy elimination and dominator optimization passes.  Path cleanup
 between stages exposes further constant states to the next peeling stage.  The immutable peeling heuristic is limited to
 @option{--param=immutable-state-peel-limit} copies per loop (eight by
 default, at most 64) and 32768 estimated instructions of growth per
-complete-unroll invocation.  This allowance applies to the additional immutable
+complete-unroll invocation.  The function-wide readonly peeling growth
+budget controlled by @option{ipa-value-specialization-peel-growth-budget}
+and @option{ipa-value-specialization-peel-growth-percent} also applies.
+This allowance applies to the additional immutable
 peeling heuristic, not to ordinary unrolling and peeling, which retain their
 existing limits.  The copy cap applies separately to each invocation; a later
 invocation may peel a residual loop again.  Functions with more than 8192
@@ -14202,6 +14236,38 @@ for (int i = 0; i < N; i++)
 @end smallexample
 This flag is enabled by default at @option{-O3}.
 It is also enabled by @option{-fprofile-use} and @option{-fauto-profile}.
+
+@opindex ftree-bitset-store-coalescing
+@item -ftree-bitset-store-coalescing
+Recognize canonical two-level packed-bit update loops and create a guarded
+fast path that combines adjacent bit updates into masked word stores.  The
+original loop nest is retained as a fallback when the accessed writable and
+mask intervals overlap, when different output rows partially overlap, or
+when a write can change the contiguous row-index
+input or invariant metadata, or when the packed-bit range is outside the
+profitability bound.  Base-pointer inequality alone is not used as proof of
+nonoverlap.  A read-only preflight computes the selected row footprint and
+rejects unsafe or wrapping address ranges before any packed store.
+Only exact unit-stride rotating indices and single-bit
+update predicates are recognized; negative or wrapping index ranges use
+the original loop.  The fast path preserves zero-trip and presence tests
+and only writes words whose final values change.  Candidates must have a single
+inner loop and single exits, and at most 16 blocks in each loop.  This is
+a structural work bound, not an exact block-count requirement.  Unsupported
+scalar live-outs, additional store guards, insufficient alignment and
+incompatible alias types prevent the transformation.  External debug
+bindings are reset when their definitions are removed.  This option requires
+@option{-O3} and is disabled by default.
+
+Preparation uses a restricted header-copying pass and may repeat
+loop-invariant motion without store motion on the whole function when a
+potentially matching loop shape is present, even if subsequent recognition
+rejects it.  Header-copying preparation respects @option{-fno-tree-ch}.
+The transformation runs before IPA inlining; loops that only become visible
+after later inlining are not recognized by this pass.  At most one successful
+loop nest is transformed per function; a rejected candidate does not prevent
+trying later nests.  The fast-path bound of 65535 bits is a conservative
+profitability policy and is not an assumption about distinct input objects.
 
 @opindex floop-unroll-and-jam
 @item -floop-unroll-and-jam
@@ -17016,6 +17082,51 @@ permitted values range from 1 through 1024.  Cost is charged before cleanup.
 Maximum cumulative estimated copied instructions per function under
 @option{-ftree-immutable-loop-specialization-cursor}.  The default is 1024 and
 permitted values range from 0 through 65536.  Zero disables this specialization.
+
+@item ipa-value-specialization-helper-growth-limit
+Maximum estimated edge growth for basic immutable helper inlining.  The
+default is 1200.  This limit is independent of the resulting-caller size limit.
+
+@item ipa-value-specialization-helper-size-limit
+Maximum estimated resulting-caller size for basic immutable helper inlining.
+The default is 4096.
+
+@item ipa-value-specialization-helper-expanded-growth-limit
+Maximum estimated edge growth when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 4096.
+
+@item ipa-value-specialization-helper-expanded-size-limit
+Maximum estimated resulting-caller size when
+@option{-fipa-value-specialization-helper-expansion} is enabled.  The default
+is 65536.  These four helper limits use the resulting caller's option context.
+They only control this additional profitability policy; ordinary inlining
+may still accept an edge.  None of them relax the ordinary stack-frame limits.
+
+@item ipa-value-specialization-peel-growth-budget
+Fixed floor for the cumulative estimated growth allowance from readonly
+loop peeling in one GIMPLE function when
+@option{-fipa-value-specialization} is enabled.  The default is 524288.
+The effective allowance is the greater of this floor and the allowance
+computed by @option{ipa-value-specialization-peel-growth-percent}.
+Each successful duplication is charged for all
+copied blocks, PHIs and non-debug statements, including previously peeled
+inner loops, without credit for possible later simplification.  The
+consumed budget is retained across loops and subsequent peeling passes on
+the same function.  Zero disables this additional readonly peeling route;
+ordinary loop peeling keeps its existing limits.  User-specified
+@code{#pragma GCC unroll} factors remain in force for both routes.  This budget
+is separate from the IPA clone admission budgets.
+
+@item ipa-value-specialization-peel-growth-percent
+Additional copied cost allowance as a percentage of the complete function
+cost before its first extra readonly peel.  The default is 800.  The
+effective allowance is computed once, is capped at @code{INT_MAX}, and is
+not increased by later expansion.  Zero uses only the fixed floor.
+Setting @option{ipa-value-specialization-peel-growth-budget} to zero
+disables this route regardless of the percentage.  These are estimated
+copy costs, not a bound on final machine-code size or on growth caused by
+other optimizations.
 
 @item ipa-cp-eval-threshold
 IPA-CP calculates its own score of cloning profitability heuristics

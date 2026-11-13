@@ -107,6 +107,10 @@ along with GCC; see the file COPYING3.  If not see
 	  NEXT_PASS (pass_if_split);
 	  NEXT_PASS (pass_sccopy);
 	  NEXT_PASS (pass_profile);
+	  NEXT_PASS (pass_bitset_store_coalescing_prepare);
+	  NEXT_PASS (pass_ch_bitset);
+	  NEXT_PASS (pass_bitset_store_coalescing_prepare);
+	  NEXT_PASS (pass_bitset_store_coalescing);
 	  NEXT_PASS (pass_local_pure_const);
 	  NEXT_PASS (pass_modref);
 	  /* Split functions creates parts that are not run through

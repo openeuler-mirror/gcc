@@ -1385,12 +1385,11 @@ readonly_pointer_base_object (tree value, unsigned depth)
   return readonly_pointer_base_object_1 (value, depth, remaining);
 }
 
-/* If LOOP belongs to an IPA constant-propagation clone and a pointer PHI is
-   initialized from a fully known immutable byte array, return a conservative
-   number of iterations to peel.  Peeling exposes a distinct constant offset
-   to CCP in each copy, which is useful for bytecode, delimiter and small
-   table interpreters.  The object-size and absolute caps prevent path or code
-   growth from becoming unbounded.  */
+/* For an IPA clone or candidate-context caller, use a pointer PHI's visible
+   constant-object initializer to suggest a bounded number of copies.  This
+   is a profitability hint, not proof of an exact trip count or of successful
+   inlining.  Runtime exits and ordinary transformation checks remain in force;
+   try_peel_loop separately limits cumulative copied cost.  */
 
 static unsigned immutable_stage_peel_cost;
 
@@ -1427,12 +1426,16 @@ ipa_readonly_value_peel_count (class loop *loop)
 	initial = object;
       else if ((TREE_CODE (object) == VAR_DECL
 		|| TREE_CODE (object) == CONST_DECL)
-	       && DECL_INITIAL (object)
-	       && TREE_CONSTANT (DECL_INITIAL (object))
+	       && !TREE_THIS_VOLATILE (object)
 	       && (TREE_READONLY (object)
 		   || (TREE_CODE (object) == VAR_DECL
 		       && DECL_IN_CONSTANT_POOL (object))))
-	initial = DECL_INITIAL (object);
+	{
+	  initial = ctor_for_folding (object);
+	  if (!initial || initial == error_mark_node
+	      || !TREE_CONSTANT (initial))
+	    initial = NULL_TREE;
+	}
 
       unsigned HOST_WIDE_INT bytes = 0;
       if (initial && TREE_CODE (initial) == STRING_CST)
@@ -1445,9 +1448,9 @@ ipa_readonly_value_peel_count (class loop *loop)
       if (bytes > 1 && bytes <= 64)
 	{
 	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "Peeling IPA readonly-value loop %d for "
-		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states.\n",
-		     loop->num, bytes);
+	    fprintf (dump_file, "Considering IPA readonly-value loop %d for "
+		     HOST_WIDE_INT_PRINT_UNSIGNED " byte states in %s.\n",
+		     loop->num, bytes, node->dump_name ());
 	  if (flag_tree_immutable_loop_specialization)
 	    return MIN ((unsigned) bytes,
 		      (unsigned) param_immutable_state_peel_limit);
@@ -1456,6 +1459,111 @@ ipa_readonly_value_peel_count (class loop *loop)
     }
 
   return 0;
+}
+
+/* Charge every block and PHI, and at least one unit per non-debug statement.
+   Do not subtract instructions that later passes might eliminate.  */
+
+static bool
+ipa_readonly_peel_charge_block (basic_block bb, unsigned limit,
+			       unsigned *cost)
+{
+  auto charge = [&] (unsigned amount) -> bool
+    {
+      if (amount > limit - *cost)
+	return false;
+      *cost += amount;
+      return true;
+    };
+
+  if (!charge (1))
+    return false;
+  for (gphi_iterator gpi = gsi_start_phis (bb);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    if (!charge (1))
+      return false;
+  for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
+       !gsi_end_p (gsi); gsi_next (&gsi))
+    {
+      gimple *stmt = gsi_stmt (gsi);
+      if (!is_gimple_debug (stmt)
+	  && !charge (MAX (1, estimate_num_insns (stmt, &eni_size_weights))))
+	return false;
+    }
+  return true;
+}
+
+/* Freeze a function-wide allowance before the first extra readonly peel.
+   Subsequent expansion must not replenish it.  A fixed floor avoids making
+   small functions depend on a ratio, while the initial full function cost
+   gives large functions room for several independent profitable loops.  */
+
+static unsigned
+ipa_readonly_peel_growth_limit ()
+{
+  unsigned floor = param_ipa_value_specialization_peel_growth_budget;
+  if (floor == 0)
+    return 0;
+  if (cfun->ipa_value_specialization_peel_limit)
+    return cfun->ipa_value_specialization_peel_limit;
+
+  unsigned initial_cost = 0;
+  unsigned percent = param_ipa_value_specialization_peel_growth_percent;
+  if (percent)
+    {
+      basic_block bb;
+      FOR_EACH_BB_FN (bb, cfun)
+	if (!ipa_readonly_peel_charge_block (bb, INT_MAX, &initial_cost))
+	  {
+	    initial_cost = INT_MAX;
+	    break;
+	  }
+    }
+  unsigned HOST_WIDE_INT relative
+    = (unsigned HOST_WIDE_INT) initial_cost * percent / 100;
+  unsigned limit = MAX (floor, (unsigned) MIN (relative, INT_MAX));
+  cfun->ipa_value_specialization_peel_limit = limit;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    {
+      if (percent)
+	fprintf (dump_file, "IPA readonly peeling budget: %u units "
+		 "(initial function cost %u, growth %u%%).\n",
+		 limit, initial_cost, percent);
+      else
+	fprintf (dump_file, "IPA readonly peeling budget: %u units "
+		 "(fixed allowance; function cost not scanned).\n", limit);
+    }
+  return limit;
+}
+
+/* Compute a conservative cost of all copies, including already expanded
+   inner loops.  Unlike tree_estimate_loop_size, a partial scan can only
+   reject the transformation, never supply an accepted cost.  */
+
+static bool
+ipa_readonly_peel_growth_cost (class loop *loop, unsigned npeel,
+			      unsigned limit, unsigned *growth)
+{
+  unsigned used = cfun->ipa_value_specialization_peel_growth;
+  if (used >= limit)
+    return false;
+
+  gcc_assert (npeel != 0);
+  unsigned max_body_cost = (limit - used) / npeel;
+  unsigned body_cost = 0;
+
+  basic_block *body = get_loop_body (loop);
+  bool fits = true;
+  for (unsigned i = 0; i < loop->num_nodes && fits; ++i)
+    fits = ipa_readonly_peel_charge_block (body[i], max_body_cost, &body_cost);
+  free (body);
+  if (!fits)
+    return false;
+
+  /* The division above bounds both the multiplication and the subsequent
+     cumulative addition by LIMIT, which is at most INT_MAX.  */
+  *growth = body_cost * npeel;
+  return true;
 }
 
 /* If the loop is expected to iterate N times and is
@@ -1472,9 +1580,8 @@ try_peel_loop (class loop *loop,
   HOST_WIDE_INT npeel;
   struct loop_size size;
   int peeled_size;
-
-  unsigned readonly_npeel = ipa_readonly_value_peel_count (loop);
-  bool readonly_specialization = readonly_npeel != 0;
+  unsigned readonly_growth = 0;
+  unsigned readonly_limit = 0;
 
   if (!flag_peel_loops
       || param_max_peel_times <= 0
@@ -1488,9 +1595,12 @@ try_peel_loop (class loop *loop,
       return false;
     }
 
+  unsigned readonly_npeel = ipa_readonly_value_peel_count (loop);
+  bool readonly_specialization = readonly_npeel != 0;
+
   /* We don't peel loops that will be unrolled as this can duplicate a
      loop more times than the user requested.  */
-  if (loop->unroll && !readonly_specialization)
+  if (loop->unroll)
     {
       if (dump_file)
         fprintf (dump_file, "Not peeling: user didn't want it peeled.\n");
@@ -1577,6 +1687,20 @@ try_peel_loop (class loop *loop,
       return false;
     }
 
+  if (readonly_specialization)
+    readonly_limit = ipa_readonly_peel_growth_limit ();
+  if (readonly_specialization
+      && !ipa_readonly_peel_growth_cost (loop, (unsigned) npeel,
+					readonly_limit, &readonly_growth))
+    {
+      if (dump_file)
+	fprintf (dump_file, "IPA readonly peeling growth budget exhausted: "
+		 "%u of %u units already used.\n",
+		 cfun->ipa_value_specialization_peel_growth,
+		 readonly_limit);
+      return false;
+    }
+
   if (readonly_specialization && flag_tree_immutable_loop_specialization)
     {
       const unsigned stage_budget = 32768;
@@ -1623,6 +1747,18 @@ try_peel_loop (class loop *loop,
       return false;
     }
   free_original_copy_tables ();
+  if (readonly_specialization)
+    {
+      cfun->ipa_value_specialization_peel_growth += readonly_growth;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Peeled IPA readonly-value loop %d, %i times.\n",
+		 loop->num, (int) npeel);
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "IPA readonly peeling growth: %u units, "
+		 "%u of %u cumulative.\n", readonly_growth,
+		 cfun->ipa_value_specialization_peel_growth,
+		 readonly_limit);
+    }
   if (dump_file && (dump_flags & TDF_DETAILS))
     {
       fprintf (dump_file, "Peeled loop %d, %i times.\n",

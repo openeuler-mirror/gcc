@@ -41,4 +41,4 @@ test (int x)
 }
 
 /* The option is default-off, so the IPA-specific loop transform must not run.  */
-/* { dg-final { scan-tree-dump-not "Peeling IPA readonly-value loop" "cunroll" } } */
+/* { dg-final { scan-tree-dump-not "Considering IPA readonly-value loop" "cunroll" } } */
