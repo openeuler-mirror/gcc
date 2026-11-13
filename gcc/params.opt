@@ -1270,6 +1270,18 @@ Maximum number of outgoing edges in a switch before VRP will not process it.
 Common Joined UInteger Var(param_vrp_vector_threshold) Init(250) Optimization Param
 Maximum number of basic blocks for VRP to use a basic cache vector.
 
+-param=memcmp-prefix-bytes=
+Common Joined UInteger Var(param_memcmp_prefix_bytes) Init(4) IntegerRange(0, 16) Param Optimization
+Maximum number of ordered bytes checked before a dynamic memcmp fallback.
+
+-param=memcmp-prefix-skip-equal=
+Common Joined UInteger Var(param_memcmp_prefix_skip_equal) Init(1) IntegerRange(0, 1) Param Optimization
+Skip the proven equal prefix in the remaining dynamic memcmp comparison.
+
+-param=small-memcmp-equality-outline=
+Common Joined UInteger Var(param_small_memcmp_equality_outline) Init(0) IntegerRange(0, 2) Param Optimization
+Diagnostic equality strategy: inline, external bounded helper, external byte loop.
+
 ; This comment is to ensure we retain the blank line above.
 
 -param=ipa-value-specialization-clone-growth-budget=
