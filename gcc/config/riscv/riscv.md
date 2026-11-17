@@ -4318,6 +4318,79 @@
   [(set_attr "type" "move")
    (set_attr "mode" "<MODE>")])
 
+;; These are forms of (x << C1) + C2, potentially canonicalized from
+;; ((x + C2') << C1.  Depending on the cost to load C2 vs C2' we may
+;; want to go ahead and recognize this form as C2 may be cheaper to
+;; synthesize than C2'.
+;;
+;; It might be better to refactor riscv_const_insns a bit so that we
+;; can have an API that passes integer values around rather than
+;; constructing a lot of garbage RTL.
+;;
+;; The mvconst_internal pattern in effect requires this pattern to
+;; also be a define_insn_and_split due to insn count costing when
+;; splitting in combine.
+(define_insn_and_split ""
+  [(set (match_operand:DI 0 "register_operand" "=r")
+	(plus:DI (ashift:DI (match_operand:DI 1 "register_operand" "r")
+			    (match_operand 2 "const_int_operand" "n"))
+		 (match_operand 3 "const_int_operand" "n")))
+   (clobber (match_scratch:DI 4 "=&r"))]
+  "(TARGET_64BIT && riscv_const_insns (operands[3]) == 1)"
+  "#"
+  "&& reload_completed"
+  [(const_int 0)]
+  "{
+     rtx x = gen_rtx_ASHIFT (DImode, operands[1], operands[2]);
+     emit_insn (gen_rtx_SET (operands[0], x));
+
+     /* If the constant fits in a simm12, use it directly as we do not
+	get another good chance to optimize things again.  */
+     if (!SMALL_OPERAND (INTVAL (operands[3])))
+       emit_move_insn (operands[4], operands[3]);
+     else
+       operands[4] = operands[3];
+
+     x = gen_rtx_PLUS (DImode, operands[0], operands[4]);
+     emit_insn (gen_rtx_SET (operands[0], x));
+     DONE;
+   }"
+  [(set_attr "type" "arith")])
+
+(define_insn_and_split ""
+  [(set (match_operand:DI 0 "register_operand" "=r")
+	(sign_extend:DI (plus:SI (ashift:SI
+				   (match_operand:SI 1 "register_operand" "r")
+				   (match_operand 2 "const_int_operand" "n"))
+				 (match_operand 3 "const_int_operand" "n"))))
+   (clobber (match_scratch:DI 4 "=&r"))]
+  "(TARGET_64BIT && riscv_const_insns (operands[3]) == 1)"
+  "#"
+  "&& reload_completed"
+  [(const_int 0)]
+  "{
+     operands[1] = gen_lowpart (DImode, operands[1]);
+     operands[5] = gen_lowpart (SImode, operands[0]);
+     operands[6] = gen_lowpart (SImode, operands[4]);
+
+     rtx x = gen_rtx_ASHIFT (DImode, operands[1], operands[2]);
+     emit_insn (gen_rtx_SET (operands[0], x));
+
+     /* If the constant fits in a simm12, use it directly as we do not
+	get another good chance to optimize things again.  */
+     if (!SMALL_OPERAND (INTVAL (operands[3])))
+       emit_move_insn (operands[4], operands[3]);
+     else
+       operands[6] = operands[3];
+
+     x = gen_rtx_PLUS (SImode, operands[5], operands[6]);
+     x = gen_rtx_SIGN_EXTEND (DImode, x);
+     emit_insn (gen_rtx_SET (operands[0], x));
+     DONE;
+   }"
+  [(set_attr "type" "arith")])
+
+
 (include "bitmanip.md")
 (include "crypto.md")
 (include "sync.md")
