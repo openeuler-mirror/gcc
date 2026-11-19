@@ -181,6 +181,12 @@ mtune=
 Target RejectNegative Negative(mtune=) ToLower Joined Var(aarch64_tune_string)
 Optimize for CPU.
 
+; An upper bound of 8 keeps the scheduler's lookahead try limit within int
+; range for AArch64's maximum issue rate of 8.
+msched-dfa-lookahead=
+Target RejectNegative Joined UInteger IntegerRange(0, 8) Var(aarch64_sched_dfa_lookahead)
+Override the multipass DFA scheduler lookahead.
+
 mabi=
 Target RejectNegative Joined Enum(aarch64_abi) Var(aarch64_abi) Init(AARCH64_ABI_DEFAULT)
 Generate code that conforms to the specified ABI.

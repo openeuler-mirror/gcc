@@ -826,6 +826,7 @@ Objective-C and Objective-C++ Dialects}.
 +@var{b-key}]|@var{bti}
 -mharden-sls=@var{opts}
 -march=@var{name}  -mcpu=@var{name}  -mtune=@var{name}
+-msched-dfa-lookahead=@var{n}
 -moverride=@var{string}  -mverbose-cost-dump
 -mstack-protector-guard=@var{guard} -mstack-protector-guard-reg=@var{sysreg}
 -mstack-protector-guard-offset=@var{offset} -mtrack-speculation
@@ -22484,6 +22485,16 @@ are specified, the code is tuned to perform well across a range
 of target processors.
 
 This option cannot be suffixed by feature modifiers.
+
+@opindex msched-dfa-lookahead
+@item -msched-dfa-lookahead=@var{n}
+Override the number of ready instructions considered at each level of the
+first-cycle multipass DFA scheduler search.  The value of @var{n} must be
+between 0 and 8.  A value of 0 disables the search.  If this option is not
+specified, the scheduler uses the target processor's issue rate as the
+lookahead value when the issue rate is greater than one, and otherwise
+disables the search.  Register-pressure scheduling and fusion scheduling
+disable the multipass search regardless of this setting.
 
 @opindex mcpu
 @item -mcpu=@var{name}

@@ -16033,9 +16033,17 @@ aarch64_sched_variable_issue (FILE *, int, rtx_insn *insn, int more)
 static int
 aarch64_sched_first_cycle_multipass_dfa_lookahead (void)
 {
+  if (sched_fusion)
+    return 0;
+
+  /* Keep the processor's issue rate as the default, but allow users to
+     decouple it from the multipass search width.  */
+  if (OPTION_SET_P (aarch64_sched_dfa_lookahead))
+    return aarch64_sched_dfa_lookahead;
+
   int issue_rate = aarch64_sched_issue_rate ();
 
-  return issue_rate > 1 && !sched_fusion ? issue_rate : 0;
+  return issue_rate > 1 ? issue_rate : 0;
 }
 
 

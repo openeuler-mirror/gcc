@@ -7320,6 +7320,9 @@ sched_init (void)
   else
     dfa_lookahead = 0;
 
+  if (sched_verbose >= 2)
+    fprintf (sched_dump, ";; DFA lookahead: %d\n", dfa_lookahead);
+
   /* Set to "0" so that we recalculate.  */
   max_lookahead_tries = 0;
 
