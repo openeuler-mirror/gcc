@@ -29,4 +29,4 @@ main ()
     __builtin_abort ();
 }
 
-// { dg-final { scan-tree-dump "__dcast_cache" "gimple" } }
+// { dg-final { scan-tree-dump {== &_ZTI} "gimple" } }

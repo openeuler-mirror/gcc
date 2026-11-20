@@ -52,5 +52,5 @@ int use (CastBase *cast_object, Base *value_object)
   return (cast_target (cast_object) != 0) + read_value (value_object);
 }
 
-/* { dg-final { scan-tree-dump-not "__dcast_cache" "gimple" } } */
+/* { dg-final { scan-tree-dump-not {== &_ZTI} "gimple" } } */
 /* { dg-final { scan-ipa-dump-not "Selecting dominant target" "devirt" } } */
