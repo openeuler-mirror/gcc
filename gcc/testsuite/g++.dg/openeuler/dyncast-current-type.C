@@ -1,5 +1,6 @@
 /* { dg-do run { target { *-*-linux* } } } */
 /* { dg-options "-O2 -fno-component-type-flow -funsafe-dynamic-cast-cache -Wl,--wrap=__dynamic_cast -fdump-tree-gimple" } */
+/* { dg-additional-options "-fdump-ipa-cgraph" } */
 
 /* An exact current type, a short single-base chain or the primary base
    of a multiple-inheritance object can avoid the runtime search.  */
@@ -83,4 +84,5 @@ main ()
 
 /* { dg-final { scan-tree-dump {== &_ZTI6Target} "gimple" } } */
 /* { dg-final { scan-tree-dump {__dynamic_cast \(} "gimple" } } */
-/* { dg-final { scan-tree-dump-not "__dcast_cache" "gimple" } } */
+/* The cast must not introduce thread-local state.  */
+/* { dg-final { scan-ipa-dump-not { tls-} "cgraph" } } */
