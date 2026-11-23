@@ -130,6 +130,7 @@ static tree throw_bad_typeid (void);
 static bool typeid_ok_p (void);
 static int qualifier_flags (tree);
 static bool target_incomplete_p (tree);
+static tree tinfo_vtable_address (tree);
 static tree tinfo_base_init (tinfo_s *, tree);
 static tree generic_initializer (tinfo_s *, tree);
 static tree ptr_initializer (tinfo_s *, tree);
@@ -564,6 +565,98 @@ build_if_nonnull (tree test, tree result, tsubst_flags_t complain)
   return cond;
 }
 
+/* Read an ABI type_info field through the same layout used to emit RTTI.  */
+
+static tree
+build_rtti_field (tree address, tree record, tree field)
+{
+  tree pointer = convert (build_pointer_type (record), address);
+  return build3 (COMPONENT_REF, TREE_TYPE (field),
+		 cp_build_fold_indirect_ref (pointer), field, NULL_TREE);
+}
+
+/* Match TARGET against CURRENT or a short chain of single public,
+   nonvirtual bases.  The RTTI for each link must have the known
+   single-base layout before its base member is read.  */
+
+static tree
+build_single_base_rtti_match (tree current, tree target, tree si_vptr,
+			      unsigned depth)
+{
+  current = save_expr (current);
+  tree exact = build2 (EQ_EXPR, boolean_type_node, current, target);
+  if (depth == 0)
+    return exact;
+
+  tree tinfo_type = get_tinfo_desc (TK_TYPE_INFO_TYPE)->type;
+  tree current_vptr = build_rtti_field (current, tinfo_type,
+				       TYPE_FIELDS (tinfo_type));
+  tree nonnull = build2 (NE_EXPR, boolean_type_node, current,
+			 build_zero_cst (TREE_TYPE (current)));
+  tree same_layout = build2 (EQ_EXPR, boolean_type_node, current_vptr,
+			     si_vptr);
+  tree single_base = build2 (TRUTH_ANDIF_EXPR, boolean_type_node,
+			     nonnull, same_layout);
+
+  tree si_type = get_tinfo_desc (TK_SI_CLASS_TYPE)->type;
+  tree base_field = DECL_CHAIN (TYPE_FIELDS (si_type));
+  tree base = build_rtti_field (current, si_type, base_field);
+  tree match = build_single_base_rtti_match (base, target, si_vptr, depth - 1);
+  return build2 (TRUTH_ORIF_EXPR, boolean_type_node, exact,
+		 build2 (TRUTH_ANDIF_EXPR, boolean_type_node, single_base, match));
+}
+
+/* Match the first direct base of the current multiple-inheritance type.
+   A match at offset zero is useful only when the source is at the head
+   of the object.  Other source subobjects need the normal ABI search.  */
+
+static tree
+build_primary_base_rtti_match (location_t loc, tree source, tree current,
+			       tree target, tsubst_flags_t complain)
+{
+  unsigned flags = push_abi_namespace ();
+  tree abi_type = xref_tag (class_type,
+			    get_tinfo_desc (TK_VMI_CLASS_TYPES)->name);
+  /* The ABI class can still be defined later in this translation unit.  */
+  tree vtable = get_vtable_decl (abi_type, /*complete=*/0);
+  pop_abi_namespace (flags);
+  tree vmi_vptr = convert (const_ptr_type_node, tinfo_vtable_address (vtable));
+  tree info = get_tinfo_desc (TK_TYPE_INFO_TYPE)->type;
+  tree vptr = build_rtti_field (current, info, TYPE_FIELDS (info));
+  tree present = build2 (NE_EXPR, boolean_type_node, current,
+			 build_zero_cst (TREE_TYPE (current)));
+  tree same_layout = build2 (EQ_EXPR, boolean_type_node, vptr, vmi_vptr);
+  tree is_vmi = build2 (TRUTH_ANDIF_EXPR, boolean_type_node, present,
+			same_layout);
+
+  /* The smallest VMI descriptor has room for the first base entry.  */
+  tree vmi = get_tinfo_desc (TK_VMI_CLASS_TYPES)->type;
+  tree count_field = DECL_CHAIN (DECL_CHAIN (TYPE_FIELDS (vmi)));
+  tree count = build_rtti_field (current, vmi, count_field);
+  tree has_base = build2 (NE_EXPR, boolean_type_node, count,
+			 build_zero_cst (TREE_TYPE (count)));
+  tree bases = build_rtti_field (current, vmi, DECL_CHAIN (count_field));
+  tree first = build4 (ARRAY_REF, TREE_TYPE (TREE_TYPE (bases)), bases,
+		       integer_zero_node, NULL_TREE, NULL_TREE);
+  tree base_field = TYPE_FIELDS (TREE_TYPE (first));
+  tree base = build3 (COMPONENT_REF, TREE_TYPE (base_field), first,
+		      base_field, NULL_TREE);
+  tree offset_field = DECL_CHAIN (base_field);
+  tree offset_flags = build3 (COMPONENT_REF, TREE_TYPE (offset_field), first,
+			      offset_field, NULL_TREE);
+  /* Bit one is public, bit zero is virtual, and the offset starts at
+     bit eight.  The value 2 is a public, nonvirtual base at offset zero.  */
+  tree zero_base = build2 (EQ_EXPR, boolean_type_node, offset_flags,
+			   build_int_cst (TREE_TYPE (offset_flags), 2));
+  tree target_base = build2 (EQ_EXPR, boolean_type_node, base, target);
+  tree head = cp_build_binary_op (loc, EQ_EXPR, build_headof (source),
+				  source, complain);
+  tree match = build2 (TRUTH_ANDIF_EXPR, boolean_type_node, target_base, head);
+  match = build2 (TRUTH_ANDIF_EXPR, boolean_type_node, zero_base, match);
+  match = build2 (TRUTH_ANDIF_EXPR, boolean_type_node, has_base, match);
+  return build2 (TRUTH_ANDIF_EXPR, boolean_type_node, is_vmi, match);
+}
+
 /* Execute a dynamic cast, as described in section 5.2.6 of the 9/93 working
    paper.  */
 
@@ -799,76 +892,70 @@ build_dynamic_cast_1 (location_t loc, tree type, tree expr,
 	  result = build_cxx_call (dcast_fn, 4, elems, complain);
 	  SET_EXPR_LOCATION (result, loc);
 
-	  /* For a zero-offset downcast, remember a successful dynamic vptr
-	     only when the result has the same address as the source subobject.
-	     A zero base hint alone does not guarantee this for cross-casts.
-	     Repeated casts of a cached dynamic type need not enter the RTTI
-	     runtime; misses and adjusted results retain the full semantics.
-	     The independent unsafe cache option requires vtable addresses to
-	     retain their dynamic type while a thread keeps an entry.  */
+	  /* BOFF == 0 describes one public non-virtual source base at offset
+	     zero, with no public virtual source bases (see dcast_base_hint).
+	     When the object's current RTTI is exactly the target RTTI and the
+     source is the zero-offset base, it is already the result.  A type
+     without repeated bases has only that source subobject.  Otherwise,
+     check the offset to exclude private source bases that the hint
+     intentionally ignores.  Read these facts
+	     afresh on every cast: retaining a previous vptr in a TLS cache is
+	     not sound when an unloaded DSO's vtable address can be reused.
+	     Use the runtime search for cross-casts, pointer adjustments and
+	     derived types without a proven zero-offset path.  Pointer-unequal
+	     duplicate type_infos also use the runtime search.  */
 	  if (flag_unsafe_dynamic_cast_cache && tc == POINTER_TYPE
 	      && optimize >= 2 && integer_zerop (boff))
 	    {
-	      tree caches[2];
-	      for (unsigned int i = 0; i < 2; ++i)
+	      tree runtime_result = result;
+	      tree index = build_int_cst (NULL_TREE,
+					 -TARGET_VTABLE_DATA_ENTRY_DISTANCE);
+	      tree current_tinfo
+		= build_vtbl_ref (cp_build_fold_indirect_ref (expr1), index);
+	      current_tinfo = convert (const_ptr_type_node, current_tinfo);
+	      tree target_tinfo = convert (const_ptr_type_node, td2);
+	      tree exact_type = cp_build_binary_op (loc, EQ_EXPR, current_tinfo,
+						   target_tinfo, complain);
+	      tree can_cast = exact_type;
+	      if (CLASSTYPE_REPEATED_BASE_P (target_type))
 		{
-		  caches[i] = build_decl (loc, VAR_DECL,
-					  create_tmp_var_name ("__dcast_cache"),
-					  ptr_type_node);
-		  TREE_PUBLIC (caches[i]) = false;
-		  TREE_STATIC (caches[i]) = true;
-		  DECL_ARTIFICIAL (caches[i]) = true;
-		  DECL_IGNORED_P (caches[i]) = true;
-		  TREE_USED (caches[i]) = true;
-		  CP_DECL_THREAD_LOCAL_P (caches[i]) = true;
-		  set_decl_tls_model (caches[i],
-				      decl_default_tls_model (caches[i]));
-		  pushdecl_top_level_and_finish (caches[i], NULL_TREE);
+		  tree at_head = cp_build_binary_op (loc, EQ_EXPR,
+						    build_headof (expr1), expr1,
+						    complain);
+		  can_cast = build2 (TRUTH_ANDIF_EXPR, boolean_type_node,
+				     exact_type, at_head);
 		}
-
-	      tree vptr_addr = build1 (NOP_EXPR,
-				       build_pointer_type (ptr_type_node),
-				       expr1);
-	      tree vptr = cp_build_fold_indirect_ref (vptr_addr);
-	      vptr = save_expr (vptr);
-	      tree hit = cp_build_binary_op (loc, EQ_EXPR, caches[0], vptr,
-					     complain);
-	      for (unsigned int i = 1; i < 2; ++i)
-		hit = build2 (TRUTH_ORIF_EXPR, boolean_type_node, hit,
-			      cp_build_binary_op (loc, EQ_EXPR, caches[i], vptr,
-						  complain));
-
-	      tree uncached_result = result;
-	      result = save_expr (result);
-	      tree nonnull = cp_truthvalue_conversion (result, complain);
-	      tree same_address = cp_build_binary_op (loc, EQ_EXPR, result,
-						     expr1, complain);
-	      tree cacheable = build2 (TRUTH_ANDIF_EXPR, boolean_type_node,
-				       nonnull, same_address);
-	      tree update = cp_build_modify_expr (loc, caches[1], NOP_EXPR,
-					  caches[0], complain);
-	      tree insert = cp_build_modify_expr (loc, caches[0], NOP_EXPR,
-					  vptr, complain);
-	      update = build2 (COMPOUND_EXPR, TREE_TYPE (insert), update,
-			       insert);
-	      tree update_result = build2 (COMPOUND_EXPR, TREE_TYPE (result),
-					   update, result);
-	      tree miss = build3 (COND_EXPR, TREE_TYPE (result), cacheable,
-				  update_result, result);
+	      else if (get_pseudo_ti_index (target_type) == TK_SI_CLASS_TYPE)
+		{
+		  /* Each single-base link preserves the target's layout at offset
+		     zero and cannot add a source subobject.  Fall back when the
+		     match takes more than two links or the layout differs.  */
+		  tree info_type = get_tinfo_desc (TK_TYPE_INFO_TYPE)->type;
+		  tree si_vptr = build_rtti_field (target_tinfo, info_type,
+						   TYPE_FIELDS (info_type));
+		  current_tinfo = save_expr (current_tinfo);
+		  tree single = build_single_base_rtti_match (current_tinfo,
+							  target_tinfo, si_vptr, 2);
+		  tree primary = build_primary_base_rtti_match (loc, expr1,
+								 current_tinfo,
+								 target_tinfo,
+								 complain);
+		  can_cast = build2 (TRUTH_ORIF_EXPR, boolean_type_node,
+				     single, primary);
+		}
 	      tree fast = build1 (NOP_EXPR, TREE_TYPE (result), expr1);
-	      result = build3 (COND_EXPR, TREE_TYPE (result), hit, fast, miss);
+	      result = build3 (COND_EXPR, TREE_TYPE (result), can_cast,
+			      fast, result);
 
-	      /* Constant evaluation must not read or update the mutable TLS
-		 cache.  This also covers constant initializers and assertions
-		 outside constexpr functions.  At run time the builtin folds to
-		 false, so constexpr-capable functions still benefit from caching.  */
+	      /* Preserve the evaluator's native dynamic_cast handling rather
+		 than making constant evaluation inspect the ABI vtable slots.  */
 	      if (cxx_dialect >= cxx20)
 		{
 		  tree fn = OVL_FIRST (get_global_binding
 		    (get_identifier ("__builtin_is_constant_evaluated")));
 		  tree constant_p = build_cxx_call (fn, 0, NULL, complain);
 		  result = build3 (COND_EXPR, TREE_TYPE (result), constant_p,
-				   uncached_result, result);
+			   runtime_result, result);
 		}
 	    }
 
@@ -994,6 +1081,18 @@ involves_incomplete_p (tree type)
     }
 }
 
+/* Return the address point of an ABI type_info vtable.  */
+
+static tree
+tinfo_vtable_address (tree vtable)
+{
+  return fold_build_pointer_plus
+    (cp_build_addr_expr (vtable, tf_warning_or_error),
+     size_binop (MULT_EXPR,
+		 size_int (2 * TARGET_VTABLE_DATA_ENTRY_DISTANCE),
+		 TYPE_SIZE_UNIT (vtable_entry_type)));
+}
+
 /* Return a CONSTRUCTOR for the common part of the type_info objects. This
    is the vtable pointer and NTBS name.  The NTBS name is emitted as a
    comdat const char array, so it becomes a unique key for the type. Generate
@@ -1055,15 +1154,8 @@ tinfo_base_init (tinfo_s *ti, tree target)
 	  CLASSTYPE_INTERFACE_ONLY (real_type) = 1;
 	}
 
-      vtable_ptr = get_vtable_decl (real_type, /*complete=*/1);
-      vtable_ptr = cp_build_addr_expr (vtable_ptr, tf_warning_or_error);
-
-      /* We need to point into the middle of the vtable.  */
-      vtable_ptr = fold_build_pointer_plus
-	(vtable_ptr,
-	 size_binop (MULT_EXPR,
-		     size_int (2 * TARGET_VTABLE_DATA_ENTRY_DISTANCE),
-		     TYPE_SIZE_UNIT (vtable_entry_type)));
+      vtable_ptr = tinfo_vtable_address (get_vtable_decl (real_type,
+								 /*complete=*/1));
 
       ti->vtable = vtable_ptr;
     }

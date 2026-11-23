@@ -3,4 +3,4 @@
 /* { dg-options "-O2 -fdump-tree-gimple" } */
 #define CACHE_OPTIONS "component-type-flow"
 #include "dyncast-cache-function-options.h"
-/* { dg-final { scan-tree-dump-not "__dcast_cache" "gimple" } } */
+/* { dg-final { scan-tree-dump-not {== &_ZTI} "gimple" } } */

@@ -3575,7 +3575,7 @@ Undocumented Var(flag_cunroll_grow_size) Optimization
 
 funsafe-dynamic-cast-cache
 Common Var(flag_unsafe_dynamic_cast_cache) Init(0) Optimization
-Cache successful zero-adjustment C++ dynamic casts assuming stable vtable addresses.
+Use an exact dynamic-type fast path for eligible zero-offset C++ dynamic casts.
 
 ; Nonzero means that loop optimizer may assume that the induction variables
 ; that control loops do not overflow and that the loops with nontrivial

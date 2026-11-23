@@ -32,5 +32,5 @@ main ()
     __builtin_abort ();
 }
 
-/* Only cached writes the two TLS slots.  */
-/* { dg-final { scan-tree-dump-times {__dcast_cache\.[0-9]+ = } 2 "gimple" } } */
+/* Only cached adds the immediate exact-type condition.  */
+/* { dg-final { scan-tree-dump-times {== &_ZTI} 4 "gimple" } } */
